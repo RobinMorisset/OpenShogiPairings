@@ -1,0 +1,53 @@
+//! Core domain logic for OpenShogiPairings.
+//!
+//! At this early stage this crate only carries the data types shared between the
+//! server and its clients. The pairing engine (Blossom matching over a weighted
+//! player graph, and later an ILP/CP-SAT backend) will live here so that it can
+//! be reused unchanged by the HTTP server, a future CLI client, and the Tauri
+//! desktop app.
+
+use serde::{Deserialize, Serialize};
+
+/// Human-readable service identifier reported by the health endpoint.
+pub const SERVICE_NAME: &str = "openshogipairings-server";
+
+/// The crate version, surfaced to clients so they can detect a server upgrade.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Payload returned by the server's health check.
+///
+/// Defined here (rather than in the server) precisely so every client — the web
+/// UI, the planned CLI, and the Tauri app — can depend on one canonical shape.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthStatus {
+    /// Always `"ok"` when the server is able to respond.
+    pub status: String,
+    /// Which service answered, useful once there are several backends.
+    pub service: String,
+    /// Semantic version of the running server.
+    pub version: String,
+}
+
+impl HealthStatus {
+    /// Build the status describing this running build.
+    pub fn current() -> Self {
+        Self {
+            status: "ok".to_string(),
+            service: SERVICE_NAME.to_string(),
+            version: VERSION.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn health_status_reports_ok() {
+        let status = HealthStatus::current();
+        assert_eq!(status.status, "ok");
+        assert_eq!(status.service, SERVICE_NAME);
+        assert_eq!(status.version, VERSION);
+    }
+}

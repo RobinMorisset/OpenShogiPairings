@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/server"]
+
+# src-tauri is intentionally NOT a workspace member: the Tauri desktop client
+# is an optional wrapper that pulls its own heavy dependency tree, and keeping it
+# out of the core workspace keeps `cargo build`/`cargo test` fast for the engine
+# and server. It is nested under this directory, so it must be explicitly
+# excluded or cargo would auto-adopt it into the workspace. It can still depend
+# on `osp-core` via a path dependency when needed.
+exclude = ["frontend/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/robingeek/OpenShogiPairings"
+
+[workspace.dependencies]
+osp-core = { path = "crates/core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }

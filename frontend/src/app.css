@@ -1,0 +1,97 @@
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  color-scheme: light dark;
+  color: #e6e6e6;
+  background-color: #1b1b1f;
+}
+
+body {
+  margin: 0;
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+}
+
+main {
+  max-width: 32rem;
+  padding: 2rem;
+  text-align: center;
+}
+
+h1 {
+  font-size: 1.8rem;
+  margin-bottom: 0.25rem;
+}
+
+.subtitle {
+  color: #9a9aa2;
+  margin-top: 0;
+}
+
+.card {
+  margin-top: 1.5rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid #34343b;
+  border-radius: 0.75rem;
+  background: #232329;
+  text-align: left;
+}
+
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: #888;
+}
+.dot.ok {
+  background: #3fb950;
+}
+.dot.error {
+  background: #f85149;
+}
+.dot.loading {
+  background: #d29922;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 1rem;
+  margin: 1rem 0 0;
+  font-size: 0.9rem;
+}
+dt {
+  color: #9a9aa2;
+}
+dd {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+button {
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid #34343b;
+  border-radius: 0.5rem;
+  background: #2d2d34;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover {
+  border-color: #4a4a52;
+}
+
+.error-msg {
+  color: #f85149;
+  font-size: 0.85rem;
+  margin-top: 0.75rem;
+}
