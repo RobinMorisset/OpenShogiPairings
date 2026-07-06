@@ -2,8 +2,8 @@
   interface Props {
     /** Create a new tournament with the given name. */
     onCreate: (name: string) => void;
-    /** Load a tournament from a chosen file. */
-    onLoad: (file: File) => void;
+    /** Open a file picker and load the chosen tournament. */
+    onLoad: () => void;
     /** Cancel and return to the existing tournament (only when one exists). */
     onCancel?: () => void;
     /** True while a create/load request is in flight. */
@@ -13,19 +13,11 @@
   let { onCreate, onLoad, onCancel, busy = false }: Props = $props();
 
   let name = $state("");
-  let fileInput = $state<HTMLInputElement>();
 
   function submit(event: SubmitEvent) {
     event.preventDefault();
     const trimmed = name.trim();
     if (trimmed) onCreate(trimmed);
-  }
-
-  function onFileChosen(event: Event) {
-    const input = event.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    if (file) onLoad(file);
-    input.value = ""; // allow re-selecting the same file later
   }
 </script>
 
@@ -56,16 +48,9 @@
 
   <div class="or">or</div>
 
-  <button type="button" class="ghost" disabled={busy} onclick={() => fileInput?.click()}>
+  <button type="button" class="ghost" disabled={busy} onclick={onLoad}>
     Load from file…
   </button>
-  <input
-    bind:this={fileInput}
-    type="file"
-    accept=".json,application/json"
-    class="hidden-file"
-    onchange={onFileChosen}
-  />
 </section>
 
 <style>
@@ -103,8 +88,5 @@
     margin: 1rem 0 0.75rem;
     color: #6a6a72;
     font-size: 0.8rem;
-  }
-  .hidden-file {
-    display: none;
   }
 </style>

@@ -9,7 +9,7 @@
     replaceTournament,
   } from "./lib/api";
   import type { NewPlayer, Tournament } from "./lib/types";
-  import { downloadTournament, readTournamentFile } from "./lib/tournamentFile";
+  import { loadTournament, saveTournament } from "./lib/tournamentFile";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
   import CreateTournament from "./lib/components/CreateTournament.svelte";
   import PlayerRegistration from "./lib/components/PlayerRegistration.svelte";
@@ -62,9 +62,10 @@
     });
   }
 
-  function handleLoad(file: File) {
+  function handleLoad() {
     run(async () => {
-      const loaded = await readTournamentFile(file);
+      const loaded = await loadTournament();
+      if (!loaded) return; // user cancelled the file dialog
       tournament = await replaceTournament(loaded);
       creatingNew = false;
     });
@@ -83,7 +84,11 @@
   }
 
   function handleSave() {
-    if (tournament) downloadTournament(tournament);
+    if (!tournament) return;
+    const current = tournament;
+    run(async () => {
+      await saveTournament(current);
+    });
   }
 </script>
 

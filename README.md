@@ -36,9 +36,11 @@ solver for experimental formats beyond Swiss / MacMahon.
 | `POST /api/tournament/players` | Register a player: `{ "name", "rating?", "club?" }`. |
 | `DELETE /api/tournament/players/{id}` | Remove a player. |
 
-Every mutating endpoint returns the full updated tournament. "Save" is a
-client-side JSON download; "load" uploads a saved file and `PUT`s it back so the
-server stays authoritative.
+Every mutating endpoint returns the full updated tournament. Save/load is
+platform-aware: in the **Tauri** desktop app it uses native OS file dialogs (the
+`dialog` plugin plus small `read_text_file`/`write_text_file` commands), and in
+the browser it falls back to a JSON download / file-picker upload. Either way a
+loaded tournament is `PUT` back to the server, which stays authoritative.
 
 ## Prerequisites
 
