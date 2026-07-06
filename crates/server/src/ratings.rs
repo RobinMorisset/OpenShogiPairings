@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::ApiError;
 use crate::state::AppState;
 
-/// The rating list to fetch. Hardcoded and date-specific for now — see TODO.md.
-const FESA_URL: &str = "https://fesashogi.eu/old/ratinglists/2026-06-01.txt";
+/// The rating list to fetch. FESA always serves the current list at this path.
+const FESA_URL: &str = "https://fesashogi.eu/old/ratinglists/latest.txt";
 
 /// The cached rating list plus when it was fetched (Unix seconds, informational).
 #[derive(Clone, Serialize, Deserialize)]
