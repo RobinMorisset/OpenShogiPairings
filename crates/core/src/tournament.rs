@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::pairing::pair_round_weighted;
 use crate::player::{NewPlayer, Player};
-use crate::round::{Board, Round, RoundDraft, Winner};
+use crate::round::{Board, Handicap, HandicapGame, Round, RoundDraft, Winner};
 
 /// On-disk / on-the-wire format version for a serialized [`Tournament`].
 ///
@@ -102,6 +102,10 @@ pub enum TournamentError {
     /// No board with the given index exists in the round.
     #[error("no board {board} in round {round}")]
     BoardNotFound { round: u32, board: usize },
+    /// A handicap was requested for two players whose ratings are equal (or both
+    /// unrated), so there is no unambiguous handicap giver.
+    #[error("a handicap game needs two players with different ratings")]
+    HandicapNeedsRatingDifference,
     /// The serialized record uses a format version this build cannot read.
     #[error("unsupported tournament format version {found} (this build supports {supported})")]
     UnsupportedFormatVersion { found: u32, supported: u32 },
@@ -320,6 +324,8 @@ impl Tournament {
                 player1: b.player1,
                 player2: b.player2,
                 result: None,
+                drawn: false,
+                handicap: None,
             })
             .collect();
         draft.forced_bye = forced_bye;
@@ -414,23 +420,107 @@ impl Tournament {
         board_index: usize,
         clicked: Winner,
     ) -> Result<&Board, TournamentError> {
-        let round = self
-            .rounds
-            .iter_mut()
-            .find(|r| r.number == round_number)
-            .ok_or(TournamentError::RoundNotFound(round_number))?;
-        let board = round.boards.get_mut(board_index).ok_or(
-            TournamentError::BoardNotFound {
-                round: round_number,
-                board: board_index,
-            },
-        )?;
+        let board = self.board_mut(round_number, board_index)?;
         board.result = if board.result == Some(clicked) {
             None
         } else {
             Some(clicked)
         };
         Ok(board)
+    }
+
+    /// Set (or clear) the "a draw occurred" flag on a board. The game is still
+    /// replayed to a decisive [`Winner`]; this only records that the draw
+    /// happened, which matters for end-of-tournament ELO.
+    pub fn set_board_drawn(
+        &mut self,
+        round_number: u32,
+        board_index: usize,
+        drawn: bool,
+    ) -> Result<&Board, TournamentError> {
+        let board = self.board_mut(round_number, board_index)?;
+        board.drawn = drawn;
+        Ok(board)
+    }
+
+    /// Set (`Some`) or clear (`None`) the handicap on a board.
+    ///
+    /// The giver — the higher-rated player — is computed from the players'
+    /// current ratings and frozen onto the board, so a later rating edit can't
+    /// change who conceded the odds. Returns
+    /// [`TournamentError::HandicapNeedsRatingDifference`] when the two players'
+    /// ratings are equal (or both unrated), since then there is no giver.
+    pub fn set_board_handicap(
+        &mut self,
+        round_number: u32,
+        board_index: usize,
+        handicap: Option<Handicap>,
+    ) -> Result<&Board, TournamentError> {
+        // Resolve the giver up front (immutable borrow of `players`) so the board
+        // can then be borrowed mutably without conflict.
+        let game = match handicap {
+            None => None,
+            Some(handicap) => {
+                let board = self.board(round_number, board_index)?;
+                let rating = |id| self.players.iter().find(|p| p.id == id).and_then(|p| p.rating);
+                let giver = Self::rating_giver(rating(board.player1), rating(board.player2))
+                    .ok_or(TournamentError::HandicapNeedsRatingDifference)?;
+                Some(HandicapGame { handicap, giver })
+            }
+        };
+        let board = self.board_mut(round_number, board_index)?;
+        board.handicap = game;
+        Ok(board)
+    }
+
+    /// Which side gives the handicap, given the two players' ratings: the higher
+    /// rating gives, an unrated player counts as the lowest. Returns `None` when
+    /// the ratings are equal (including both unrated), leaving no unambiguous
+    /// giver — the caller treats that as an error.
+    fn rating_giver(p1: Option<u32>, p2: Option<u32>) -> Option<Winner> {
+        match (p1, p2) {
+            (Some(a), Some(b)) if a > b => Some(Winner::Player1),
+            (Some(a), Some(b)) if a < b => Some(Winner::Player2),
+            (Some(_), None) => Some(Winner::Player1),
+            (None, Some(_)) => Some(Winner::Player2),
+            _ => None, // equal ratings or both unrated
+        }
+    }
+
+    /// Immutable access to a board by round number and index.
+    fn board(&self, round_number: u32, board_index: usize) -> Result<&Board, TournamentError> {
+        let round = self
+            .rounds
+            .iter()
+            .find(|r| r.number == round_number)
+            .ok_or(TournamentError::RoundNotFound(round_number))?;
+        round
+            .boards
+            .get(board_index)
+            .ok_or(TournamentError::BoardNotFound {
+                round: round_number,
+                board: board_index,
+            })
+    }
+
+    /// Mutable access to a board by round number and index.
+    fn board_mut(
+        &mut self,
+        round_number: u32,
+        board_index: usize,
+    ) -> Result<&mut Board, TournamentError> {
+        let round = self
+            .rounds
+            .iter_mut()
+            .find(|r| r.number == round_number)
+            .ok_or(TournamentError::RoundNotFound(round_number))?;
+        round
+            .boards
+            .get_mut(board_index)
+            .ok_or(TournamentError::BoardNotFound {
+                round: round_number,
+                board: board_index,
+            })
     }
 
     /// Validate a tournament that was deserialized from an untrusted source
@@ -733,6 +823,8 @@ mod tests {
             player1: ids[0],
             player2: ids[2],
             result: None,
+            drawn: false,
+            handicap: None,
         }];
         t.update_draft(vec![], forced, Some(ids[4])).unwrap();
         let round = t.confirm_round().unwrap();
@@ -743,6 +835,112 @@ mod tests {
             .iter()
             .any(|b| b.player1 == ids[0] && b.player2 == ids[2]));
         assert_eq!(round.boards.len(), 2);
+    }
+
+    fn rated(last_name: &str, rating: u32) -> NewPlayer {
+        NewPlayer {
+            last_name: last_name.to_string(),
+            rating: Some(rating),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn set_board_drawn_toggles_flag_without_touching_result() {
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        let board = t.set_board_drawn(1, 0, true).unwrap();
+        assert!(board.drawn);
+        assert_eq!(board.result, Some(Winner::Player1)); // result untouched
+        // Effective winner unaffected by the draw flag.
+        assert_eq!(board.effective_winner(), Some(Winner::Player1));
+        assert!(!t.set_board_drawn(1, 0, false).unwrap().drawn);
+    }
+
+    #[test]
+    fn handicap_freezes_giver_and_flips_effective_winner() {
+        let mut t = Tournament::new("Cup").unwrap();
+        // High is rated above Low, so High is the giver.
+        let high = t.add_player(rated("High", 2000)).unwrap().id;
+        let _low = t.add_player(rated("Low", 1000)).unwrap().id;
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+
+        let (p1_is_high, giver) = {
+            let b = &t.rounds[0].boards[0];
+            (b.player1 == high, ())
+        };
+        let _ = giver;
+
+        // Give a 4-piece handicap. Whoever actually loses, the giver (High)
+        // scores the effective point.
+        t.set_board_handicap(1, 0, Some(Handicap::FourPiece)).unwrap();
+        // The receiver actually wins the game...
+        let receiver_wins = if p1_is_high { Winner::Player2 } else { Winner::Player1 };
+        t.toggle_board_winner(1, 0, receiver_wins).unwrap();
+
+        let board = &t.rounds[0].boards[0];
+        assert_eq!(board.result, Some(receiver_wins)); // actual result recorded
+        let giver_side = if p1_is_high { Winner::Player1 } else { Winner::Player2 };
+        assert_eq!(board.handicap.unwrap().giver, giver_side);
+        // ...but the giver still counts as the effective winner.
+        assert_eq!(board.effective_winner(), Some(giver_side));
+
+        // The frozen giver survives a later rating swap (Low now outrates High).
+        let low_id = t.players.iter().find(|p| p.id != high).unwrap().id;
+        t.edit_player(low_id, rated("Low", 9999)).unwrap();
+        assert_eq!(t.rounds[0].boards[0].handicap.unwrap().giver, giver_side);
+    }
+
+    #[test]
+    fn handicap_rejected_when_ratings_equal() {
+        let mut t = Tournament::new("Cup").unwrap();
+        t.add_player(rated("A", 1500)).unwrap();
+        t.add_player(rated("B", 1500)).unwrap();
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+        assert_eq!(
+            t.set_board_handicap(1, 0, Some(Handicap::Rook)),
+            Err(TournamentError::HandicapNeedsRatingDifference)
+        );
+        // Clearing a handicap is always allowed, even with equal ratings.
+        assert!(t.set_board_handicap(1, 0, None).unwrap().handicap.is_none());
+    }
+
+    #[test]
+    fn handicap_rejected_when_both_unrated() {
+        let mut t = Tournament::new("Cup").unwrap();
+        t.add_player(named("A")).unwrap();
+        t.add_player(named("B")).unwrap();
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+        assert_eq!(
+            t.set_board_handicap(1, 0, Some(Handicap::Rook)),
+            Err(TournamentError::HandicapNeedsRatingDifference)
+        );
+    }
+
+    #[test]
+    fn unrated_player_receives_handicap_from_rated() {
+        let mut t = Tournament::new("Cup").unwrap();
+        let rated_id = t.add_player(rated("Rated", 1800)).unwrap().id;
+        t.add_player(named("Unrated")).unwrap();
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+        t.set_board_handicap(1, 0, Some(Handicap::TwoPiece)).unwrap();
+        let board = &t.rounds[0].boards[0];
+        let giver_side = if board.player1 == rated_id {
+            Winner::Player1
+        } else {
+            Winner::Player2
+        };
+        assert_eq!(board.handicap.unwrap().giver, giver_side); // rated player gives
     }
 
     #[test]

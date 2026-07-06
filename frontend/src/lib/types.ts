@@ -42,11 +42,44 @@ export interface RatedPlayer {
 /** Which player won a board — mirror of `osp_core::Winner`. */
 export type Winner = "player1" | "player2";
 
+/** A piece-odds handicap — mirror of `osp_core::Handicap` (serialized as its code). */
+export type Handicap =
+  | "s"
+  | "l"
+  | "b"
+  | "r"
+  | "rl"
+  | "2p"
+  | "4p"
+  | "5p"
+  | "6p";
+
+/** Handicaps in the picker order, with their display labels. */
+export const HANDICAPS: { value: Handicap; label: string }[] = [
+  { value: "s", label: "Sente" },
+  { value: "l", label: "Lance" },
+  { value: "b", label: "Bishop" },
+  { value: "r", label: "Rook" },
+  { value: "rl", label: "Rook+Lance" },
+  { value: "2p", label: "2 pieces" },
+  { value: "4p", label: "4 pieces" },
+  { value: "5p", label: "5 pieces" },
+  { value: "6p", label: "6 pieces" },
+];
+
+/** A handicap attached to a board — mirror of `osp_core::HandicapGame`. */
+export interface HandicapGame {
+  handicap: Handicap;
+  giver: Winner; // frozen: the higher-rated player
+}
+
 /** Mirror of `osp_core::Board` — one game in a round. */
 export interface Board {
   player1: string; // player UUID
   player2: string; // player UUID
-  result?: Winner; // absent = not played yet
+  result?: Winner; // actual winner; absent = not played yet
+  drawn?: boolean; // a draw occurred before the decisive game
+  handicap?: HandicapGame | null; // piece odds, if any
 }
 
 /** Mirror of `osp_core::Round`. */

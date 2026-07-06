@@ -1,15 +1,26 @@
 <script lang="ts">
-  import type { Player, Round, Winner } from "../types";
+  import { HANDICAPS, type Board, type Handicap, type Player, type Round, type Winner } from "../types";
 
   interface Props {
     round: Round;
     players: Player[];
     /** Register a click on a board's player (toggles the winner). */
     onClickWinner: (boardIndex: number, clicked: Winner) => void;
+    /** Set/clear the "a draw occurred" flag on a board. */
+    onToggleDrawn: (boardIndex: number, drawn: boolean) => void;
+    /** Set (or clear, with null) a board's handicap. */
+    onSetHandicap: (boardIndex: number, handicap: Handicap | null) => void;
     busy?: boolean;
   }
 
-  let { round, players, onClickWinner, busy = false }: Props = $props();
+  let {
+    round,
+    players,
+    onClickWinner,
+    onToggleDrawn,
+    onSetHandicap,
+    busy = false,
+  }: Props = $props();
 
   // Resolve player ids to display names.
   const byId = $derived(new Map(players.map((p) => [p.id, p])));
@@ -19,6 +30,26 @@
     if (!p) return "(unknown)";
     const full = `${p.last_name} ${p.first_name}`.trim();
     return p.rating != null ? `${full} (${p.rating})` : full;
+  }
+
+  // A handicap needs an unambiguous giver — the higher-rated player — so it is
+  // only offered when the two ratings differ (both unrated counts as equal).
+  function handicapAllowed(board: Board): boolean {
+    const r1 = byId.get(board.player1)?.rating ?? null;
+    const r2 = byId.get(board.player2)?.rating ?? null;
+    return r1 !== r2;
+  }
+
+  // Name of the frozen handicap giver, for the "X gives" hint.
+  function giverName(board: Board): string {
+    if (!board.handicap) return "";
+    const id = board.handicap.giver === "player1" ? board.player1 : board.player2;
+    const p = byId.get(id);
+    return p ? `${p.last_name} ${p.first_name}`.trim() : "(unknown)";
+  }
+
+  function onHandicapChange(index: number, value: string) {
+    onSetHandicap(index, value === "" ? null : (value as Handicap));
   }
 </script>
 
@@ -32,6 +63,8 @@
           <th class="num">Board</th>
           <th>Player 1</th>
           <th>Player 2</th>
+          <th class="draw-col">Draw</th>
+          <th>Handicap</th>
         </tr>
       </thead>
       <tbody>
@@ -63,6 +96,41 @@
               >
                 {name(board.player2)}
               </button>
+            </td>
+            <td class="draw-col">
+              <button
+                type="button"
+                class="draw"
+                class:active={board.drawn}
+                disabled={busy}
+                title="A draw occurred before the decisive game (recorded for ELO)"
+                aria-pressed={board.drawn ?? false}
+                onclick={() => onToggleDrawn(i, !board.drawn)}
+              >
+                =
+              </button>
+            </td>
+            <td>
+              {#if handicapAllowed(board)}
+                <select
+                  class="handicap"
+                  disabled={busy}
+                  value={board.handicap?.handicap ?? ""}
+                  onchange={(e) => onHandicapChange(i, e.currentTarget.value)}
+                >
+                  <option value="">None</option>
+                  {#each HANDICAPS as h (h.value)}
+                    <option value={h.value}>{h.label}</option>
+                  {/each}
+                </select>
+                {#if board.handicap}
+                  <span class="giver" title="The higher-rated player concedes the odds"
+                    >{giverName(board)} gives</span
+                  >
+                {/if}
+              {:else}
+                <span class="na" title="Needs two players with different ratings">—</span>
+              {/if}
             </td>
           </tr>
         {/each}
@@ -130,6 +198,47 @@
   }
   .player.loser {
     color: #6a6a72;
+  }
+
+  .draw-col {
+    text-align: center;
+    width: 3.5rem;
+  }
+  .draw {
+    width: 1.9rem;
+    height: 1.9rem;
+    border: 1px solid #3a3a42;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: #9a9aa2;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .draw:hover:not(:disabled) {
+    background: #26262c;
+  }
+  .draw.active {
+    border-color: #d29922;
+    color: #d29922;
+    background: #2a2410;
+  }
+
+  .handicap {
+    background: #1c1c22;
+    color: inherit;
+    border: 1px solid #3a3a42;
+    border-radius: 0.4rem;
+    padding: 0.2rem 0.35rem;
+    font: inherit;
+  }
+  .giver {
+    margin-left: 0.5rem;
+    color: #6a6a72;
+    font-size: 0.8rem;
+  }
+  .na {
+    color: #4a4a52;
   }
 
   .hint,

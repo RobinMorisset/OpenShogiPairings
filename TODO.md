@@ -26,6 +26,15 @@ Known limitations and future work, roughly ordered by area.
   table. This needs a way to mark a board as a no-show (a new board-result state,
   giving the opponent the win); not handled yet. Byes (`0+`, win) and absences
   (`0-`, loss) are already handled.
+- **End-of-tournament ELO update.** Boards now record the *actual* result plus a
+  `drawn` flag and an optional `handicap` (with a frozen giver), precisely so an
+  ELO recompute can consume them — but no such computation exists yet. The
+  standings/pairing already use the *effective* winner (`Board::effective_winner`:
+  the handicap giver always scores, whoever actually won); ELO should instead use
+  the actual result and the draw/handicap detail. In the Results tab a handicap
+  game shows the actual sign with the handicap in parentheses (e.g. `3=−(−4p)`
+  giving, `1=+(+4p)` receiving) while the victories column counts the effective
+  winner.
 
 ## FESA rating list
 

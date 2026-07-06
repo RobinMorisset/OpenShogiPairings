@@ -22,11 +22,24 @@
     ),
   );
 
+  type PlayedCell = {
+    kind: "played";
+    opponent: string;
+    /** This player actually won the game — drives the +/− sign and colour. */
+    actualWon: boolean;
+    /** Counts as a win in the standings (the giver always does). */
+    effectiveWon: boolean;
+    /** A draw occurred before the decisive game. */
+    drawn: boolean;
+    /** Present for a handicap game: the code, and whether this player conceded. */
+    handicap?: { code: string; gave: boolean };
+  };
+
   type Cell =
     | { kind: "bye" }
     | { kind: "absent" }
     | { kind: "pending"; opponent: string }
-    | { kind: "played"; opponent: string; won: boolean };
+    | PlayedCell;
 
   function cellFor(player: Player, round: Round): Cell {
     if (round.bye === player.id) return { kind: "bye" };
@@ -38,18 +51,47 @@
     const opponentId = numberOf.get(isP1 ? board.player2 : board.player1);
     const opponent = opponentId != null ? String(opponentId) : "?";
     if (!board.result) return { kind: "pending", opponent };
-    const won =
+    const actualWon =
       (board.result === "player1" && isP1) ||
       (board.result === "player2" && !isP1);
-    return { kind: "played", opponent, won };
+
+    // A handicap game always counts as a win for the giver, whoever won.
+    let effectiveWon = actualWon;
+    let handicap: PlayedCell["handicap"];
+    if (board.handicap) {
+      const gave =
+        (board.handicap.giver === "player1" && isP1) ||
+        (board.handicap.giver === "player2" && !isP1);
+      effectiveWon = gave;
+      handicap = { code: board.handicap.handicap, gave };
+    }
+    return {
+      kind: "played",
+      opponent,
+      actualWon,
+      effectiveWon,
+      drawn: board.drawn ?? false,
+      handicap,
+    };
+  }
+
+  /** The results-cell label, e.g. `3+`, `4=−`, `3+(+4p)`, `4=+(−2p)`. */
+  function playedLabel(cell: PlayedCell): string {
+    const draw = cell.drawn ? "=" : "";
+    const sign = cell.actualWon ? "+" : "−";
+    const hc = cell.handicap
+      ? `(${cell.handicap.gave ? "−" : "+"}${cell.handicap.code})`
+      : "";
+    return `${cell.opponent}${draw}${sign}${hc}`;
   }
 
   function victories(player: Player): number {
     let count = 0;
     for (const round of completedRounds) {
       const cell = cellFor(player, round);
-      // A win at the board, or a bye, both count as a victory.
-      if ((cell.kind === "played" && cell.won) || cell.kind === "bye") count++;
+      // A standings win at the board, or a bye, both count as a victory.
+      if ((cell.kind === "played" && cell.effectiveWon) || cell.kind === "bye")
+        count++;
     }
     return count;
   }
@@ -92,8 +134,11 @@
               {:else if cell.kind === "pending"}
                 <span class="pending">{cell.opponent}?</span>
               {:else}
-                <span class={cell.won ? "win" : "loss"}
-                  >{cell.opponent}{cell.won ? "+" : "−"}</span
+                <span
+                  class={cell.actualWon ? "win" : "loss"}
+                  title={cell.handicap
+                    ? `Handicap game — counts as a ${cell.effectiveWon ? "win" : "loss"} in the standings`
+                    : undefined}>{playedLabel(cell)}</span
                 >
               {/if}
             </td>

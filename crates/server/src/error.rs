@@ -44,6 +44,7 @@ impl From<TournamentError> for ApiError {
             | TournamentError::InvalidDraft(_)
             | TournamentError::NoRoundToComplete
             | TournamentError::RoundHasUnplayedGames
+            | TournamentError::HandicapNeedsRatingDifference
             | TournamentError::UnsupportedFormatVersion { .. } => {
                 ApiError::BadRequest(err.to_string())
             }

@@ -4,7 +4,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{post, put};
 use axum::{Json, Router};
-use osp_core::{Board, NewPlayer, Tournament, Winner};
+use osp_core::{Board, Handicap, NewPlayer, Tournament, Winner};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -23,6 +23,8 @@ use crate::state::{AppState, TournamentStore};
 /// - `PUT    /api/tournament/draft`                  edit the draft
 /// - `POST   /api/tournament/rounds`                 confirm the draft (pair & start)
 /// - `POST   /api/tournament/rounds/{n}/boards/{i}/result`  toggle a board winner
+/// - `POST   /api/tournament/rounds/{n}/boards/{i}/drawn`   set the draw flag
+/// - `PUT    /api/tournament/rounds/{n}/boards/{i}/handicap` set/clear the handicap
 /// - `POST   /api/tournament/players`       register a player
 /// - `PUT    /api/tournament/players/{id}`  edit a player
 /// - `DELETE /api/tournament/players/{id}`  remove a player
@@ -50,6 +52,14 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/tournament/rounds/{round_number}/boards/{board_index}/result",
             post(set_board_result),
+        )
+        .route(
+            "/api/tournament/rounds/{round_number}/boards/{board_index}/drawn",
+            post(set_board_drawn),
+        )
+        .route(
+            "/api/tournament/rounds/{round_number}/boards/{board_index}/handicap",
+            put(set_board_handicap),
         )
         .route("/api/tournament/players", post(add_player))
         .route(
@@ -197,6 +207,47 @@ async fn set_board_result(
     let mut store = state.store.write().expect("store lock poisoned");
     store.mutate(|t| {
         t.toggle_board_winner(round_number, board_index, req.clicked)
+            .map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// Body of the draw-flag endpoint: whether the game was drawn before resolving.
+#[derive(Debug, Deserialize)]
+struct SetDrawnRequest {
+    drawn: bool,
+}
+
+/// Set (or clear) a board's "a draw occurred" flag.
+async fn set_board_drawn(
+    State(state): State<AppState>,
+    Path((round_number, board_index)): Path<(u32, usize)>,
+    Json(req): Json<SetDrawnRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.mutate(|t| {
+        t.set_board_drawn(round_number, board_index, req.drawn)
+            .map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// Body of the handicap endpoint: the handicap to set, or `null` to clear it.
+#[derive(Debug, Deserialize)]
+struct SetHandicapRequest {
+    handicap: Option<Handicap>,
+}
+
+/// Set or clear a board's handicap. The giver is frozen server-side from the
+/// players' current ratings.
+async fn set_board_handicap(
+    State(state): State<AppState>,
+    Path((round_number, board_index)): Path<(u32, usize)>,
+    Json(req): Json<SetHandicapRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.mutate(|t| {
+        t.set_board_handicap(round_number, board_index, req.handicap)
             .map(|_| ())
     })?;
     view(&store)

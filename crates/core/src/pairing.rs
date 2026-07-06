@@ -83,6 +83,8 @@ pub fn pair_round_constrained(
             player1: b.player1,
             player2: b.player2,
             result: None,
+            drawn: false,
+            handicap: None,
         })
         .collect();
     for pair in remaining.chunks(2) {
@@ -90,6 +92,8 @@ pub fn pair_round_constrained(
             player1: pair[0],
             player2: pair[1],
             result: None,
+            drawn: false,
+            handicap: None,
         });
     }
 
@@ -190,7 +194,9 @@ impl Standings {
                 }
             }
             for board in &round.boards {
-                match board.result {
+                // Standings count the *effective* winner: for a handicap game the
+                // giver always scores the point, whoever actually won.
+                match board.effective_winner() {
                     Some(Winner::Player1) => {
                         if let Some(s) = by_id.get_mut(&board.player1) {
                             s.victories += 1;
@@ -389,6 +395,8 @@ pub fn pair_round_weighted(
             player1: b.player1,
             player2: b.player2,
             result: None,
+            drawn: false,
+            handicap: None,
         })
         .collect();
     let mut bye = forced_bye;
@@ -427,6 +435,8 @@ pub fn pair_round_weighted(
                     player1: free[i],
                     player2: free[j],
                     result: None,
+                    drawn: false,
+                    handicap: None,
                 });
             }
         }
@@ -480,6 +490,8 @@ mod tests {
             player1: p[0],
             player2: p[3],
             result: None,
+            drawn: false,
+            handicap: None,
         }];
         let round = pair_round_constrained(1, &p, &forced, None);
         assert_eq!(round.boards.len(), 2);
@@ -532,6 +544,8 @@ mod tests {
                     player1: a,
                     player2: b,
                     result: Some(w),
+                    drawn: false,
+                    handicap: None,
                 })
                 .collect(),
             bye,

@@ -81,6 +81,8 @@ button together (the persisted save-file shape stays the bare tournament).
 | `PUT /api/tournament/draft` | Edit the draft (absent set, forced pairings, forced bye). |
 | `POST /api/tournament/rounds` | Confirm the draft: pair remaining players and start the round. |
 | `POST /api/tournament/rounds/{n}/boards/{i}/result` | Toggle a board's winner: `{ "clicked": "player1"｜"player2" }`. |
+| `POST /api/tournament/rounds/{n}/boards/{i}/drawn` | Set the "a draw occurred" flag: `{ "drawn": true｜false }`. |
+| `PUT /api/tournament/rounds/{n}/boards/{i}/handicap` | Set/clear the handicap: `{ "handicap": "4p"｜null }` (giver frozen from ratings; 400 if ratings equal). |
 | `POST /api/tournament/players` | Register a player: `{ "last_name", "first_name?", "rating?", "nationality?", "club?" }`. |
 | `PUT /api/tournament/players/{id}` | Edit a player's fields in place. |
 | `DELETE /api/tournament/players/{id}` | Remove a player. |

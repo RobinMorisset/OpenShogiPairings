@@ -1,4 +1,5 @@
 import type {
+  Handicap,
   HealthStatus,
   NewPlayer,
   RatedPlayer,
@@ -175,6 +176,30 @@ export function setBoardWinner(
   return request<TournamentResponse>(
     `/api/tournament/rounds/${roundNumber}/boards/${boardIndex}/result`,
     { method: "POST", body: JSON.stringify({ clicked }) },
+  );
+}
+
+/** Set (or clear) a board's "a draw occurred" flag. */
+export function setBoardDrawn(
+  roundNumber: number,
+  boardIndex: number,
+  drawn: boolean,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    `/api/tournament/rounds/${roundNumber}/boards/${boardIndex}/drawn`,
+    { method: "POST", body: JSON.stringify({ drawn }) },
+  );
+}
+
+/** Set or clear a board's handicap (the server freezes the giver from ratings). */
+export function setBoardHandicap(
+  roundNumber: number,
+  boardIndex: number,
+  handicap: Handicap | null,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    `/api/tournament/rounds/${roundNumber}/boards/${boardIndex}/handicap`,
+    { method: "PUT", body: JSON.stringify({ handicap }) },
   );
 }
 

@@ -14,12 +14,15 @@
     refreshRatings,
     removePlayer,
     replaceTournament,
+    setBoardDrawn,
+    setBoardHandicap,
     setBoardWinner,
     undoTournament,
     updateDraft,
     type DraftUpdate,
   } from "./lib/api";
   import type {
+    Handicap,
     NewPlayer,
     RatedPlayer,
     Tournament,
@@ -236,6 +239,22 @@
     });
   }
 
+  function handleSetDrawn(roundNumber: number, boardIndex: number, drawn: boolean) {
+    run(async () => {
+      apply(await setBoardDrawn(roundNumber, boardIndex, drawn));
+    });
+  }
+
+  function handleSetHandicap(
+    roundNumber: number,
+    boardIndex: number,
+    handicap: Handicap | null,
+  ) {
+    run(async () => {
+      apply(await setBoardHandicap(roundNumber, boardIndex, handicap));
+    });
+  }
+
   function handleSave() {
     if (!tournament) return;
     const current = tournament;
@@ -404,6 +423,10 @@
             players={tournament.players}
             onClickWinner={(boardIndex, clicked) =>
               handleSetResult(activeRound.number, boardIndex, clicked)}
+            onToggleDrawn={(boardIndex, drawn) =>
+              handleSetDrawn(activeRound.number, boardIndex, drawn)}
+            onSetHandicap={(boardIndex, handicap) =>
+              handleSetHandicap(activeRound.number, boardIndex, handicap)}
             {busy}
           />
         {/if}
