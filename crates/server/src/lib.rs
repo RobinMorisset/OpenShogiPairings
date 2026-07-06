@@ -18,7 +18,10 @@ mod tournament;
 
 pub use state::AppState;
 
-use axum::{routing::get, Json, Router};
+use axum::{
+    routing::{get, post},
+    Json, Router,
+};
 use osp_core::HealthStatus;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -34,6 +37,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/ratings", get(ratings::ratings_handler))
+        .route("/api/ratings/refresh", post(ratings::refresh_handler))
         .merge(tournament::routes())
         .with_state(state)
         .layer(cors)

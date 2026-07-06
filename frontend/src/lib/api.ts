@@ -76,6 +76,11 @@ export function fetchRatings(): Promise<RatedPlayer[]> {
   return request<RatedPlayer[]>("/api/ratings");
 }
 
+/** Force the server to re-download the FESA rating list from the website. */
+export function refreshRatings(): Promise<RatedPlayer[]> {
+  return request<RatedPlayer[]>("/api/ratings/refresh", { method: "POST" });
+}
+
 /**
  * Fetch the current tournament, or `null` if none has been created yet
  * (the server answers 404 in that case).

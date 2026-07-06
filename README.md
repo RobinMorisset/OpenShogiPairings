@@ -39,6 +39,7 @@ solver for experimental formats beyond Swiss / MacMahon.
 |---------------|---------|
 | `GET /api/health` | Liveness check. |
 | `GET /api/ratings` | FESA rating list (server-cached) for registration autocomplete. |
+| `POST /api/ratings/refresh` | Re-download the FESA list now (manual refresh). |
 | `POST /api/tournament` | Create a new (empty) tournament: `{ "name": "..." }`. |
 | `GET /api/tournament` | Fetch the current tournament (404 if none). |
 | `PUT /api/tournament` | Replace the current tournament (used by "load"). |
@@ -47,9 +48,13 @@ solver for experimental formats beyond Swiss / MacMahon.
 
 The FESA rating list is fixed-width, Latin-1 text (parsed in
 [`crates/core`](crates/core/src/fesa.rs)). It's shared reference data, so the
-**server** owns the cache — it fetches from FESA at most once per TTL, keeps the
-parsed list in memory, and persists it to a per-user cache file (serving stale
-data if FESA is unreachable). Clients pull the list once and filter locally.
+**server** owns the cache: it downloads from FESA **only once**, the first time a
+list is needed with nothing cached, then keeps it in memory and persists it to a
+per-user cache file. It never re-downloads on its own — updating the list is a
+manual action (the "Refresh FESA list" button → `POST /api/ratings/refresh`).
+Clients pull the list once and filter locally.
+
+Known limitations and future work are tracked in [TODO.md](TODO.md).
 
 Every mutating endpoint returns the full updated tournament. Save/load is
 platform-aware: in the **Tauri** desktop app it uses native OS file dialogs (the

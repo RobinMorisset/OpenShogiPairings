@@ -6,6 +6,7 @@
     createTournament,
     fetchRatings,
     fetchTournament,
+    refreshRatings,
     removePlayer,
     replaceTournament,
   } from "./lib/api";
@@ -100,6 +101,12 @@
       await saveTournament(current);
     });
   }
+
+  function handleRefreshRatings() {
+    run(async () => {
+      ratings = await refreshRatings();
+    });
+  }
 </script>
 
 <div class="app">
@@ -148,6 +155,24 @@
       </div>
 
       <PlayerRegistration onAdd={handleAddPlayer} {ratings} {busy} />
+      <div class="ratings-status">
+        <span>
+          {#if ratings.length > 0}
+            {ratings.length} players in the FESA rating list
+          {:else}
+            FESA rating list not loaded
+          {/if}
+        </span>
+        <button
+          type="button"
+          class="ghost small"
+          onclick={handleRefreshRatings}
+          disabled={busy}
+          title="Re-download the rating list from the FESA website"
+        >
+          Refresh FESA list
+        </button>
+      </div>
       <div class="players">
         <PlayerList
           players={tournament.players}
@@ -204,6 +229,19 @@
   .toolbar-actions {
     display: flex;
     gap: 0.5rem;
+  }
+  .ratings-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: 0.6rem;
+    font-size: 0.8rem;
+    color: #9a9aa2;
+  }
+  .ratings-status button.small {
+    padding: 0.25rem 0.6rem;
+    font-size: 0.78rem;
   }
   .players {
     margin-top: 1.25rem;
