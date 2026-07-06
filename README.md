@@ -51,7 +51,8 @@ engine scores by total points.
 > gated: **finalize registration** → **prepare round** (a draft state to mark
 > players absent, force pairings, and force the bye) → **start round** (confirm)
 > → play games → **complete round** (only once every game is played) → prepare
-> the next round. In a round
+> the next round; **cancel last round** peels back one stage (discarding an open
+> draft, else removing the most recent round) to replay it or undo a mistake. In a round
 > tab, clicking a player records them as the winner (click the other to switch,
 > click the winner again to clear — three states); completed rounds stay editable
 > with a warning. Finalizing registration assigns each player a tournament
@@ -61,14 +62,16 @@ engine scores by total points.
 > (`opponent-number` + `+`/`−`, or `0+` for a bye / `0-` for an absence), a
 > victory count, and Points / SOS / SODOS / SOSOS columns. The web UI is organized
 > into tabs (Settings / Players / Results / one per round) and can save/load the
-> tournament as a JSON file.
+> tournament as a JSON file. Once a round is complete it can also export the
+> **American Grid** cross-table (the federation's ELO-update format); a matching
+> import API rebuilds a tournament from such a grid, for tests and simulations.
 
 Mutations go through a `TournamentStore` that keeps the current tournament plus a
 stack of prior snapshots (the undo history); create/load reset it. Endpoints
 return `{ tournament, can_undo, standings }` so the client refreshes the view,
 the undo button, and the ranked table together (the persisted save-file shape
 stays the bare tournament). `standings` is computed server-side (in `osp-core`)
-so every client — and the future American grid — shares one canonical ranking:
+so every client — and the American grid export — shares one canonical ranking:
 by points, then the SOS / SODOS / SOSOS tie-breaks, then tournament number.
 
 ### API
@@ -82,9 +85,12 @@ by points, then the SOS / SODOS / SOSOS tie-breaks, then tournament number.
 | `GET /api/tournament` | Fetch the current tournament (404 if none). |
 | `PUT /api/tournament` | Replace the current tournament (used by "load"). |
 | `POST /api/tournament/undo` | Revert the last change (server-side undo history). |
+| `GET /api/tournament/american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
+| `PUT /api/tournament/american-grid` | Import an American Grid (raw `text/plain` body), rebuilding the tournament from it — registers the players, forces every round's pairings, and replays the results. Replaces the current tournament; meant for seeding a non-trivial state in tests/simulations, not surfaced in the UI. |
 | `PUT /api/tournament/settings` | Update settings (the whole `TournamentSettings`): `{ "macmahon_thresholds": [1200, 1700], "macmahon_removals": [3] }` — thresholds stored sorted & de-duplicated, `macmahon_removals` (degressive MacMahon: round-ends at which the bottom threshold is dropped) sorted & capped to the threshold count. |
 | `POST /api/tournament/finalize-registration` | Finalize registration (unlocks round 1). |
 | `POST /api/tournament/complete-round` | Complete the current round (all games must be played). |
+| `POST /api/tournament/cancel-round` | Cancel the last round — discards the open draft if one is being prepared, otherwise removes the most recent round (undoable). Steps back one stage, e.g. to replay a round in a simulation. |
 | `POST /api/tournament/rounds/prepare` | Begin drafting the next round. |
 | `PUT /api/tournament/draft` | Edit the draft (absent set, forced pairings, forced bye). |
 | `POST /api/tournament/rounds` | Confirm the draft: pair remaining players and start the round. |
