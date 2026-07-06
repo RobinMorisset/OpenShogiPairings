@@ -5,6 +5,8 @@
 //! (rather than in the server) means the server, a future CLI, and the Tauri app
 //! all share exactly one implementation.
 
+use std::cmp::Ordering;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -118,9 +120,27 @@ impl Tournament {
         if new.last_name.trim().is_empty() {
             return Err(TournamentError::EmptyPlayerName);
         }
-        self.players.push(Player::from_new(new));
+        let mut player = Player::from_new(new);
+        // A player registered after finalization gets the next free number
+        // immediately (independent of rating); before finalization, numbers are
+        // assigned in bulk by `finalize_registration`.
+        if self.registration_finalized {
+            player.tournament_id = Some(self.next_tournament_id());
+        }
+        self.players.push(player);
         // `push` never reallocates away the just-added last element.
         Ok(self.players.last().expect("just pushed a player"))
+    }
+
+    /// The next unused tournament number (max assigned + 1). Numbers are never
+    /// reused, so results referencing a number stay unambiguous.
+    fn next_tournament_id(&self) -> u32 {
+        self.players
+            .iter()
+            .filter_map(|p| p.tournament_id)
+            .max()
+            .unwrap_or(0)
+            + 1
     }
 
     /// Replace the editable fields of an existing player, keeping its id and
@@ -170,6 +190,22 @@ impl Tournament {
     pub fn finalize_registration(&mut self) -> Result<(), TournamentError> {
         if self.registration_finalized {
             return Err(TournamentError::RegistrationAlreadyFinalized);
+        }
+        // Assign tournament numbers 1..N in the sorted-table order: highest ELO
+        // first, unrated players last, ties broken by registration order.
+        let mut order: Vec<usize> = (0..self.players.len()).collect();
+        order.sort_by(|&a, &b| {
+            let (ra, rb) = (self.players[a].rating, self.players[b].rating);
+            let by_rating = match (ra, rb) {
+                (Some(x), Some(y)) => y.cmp(&x), // descending
+                (Some(_), None) => Ordering::Less, // rated before unrated
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => Ordering::Equal,
+            };
+            by_rating.then(a.cmp(&b)) // stable: registration order breaks ties
+        });
+        for (rank, &idx) in order.iter().enumerate() {
+            self.players[idx].tournament_id = Some(rank as u32 + 1);
         }
         self.registration_finalized = true;
         Ok(())
@@ -381,6 +417,36 @@ mod tests {
         let round2 = t.start_round().unwrap();
         assert_eq!(round2.number, 2);
         assert_eq!(t.rounds.len(), 2);
+    }
+
+    #[test]
+    fn finalize_assigns_tournament_ids_by_elo() {
+        fn rated(name: &str, rating: u32) -> NewPlayer {
+            NewPlayer {
+                last_name: name.to_string(),
+                rating: Some(rating),
+                ..Default::default()
+            }
+        }
+
+        let mut t = Tournament::new("Cup").unwrap();
+        // Registered out of ELO order.
+        let low = t.add_player(rated("Low", 1000)).unwrap().id;
+        let high = t.add_player(rated("High", 2000)).unwrap().id;
+        let unrated = t.add_player(named("Unrated")).unwrap().id;
+        let mid = t.add_player(rated("Mid", 1500)).unwrap().id;
+        assert!(t.players.iter().all(|p| p.tournament_id.is_none()));
+
+        t.finalize_registration().unwrap();
+        let id_of = |uuid| t.players.iter().find(|p| p.id == uuid).unwrap().tournament_id;
+        assert_eq!(id_of(high), Some(1));
+        assert_eq!(id_of(mid), Some(2));
+        assert_eq!(id_of(low), Some(3));
+        assert_eq!(id_of(unrated), Some(4)); // unrated last
+
+        // Added after finalization → next free number, regardless of rating.
+        let newcomer = t.add_player(rated("Newcomer", 9000)).unwrap();
+        assert_eq!(newcomer.tournament_id, Some(5));
     }
 
     #[test]

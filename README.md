@@ -43,10 +43,13 @@ until results land), and one tab per round created by "Start round".
 > gated: **finalize registration** → **start round** → play games → **complete
 > round** (only once every game is played) → start the next round. In a round
 > tab, clicking a player records them as the winner (click the other to switch,
-> click the winner again to clear — three states); completing a round locks its
-> results. The web UI is organized into tabs (Players / Results / one per round)
-> and can save/load the tournament as a JSON file. Standings (the Results tab)
-> and smarter pairings are next.
+> click the winner again to clear — three states); completed rounds stay editable
+> with a warning. Finalizing registration assigns each player a tournament
+> number (by ELO, unrated last; later additions get the next free number). The
+> **Results** tab has a row per player with one column per completed round
+> (`opponent-number` + `+`/`−`) and a victory count. The web UI is organized into
+> tabs (Players / Results / one per round) and can save/load the tournament as a
+> JSON file. Ranked standings and smarter pairings are next.
 
 Mutations go through a `TournamentStore` that keeps the current tournament plus a
 stack of prior snapshots (the undo history); create/load reset it. Endpoints

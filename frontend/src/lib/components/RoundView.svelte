@@ -44,8 +44,8 @@
                 class="player"
                 class:winner={board.result === "player1"}
                 class:loser={board.result === "player2"}
-                disabled={busy || round.completed}
-                title={round.completed ? "" : "Click to set as winner"}
+                disabled={busy}
+                title="Click to set as winner"
                 onclick={() => onClickWinner(i, "player1")}
               >
                 {name(board.player1)}
@@ -57,8 +57,8 @@
                 class="player"
                 class:winner={board.result === "player2"}
                 class:loser={board.result === "player1"}
-                disabled={busy || round.completed}
-                title={round.completed ? "" : "Click to set as winner"}
+                disabled={busy}
+                title="Click to set as winner"
                 onclick={() => onClickWinner(i, "player2")}
               >
                 {name(board.player2)}
@@ -69,7 +69,10 @@
       </tbody>
     </table>
     {#if round.completed}
-      <p class="hint completed">✓ Round complete — results locked.</p>
+      <p class="hint warning">
+        ⚠ This round was already completed — changing a result here updates the
+        recorded standings.
+      </p>
     {:else}
       <p class="hint">Click a player to record them as the winner.</p>
     {/if}
@@ -135,8 +138,8 @@
     font-size: 0.8rem;
     margin-top: 0.6rem;
   }
-  .hint.completed {
-    color: #3fb950;
+  .hint.warning {
+    color: #d29922;
   }
   .bye {
     margin-top: 1rem;

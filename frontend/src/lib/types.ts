@@ -14,6 +14,7 @@ export interface HealthStatus {
 /** Mirror of `osp_core::Player`. */
 export interface Player {
   id: string; // UUID
+  tournament_id?: number; // human-facing number, assigned at finalize
   last_name: string;
   first_name: string;
   rating?: number;

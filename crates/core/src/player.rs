@@ -13,6 +13,11 @@ use uuid::Uuid;
 pub struct Player {
     /// Stable unique identifier, assigned by the server on registration.
     pub id: Uuid,
+    /// Human-facing tournament number, assigned when registration is finalized
+    /// (or on registration if added afterwards). `None` until then. Used to
+    /// reference opponents in the results table.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tournament_id: Option<u32>,
     /// Family name. Guaranteed non-empty (trimmed) once registered.
     pub last_name: String,
     /// Given name. May be empty.
@@ -65,6 +70,7 @@ impl Player {
     pub(crate) fn from_new(new: NewPlayer) -> Self {
         Self {
             id: Uuid::new_v4(),
+            tournament_id: None,
             last_name: new.last_name.trim().to_string(),
             first_name: new.first_name.trim().to_string(),
             rating: new.rating,

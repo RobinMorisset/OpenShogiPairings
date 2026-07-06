@@ -12,7 +12,9 @@ Known limitations and future work, roughly ordered by area.
   avoidance, colour balance, float rules…), then an ILP/CP-SAT backend for
   experimental formats. `pair_round`'s signature is meant to stay stable while
   its internals are swapped.
-- **Standings.** Populate the Results tab from the recorded board results.
+- **Ranked standings.** The Results tab lists per-round results and a victory
+  count, ordered by tournament number. Add real standings ordering (by score,
+  then tie-breaks) and richer scoring (points, draws) on top of it.
 
 ## FESA rating list
 

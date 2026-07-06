@@ -29,6 +29,7 @@
   import PlayerRegistration from "./lib/components/PlayerRegistration.svelte";
   import PlayerList from "./lib/components/PlayerList.svelte";
   import RoundView from "./lib/components/RoundView.svelte";
+  import ResultsView from "./lib/components/ResultsView.svelte";
 
   let tournament = $state<Tournament | null>(null);
   let canUndo = $state(false);
@@ -359,10 +360,7 @@
             />
           </div>
         {:else if activeTab === "results"}
-          <p class="muted placeholder">
-            Standings will appear here once round results can be entered
-            (coming soon).
-          </p>
+          <ResultsView {tournament} />
         {:else if activeRound}
           <RoundView
             round={activeRound}
@@ -473,10 +471,6 @@
     border-color: #3b5bdb;
     background: #2b3a67;
     color: #cdd6f4;
-  }
-  .placeholder {
-    padding: 1.5rem 0;
-    text-align: center;
   }
   .ratings-status {
     display: flex;
