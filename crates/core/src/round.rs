@@ -115,6 +115,14 @@ pub struct Board {
     /// The handicap conceded on this board, if any (see [`HandicapGame`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handicap: Option<HandicapGame>,
+    /// The float for this board: `points(player1) − points(player2)` at the time
+    /// the round was paired. Frozen here so the float history stays correct even
+    /// if MacMahon thresholds change later or an earlier result is edited — the
+    /// score standings are recomputed live, but *who floated* is a fact of the
+    /// pairing. `None` for boards from the naive pairer or from saves predating
+    /// this field (the scorer then falls back to the live points difference).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub points_diff: Option<i32>,
 }
 
 impl Board {

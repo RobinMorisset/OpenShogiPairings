@@ -18,11 +18,10 @@ Known limitations and future work, roughly ordered by area.
   are compile-time constants; expose them (and let referees toggle/reorder rules)
   once the model settles. Colour balance is intentionally absent (sente/gote is
   random per game in shogi).
-- **American grid (cross-table).** Standings are now computed server-side
-  (`osp-core` `compute_standings`) and ranked by points, then SOS / SODOS / SOSOS,
-  then tournament number — surfaced on the Results tab and in the tournament-view
-  envelope. The end-of-tournament American grid (cross-table) should be built from
-  this same canonical ordering.
+- **Ranked standings.** The Results tab lists per-round results, a victory count
+  and a total-points column (victories + MacMahon starting points), ordered by
+  tournament number. Add real standings *ordering* (by points, then tie-breaks)
+  on top of it.
 - **No-shows.** A player who was paired for a round but did not show up (distinct
   from a game simply not yet recorded) should appear as `0#` in the results
   table. This needs a way to mark a board as a no-show (a new board-result state,
@@ -38,9 +37,11 @@ Known limitations and future work, roughly ordered by area.
   giving, `1=+(+4p)` receiving) while the victories column counts the effective
   winner.
 
-- ** Making club protection optional** as a tournament option. It should also be possible
+- **Making club protection optional** as a tournament option. It should also be possible
   to have it only active for the first N rounds of the tournament (also settable from the
   tournament settings tab).
+
+- **Add proper selection of floaters**: classic swiss vs median swiss as an option 
 
 ## FESA rating list
 
@@ -68,7 +69,13 @@ Known limitations and future work, roughly ordered by area.
   
 ## Simulations
 
+- **Add an API to load an american grid into a tournament** This API should not be surfaced in the UI, it is
+  to be used in tests, and for doing simulations of various pairing methods.
 - **Add an API to get random game results** This API should not be surfaced in the UI, it is
   to be used in tests, and for doing simulations of various pairing methods. For each undecided match
   in the current round, it should pick a winner based on the respective ELOs, using the following formula:
   Chance of victory for player with elo A playing against player with elo B: 1 / (1 + 10^((B - A) / 400))
+- **Add an API and a button to cancel the last round** This should return to the state right after the last round completion
+  and make it easy to replay a round many times in simulation. It can have a button because it can also be useful to referees in rare situations
+- **Add an API getting statistical results from a tournament** the one I'm interested in is specifically the distribution of
+  ELO differences between players of games, ideally taking not the ELO at the start of the tournament for each player, but allowing an updated player -> ELO mapping to be provided by the client for this request only.

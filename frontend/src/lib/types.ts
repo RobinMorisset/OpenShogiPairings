@@ -80,6 +80,7 @@ export interface Board {
   result?: Winner; // actual winner; absent = not played yet
   drawn?: boolean; // a draw occurred before the decisive game
   handicap?: HandicapGame | null; // piece odds, if any
+  points_diff?: number | null; // points(p1) − points(p2) frozen at pairing time
 }
 
 /** Mirror of `osp_core::Round`. */

@@ -353,6 +353,7 @@ impl Tournament {
                 result: None,
                 drawn: false,
                 handicap: None,
+                points_diff: None,
             })
             .collect();
         draft.forced_bye = forced_bye;
@@ -853,6 +854,7 @@ mod tests {
             result: None,
             drawn: false,
             handicap: None,
+            points_diff: None,
         }];
         t.update_draft(vec![], forced, Some(ids[4])).unwrap();
         let round = t.confirm_round().unwrap();

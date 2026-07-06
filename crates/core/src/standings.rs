@@ -20,7 +20,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::player::Player;
-use crate::round::{Round, Winner};
+use crate::round::Round;
+use crate::scoring::compute_scores;
 use crate::settings::TournamentSettings;
 
 /// One player's standing: score and tie-breaks. The position in the returned
@@ -51,70 +52,31 @@ pub fn compute_standings(
     settings: &TournamentSettings,
     rounds: &[Round],
 ) -> Vec<Standing> {
-    // Points start at each player's MacMahon points, then gain a point per
-    // effective win (and per bye). Opponents faced / defeated are collected for
-    // the tie-breaks.
-    let mut points: HashMap<Uuid, u32> = players
-        .iter()
-        .map(|p| (p.id, settings.macmahon_points(p.rating)))
-        .collect();
-    let mut victories: HashMap<Uuid, u32> = players.iter().map(|p| (p.id, 0)).collect();
-    let mut faced: HashMap<Uuid, Vec<Uuid>> = players.iter().map(|p| (p.id, Vec::new())).collect();
-    let mut defeated: HashMap<Uuid, Vec<Uuid>> =
-        players.iter().map(|p| (p.id, Vec::new())).collect();
-
-    for round in rounds.iter().filter(|r| r.completed) {
-        for board in &round.boards {
-            if let Some(v) = faced.get_mut(&board.player1) {
-                v.push(board.player2);
-            }
-            if let Some(v) = faced.get_mut(&board.player2) {
-                v.push(board.player1);
-            }
-            let (winner_id, loser_id) = match board.effective_winner() {
-                Some(Winner::Player1) => (board.player1, board.player2),
-                Some(Winner::Player2) => (board.player2, board.player1),
-                None => continue,
-            };
-            if let Some(p) = points.get_mut(&winner_id) {
-                *p += 1;
-            }
-            if let Some(v) = victories.get_mut(&winner_id) {
-                *v += 1;
-            }
-            if let Some(d) = defeated.get_mut(&winner_id) {
-                d.push(loser_id);
-            }
-        }
-        if let Some(bye) = round.bye {
-            if let Some(p) = points.get_mut(&bye) {
-                *p += 1;
-            }
-            if let Some(v) = victories.get_mut(&bye) {
-                *v += 1;
-            }
-        }
-    }
-
-    let point_sum = |ids: &[Uuid]| ids.iter().map(|o| points.get(o).copied().unwrap_or(0)).sum();
+    // Points, opponents and victories come from the shared scorer; the tie-breaks
+    // are then sums over each player's opponents.
+    let scores = compute_scores(players, settings, rounds);
+    let point_sum = |ids: &[Uuid]| ids.iter().map(|o| scores.points(o)).sum();
 
     // SOS first (needed on its own for each player's SOSOS).
-    let sos: HashMap<Uuid, u32> = faced
+    let sos: HashMap<Uuid, u32> = players
         .iter()
-        .map(|(id, opps)| (*id, point_sum(opps)))
+        .map(|p| (p.id, point_sum(&scores.get(&p.id).opponents)))
         .collect();
     let sos_sum = |ids: &[Uuid]| ids.iter().map(|o| sos.get(o).copied().unwrap_or(0)).sum();
 
     let mut standings: Vec<Standing> = players
         .iter()
-        .map(|p| Standing {
-            player_id: p.id,
-            victories: victories[&p.id],
-            macmahon: settings.macmahon_points(p.rating),
-            points: points[&p.id],
-            sos: sos[&p.id],
-            sodos: point_sum(&defeated[&p.id]),
-            sosos: sos_sum(&faced[&p.id]),
+        .map(|p| {
+            let s = scores.get(&p.id);
+            Standing {
+                player_id: p.id,
+                victories: s.victories,
+                macmahon: s.macmahon,
+                points: s.points,
+                sos: sos[&p.id],
+                sodos: point_sum(&s.defeated),
+                sosos: sos_sum(&s.opponents),
+            }
         })
         .collect();
 
@@ -138,7 +100,7 @@ pub fn compute_standings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::Board;
+    use crate::round::{Board, Winner};
 
     fn player(tid: u32, rating: Option<u32>) -> Player {
         Player {
@@ -159,6 +121,7 @@ mod tests {
             result: Some(winner),
             drawn: false,
             handicap: None,
+            points_diff: None,
         }
     }
 

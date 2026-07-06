@@ -37,7 +37,8 @@ use uuid::Uuid;
 
 use crate::matching::min_weight_perfect_matching;
 use crate::player::Player;
-use crate::round::{Board, Round, Winner};
+use crate::round::{Board, Round};
+use crate::scoring::{compute_scores, Scores};
 use crate::settings::TournamentSettings;
 
 /// Pair all the given players with no constraints (naïve mode).
@@ -87,6 +88,7 @@ pub fn pair_round_constrained(
             result: None,
             drawn: false,
             handicap: None,
+            points_diff: None,
         })
         .collect();
     for pair in remaining.chunks(2) {
@@ -96,6 +98,7 @@ pub fn pair_round_constrained(
             result: None,
             drawn: false,
             handicap: None,
+            points_diff: None,
         });
     }
 
@@ -125,113 +128,6 @@ const W_FOLD: i128 = 1; // rule 5
 /// decay reads smoothly.
 const FLOAT_BASE: i128 = 720;
 
-/// Per-player state going into the round being paired, derived from the completed
-/// rounds. Holds everything the rules need.
-struct PlayerStanding {
-    /// Total score driving the pairing: MacMahon starting points plus victories
-    /// (a bye and the effective winner of each board both count as a victory).
-    points: u32,
-    opponents: HashSet<Uuid>,
-    had_bye: bool,
-    /// Round number of the most recent round in which the player was an ascending
-    /// / descending floater (a bye counts as descending). `None` if never.
-    last_ascended: Option<u32>,
-    last_descended: Option<u32>,
-    /// Rating for seeding; unrated players count as 1 (per the fold rule).
-    rating: u32,
-    club: Option<String>,
-}
-
-struct Standings {
-    by_id: HashMap<Uuid, PlayerStanding>,
-}
-
-impl Standings {
-    /// Replay the completed rounds to accumulate each player's points (starting
-    /// from their MacMahon points), opponents, bye status and float history.
-    fn compute(
-        players: &[Player],
-        settings: &TournamentSettings,
-        completed_rounds: &[Round],
-    ) -> Self {
-        let mut by_id: HashMap<Uuid, PlayerStanding> = players
-            .iter()
-            .map(|p| {
-                (
-                    p.id,
-                    PlayerStanding {
-                        points: settings.macmahon_points(p.rating),
-                        opponents: HashSet::new(),
-                        had_bye: false,
-                        last_ascended: None,
-                        last_descended: None,
-                        rating: p.rating.unwrap_or(1),
-                        club: p.club.clone(),
-                    },
-                )
-            })
-            .collect();
-
-        for round in completed_rounds {
-            // A float is judged on the victory counts going *into* the round, so
-            // record opponents/floats first, then apply this round's results.
-            for board in &round.boards {
-                let (a, b) = (board.player1, board.player2);
-                let (va, vb) = match (by_id.get(&a), by_id.get(&b)) {
-                    (Some(sa), Some(sb)) => (sa.points, sb.points),
-                    _ => continue,
-                };
-                by_id.get_mut(&a).unwrap().opponents.insert(b);
-                by_id.get_mut(&b).unwrap().opponents.insert(a);
-                match va.cmp(&vb) {
-                    Ordering::Less => {
-                        by_id.get_mut(&a).unwrap().last_ascended = Some(round.number);
-                        by_id.get_mut(&b).unwrap().last_descended = Some(round.number);
-                    }
-                    Ordering::Greater => {
-                        by_id.get_mut(&a).unwrap().last_descended = Some(round.number);
-                        by_id.get_mut(&b).unwrap().last_ascended = Some(round.number);
-                    }
-                    Ordering::Equal => {}
-                }
-            }
-            if let Some(bye) = round.bye {
-                if let Some(s) = by_id.get_mut(&bye) {
-                    s.had_bye = true;
-                    s.last_descended = Some(round.number); // a bye is a downfloat
-                }
-            }
-            for board in &round.boards {
-                // Standings count the *effective* winner: for a handicap game the
-                // giver always scores the point, whoever actually won.
-                match board.effective_winner() {
-                    Some(Winner::Player1) => {
-                        if let Some(s) = by_id.get_mut(&board.player1) {
-                            s.points += 1;
-                        }
-                    }
-                    Some(Winner::Player2) => {
-                        if let Some(s) = by_id.get_mut(&board.player2) {
-                            s.points += 1;
-                        }
-                    }
-                    None => {}
-                }
-            }
-            if let Some(bye) = round.bye {
-                if let Some(s) = by_id.get_mut(&bye) {
-                    s.points += 1;
-                }
-            }
-        }
-        Standings { by_id }
-    }
-
-    fn get(&self, id: &Uuid) -> &PlayerStanding {
-        &self.by_id[id]
-    }
-}
-
 /// Within-group fold placement of a player: its rank in the score group (by
 /// rating, descending) and the group's size.
 struct FoldInfo {
@@ -250,27 +146,24 @@ fn ideal_rank(rank: usize, group_size: usize) -> usize {
     }
 }
 
-/// Fold ranks for the `free` players, grouped by victory count and sorted within
-/// each group by rating (descending; unrated = 1), ties broken by tournament
-/// number for a stable, reproducible ordering.
-fn fold_ranks(stand: &Standings, players: &[Player], free: &[Uuid]) -> HashMap<Uuid, FoldInfo> {
-    let tnum: HashMap<Uuid, u32> = players
-        .iter()
-        .map(|p| (p.id, p.tournament_id.unwrap_or(u32::MAX)))
-        .collect();
+/// Fold ranks for the `free` players, grouped by points and sorted within each
+/// group by rating (descending; unrated = 1), ties broken by tournament number
+/// for a stable, reproducible ordering.
+fn fold_ranks(
+    scores: &Scores,
+    by_player: &HashMap<Uuid, &Player>,
+    free: &[Uuid],
+) -> HashMap<Uuid, FoldInfo> {
+    // Rating for seeding; unrated players count as 1 (per the fold rule).
+    let rating = |id: &Uuid| by_player[id].rating.unwrap_or(1);
+    let tnum = |id: &Uuid| by_player[id].tournament_id.unwrap_or(u32::MAX);
     let mut groups: HashMap<u32, Vec<Uuid>> = HashMap::new();
     for &id in free {
-        groups.entry(stand.get(&id).points).or_default().push(id);
+        groups.entry(scores.get(&id).points).or_default().push(id);
     }
     let mut info = HashMap::new();
     for group in groups.values_mut() {
-        group.sort_by(|x, y| {
-            stand
-                .get(y)
-                .rating
-                .cmp(&stand.get(x).rating)
-                .then_with(|| tnum[x].cmp(&tnum[y]))
-        });
+        group.sort_by(|x, y| rating(y).cmp(&rating(x)).then_with(|| tnum(x).cmp(&tnum(y))));
         let m = group.len();
         for (rank, id) in group.iter().enumerate() {
             info.insert(*id, FoldInfo { rank, group_size: m });
@@ -293,14 +186,15 @@ fn float_penalty(last: Option<u32>, round: u32) -> i128 {
 
 /// Penalty for pairing `a` against `b` this round.
 fn edge_cost(
-    stand: &Standings,
+    scores: &Scores,
+    by_player: &HashMap<Uuid, &Player>,
     fold: &HashMap<Uuid, FoldInfo>,
     a: Uuid,
     b: Uuid,
     round: u32,
 ) -> i128 {
-    let sa = stand.get(&a);
-    let sb = stand.get(&b);
+    let sa = scores.get(&a);
+    let sb = scores.get(&b);
     let mut cost = 0i128;
 
     // Rule 1: never play the same opponent twice.
@@ -327,7 +221,7 @@ fn edge_cost(
     }
 
     // Rule 4: avoid pairing club-mates (ignored when a club is unknown).
-    if let (Some(ca), Some(cb)) = (&sa.club, &sb.club) {
+    if let (Some(ca), Some(cb)) = (&by_player[&a].club, &by_player[&b].club) {
         if ca == cb {
             cost += W_CLUB;
         }
@@ -348,8 +242,8 @@ fn edge_cost(
 
 /// Penalty for giving `player` the bye this round: a bye repeats rule 1 (never
 /// bye twice) and counts as a downfloat for rule 3.
-fn bye_cost(stand: &Standings, player: Uuid, round: u32) -> i128 {
-    let s = stand.get(&player);
+fn bye_cost(scores: &Scores, player: Uuid, round: u32) -> i128 {
+    let s = scores.get(&player);
     let mut cost = 0i128;
     if s.had_bye {
         cost += W_REMATCH;
@@ -374,7 +268,10 @@ pub fn pair_round_weighted(
     forced_boards: &[Board],
     forced_bye: Option<Uuid>,
 ) -> Round {
-    let stand = Standings::compute(players, settings, completed_rounds);
+    let scores = compute_scores(players, settings, completed_rounds);
+    let by_player: HashMap<Uuid, &Player> = players.iter().map(|p| (p.id, p)).collect();
+    // The float frozen onto each board: points(player1) − points(player2) now.
+    let diff = |p1: Uuid, p2: Uuid| scores.points(&p1) as i32 - scores.points(&p2) as i32;
 
     let mut placed: HashSet<Uuid> = HashSet::new();
     for board in forced_boards {
@@ -390,7 +287,7 @@ pub fn pair_round_weighted(
         .filter(|id| !placed.contains(id))
         .collect();
 
-    let fold = fold_ranks(&stand, players, &free);
+    let fold = fold_ranks(&scores, &by_player, &free);
 
     // A phantom vertex absorbs the bye when an odd number of players remain and
     // none was forced; whoever the matching pairs with it sits out.
@@ -406,6 +303,7 @@ pub fn pair_round_weighted(
             result: None,
             drawn: false,
             handicap: None,
+            points_diff: Some(diff(b.player1, b.player2)),
         })
         .collect();
     let mut bye = forced_bye;
@@ -414,7 +312,7 @@ pub fn pair_round_weighted(
         let mut cost = vec![vec![0i128; vcount]; vcount];
         for i in 0..k {
             for j in (i + 1)..k {
-                let c = edge_cost(&stand, &fold, free[i], free[j], number);
+                let c = edge_cost(&scores, &by_player, &fold, free[i], free[j], number);
                 cost[i][j] = c;
                 cost[j][i] = c;
             }
@@ -422,7 +320,7 @@ pub fn pair_round_weighted(
         if need_phantom {
             let p = k;
             for i in 0..k {
-                let c = bye_cost(&stand, free[i], number);
+                let c = bye_cost(&scores, free[i], number);
                 cost[i][p] = c;
                 cost[p][i] = c;
             }
@@ -446,6 +344,7 @@ pub fn pair_round_weighted(
                     result: None,
                     drawn: false,
                     handicap: None,
+                    points_diff: Some(diff(free[i], free[j])),
                 });
             }
         }
@@ -467,6 +366,7 @@ pub fn pair_round_weighted(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::round::Winner;
 
     fn ids(n: usize) -> Vec<Uuid> {
         (0..n).map(|_| Uuid::new_v4()).collect()
@@ -501,6 +401,7 @@ mod tests {
             result: None,
             drawn: false,
             handicap: None,
+            points_diff: None,
         }];
         let round = pair_round_constrained(1, &p, &forced, None);
         assert_eq!(round.boards.len(), 2);
@@ -555,6 +456,7 @@ mod tests {
                     result: Some(w),
                     drawn: false,
                     handicap: None,
+                    points_diff: None,
                 })
                 .collect(),
             bye,
@@ -618,6 +520,42 @@ mod tests {
         // leaves the same-score board p0 vs p2.
         assert_eq!(round.bye, Some(p[1].id));
         assert_eq!(board_pairs(&round), HashSet::from([unord(p[0].id, p[2].id)]));
+    }
+
+    #[test]
+    fn pairing_freezes_the_points_diff_on_each_board() {
+        // After round 1 (A, C on 1 point; B, D on 0), force A vs D in round 2.
+        // The board should record the float A had going in: 1 − 0 = 1.
+        let p: Vec<Player> = (1..=4).map(|i| player(i, Some(2000 - i * 10), None)).collect();
+        let r1 = completed_round(
+            1,
+            &[
+                (p[0].id, p[1].id, Winner::Player1), // A beats B
+                (p[2].id, p[3].id, Winner::Player1), // C beats D
+            ],
+            None,
+        );
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let forced = vec![Board {
+            player1: p[0].id, // A (1 pt)
+            player2: p[3].id, // D (0 pt)
+            result: None,
+            drawn: false,
+            handicap: None,
+            points_diff: None,
+        }];
+
+        let round =
+            pair_round_weighted(2, &p, &TournamentSettings::default(), &[r1], &present, &forced, None);
+
+        // Every board carries a frozen float, and the forced A-vs-D board's is +1.
+        assert!(round.boards.iter().all(|b| b.points_diff.is_some()));
+        let ad = round
+            .boards
+            .iter()
+            .find(|b| b.player1 == p[0].id && b.player2 == p[3].id)
+            .expect("forced board present");
+        assert_eq!(ad.points_diff, Some(1));
     }
 
     #[test]

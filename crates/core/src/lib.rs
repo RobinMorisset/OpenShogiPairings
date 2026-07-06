@@ -12,6 +12,7 @@ mod matching;
 mod pairing;
 mod player;
 mod round;
+mod scoring;
 mod settings;
 mod standings;
 mod tournament;
