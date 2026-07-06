@@ -4,14 +4,20 @@ Known limitations and future work, roughly ordered by area.
 
 ## Pairing
 
-- **Replace the naïve pairing with real weighted matching.** The current pairing
-  ([`crates/core/src/pairing.rs`](crates/core/src/pairing.rs)) is the most naïve
-  mode: all edges weight 1, so it just pairs players consecutively with a bye for
-  the odd one out. Implement the intended **minimum-weight perfect matching**
-  (Blossom algorithm) with a real weight function (score difference, rematch
-  avoidance, colour balance, float rules…), then an ILP/CP-SAT backend for
-  experimental formats. `pair_round`'s signature is meant to stay stable while
-  its internals are swapped.
+- **ILP/CP-SAT backend.** Pairing is now a real **minimum-weight perfect
+  matching** (integer blossom in [`crates/core/src/matching.rs`](crates/core/src/matching.rs))
+  over a rule-weighted graph ([`crates/core/src/pairing.rs`](crates/core/src/pairing.rs)):
+  rematch/repeat-bye ≫ score gap² ≫ float-repeat ≫ same-club ≫ within-group fold,
+  ordered by a scalar multiplier ladder. Two limits motivate an ILP/CP-SAT
+  backend: (a) the multiplier ladder only approximates strict lexicographic
+  priority and its gaps are sized for realistic events (≲128 players, ≲20 rounds);
+  (b) experimental formats (MacMahon-beyond, hard multi-round constraints) need
+  true lexicographic tiers and constraints a plain matching can't express. Plan:
+  `good_lp` + HiGHS first, then CP-SAT.
+- **Tune / make rules configurable.** The rule weights and the float-decay base
+  are compile-time constants; expose them (and let referees toggle/reorder rules)
+  once the model settles. Colour balance is intentionally absent (sente/gote is
+  random per game in shogi).
 - **Ranked standings.** The Results tab lists per-round results and a victory
   count, ordered by tournament number. Add real standings ordering (by score,
   then tie-breaks) and richer scoring (points, draws) on top of it.

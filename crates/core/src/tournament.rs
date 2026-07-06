@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::pairing::pair_round_constrained;
+use crate::pairing::pair_round_weighted;
 use crate::player::{NewPlayer, Player};
 use crate::round::{Board, Round, RoundDraft, Winner};
 
@@ -389,8 +389,14 @@ impl Tournament {
             }
         }
 
-        let mut round =
-            pair_round_constrained(draft.number, &present, &draft.forced_boards, draft.forced_bye);
+        let mut round = pair_round_weighted(
+            draft.number,
+            &self.players,
+            &self.rounds,
+            &present,
+            &draft.forced_boards,
+            draft.forced_bye,
+        );
         round.absent = draft.absent;
         self.rounds.push(round);
         self.draft = None;

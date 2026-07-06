@@ -21,13 +21,18 @@ a library. The desktop app links the library and starts the API in-process on an
 prompts); the frontend asks Rust for that port via the `api_base` command. This
 is what lets the packaged app ship as a single self-contained executable.
 
-The pairing engine ([`crates/core/src/pairing.rs`](crates/core/src/pairing.rs))
-models a round as a **minimum-weight perfect matching** over a weighted player
-graph. Only the most naïve mode exists so far — every edge has weight 1, so it
-just pairs players consecutively with a bye for the odd one out. The real
-weighted matching (Blossom algorithm, then an ILP/CP-SAT solver for formats
-beyond Swiss / MacMahon) will replace `pair_round`'s internals; see
-[TODO.md](TODO.md).
+The pairing engine models a round as a **minimum-weight perfect matching** over a
+complete player graph. The matching itself is an integer **blossom** solver
+([`crates/core/src/matching.rs`](crates/core/src/matching.rs), general graphs —
+Hungarian doesn't apply); the edge weights come from a set of Swiss rules
+([`crates/core/src/pairing.rs`](crates/core/src/pairing.rs)) combined on a
+priority ladder of multipliers — most important first: never rematch or repeat a
+bye, prefer equal scores (penalty ∝ gap²), avoid repeating a float in the same
+direction (decaying with time), avoid club-mates, and fold each score group
+(top-half Nth meets bottom-half Nth). The odd player's bye is modeled as a
+phantom vertex. The multiplier ladder approximates strict lexicographic priority
+and is sized for realistic events; an ILP/CP-SAT backend for stricter tiers and
+experimental formats is future work (see [TODO.md](TODO.md)).
 
 The UI organizes a tournament into tabs: **Players**, **Results** (placeholder
 until results land), and one tab per round created by "Start round".
@@ -39,7 +44,7 @@ until results land), and one tab per round created by "Start round".
 > Registration autocompletes names + ELOs from the FESA rating list. The player
 > table is sorted by descending ELO (unrated last), any cell is editable in
 > place, and a server-side undo history reverts changes. Rounds can be started,
-> which pairs players (naïve mode for now — see below). The round lifecycle is
+> which pairs players by weighted minimum-weight matching (see below). The round lifecycle is
 > gated: **finalize registration** → **prepare round** (a draft state to mark
 > players absent, force pairings, and force the bye) → **start round** (confirm)
 > → play games → **complete round** (only once every game is played) → prepare
@@ -52,7 +57,7 @@ until results land), and one tab per round created by "Start round".
 > (`opponent-number` + `+`/`−`, or `0+` for a bye / `0-` for an absence) and a
 > victory count (wins and byes). The web UI is organized into
 > tabs (Players / Results / one per round) and can save/load the tournament as a
-> JSON file. Ranked standings and smarter pairings are next.
+> JSON file. Ranked standings are next.
 
 Mutations go through a `TournamentStore` that keeps the current tournament plus a
 stack of prior snapshots (the undo history); create/load reset it. Endpoints

@@ -8,13 +8,14 @@
 //! desktop app.
 
 mod fesa;
+mod matching;
 mod pairing;
 mod player;
 mod round;
 mod tournament;
 
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
-pub use pairing::{pair_round, pair_round_constrained};
+pub use pairing::{pair_round, pair_round_constrained, pair_round_weighted};
 pub use player::{NewPlayer, Player};
 pub use round::{Board, Round, RoundDraft, Winner};
 pub use tournament::{
