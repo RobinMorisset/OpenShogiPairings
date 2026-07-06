@@ -58,6 +58,12 @@ cd frontend
 npm run tauri dev
 ```
 
+> `tauri dev` starts its **own** Vite dev server on port 5173 (via
+> `beforeDevCommand`), so don't also have `npm run dev` (or another preview)
+> running on 5173 at the same time — the port is fixed (`strictPort`) and the
+> second one will fail with "Port 5173 is already in use". You still need the
+> **server** (`cargo run -p osp-server`) running for the app to reach the API.
+
 ## Testing
 
 ```sh

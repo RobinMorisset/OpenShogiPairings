@@ -6,7 +6,10 @@
       "runtimeExecutable": "C:\\Program Files\\nodejs\\node.exe",
       "runtimeArgs": ["node_modules/vite/bin/vite.js"],
       "cwd": "frontend",
-      "port": 5173
+      "port": 5173,
+      "env": {
+        "PATH": "C:\\Program Files\\nodejs;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\Users\\robin\\AppData\\Roaming\\npm"
+      }
     }
   ]
 }
