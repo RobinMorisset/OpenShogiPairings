@@ -173,6 +173,13 @@ export function completeRound(): Promise<TournamentResponse> {
   });
 }
 
+/** Cancel the last round (or the open draft), stepping back one stage. */
+export function cancelRound(): Promise<TournamentResponse> {
+  return request<TournamentResponse>("/api/tournament/cancel-round", {
+    method: "POST",
+  });
+}
+
 /** Begin drafting the next round (enters the round-draft state). */
 export function prepareRound(): Promise<TournamentResponse> {
   return request<TournamentResponse>("/api/tournament/rounds/prepare", {

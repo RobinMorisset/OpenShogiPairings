@@ -43,6 +43,7 @@ impl From<TournamentError> for ApiError {
             | TournamentError::NoDraft
             | TournamentError::InvalidDraft(_)
             | TournamentError::NoRoundToComplete
+            | TournamentError::NoRoundToCancel
             | TournamentError::RoundHasUnplayedGames
             | TournamentError::HandicapNeedsRatingDifference
             | TournamentError::UnsupportedFormatVersion { .. } => {

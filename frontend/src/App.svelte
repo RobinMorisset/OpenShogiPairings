@@ -3,6 +3,7 @@
   import {
     addPlayer,
     ApiError,
+    cancelRound,
     completeRound,
     confirmRound,
     createTournament,
@@ -140,6 +141,19 @@
       : phase !== "ready"
         ? "Finish the current round before exporting"
         : "Download the American Grid (cross-table) for ELO",
+  );
+
+  // "Cancel last round" button: peels back one stage — discards the open draft,
+  // or removes the most recent round — whenever there is anything to cancel.
+  const canCancel = $derived(
+    !busy && (!!tournament?.draft || (tournament?.rounds.length ?? 0) > 0),
+  );
+  const cancelTitle = $derived(
+    tournament?.draft
+      ? "Discard the round being prepared"
+      : (tournament?.rounds.length ?? 0) > 0
+        ? "Remove the last round and return to the previous state (undoable)"
+        : "No round to cancel",
   );
 
   // Keep the selected tab valid (e.g. after undo removes a round).
@@ -311,6 +325,11 @@
       await saveAmericanGrid(name, grid);
     });
   }
+
+  function handleCancelRound() {
+    run(async () => apply(await cancelRound()));
+    // If the cancelled round's tab was active, the tab-validity effect resets it.
+  }
 </script>
 
 <div class="app">
@@ -434,6 +453,15 @@
             title={exportTitle}
           >
             Export grid
+          </button>
+          <button
+            type="button"
+            class="ctrl danger"
+            onclick={handleCancelRound}
+            disabled={!canCancel}
+            title={cancelTitle}
+          >
+            Cancel last round
           </button>
         </div>
       </div>
@@ -602,6 +630,14 @@
     border-color: #3b5bdb;
     background: #2b3a67;
     color: #cdd6f4;
+  }
+  .ctrl.danger:not(:disabled) {
+    border-color: #6e2329;
+    color: #ffb4ab;
+  }
+  .ctrl.danger:hover:not(:disabled) {
+    border-color: #a13b3b;
+    background: #3d1417;
   }
   .ratings-status {
     display: flex;

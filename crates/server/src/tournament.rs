@@ -23,6 +23,7 @@ use crate::state::{AppState, TournamentStore};
 /// - `PUT    /api/tournament/settings`      update tournament settings (MacMahon, …)
 /// - `POST   /api/tournament/finalize-registration`  finalize registration
 /// - `POST   /api/tournament/complete-round`         complete the current round
+/// - `POST   /api/tournament/cancel-round`           cancel the last round (or draft)
 /// - `POST   /api/tournament/rounds/prepare`         begin drafting the next round
 /// - `PUT    /api/tournament/draft`                  edit the draft
 /// - `POST   /api/tournament/rounds`                 confirm the draft (pair & start)
@@ -55,6 +56,7 @@ pub fn routes() -> Router<AppState> {
             post(finalize_registration),
         )
         .route("/api/tournament/complete-round", post(complete_round))
+        .route("/api/tournament/cancel-round", post(cancel_round))
         .route("/api/tournament/rounds/prepare", post(prepare_round))
         .route("/api/tournament/draft", put(update_draft))
         .route("/api/tournament/rounds", post(confirm_round))
@@ -203,6 +205,16 @@ async fn complete_round(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = state.store.write().expect("store lock poisoned");
     store.mutate(|t| t.complete_current_round())?;
+    view(&store)
+}
+
+/// Cancel the last round (or the open draft), stepping the tournament back one
+/// stage. Undoable like any other mutation.
+async fn cancel_round(
+    State(state): State<AppState>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.mutate(|t| t.cancel_last_round())?;
     view(&store)
 }
 

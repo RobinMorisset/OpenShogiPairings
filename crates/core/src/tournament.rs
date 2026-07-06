@@ -99,6 +99,9 @@ pub enum TournamentError {
     /// There is no round in progress to complete.
     #[error("no round in progress to complete")]
     NoRoundToComplete,
+    /// There is no round (or draft) to cancel.
+    #[error("no round to cancel")]
+    NoRoundToCancel,
     /// The round still has games without a result.
     #[error("all games in the round must be played first")]
     RoundHasUnplayedGames,
@@ -273,6 +276,29 @@ impl Tournament {
             return Err(TournamentError::RoundHasUnplayedGames);
         }
         round.completed = true;
+        Ok(())
+    }
+
+    /// Cancel the most recent round, stepping the tournament back one stage.
+    ///
+    /// Peels off exactly one step: if a round is currently being drafted, the
+    /// draft is discarded; otherwise the last round is removed. Either way the
+    /// tournament returns to the state right after the previous round completed —
+    /// or to just-finalized registration if the removed round was the first one.
+    ///
+    /// This makes it easy to re-pair and replay a round in simulations, and lets
+    /// a referee undo a round in the rare cases that call for it. It is undoable
+    /// like any other mutation.
+    ///
+    /// Returns [`TournamentError::NoRoundToCancel`] when there is neither a draft
+    /// nor any round to remove.
+    pub fn cancel_last_round(&mut self) -> Result<(), TournamentError> {
+        if self.draft.take().is_some() {
+            return Ok(());
+        }
+        if self.rounds.pop().is_none() {
+            return Err(TournamentError::NoRoundToCancel);
+        }
         Ok(())
     }
 
@@ -758,6 +784,60 @@ mod tests {
         // Now round 2 can be prepared and started.
         start_next_round(&mut t);
         assert_eq!(t.rounds.len(), 2);
+    }
+
+    #[test]
+    fn cancel_last_round_peels_one_stage() {
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+
+        // Nothing to cancel right after finalizing.
+        assert_eq!(t.cancel_last_round(), Err(TournamentError::NoRoundToCancel));
+
+        // A draft is peeled first, leaving the completed rounds untouched.
+        t.prepare_round().unwrap();
+        assert!(t.draft.is_some());
+        t.cancel_last_round().unwrap();
+        assert!(t.draft.is_none());
+        assert!(t.rounds.is_empty());
+
+        // Play and complete round 1.
+        start_next_round(&mut t);
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        t.complete_current_round().unwrap();
+        assert_eq!(t.rounds.len(), 1);
+
+        // With a draft open for round 2, cancel drops the draft but keeps round 1.
+        t.prepare_round().unwrap();
+        t.cancel_last_round().unwrap();
+        assert!(t.draft.is_none());
+        assert_eq!(t.rounds.len(), 1);
+        assert!(t.rounds[0].completed);
+
+        // No draft now: cancel removes round 1, back to just-finalized registration.
+        t.cancel_last_round().unwrap();
+        assert!(t.rounds.is_empty());
+        assert!(t.registration_finalized);
+        assert_eq!(t.cancel_last_round(), Err(TournamentError::NoRoundToCancel));
+    }
+
+    #[test]
+    fn cancel_last_round_can_drop_an_in_progress_round() {
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t); // round 1 in progress (not completed)
+        assert_eq!(t.rounds.len(), 1);
+        assert!(!t.rounds[0].completed);
+
+        t.cancel_last_round().unwrap();
+        assert!(t.rounds.is_empty());
+        assert!(t.draft.is_none());
     }
 
     #[test]
