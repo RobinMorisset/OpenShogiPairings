@@ -19,6 +19,7 @@ use crate::state::{AppState, TournamentStore};
 /// - `PUT    /api/tournament`               replace the current tournament (load)
 /// - `POST   /api/tournament/undo`          revert the last player change
 /// - `GET    /api/tournament/american-grid` export the cross-table for ELO (text)
+/// - `PUT    /api/tournament/american-grid` import a cross-table, rebuilding it (text)
 /// - `PUT    /api/tournament/settings`      update tournament settings (MacMahon)
 /// - `POST   /api/tournament/finalize-registration`  finalize registration
 /// - `POST   /api/tournament/complete-round`         complete the current round
@@ -44,7 +45,10 @@ pub fn routes() -> Router<AppState> {
                 .put(replace_tournament),
         )
         .route("/api/tournament/undo", post(undo))
-        .route("/api/tournament/american-grid", get(american_grid))
+        .route(
+            "/api/tournament/american-grid",
+            get(american_grid).put(import_american_grid),
+        )
         .route("/api/tournament/settings", put(update_settings))
         .route(
             "/api/tournament/finalize-registration",
@@ -152,6 +156,21 @@ async fn american_grid(State(state): State<AppState>) -> Result<impl IntoRespons
     let tournament = store.current().ok_or(ApiError::NoTournament)?;
     let grid = osp_core::american_grid(tournament, &tournament.standings());
     Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], grid))
+}
+
+/// Import an American Grid document (raw text body), rebuilding it into the
+/// current tournament — replacing whatever was there. Meant for quickly seeding a
+/// non-trivial tournament state in tests and simulations. Returns the rebuilt
+/// [`TournamentView`].
+async fn import_american_grid(
+    State(state): State<AppState>,
+    body: String,
+) -> Result<Json<TournamentView>, ApiError> {
+    let tournament = osp_core::import_american_grid(&body)
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.set_current(tournament);
+    view(&store)
 }
 
 /// Body of the settings endpoint. Only the MacMahon thresholds for now.

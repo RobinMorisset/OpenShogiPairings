@@ -9,6 +9,7 @@
 
 mod american_grid;
 mod fesa;
+mod grid_import;
 mod matching;
 mod pairing;
 mod player;
@@ -20,6 +21,7 @@ mod tournament;
 
 pub use american_grid::to_grid as american_grid;
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
+pub use grid_import::{import_american_grid, GridImportError};
 pub use pairing::{pair_round, pair_round_constrained, pair_round_weighted};
 pub use player::{NewPlayer, Player};
 pub use round::{Board, Handicap, HandicapGame, Round, RoundDraft, Winner};

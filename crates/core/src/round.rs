@@ -66,6 +66,12 @@ impl Handicap {
         }
     }
 
+    /// Parse a handicap from its short [`code`](Self::code), e.g. when reading a
+    /// results cell back in. Returns `None` for an unknown code.
+    pub fn from_code(code: &str) -> Option<Handicap> {
+        Handicap::ALL.into_iter().find(|h| h.code() == code)
+    }
+
     /// Human-readable label shown in the handicap picker.
     pub fn label(self) -> &'static str {
         match self {
