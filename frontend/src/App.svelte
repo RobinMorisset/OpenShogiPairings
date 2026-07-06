@@ -3,10 +3,12 @@
   import {
     addPlayer,
     ApiError,
+    completeRound,
     createTournament,
     editPlayer,
     fetchRatings,
     fetchTournament,
+    finalizeRegistration,
     refreshRatings,
     removePlayer,
     replaceTournament,
@@ -51,6 +53,55 @@
 
   const activeRound = $derived(
     tournament?.rounds.find((r) => `round-${r.number}` === activeTab) ?? null,
+  );
+
+  // Tournament phase, derived from the finalize flag and the last round's state.
+  type Phase = "registration" | "ready" | "in_progress";
+  const currentRound = $derived(tournament?.rounds.at(-1) ?? null);
+  const phase = $derived<Phase>(
+    !tournament || !tournament.registration_finalized
+      ? "registration"
+      : !currentRound || currentRound.completed
+        ? "ready"
+        : "in_progress",
+  );
+  const enoughPlayers = $derived((tournament?.players.length ?? 0) >= 2);
+  const currentRoundAllPlayed = $derived(
+    currentRound ? currentRound.boards.every((b) => b.result != null) : false,
+  );
+
+  // "Advance" button (finalize registration / complete current round).
+  const advanceLabel = $derived(
+    phase === "registration"
+      ? "Finalize registration"
+      : phase === "in_progress"
+        ? `Complete round ${currentRound?.number}`
+        : (tournament?.rounds.length ?? 0) > 0
+          ? `Round ${tournament?.rounds.length} complete`
+          : "Registration finalized",
+  );
+  const advanceEnabled = $derived(
+    !busy &&
+      ((phase === "registration" && enoughPlayers) ||
+        (phase === "in_progress" && currentRoundAllPlayed)),
+  );
+  const advanceTitle = $derived(
+    phase === "registration" && !enoughPlayers
+      ? "Register at least 2 players first"
+      : phase === "in_progress" && !currentRoundAllPlayed
+        ? "All games in the round must be played first"
+        : "",
+  );
+
+  // "Start round" button.
+  const nextRoundNumber = $derived((tournament?.rounds.length ?? 0) + 1);
+  const startEnabled = $derived(!busy && phase === "ready" && enoughPlayers);
+  const startTitle = $derived(
+    phase !== "ready"
+      ? "Finalize registration / complete the current round first"
+      : !enoughPlayers
+        ? "Need at least 2 players"
+        : "",
   );
 
   // Keep the selected tab valid (e.g. after undo removes a round).
@@ -141,6 +192,14 @@
     run(async () => {
       apply(await undoTournament());
     });
+  }
+
+  function handleAdvance() {
+    if (phase === "registration") {
+      run(async () => apply(await finalizeRegistration()));
+    } else if (phase === "in_progress") {
+      run(async () => apply(await completeRound()));
+    }
   }
 
   function handleStartRound() {
@@ -245,20 +304,29 @@
             class:active={activeTab === `round-${round.number}`}
             onclick={() => (activeTab = `round-${round.number}`)}
           >
-            Round {round.number}
+            Round {round.number}{round.completed ? " ✓" : ""}
           </button>
         {/each}
-        <button
-          type="button"
-          class="tab start-round"
-          onclick={handleStartRound}
-          disabled={busy || tournament.players.length < 2}
-          title={tournament.players.length < 2
-            ? "Need at least 2 players to start a round"
-            : "Pair the next round"}
-        >
-          + Start round {tournament.rounds.length + 1}
-        </button>
+        <div class="round-controls">
+          <button
+            type="button"
+            class="ctrl"
+            onclick={handleAdvance}
+            disabled={!advanceEnabled}
+            title={advanceTitle}
+          >
+            {advanceLabel}
+          </button>
+          <button
+            type="button"
+            class="ctrl primary"
+            onclick={handleStartRound}
+            disabled={!startEnabled}
+            title={startTitle}
+          >
+            Start round {nextRoundNumber}
+          </button>
+        </div>
       </div>
 
       <div class="tab-content">
@@ -378,13 +446,33 @@
     border-color: #34343b;
     background: #232329;
   }
-  .tab.start-round {
+  .round-controls {
     margin-left: auto;
-    color: #7aa2f7;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    padding-bottom: 0.3rem;
   }
-  .tab.start-round:disabled {
-    color: #6a6a72;
+  .ctrl {
+    padding: 0.35rem 0.75rem;
+    border: 1px solid #34343b;
+    border-radius: 0.5rem;
+    background: #2d2d34;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .ctrl:hover:not(:disabled) {
+    border-color: #4a4a52;
+  }
+  .ctrl:disabled {
+    opacity: 0.45;
     cursor: not-allowed;
+  }
+  .ctrl.primary:not(:disabled) {
+    border-color: #3b5bdb;
+    background: #2b3a67;
+    color: #cdd6f4;
   }
   .placeholder {
     padding: 1.5rem 0;

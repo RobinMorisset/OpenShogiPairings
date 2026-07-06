@@ -38,6 +38,7 @@ pub fn pair_round(number: u32, player_ids: &[Uuid]) -> Round {
         number,
         boards,
         bye,
+        completed: false,
     }
 }
 

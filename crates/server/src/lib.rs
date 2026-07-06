@@ -235,6 +235,11 @@ mod tests {
             )
             .await;
         }
+        send(
+            router(state.clone()),
+            post_empty("/api/tournament/finalize-registration"),
+        )
+        .await;
 
         let (status, body) =
             send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
@@ -244,6 +249,68 @@ mod tests {
         assert_eq!(rounds[0]["number"], 1);
         assert_eq!(rounds[0]["boards"].as_array().unwrap().len(), 1); // 3 → 1 board
         assert!(rounds[0]["bye"].is_string()); // + a bye
+    }
+
+    #[tokio::test]
+    async fn round_lifecycle_is_gated_over_http() {
+        let state = AppState::default();
+        send(
+            router(state.clone()),
+            json_req("POST", "/api/tournament", json!({ "name": "Cup" })),
+        )
+        .await;
+        for name in ["Alice", "Bob"] {
+            send(
+                router(state.clone()),
+                json_req("POST", "/api/tournament/players", json!({ "last_name": name })),
+            )
+            .await;
+        }
+
+        // Can't start a round before finalizing.
+        let (status, _) =
+            send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // Finalize, then start round 1.
+        let (status, _) = send(
+            router(state.clone()),
+            post_empty("/api/tournament/finalize-registration"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+
+        // Can't complete before the game is played.
+        let (status, _) = send(
+            router(state.clone()),
+            post_empty("/api/tournament/complete-round"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // Play the game, then complete succeeds and marks the round completed.
+        send(
+            router(state.clone()),
+            json_req(
+                "POST",
+                "/api/tournament/rounds/1/boards/0/result",
+                json!({ "clicked": "player1" }),
+            ),
+        )
+        .await;
+        let (status, body) = send(
+            router(state.clone()),
+            post_empty("/api/tournament/complete-round"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tournament"]["rounds"][0]["completed"], true);
+
+        // Now round 2 can start.
+        let (status, _) =
+            send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+        assert_eq!(status, StatusCode::CREATED);
     }
 
     #[tokio::test]
@@ -261,6 +328,11 @@ mod tests {
             )
             .await;
         }
+        send(
+            router(state.clone()),
+            post_empty("/api/tournament/finalize-registration"),
+        )
+        .await;
         send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
 
         // Click player 1 → they win.
@@ -300,6 +372,11 @@ mod tests {
         send(
             router(state.clone()),
             json_req("POST", "/api/tournament/players", json!({ "last_name": "Solo" })),
+        )
+        .await;
+        send(
+            router(state.clone()),
+            post_empty("/api/tournament/finalize-registration"),
         )
         .await;
         let (status, _) =

@@ -122,6 +122,20 @@ export function undoTournament(): Promise<TournamentResponse> {
   return request<TournamentResponse>("/api/tournament/undo", { method: "POST" });
 }
 
+/** Finalize registration (prerequisite for starting the first round). */
+export function finalizeRegistration(): Promise<TournamentResponse> {
+  return request<TournamentResponse>("/api/tournament/finalize-registration", {
+    method: "POST",
+  });
+}
+
+/** Complete the current (in-progress) round. */
+export function completeRound(): Promise<TournamentResponse> {
+  return request<TournamentResponse>("/api/tournament/complete-round", {
+    method: "POST",
+  });
+}
+
 /** Start (pair) the next round from the current players. */
 export function startRound(): Promise<TournamentResponse> {
   return request<TournamentResponse>("/api/tournament/rounds", { method: "POST" });

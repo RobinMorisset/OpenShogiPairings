@@ -44,8 +44,8 @@
                 class="player"
                 class:winner={board.result === "player1"}
                 class:loser={board.result === "player2"}
-                disabled={busy}
-                title="Click to set as winner"
+                disabled={busy || round.completed}
+                title={round.completed ? "" : "Click to set as winner"}
                 onclick={() => onClickWinner(i, "player1")}
               >
                 {name(board.player1)}
@@ -57,8 +57,8 @@
                 class="player"
                 class:winner={board.result === "player2"}
                 class:loser={board.result === "player1"}
-                disabled={busy}
-                title="Click to set as winner"
+                disabled={busy || round.completed}
+                title={round.completed ? "" : "Click to set as winner"}
                 onclick={() => onClickWinner(i, "player2")}
               >
                 {name(board.player2)}
@@ -68,7 +68,11 @@
         {/each}
       </tbody>
     </table>
-    <p class="hint">Click a player to record them as the winner.</p>
+    {#if round.completed}
+      <p class="hint completed">✓ Round complete — results locked.</p>
+    {:else}
+      <p class="hint">Click a player to record them as the winner.</p>
+    {/if}
   {/if}
 
   {#if round.bye}
@@ -130,6 +134,9 @@
     color: #6a6a72;
     font-size: 0.8rem;
     margin-top: 0.6rem;
+  }
+  .hint.completed {
+    color: #3fb950;
   }
   .bye {
     margin-top: 1rem;

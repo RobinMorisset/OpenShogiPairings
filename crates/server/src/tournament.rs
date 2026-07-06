@@ -17,6 +17,8 @@ use crate::state::{AppState, TournamentStore};
 /// - `GET    /api/tournament`               fetch the current tournament
 /// - `PUT    /api/tournament`               replace the current tournament (load)
 /// - `POST   /api/tournament/undo`          revert the last player change
+/// - `POST   /api/tournament/finalize-registration`  finalize registration
+/// - `POST   /api/tournament/complete-round`         complete the current round
 /// - `POST   /api/tournament/rounds`        start (pair) the next round
 /// - `POST   /api/tournament/rounds/{n}/boards/{i}/result`  toggle a board winner
 /// - `POST   /api/tournament/players`       register a player
@@ -35,6 +37,11 @@ pub fn routes() -> Router<AppState> {
                 .put(replace_tournament),
         )
         .route("/api/tournament/undo", post(undo))
+        .route(
+            "/api/tournament/finalize-registration",
+            post(finalize_registration),
+        )
+        .route("/api/tournament/complete-round", post(complete_round))
         .route("/api/tournament/rounds", post(start_round))
         .route(
             "/api/tournament/rounds/{round_number}/boards/{board_index}/result",
@@ -107,6 +114,24 @@ async fn undo(State(state): State<AppState>) -> Result<Json<TournamentView>, Api
         return Err(ApiError::NoTournament);
     }
     store.undo();
+    view(&store)
+}
+
+/// Finalize registration (prerequisite for starting the first round).
+async fn finalize_registration(
+    State(state): State<AppState>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.mutate(|t| t.finalize_registration())?;
+    view(&store)
+}
+
+/// Complete the current (in-progress) round.
+async fn complete_round(
+    State(state): State<AppState>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.mutate(|t| t.complete_current_round())?;
     view(&store)
 }
 

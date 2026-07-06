@@ -42,6 +42,9 @@ pub struct Tournament {
     /// Registered players, in registration order.
     #[serde(default)]
     pub players: Vec<Player>,
+    /// Whether registration has been finalized (a prerequisite for round 1).
+    #[serde(default)]
+    pub registration_finalized: bool,
     /// Rounds played so far, in order.
     #[serde(default)]
     pub rounds: Vec<Round>,
@@ -62,6 +65,21 @@ pub enum TournamentError {
     /// Too few players to start a round.
     #[error("need at least {needed} players to start a round (have {have})")]
     NotEnoughPlayers { needed: usize, have: usize },
+    /// Registration has already been finalized.
+    #[error("registration is already finalized")]
+    RegistrationAlreadyFinalized,
+    /// Registration must be finalized before starting rounds.
+    #[error("registration must be finalized first")]
+    RegistrationNotFinalized,
+    /// A new round cannot start until the current one is completed.
+    #[error("the current round must be completed first")]
+    PreviousRoundNotComplete,
+    /// There is no round in progress to complete.
+    #[error("no round in progress to complete")]
+    NoRoundToComplete,
+    /// The round still has games without a result.
+    #[error("all games in the round must be played first")]
+    RoundHasUnplayedGames,
     /// No round with the given number exists.
     #[error("no round number {0}")]
     RoundNotFound(u32),
@@ -87,6 +105,7 @@ impl Tournament {
             id: Uuid::new_v4(),
             name: name.to_string(),
             players: Vec::new(),
+            registration_finalized: false,
             rounds: Vec::new(),
         })
     }
@@ -144,11 +163,51 @@ impl Tournament {
         Ok(())
     }
 
+    /// Finalize registration. Prerequisite for starting the first round.
+    ///
+    /// A no-op beyond flipping the flag for now (registration stays editable);
+    /// it exists to gate round creation behind an explicit step.
+    pub fn finalize_registration(&mut self) -> Result<(), TournamentError> {
+        if self.registration_finalized {
+            return Err(TournamentError::RegistrationAlreadyFinalized);
+        }
+        self.registration_finalized = true;
+        Ok(())
+    }
+
+    /// Complete the current (last, in-progress) round.
+    ///
+    /// Only possible once every game in the round has a result. Completing a
+    /// round locks it in and unlocks starting the next one.
+    pub fn complete_current_round(&mut self) -> Result<(), TournamentError> {
+        let round = self
+            .rounds
+            .last_mut()
+            .ok_or(TournamentError::NoRoundToComplete)?;
+        if round.completed {
+            return Err(TournamentError::NoRoundToComplete);
+        }
+        if round.boards.iter().any(|b| b.result.is_none()) {
+            return Err(TournamentError::RoundHasUnplayedGames);
+        }
+        round.completed = true;
+        Ok(())
+    }
+
     /// Start the next round: compute its pairings from the current players and
     /// append it. Returns the new [`Round`].
     ///
-    /// Requires at least [`MIN_PLAYERS_PER_ROUND`] players.
+    /// Requires that registration is finalized, the previous round (if any) is
+    /// completed, and there are at least [`MIN_PLAYERS_PER_ROUND`] players.
     pub fn start_round(&mut self) -> Result<&Round, TournamentError> {
+        if !self.registration_finalized {
+            return Err(TournamentError::RegistrationNotFinalized);
+        }
+        if let Some(last) = self.rounds.last() {
+            if !last.completed {
+                return Err(TournamentError::PreviousRoundNotComplete);
+            }
+        }
         if self.players.len() < MIN_PLAYERS_PER_ROUND {
             return Err(TournamentError::NotEnoughPlayers {
                 needed: MIN_PLAYERS_PER_ROUND,
@@ -307,13 +366,55 @@ mod tests {
         for name in ["A", "B", "C"] {
             t.add_player(named(name)).unwrap();
         }
-        let round = t.start_round().unwrap();
-        assert_eq!(round.number, 1);
-        assert_eq!(round.boards.len(), 1); // 3 players → 1 board + 1 bye
-        assert!(round.bye.is_some());
+        t.finalize_registration().unwrap();
+        {
+            let round = t.start_round().unwrap();
+            assert_eq!(round.number, 1);
+            assert_eq!(round.boards.len(), 1); // 3 players → 1 board + 1 bye
+            assert!(round.bye.is_some());
+        }
+
+        // Play and complete round 1 before starting round 2.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        t.complete_current_round().unwrap();
 
         let round2 = t.start_round().unwrap();
         assert_eq!(round2.number, 2);
+        assert_eq!(t.rounds.len(), 2);
+    }
+
+    #[test]
+    fn round_flow_is_gated() {
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        // Can't start before finalizing.
+        assert_eq!(
+            t.start_round(),
+            Err(TournamentError::RegistrationNotFinalized)
+        );
+        t.finalize_registration().unwrap();
+        assert_eq!(
+            t.finalize_registration(),
+            Err(TournamentError::RegistrationAlreadyFinalized)
+        );
+        t.start_round().unwrap();
+        // Can't start round 2 while round 1 is in progress.
+        assert_eq!(
+            t.start_round(),
+            Err(TournamentError::PreviousRoundNotComplete)
+        );
+        // Can't complete while a game is unplayed.
+        assert_eq!(
+            t.complete_current_round(),
+            Err(TournamentError::RoundHasUnplayedGames)
+        );
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        t.complete_current_round().unwrap();
+        assert!(t.rounds[0].completed);
+        // Now round 2 can start.
+        t.start_round().unwrap();
         assert_eq!(t.rounds.len(), 2);
     }
 
@@ -324,6 +425,7 @@ mod tests {
         for name in ["A", "B"] {
             t.add_player(named(name)).unwrap();
         }
+        t.finalize_registration().unwrap();
         t.start_round().unwrap();
 
         // not played -> player 1 wins
@@ -347,6 +449,7 @@ mod tests {
         for name in ["A", "B"] {
             t.add_player(named(name)).unwrap();
         }
+        t.finalize_registration().unwrap();
         t.start_round().unwrap();
         assert_eq!(
             t.toggle_board_winner(9, 0, Winner::Player1),
@@ -362,6 +465,7 @@ mod tests {
     fn start_round_needs_enough_players() {
         let mut t = Tournament::new("Cup").unwrap();
         t.add_player(named("Solo")).unwrap();
+        t.finalize_registration().unwrap();
         assert_eq!(
             t.start_round(),
             Err(TournamentError::NotEnoughPlayers { needed: 2, have: 1 })

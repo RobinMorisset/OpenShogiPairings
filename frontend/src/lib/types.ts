@@ -53,6 +53,7 @@ export interface Round {
   number: number;
   boards: Board[];
   bye?: string; // player UUID sitting out
+  completed: boolean;
 }
 
 /** Mirror of `osp_core::Tournament`. */
@@ -61,6 +62,7 @@ export interface Tournament {
   id: string; // UUID
   name: string;
   players: Player[];
+  registration_finalized: boolean;
   rounds: Round[];
 }
 

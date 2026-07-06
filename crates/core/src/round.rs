@@ -31,4 +31,8 @@ pub struct Round {
     pub boards: Vec<Board>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bye: Option<Uuid>,
+    /// Whether the round has been completed (all games played and locked in).
+    /// A new round must not be started until the current one is completed.
+    #[serde(default)]
+    pub completed: bool,
 }

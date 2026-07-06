@@ -36,6 +36,11 @@ impl From<TournamentError> for ApiError {
             TournamentError::EmptyTournamentName
             | TournamentError::EmptyPlayerName
             | TournamentError::NotEnoughPlayers { .. }
+            | TournamentError::RegistrationAlreadyFinalized
+            | TournamentError::RegistrationNotFinalized
+            | TournamentError::PreviousRoundNotComplete
+            | TournamentError::NoRoundToComplete
+            | TournamentError::RoundHasUnplayedGames
             | TournamentError::UnsupportedFormatVersion { .. } => {
                 ApiError::BadRequest(err.to_string())
             }
