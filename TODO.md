@@ -31,11 +31,6 @@ Known limitations and future work, roughly ordered by area.
   header row's `Name` / `Grades` positions, or by detecting the alignment) so the
   parser adapts automatically instead of silently breaking.
 
-## UI
-
-- **Correct focus in the player registration form** When adding a player to the tournament,
-  focus is currently lost. It should go back to the last name field.
-  
 ## Simulations
 
 - **Add an API to get random game results** This API should not be surfaced in the UI, it is

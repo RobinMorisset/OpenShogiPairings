@@ -12,6 +12,17 @@
 
   let { onAdd, ratings = [], busy = false }: Props = $props();
 
+  let lastNameInput: HTMLInputElement | undefined = $state();
+  // Set on submit, while the add-player request is in flight (inputs disabled
+  // meanwhile, which drops focus); refocus once it completes.
+  let refocusPending = $state(false);
+  $effect(() => {
+    if (refocusPending && !busy) {
+      refocusPending = false;
+      lastNameInput?.focus();
+    }
+  });
+
   let lastName = $state("");
   let firstName = $state("");
   // Bound to a number input, so Svelte gives us a number (or null when empty).
@@ -100,6 +111,7 @@
     if (cl) player.club = cl;
 
     onAdd(player);
+    refocusPending = true;
 
     // Reset for the next entry; keep focus flowing for fast bulk registration.
     lastName = "";
@@ -116,6 +128,7 @@
   <div class="name-field">
     <input
       type="text"
+      bind:this={lastNameInput}
       bind:value={lastName}
       oninput={onLastNameInput}
       onkeydown={onLastNameKeydown}
