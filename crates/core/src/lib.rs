@@ -14,9 +14,9 @@ mod round;
 mod tournament;
 
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
-pub use pairing::pair_round;
+pub use pairing::{pair_round, pair_round_constrained};
 pub use player::{NewPlayer, Player};
-pub use round::{Board, Round, Winner};
+pub use round::{Board, Round, RoundDraft, Winner};
 pub use tournament::{
     Tournament, TournamentError, MIN_PLAYERS_PER_ROUND, TOURNAMENT_FORMAT_VERSION,
 };

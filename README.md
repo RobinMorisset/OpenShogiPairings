@@ -40,8 +40,10 @@ until results land), and one tab per round created by "Start round".
 > table is sorted by descending ELO (unrated last), any cell is editable in
 > place, and a server-side undo history reverts changes. Rounds can be started,
 > which pairs players (naïve mode for now — see below). The round lifecycle is
-> gated: **finalize registration** → **start round** → play games → **complete
-> round** (only once every game is played) → start the next round. In a round
+> gated: **finalize registration** → **prepare round** (a draft state to mark
+> players absent, force pairings, and force the bye) → **start round** (confirm)
+> → play games → **complete round** (only once every game is played) → prepare
+> the next round. In a round
 > tab, clicking a player records them as the winner (click the other to switch,
 > click the winner again to clear — three states); completed rounds stay editable
 > with a warning. Finalizing registration assigns each player a tournament
@@ -70,7 +72,9 @@ button together (the persisted save-file shape stays the bare tournament).
 | `POST /api/tournament/undo` | Revert the last change (server-side undo history). |
 | `POST /api/tournament/finalize-registration` | Finalize registration (unlocks round 1). |
 | `POST /api/tournament/complete-round` | Complete the current round (all games must be played). |
-| `POST /api/tournament/rounds` | Start (pair) the next round. |
+| `POST /api/tournament/rounds/prepare` | Begin drafting the next round. |
+| `PUT /api/tournament/draft` | Edit the draft (absent set, forced pairings, forced bye). |
+| `POST /api/tournament/rounds` | Confirm the draft: pair remaining players and start the round. |
 | `POST /api/tournament/rounds/{n}/boards/{i}/result` | Toggle a board's winner: `{ "clicked": "player1"｜"player2" }`. |
 | `POST /api/tournament/players` | Register a player: `{ "last_name", "first_name?", "rating?", "nationality?", "club?" }`. |
 | `PUT /api/tournament/players/{id}` | Edit a player's fields in place. |

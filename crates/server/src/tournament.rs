@@ -2,9 +2,9 @@
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::post;
+use axum::routing::{post, put};
 use axum::{Json, Router};
-use osp_core::{NewPlayer, Tournament, Winner};
+use osp_core::{Board, NewPlayer, Tournament, Winner};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -19,7 +19,9 @@ use crate::state::{AppState, TournamentStore};
 /// - `POST   /api/tournament/undo`          revert the last player change
 /// - `POST   /api/tournament/finalize-registration`  finalize registration
 /// - `POST   /api/tournament/complete-round`         complete the current round
-/// - `POST   /api/tournament/rounds`        start (pair) the next round
+/// - `POST   /api/tournament/rounds/prepare`         begin drafting the next round
+/// - `PUT    /api/tournament/draft`                  edit the draft
+/// - `POST   /api/tournament/rounds`                 confirm the draft (pair & start)
 /// - `POST   /api/tournament/rounds/{n}/boards/{i}/result`  toggle a board winner
 /// - `POST   /api/tournament/players`       register a player
 /// - `PUT    /api/tournament/players/{id}`  edit a player
@@ -42,7 +44,9 @@ pub fn routes() -> Router<AppState> {
             post(finalize_registration),
         )
         .route("/api/tournament/complete-round", post(complete_round))
-        .route("/api/tournament/rounds", post(start_round))
+        .route("/api/tournament/rounds/prepare", post(prepare_round))
+        .route("/api/tournament/draft", put(update_draft))
+        .route("/api/tournament/rounds", post(confirm_round))
         .route(
             "/api/tournament/rounds/{round_number}/boards/{board_index}/result",
             post(set_board_result),
@@ -135,12 +139,46 @@ async fn complete_round(
     view(&store)
 }
 
-/// Start (pair) the next round from the current players.
-async fn start_round(
+/// Begin drafting the next round (enters the round-draft state).
+async fn prepare_round(
+    State(state): State<AppState>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.mutate(|t| t.prepare_round().map(|_| ()))?;
+    view(&store)
+}
+
+/// Body of `PUT /api/tournament/draft`: the draft's customization.
+#[derive(Debug, Deserialize)]
+struct DraftUpdate {
+    #[serde(default)]
+    absent: Vec<Uuid>,
+    /// Forced pairings; only `player1`/`player2` are read (result is ignored).
+    #[serde(default)]
+    forced_boards: Vec<Board>,
+    #[serde(default)]
+    forced_bye: Option<Uuid>,
+}
+
+/// Edit the current draft (absent set, forced pairings, forced bye).
+async fn update_draft(
+    State(state): State<AppState>,
+    Json(req): Json<DraftUpdate>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.mutate(|t| {
+        t.update_draft(req.absent, req.forced_boards, req.forced_bye)
+            .map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// Confirm the draft: pair the remaining players and start the round.
+async fn confirm_round(
     State(state): State<AppState>,
 ) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
     let mut store = state.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.start_round().map(|_| ()))?;
+    store.mutate(|t| t.confirm_round().map(|_| ()))?;
     Ok((StatusCode::CREATED, view(&store)?))
 }
 

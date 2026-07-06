@@ -136,8 +136,30 @@ export function completeRound(): Promise<TournamentResponse> {
   });
 }
 
-/** Start (pair) the next round from the current players. */
-export function startRound(): Promise<TournamentResponse> {
+/** Begin drafting the next round (enters the round-draft state). */
+export function prepareRound(): Promise<TournamentResponse> {
+  return request<TournamentResponse>("/api/tournament/rounds/prepare", {
+    method: "POST",
+  });
+}
+
+/** The draft customization sent to the server. */
+export interface DraftUpdate {
+  absent: string[];
+  forced_boards: { player1: string; player2: string }[];
+  forced_bye?: string | null;
+}
+
+/** Edit the current draft (absent set, forced pairings, forced bye). */
+export function updateDraft(update: DraftUpdate): Promise<TournamentResponse> {
+  return request<TournamentResponse>("/api/tournament/draft", {
+    method: "PUT",
+    body: JSON.stringify(update),
+  });
+}
+
+/** Confirm the draft: pair the remaining players and start the round. */
+export function confirmRound(): Promise<TournamentResponse> {
   return request<TournamentResponse>("/api/tournament/rounds", { method: "POST" });
 }
 

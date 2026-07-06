@@ -103,6 +103,16 @@ mod tests {
             .unwrap()
     }
 
+    /// Prepare and confirm the next round with no customization.
+    async fn start_round(state: &AppState) {
+        send(
+            router(state.clone()),
+            post_empty("/api/tournament/rounds/prepare"),
+        )
+        .await;
+        send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+    }
+
     #[tokio::test]
     async fn health_endpoint_returns_ok() {
         let (status, body) = send(router(AppState::default()), get("/api/health")).await;
@@ -240,6 +250,11 @@ mod tests {
             post_empty("/api/tournament/finalize-registration"),
         )
         .await;
+        send(
+            router(state.clone()),
+            post_empty("/api/tournament/rounds/prepare"),
+        )
+        .await;
 
         let (status, body) =
             send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
@@ -267,19 +282,30 @@ mod tests {
             .await;
         }
 
-        // Can't start a round before finalizing.
-        let (status, _) =
-            send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+        // Can't prepare a round before finalizing.
+        let (status, _) = send(
+            router(state.clone()),
+            post_empty("/api/tournament/rounds/prepare"),
+        )
+        .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
 
-        // Finalize, then start round 1.
+        // Finalize, prepare, then confirm round 1.
         let (status, _) = send(
             router(state.clone()),
             post_empty("/api/tournament/finalize-registration"),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+        let (status, _) = send(
+            router(state.clone()),
+            post_empty("/api/tournament/rounds/prepare"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) =
+            send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+        assert_eq!(status, StatusCode::CREATED);
 
         // Can't complete before the game is played.
         let (status, _) = send(
@@ -307,7 +333,12 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["tournament"]["rounds"][0]["completed"], true);
 
-        // Now round 2 can start.
+        // Now round 2 can be prepared and started.
+        send(
+            router(state.clone()),
+            post_empty("/api/tournament/rounds/prepare"),
+        )
+        .await;
         let (status, _) =
             send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
         assert_eq!(status, StatusCode::CREATED);
@@ -333,7 +364,7 @@ mod tests {
             post_empty("/api/tournament/finalize-registration"),
         )
         .await;
-        send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+        start_round(&state).await;
 
         // Click player 1 → they win.
         let (status, body) = send(
@@ -377,6 +408,11 @@ mod tests {
         send(
             router(state.clone()),
             post_empty("/api/tournament/finalize-registration"),
+        )
+        .await;
+        send(
+            router(state.clone()),
+            post_empty("/api/tournament/rounds/prepare"),
         )
         .await;
         let (status, _) =

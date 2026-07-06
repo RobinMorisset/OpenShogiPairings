@@ -4,17 +4,20 @@
     addPlayer,
     ApiError,
     completeRound,
+    confirmRound,
     createTournament,
     editPlayer,
     fetchRatings,
     fetchTournament,
     finalizeRegistration,
+    prepareRound,
     refreshRatings,
     removePlayer,
     replaceTournament,
     setBoardWinner,
-    startRound,
     undoTournament,
+    updateDraft,
+    type DraftUpdate,
   } from "./lib/api";
   import type {
     NewPlayer,
@@ -29,6 +32,7 @@
   import PlayerRegistration from "./lib/components/PlayerRegistration.svelte";
   import PlayerList from "./lib/components/PlayerList.svelte";
   import RoundView from "./lib/components/RoundView.svelte";
+  import RoundDraftView from "./lib/components/RoundDraftView.svelte";
   import ResultsView from "./lib/components/ResultsView.svelte";
 
   let tournament = $state<Tournament | null>(null);
@@ -56,15 +60,18 @@
     tournament?.rounds.find((r) => `round-${r.number}` === activeTab) ?? null,
   );
 
-  // Tournament phase, derived from the finalize flag and the last round's state.
-  type Phase = "registration" | "ready" | "in_progress";
+  // Tournament phase, derived from the finalize flag, the draft, and the last
+  // round's state.
+  type Phase = "registration" | "ready" | "draft" | "in_progress";
   const currentRound = $derived(tournament?.rounds.at(-1) ?? null);
   const phase = $derived<Phase>(
     !tournament || !tournament.registration_finalized
       ? "registration"
-      : !currentRound || currentRound.completed
-        ? "ready"
-        : "in_progress",
+      : tournament.draft
+        ? "draft"
+        : !currentRound || currentRound.completed
+          ? "ready"
+          : "in_progress",
   );
   const enoughPlayers = $derived((tournament?.players.length ?? 0) >= 2);
   const currentRoundAllPlayed = $derived(
@@ -112,6 +119,7 @@
       "players",
       "results",
       ...tournament.rounds.map((r) => `round-${r.number}`),
+      ...(tournament.draft ? ["draft"] : []),
     ]);
     if (!valid.has(activeTab)) activeTab = "players";
   });
@@ -203,9 +211,20 @@
     }
   }
 
-  function handleStartRound() {
+  function handlePrepareRound() {
     run(async () => {
-      apply(await startRound());
+      apply(await prepareRound());
+      activeTab = "draft";
+    });
+  }
+
+  function handleUpdateDraft(update: DraftUpdate) {
+    run(async () => apply(await updateDraft(update)));
+  }
+
+  function handleConfirmRound() {
+    run(async () => {
+      apply(await confirmRound());
       // Jump to the round we just created.
       if (tournament) activeTab = `round-${tournament.rounds.length}`;
     });
@@ -308,6 +327,16 @@
             Round {round.number}{round.completed ? " ✓" : ""}
           </button>
         {/each}
+        {#if tournament.draft}
+          <button
+            type="button"
+            class="tab draft-tab"
+            class:active={activeTab === "draft"}
+            onclick={() => (activeTab = "draft")}
+          >
+            Round {tournament.draft.number} (draft)
+          </button>
+        {/if}
         <div class="round-controls">
           <button
             type="button"
@@ -321,11 +350,11 @@
           <button
             type="button"
             class="ctrl primary"
-            onclick={handleStartRound}
+            onclick={handlePrepareRound}
             disabled={!startEnabled}
             title={startTitle}
           >
-            Start round {nextRoundNumber}
+            Prepare round {nextRoundNumber}
           </button>
         </div>
       </div>
@@ -361,6 +390,14 @@
           </div>
         {:else if activeTab === "results"}
           <ResultsView {tournament} />
+        {:else if activeTab === "draft" && tournament.draft}
+          <RoundDraftView
+            draft={tournament.draft}
+            players={tournament.players}
+            onUpdate={handleUpdateDraft}
+            onConfirm={handleConfirmRound}
+            {busy}
+          />
         {:else if activeRound}
           <RoundView
             round={activeRound}
@@ -443,6 +480,10 @@
     color: #e6e6e6;
     border-color: #34343b;
     background: #232329;
+  }
+  .tab.draft-tab {
+    font-style: italic;
+    color: #7aa2f7;
   }
   .round-controls {
     margin-left: auto;

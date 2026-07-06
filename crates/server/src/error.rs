@@ -35,10 +35,13 @@ impl From<TournamentError> for ApiError {
         match err {
             TournamentError::EmptyTournamentName
             | TournamentError::EmptyPlayerName
-            | TournamentError::NotEnoughPlayers { .. }
+            | TournamentError::NotEnoughPresentPlayers { .. }
             | TournamentError::RegistrationAlreadyFinalized
             | TournamentError::RegistrationNotFinalized
             | TournamentError::PreviousRoundNotComplete
+            | TournamentError::DraftAlreadyExists
+            | TournamentError::NoDraft
+            | TournamentError::InvalidDraft(_)
             | TournamentError::NoRoundToComplete
             | TournamentError::RoundHasUnplayedGames
             | TournamentError::UnsupportedFormatVersion { .. } => {

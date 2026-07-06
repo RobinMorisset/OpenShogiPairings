@@ -54,7 +54,16 @@ export interface Round {
   number: number;
   boards: Board[];
   bye?: string; // player UUID sitting out
+  absent: string[]; // player UUIDs marked absent
   completed: boolean;
+}
+
+/** Mirror of `osp_core::RoundDraft` — a round being set up but not yet started. */
+export interface RoundDraft {
+  number: number;
+  absent: string[]; // player UUIDs
+  forced_boards: Board[]; // { player1, player2 }
+  forced_bye?: string; // player UUID
 }
 
 /** Mirror of `osp_core::Tournament`. */
@@ -64,6 +73,7 @@ export interface Tournament {
   name: string;
   players: Player[];
   registration_finalized: boolean;
+  draft?: RoundDraft | null;
   rounds: Round[];
 }
 

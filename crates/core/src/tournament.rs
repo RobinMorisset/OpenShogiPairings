@@ -6,13 +6,14 @@
 //! all share exactly one implementation.
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::pairing::pair_round;
+use crate::pairing::pair_round_constrained;
 use crate::player::{NewPlayer, Player};
-use crate::round::{Board, Round, Winner};
+use crate::round::{Board, Round, RoundDraft, Winner};
 
 /// On-disk / on-the-wire format version for a serialized [`Tournament`].
 ///
@@ -47,6 +48,10 @@ pub struct Tournament {
     /// Whether registration has been finalized (a prerequisite for round 1).
     #[serde(default)]
     pub registration_finalized: bool,
+    /// The round currently being set up but not yet started, if any. Its
+    /// presence is the `RoundDraft` state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft: Option<RoundDraft>,
     /// Rounds played so far, in order.
     #[serde(default)]
     pub rounds: Vec<Round>,
@@ -64,9 +69,6 @@ pub enum TournamentError {
     /// No player with the given id exists in this tournament.
     #[error("no player with id {0}")]
     PlayerNotFound(Uuid),
-    /// Too few players to start a round.
-    #[error("need at least {needed} players to start a round (have {have})")]
-    NotEnoughPlayers { needed: usize, have: usize },
     /// Registration has already been finalized.
     #[error("registration is already finalized")]
     RegistrationAlreadyFinalized,
@@ -76,6 +78,18 @@ pub enum TournamentError {
     /// A new round cannot start until the current one is completed.
     #[error("the current round must be completed first")]
     PreviousRoundNotComplete,
+    /// A round is already being drafted.
+    #[error("a round is already being prepared")]
+    DraftAlreadyExists,
+    /// An operation needs a draft round in progress, but there is none.
+    #[error("no round is being prepared")]
+    NoDraft,
+    /// Too few present (non-absent) players to start a round.
+    #[error("need at least {needed} present players (have {have})")]
+    NotEnoughPresentPlayers { needed: usize, have: usize },
+    /// The draft's constraints are inconsistent (see the message).
+    #[error("invalid round setup: {0}")]
+    InvalidDraft(String),
     /// There is no round in progress to complete.
     #[error("no round in progress to complete")]
     NoRoundToComplete,
@@ -108,6 +122,7 @@ impl Tournament {
             name: name.to_string(),
             players: Vec::new(),
             registration_finalized: false,
+            draft: None,
             rounds: Vec::new(),
         })
     }
@@ -230,29 +245,155 @@ impl Tournament {
         Ok(())
     }
 
-    /// Start the next round: compute its pairings from the current players and
-    /// append it. Returns the new [`Round`].
+    /// Begin preparing the next round (the `RoundDraft` state).
     ///
-    /// Requires that registration is finalized, the previous round (if any) is
-    /// completed, and there are at least [`MIN_PLAYERS_PER_ROUND`] players.
-    pub fn start_round(&mut self) -> Result<&Round, TournamentError> {
+    /// Requires registration finalized and the previous round (if any)
+    /// completed. The draft's absent set defaults to the previous round's
+    /// absentees (restricted to players who still exist), so recurring absences
+    /// carry over while late joiners are not pre-marked absent.
+    pub fn prepare_round(&mut self) -> Result<&RoundDraft, TournamentError> {
         if !self.registration_finalized {
             return Err(TournamentError::RegistrationNotFinalized);
+        }
+        if self.draft.is_some() {
+            return Err(TournamentError::DraftAlreadyExists);
         }
         if let Some(last) = self.rounds.last() {
             if !last.completed {
                 return Err(TournamentError::PreviousRoundNotComplete);
             }
         }
-        if self.players.len() < MIN_PLAYERS_PER_ROUND {
-            return Err(TournamentError::NotEnoughPlayers {
+
+        let number = self.rounds.len() as u32 + 1;
+        let existing: HashSet<Uuid> = self.players.iter().map(|p| p.id).collect();
+        let default_absent: Vec<Uuid> = self
+            .rounds
+            .last()
+            .map(|r| {
+                r.absent
+                    .iter()
+                    .copied()
+                    .filter(|id| existing.contains(id))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        self.draft = Some(RoundDraft {
+            number,
+            absent: default_absent,
+            forced_boards: Vec::new(),
+            forced_bye: None,
+        });
+        Ok(self.draft.as_ref().expect("just set the draft"))
+    }
+
+    /// Replace the current draft's customization (absent set, forced pairings,
+    /// forced bye). Structural consistency is validated when the round is
+    /// confirmed; here we only check that every referenced player exists.
+    pub fn update_draft(
+        &mut self,
+        absent: Vec<Uuid>,
+        forced_boards: Vec<Board>,
+        forced_bye: Option<Uuid>,
+    ) -> Result<&RoundDraft, TournamentError> {
+        if self.draft.is_none() {
+            return Err(TournamentError::NoDraft);
+        }
+        let known: HashSet<Uuid> = self.players.iter().map(|p| p.id).collect();
+        let referenced = absent
+            .iter()
+            .chain(forced_boards.iter().flat_map(|b| [&b.player1, &b.player2]))
+            .chain(forced_bye.iter());
+        for id in referenced {
+            if !known.contains(id) {
+                return Err(TournamentError::InvalidDraft(format!(
+                    "references unknown player {id}"
+                )));
+            }
+        }
+
+        let draft = self.draft.as_mut().expect("draft present");
+        draft.absent = absent;
+        draft.forced_boards = forced_boards
+            .into_iter()
+            .map(|b| Board {
+                player1: b.player1,
+                player2: b.player2,
+                result: None,
+            })
+            .collect();
+        draft.forced_bye = forced_bye;
+        Ok(self.draft.as_ref().expect("draft present"))
+    }
+
+    /// Confirm the draft: generate the pairings for the present players
+    /// (honoring the forced pairings/bye) and append the resulting [`Round`].
+    ///
+    /// Validates that there are enough present players and that the forced
+    /// constraints are consistent.
+    pub fn confirm_round(&mut self) -> Result<&Round, TournamentError> {
+        let draft = self.draft.clone().ok_or(TournamentError::NoDraft)?;
+
+        let absent: HashSet<Uuid> = draft.absent.iter().copied().collect();
+        let present: Vec<Uuid> = self
+            .players
+            .iter()
+            .map(|p| p.id)
+            .filter(|id| !absent.contains(id))
+            .collect();
+        if present.len() < MIN_PLAYERS_PER_ROUND {
+            return Err(TournamentError::NotEnoughPresentPlayers {
                 needed: MIN_PLAYERS_PER_ROUND,
-                have: self.players.len(),
+                have: present.len(),
             });
         }
-        let number = self.rounds.len() as u32 + 1;
-        let ids: Vec<Uuid> = self.players.iter().map(|p| p.id).collect();
-        self.rounds.push(pair_round(number, &ids));
+
+        let present_set: HashSet<Uuid> = present.iter().copied().collect();
+        let mut placed: HashSet<Uuid> = HashSet::new();
+        for board in &draft.forced_boards {
+            if board.player1 == board.player2 {
+                return Err(TournamentError::InvalidDraft(
+                    "a forced pairing has the same player twice".into(),
+                ));
+            }
+            for player in [board.player1, board.player2] {
+                if !present_set.contains(&player) {
+                    return Err(TournamentError::InvalidDraft(
+                        "a forced pairing includes an absent player".into(),
+                    ));
+                }
+                if !placed.insert(player) {
+                    return Err(TournamentError::InvalidDraft(
+                        "a player is in more than one forced pairing".into(),
+                    ));
+                }
+            }
+        }
+        if let Some(bye) = draft.forced_bye {
+            if !present_set.contains(&bye) {
+                return Err(TournamentError::InvalidDraft(
+                    "the forced bye is an absent player".into(),
+                ));
+            }
+            if !placed.insert(bye) {
+                return Err(TournamentError::InvalidDraft(
+                    "the forced bye is also in a forced pairing".into(),
+                ));
+            }
+            // With a forced bye, the players left to auto-pair must be even.
+            let leftover = present.len() - 2 * draft.forced_boards.len() - 1;
+            if leftover % 2 != 0 {
+                return Err(TournamentError::InvalidDraft(
+                    "a forced bye needs an odd number of present players".into(),
+                ));
+            }
+        }
+
+        let mut round =
+            pair_round_constrained(draft.number, &present, &draft.forced_boards, draft.forced_bye);
+        round.absent = draft.absent;
+        self.rounds.push(round);
+        self.draft = None;
         Ok(self.rounds.last().expect("just pushed a round"))
     }
 
@@ -308,6 +449,12 @@ mod tests {
             last_name: last_name.to_string(),
             ..Default::default()
         }
+    }
+
+    /// Prepare and confirm the next round with no customization.
+    fn start_next_round(t: &mut Tournament) {
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
     }
 
     #[test]
@@ -403,8 +550,9 @@ mod tests {
             t.add_player(named(name)).unwrap();
         }
         t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
         {
-            let round = t.start_round().unwrap();
+            let round = t.confirm_round().unwrap();
             assert_eq!(round.number, 1);
             assert_eq!(round.boards.len(), 1); // 3 players → 1 board + 1 bye
             assert!(round.bye.is_some());
@@ -414,8 +562,8 @@ mod tests {
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
         t.complete_current_round().unwrap();
 
-        let round2 = t.start_round().unwrap();
-        assert_eq!(round2.number, 2);
+        start_next_round(&mut t);
+        assert_eq!(t.rounds.last().unwrap().number, 2);
         assert_eq!(t.rounds.len(), 2);
     }
 
@@ -455,9 +603,9 @@ mod tests {
         for name in ["A", "B"] {
             t.add_player(named(name)).unwrap();
         }
-        // Can't start before finalizing.
+        // Can't prepare before finalizing.
         assert_eq!(
-            t.start_round(),
+            t.prepare_round(),
             Err(TournamentError::RegistrationNotFinalized)
         );
         t.finalize_registration().unwrap();
@@ -465,10 +613,13 @@ mod tests {
             t.finalize_registration(),
             Err(TournamentError::RegistrationAlreadyFinalized)
         );
-        t.start_round().unwrap();
-        // Can't start round 2 while round 1 is in progress.
+        t.prepare_round().unwrap();
+        // Can't prepare a second draft while one exists.
+        assert_eq!(t.prepare_round(), Err(TournamentError::DraftAlreadyExists));
+        t.confirm_round().unwrap();
+        // Can't prepare round 2 while round 1 is in progress.
         assert_eq!(
-            t.start_round(),
+            t.prepare_round(),
             Err(TournamentError::PreviousRoundNotComplete)
         );
         // Can't complete while a game is unplayed.
@@ -479,8 +630,8 @@ mod tests {
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
         t.complete_current_round().unwrap();
         assert!(t.rounds[0].completed);
-        // Now round 2 can start.
-        t.start_round().unwrap();
+        // Now round 2 can be prepared and started.
+        start_next_round(&mut t);
         assert_eq!(t.rounds.len(), 2);
     }
 
@@ -492,7 +643,7 @@ mod tests {
             t.add_player(named(name)).unwrap();
         }
         t.finalize_registration().unwrap();
-        t.start_round().unwrap();
+        start_next_round(&mut t);
 
         // not played -> player 1 wins
         assert_eq!(
@@ -516,7 +667,7 @@ mod tests {
             t.add_player(named(name)).unwrap();
         }
         t.finalize_registration().unwrap();
-        t.start_round().unwrap();
+        start_next_round(&mut t);
         assert_eq!(
             t.toggle_board_winner(9, 0, Winner::Player1),
             Err(TournamentError::RoundNotFound(9))
@@ -528,14 +679,64 @@ mod tests {
     }
 
     #[test]
-    fn start_round_needs_enough_players() {
+    fn confirm_needs_enough_present_players() {
         let mut t = Tournament::new("Cup").unwrap();
         t.add_player(named("Solo")).unwrap();
         t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
         assert_eq!(
-            t.start_round(),
-            Err(TournamentError::NotEnoughPlayers { needed: 2, have: 1 })
+            t.confirm_round(),
+            Err(TournamentError::NotEnoughPresentPlayers { needed: 2, have: 1 })
         );
+    }
+
+    #[test]
+    fn draft_defaults_absent_to_previous_round() {
+        let mut t = Tournament::new("Cup").unwrap();
+        let a = t.add_player(named("A")).unwrap().id;
+        let b = t.add_player(named("B")).unwrap().id;
+        let c = t.add_player(named("C")).unwrap().id;
+        t.finalize_registration().unwrap();
+
+        // Round 1: C absent, A vs B.
+        t.prepare_round().unwrap();
+        t.update_draft(vec![c], vec![], None).unwrap();
+        t.confirm_round().unwrap();
+        assert_eq!(t.rounds[0].absent, vec![c]);
+        assert_eq!(t.rounds[0].boards.len(), 1); // A vs B, no bye
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        t.complete_current_round().unwrap();
+
+        // Round 2 draft defaults absent to the previous round's absentees.
+        let draft = t.prepare_round().unwrap();
+        assert_eq!(draft.absent, vec![c]);
+        let _ = (a, b);
+    }
+
+    #[test]
+    fn confirm_honors_forced_pairing_and_bye() {
+        let mut t = Tournament::new("Cup").unwrap();
+        let ids: Vec<Uuid> = ["A", "B", "C", "D", "E"]
+            .iter()
+            .map(|n| t.add_player(named(n)).unwrap().id)
+            .collect();
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        // Force A vs C, and E as the bye (5 present → odd, ok).
+        let forced = vec![Board {
+            player1: ids[0],
+            player2: ids[2],
+            result: None,
+        }];
+        t.update_draft(vec![], forced, Some(ids[4])).unwrap();
+        let round = t.confirm_round().unwrap();
+        assert_eq!(round.bye, Some(ids[4]));
+        // A vs C is present as a board; B and D auto-paired.
+        assert!(round
+            .boards
+            .iter()
+            .any(|b| b.player1 == ids[0] && b.player2 == ids[2]));
+        assert_eq!(round.boards.len(), 2);
     }
 
     #[test]
