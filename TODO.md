@@ -15,6 +15,11 @@ Known limitations and future work, roughly ordered by area.
 - **Ranked standings.** The Results tab lists per-round results and a victory
   count, ordered by tournament number. Add real standings ordering (by score,
   then tie-breaks) and richer scoring (points, draws) on top of it.
+- **No-shows.** A player who was paired for a round but did not show up (distinct
+  from a game simply not yet recorded) should appear as `0#` in the results
+  table. This needs a way to mark a board as a no-show (a new board-result state,
+  giving the opponent the win); not handled yet. Byes (`0+`, win) and absences
+  (`0-`, loss) are already handled.
 
 ## FESA rating list
 

@@ -48,7 +48,8 @@
     let count = 0;
     for (const round of completedRounds) {
       const cell = cellFor(player, round);
-      if (cell.kind === "played" && cell.won) count++;
+      // A win at the board, or a bye, both count as a victory.
+      if ((cell.kind === "played" && cell.won) || cell.kind === "bye") count++;
     }
     return count;
   }
@@ -85,9 +86,9 @@
             {@const cell = cellFor(player, round)}
             <td class="num result">
               {#if cell.kind === "bye"}
-                <span class="bye">bye</span>
+                <span class="win" title="Bye (counts as a win)">0+</span>
               {:else if cell.kind === "absent"}
-                <span class="absent">·</span>
+                <span class="loss" title="Absent (counts as a loss)">0−</span>
               {:else if cell.kind === "pending"}
                 <span class="pending">{cell.opponent}?</span>
               {:else}
@@ -143,10 +144,6 @@
   }
   .pending {
     color: #d29922;
-  }
-  .bye,
-  .absent {
-    color: #6a6a72;
   }
   .victories {
     font-weight: 600;

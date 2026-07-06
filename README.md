@@ -47,7 +47,8 @@ until results land), and one tab per round created by "Start round".
 > with a warning. Finalizing registration assigns each player a tournament
 > number (by ELO, unrated last; later additions get the next free number). The
 > **Results** tab has a row per player with one column per completed round
-> (`opponent-number` + `+`/`−`) and a victory count. The web UI is organized into
+> (`opponent-number` + `+`/`−`, or `0+` for a bye / `0-` for an absence) and a
+> victory count (wins and byes). The web UI is organized into
 > tabs (Players / Results / one per round) and can save/load the tournament as a
 > JSON file. Ranked standings and smarter pairings are next.
 
