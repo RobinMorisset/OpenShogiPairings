@@ -165,3 +165,9 @@ in [`tauri.conf.json`](frontend/src-tauri/tauri.conf.json).
 cargo test          # Rust workspace (core + server)
 cd frontend && npm run check   # Svelte / TypeScript type-check
 ```
+
+Dev helpers (Windows/PowerShell) in [`scripts/`](scripts):
+
+- `scripts/check.ps1` — runs both of the above.
+- `scripts/restart-server.ps1` — restart `osp-server` and wait until it responds
+  (the running server doesn't hot-reload, so restart it after backend changes).
