@@ -31,6 +31,7 @@ pub fn pair_round(number: u32, player_ids: &[Uuid]) -> Round {
         .map(|pair| Board {
             player1: pair[0],
             player2: pair[1],
+            result: None,
         })
         .collect();
     Round {

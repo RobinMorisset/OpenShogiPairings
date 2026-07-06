@@ -39,7 +39,9 @@ impl From<TournamentError> for ApiError {
             | TournamentError::UnsupportedFormatVersion { .. } => {
                 ApiError::BadRequest(err.to_string())
             }
-            TournamentError::PlayerNotFound(_) => ApiError::NotFound(err.to_string()),
+            TournamentError::PlayerNotFound(_)
+            | TournamentError::RoundNotFound(_)
+            | TournamentError::BoardNotFound { .. } => ApiError::NotFound(err.to_string()),
         }
     }
 }

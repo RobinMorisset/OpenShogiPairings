@@ -10,6 +10,7 @@
     refreshRatings,
     removePlayer,
     replaceTournament,
+    setBoardWinner,
     startRound,
     undoTournament,
   } from "./lib/api";
@@ -18,6 +19,7 @@
     RatedPlayer,
     Tournament,
     TournamentResponse,
+    Winner,
   } from "./lib/types";
   import { loadTournament, saveTournament } from "./lib/tournamentFile";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
@@ -146,6 +148,12 @@
       apply(await startRound());
       // Jump to the round we just created.
       if (tournament) activeTab = `round-${tournament.rounds.length}`;
+    });
+  }
+
+  function handleSetResult(roundNumber: number, boardIndex: number, clicked: Winner) {
+    run(async () => {
+      apply(await setBoardWinner(roundNumber, boardIndex, clicked));
     });
   }
 
@@ -288,7 +296,13 @@
             (coming soon).
           </p>
         {:else if activeRound}
-          <RoundView round={activeRound} players={tournament.players} />
+          <RoundView
+            round={activeRound}
+            players={tournament.players}
+            onClickWinner={(boardIndex, clicked) =>
+              handleSetResult(activeRound.number, boardIndex, clicked)}
+            {busy}
+          />
         {/if}
       </div>
     </section>

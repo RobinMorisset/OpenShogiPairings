@@ -4,7 +4,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
-use osp_core::{NewPlayer, Tournament};
+use osp_core::{NewPlayer, Tournament, Winner};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -18,6 +18,7 @@ use crate::state::{AppState, TournamentStore};
 /// - `PUT    /api/tournament`               replace the current tournament (load)
 /// - `POST   /api/tournament/undo`          revert the last player change
 /// - `POST   /api/tournament/rounds`        start (pair) the next round
+/// - `POST   /api/tournament/rounds/{n}/boards/{i}/result`  toggle a board winner
 /// - `POST   /api/tournament/players`       register a player
 /// - `PUT    /api/tournament/players/{id}`  edit a player
 /// - `DELETE /api/tournament/players/{id}`  remove a player
@@ -35,6 +36,10 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/api/tournament/undo", post(undo))
         .route("/api/tournament/rounds", post(start_round))
+        .route(
+            "/api/tournament/rounds/{round_number}/boards/{board_index}/result",
+            post(set_board_result),
+        )
         .route("/api/tournament/players", post(add_player))
         .route(
             "/api/tournament/players/{id}",
@@ -112,6 +117,26 @@ async fn start_round(
     let mut store = state.store.write().expect("store lock poisoned");
     store.mutate(|t| t.start_round().map(|_| ()))?;
     Ok((StatusCode::CREATED, view(&store)?))
+}
+
+/// Body of the board-result endpoint: which player the referee clicked.
+#[derive(Debug, Deserialize)]
+struct SetResultRequest {
+    clicked: Winner,
+}
+
+/// Toggle a board's winner in response to a clicked player.
+async fn set_board_result(
+    State(state): State<AppState>,
+    Path((round_number, board_index)): Path<(u32, usize)>,
+    Json(req): Json<SetResultRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.mutate(|t| {
+        t.toggle_board_winner(round_number, board_index, req.clicked)
+            .map(|_| ())
+    })?;
+    view(&store)
 }
 
 /// Register a player in the current tournament.

@@ -12,9 +12,7 @@ Known limitations and future work, roughly ordered by area.
   avoidance, colour balance, float rules…), then an ILP/CP-SAT backend for
   experimental formats. `pair_round`'s signature is meant to stay stable while
   its internals are swapped.
-- **Round results + standings.** Rounds currently only hold pairings; add game
-  results, then populate the Results tab with standings.
-- **Colour (sente/gote) assignment** as part of pairing.
+- **Standings.** Populate the Results tab from the recorded board results.
 
 ## FESA rating list
 

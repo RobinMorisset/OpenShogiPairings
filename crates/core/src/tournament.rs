@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::pairing::pair_round;
 use crate::player::{NewPlayer, Player};
-use crate::round::Round;
+use crate::round::{Board, Round, Winner};
 
 /// On-disk / on-the-wire format version for a serialized [`Tournament`].
 ///
@@ -62,6 +62,12 @@ pub enum TournamentError {
     /// Too few players to start a round.
     #[error("need at least {needed} players to start a round (have {have})")]
     NotEnoughPlayers { needed: usize, have: usize },
+    /// No round with the given number exists.
+    #[error("no round number {0}")]
+    RoundNotFound(u32),
+    /// No board with the given index exists in the round.
+    #[error("no board {board} in round {round}")]
+    BoardNotFound { round: u32, board: usize },
     /// The serialized record uses a format version this build cannot read.
     #[error("unsupported tournament format version {found} (this build supports {supported})")]
     UnsupportedFormatVersion { found: u32, supported: u32 },
@@ -153,6 +159,36 @@ impl Tournament {
         let ids: Vec<Uuid> = self.players.iter().map(|p| p.id).collect();
         self.rounds.push(pair_round(number, &ids));
         Ok(self.rounds.last().expect("just pushed a round"))
+    }
+
+    /// Toggle the winner of a board in response to a player being clicked.
+    ///
+    /// If `clicked` is already the recorded winner, the result is cleared (back
+    /// to "not played"); otherwise `clicked` becomes the winner. This gives the
+    /// three states — not played, player 1 won, player 2 won — from clicks alone.
+    pub fn toggle_board_winner(
+        &mut self,
+        round_number: u32,
+        board_index: usize,
+        clicked: Winner,
+    ) -> Result<&Board, TournamentError> {
+        let round = self
+            .rounds
+            .iter_mut()
+            .find(|r| r.number == round_number)
+            .ok_or(TournamentError::RoundNotFound(round_number))?;
+        let board = round.boards.get_mut(board_index).ok_or(
+            TournamentError::BoardNotFound {
+                round: round_number,
+                board: board_index,
+            },
+        )?;
+        board.result = if board.result == Some(clicked) {
+            None
+        } else {
+            Some(clicked)
+        };
+        Ok(board)
     }
 
     /// Validate a tournament that was deserialized from an untrusted source
@@ -279,6 +315,47 @@ mod tests {
         let round2 = t.start_round().unwrap();
         assert_eq!(round2.number, 2);
         assert_eq!(t.rounds.len(), 2);
+    }
+
+    #[test]
+    fn toggle_board_winner_cycles_states() {
+        use crate::round::Winner;
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.start_round().unwrap();
+
+        // not played -> player 1 wins
+        assert_eq!(
+            t.toggle_board_winner(1, 0, Winner::Player1).unwrap().result,
+            Some(Winner::Player1)
+        );
+        // click player 2 -> switch winner
+        assert_eq!(
+            t.toggle_board_winner(1, 0, Winner::Player2).unwrap().result,
+            Some(Winner::Player2)
+        );
+        // click the current winner again -> back to not played
+        assert_eq!(t.toggle_board_winner(1, 0, Winner::Player2).unwrap().result, None);
+    }
+
+    #[test]
+    fn toggle_board_winner_reports_bad_indices() {
+        use crate::round::Winner;
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.start_round().unwrap();
+        assert_eq!(
+            t.toggle_board_winner(9, 0, Winner::Player1),
+            Err(TournamentError::RoundNotFound(9))
+        );
+        assert_eq!(
+            t.toggle_board_winner(1, 5, Winner::Player1),
+            Err(TournamentError::BoardNotFound { round: 1, board: 5 })
+        );
     }
 
     #[test]

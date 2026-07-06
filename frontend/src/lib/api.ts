@@ -4,6 +4,7 @@ import type {
   RatedPlayer,
   Tournament,
   TournamentResponse,
+  Winner,
 } from "./types";
 import { isTauri } from "./platform";
 
@@ -124,6 +125,21 @@ export function undoTournament(): Promise<TournamentResponse> {
 /** Start (pair) the next round from the current players. */
 export function startRound(): Promise<TournamentResponse> {
   return request<TournamentResponse>("/api/tournament/rounds", { method: "POST" });
+}
+
+/**
+ * Register a click on a board's player: toggles that player as the winner
+ * (clicking the current winner clears the result).
+ */
+export function setBoardWinner(
+  roundNumber: number,
+  boardIndex: number,
+  clicked: Winner,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    `/api/tournament/rounds/${roundNumber}/boards/${boardIndex}/result`,
+    { method: "POST", body: JSON.stringify({ clicked }) },
+  );
 }
 
 /** Register a player in the current tournament. */

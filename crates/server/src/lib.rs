@@ -247,6 +247,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn set_board_result_toggles_winner() {
+        let state = AppState::default();
+        send(
+            router(state.clone()),
+            json_req("POST", "/api/tournament", json!({ "name": "Cup" })),
+        )
+        .await;
+        for name in ["Alice", "Bob"] {
+            send(
+                router(state.clone()),
+                json_req("POST", "/api/tournament/players", json!({ "last_name": name })),
+            )
+            .await;
+        }
+        send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+
+        // Click player 1 → they win.
+        let (status, body) = send(
+            router(state.clone()),
+            json_req(
+                "POST",
+                "/api/tournament/rounds/1/boards/0/result",
+                json!({ "clicked": "player1" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tournament"]["rounds"][0]["boards"][0]["result"], "player1");
+
+        // Bad board index → 404.
+        let (status, _) = send(
+            router(state.clone()),
+            json_req(
+                "POST",
+                "/api/tournament/rounds/1/boards/9/result",
+                json!({ "clicked": "player1" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn start_round_needs_two_players_is_400() {
         let state = AppState::default();
         send(

@@ -38,10 +38,14 @@ export interface RatedPlayer {
   nationality: string;
 }
 
+/** Which player won a board — mirror of `osp_core::Winner`. */
+export type Winner = "player1" | "player2";
+
 /** Mirror of `osp_core::Board` — one game in a round. */
 export interface Board {
   player1: string; // player UUID
   player2: string; // player UUID
+  result?: Winner; // absent = not played yet
 }
 
 /** Mirror of `osp_core::Round`. */
