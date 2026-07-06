@@ -4,6 +4,8 @@ use std::sync::{Arc, RwLock};
 
 use osp_core::Tournament;
 
+use crate::ratings::CachedRatings;
+
 /// State shared across all requests.
 ///
 /// The server currently holds a single "current tournament" in memory — this is
@@ -17,4 +19,6 @@ use osp_core::Tournament;
 #[derive(Clone, Default)]
 pub struct AppState {
     pub tournament: Arc<RwLock<Option<Tournament>>>,
+    /// Cached FESA rating list (see [`crate::ratings`]).
+    pub ratings: Arc<RwLock<Option<CachedRatings>>>,
 }

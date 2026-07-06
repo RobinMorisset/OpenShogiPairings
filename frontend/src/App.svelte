@@ -4,11 +4,12 @@
     addPlayer,
     ApiError,
     createTournament,
+    fetchRatings,
     fetchTournament,
     removePlayer,
     replaceTournament,
   } from "./lib/api";
-  import type { NewPlayer, Tournament } from "./lib/types";
+  import type { NewPlayer, RatedPlayer, Tournament } from "./lib/types";
   import { loadTournament, saveTournament } from "./lib/tournamentFile";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
   import CreateTournament from "./lib/components/CreateTournament.svelte";
@@ -20,12 +21,21 @@
   let creatingNew = $state(false);
   let busy = $state(false);
   let error = $state<string | null>(null);
+  let ratings = $state<RatedPlayer[]>([]);
 
   // Show the create form when there is no tournament, or when the user
   // explicitly asked to start a new one.
   let showCreate = $derived(tournament === null || creatingNew);
 
   onMount(async () => {
+    // Load the FESA ratings in the background — autocomplete is a nice-to-have,
+    // so a failure here must not block or error the rest of the app.
+    fetchRatings()
+      .then((r) => (ratings = r))
+      .catch(() => {
+        /* autocomplete simply unavailable */
+      });
+
     try {
       tournament = await fetchTournament();
     } catch (err) {
@@ -137,7 +147,7 @@
         </div>
       </div>
 
-      <PlayerRegistration onAdd={handleAddPlayer} {busy} />
+      <PlayerRegistration onAdd={handleAddPlayer} {ratings} {busy} />
       <div class="players">
         <PlayerList
           players={tournament.players}

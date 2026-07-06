@@ -17,11 +17,16 @@ osp-core = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# FESA ratings fetch. rustls (not native-tls) keeps TLS pure-Rust so the packaged
+# app has no system OpenSSL dependency.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# Locating a per-user cache directory for the persisted ratings list.
+dirs = "5"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
-serde_json = { workspace = true }

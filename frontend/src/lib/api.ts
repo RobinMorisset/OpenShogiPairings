@@ -1,4 +1,4 @@
-import type { HealthStatus, NewPlayer, Tournament } from "./types";
+import type { HealthStatus, NewPlayer, RatedPlayer, Tournament } from "./types";
 import { isTauri } from "./platform";
 
 // Where the API lives.
@@ -69,6 +69,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 /** Ask the server whether it is up. */
 export function fetchHealth(): Promise<HealthStatus> {
   return request<HealthStatus>("/api/health");
+}
+
+/** Fetch the FESA rating list (server-cached) for registration autocomplete. */
+export function fetchRatings(): Promise<RatedPlayer[]> {
+  return request<RatedPlayer[]>("/api/ratings");
 }
 
 /**

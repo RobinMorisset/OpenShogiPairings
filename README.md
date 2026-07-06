@@ -27,20 +27,29 @@ solver for experimental formats beyond Swiss / MacMahon.
 
 > **Current status:** early. The server holds a single in-memory tournament (a
 > name + a list of players) as the shared source of truth, with a REST API to
-> create it, register/remove players, and replace it wholesale (for load). The
-> web UI drives all of that and can save/load the tournament as a JSON file. No
-> rounds or pairing logic yet.
+> create it, register/remove players, and replace it wholesale (for load).
+> Players have a last name, first name, optional rating, nationality and club.
+> Registration autocompletes names + ELOs from the FESA rating list. The web UI
+> drives all of that and can save/load the tournament as a JSON file. No rounds
+> or pairing logic yet.
 
 ### API
 
 | Method & path | Purpose |
 |---------------|---------|
 | `GET /api/health` | Liveness check. |
+| `GET /api/ratings` | FESA rating list (server-cached) for registration autocomplete. |
 | `POST /api/tournament` | Create a new (empty) tournament: `{ "name": "..." }`. |
 | `GET /api/tournament` | Fetch the current tournament (404 if none). |
 | `PUT /api/tournament` | Replace the current tournament (used by "load"). |
-| `POST /api/tournament/players` | Register a player: `{ "name", "rating?", "club?" }`. |
+| `POST /api/tournament/players` | Register a player: `{ "last_name", "first_name?", "rating?", "nationality?", "club?" }`. |
 | `DELETE /api/tournament/players/{id}` | Remove a player. |
+
+The FESA rating list is fixed-width, Latin-1 text (parsed in
+[`crates/core`](crates/core/src/fesa.rs)). It's shared reference data, so the
+**server** owns the cache — it fetches from FESA at most once per TTL, keeps the
+parsed list in memory, and persists it to a per-user cache file (serving stale
+data if FESA is unreachable). Clients pull the list once and filter locally.
 
 Every mutating endpoint returns the full updated tournament. Save/load is
 platform-aware: in the **Tauri** desktop app it uses native OS file dialogs (the

@@ -7,9 +7,11 @@
 //! reused unchanged by the HTTP server, a future CLI client, and the Tauri
 //! desktop app.
 
+mod fesa;
 mod player;
 mod tournament;
 
+pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
 pub use player::{NewPlayer, Player};
 pub use tournament::{Tournament, TournamentError, TOURNAMENT_FORMAT_VERSION};
 

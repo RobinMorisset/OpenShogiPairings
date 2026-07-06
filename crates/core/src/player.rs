@@ -5,18 +5,25 @@ use uuid::Uuid;
 
 /// A player registered in a tournament.
 ///
-/// Only `name` is required; `rating` and `club` are optional metadata that the
-/// pairing engine will eventually use (e.g. rating for initial seeding, club to
-/// avoid pairing team-mates in early rounds).
+/// Names follow the FESA convention: separate last and first names (last name is
+/// the primary identifier). Only `last_name` is required; the rest is optional
+/// metadata the pairing engine will eventually use (rating for seeding, club to
+/// avoid pairing team-mates early). `nationality` is a country code (e.g. `JP`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Player {
     /// Stable unique identifier, assigned by the server on registration.
     pub id: Uuid,
-    /// Display name. Guaranteed non-empty (trimmed) once registered.
-    pub name: String,
+    /// Family name. Guaranteed non-empty (trimmed) once registered.
+    pub last_name: String,
+    /// Given name. May be empty.
+    #[serde(default)]
+    pub first_name: String,
     /// Optional playing strength / rating.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rating: Option<u32>,
+    /// Optional country code (uppercase, e.g. `JP`, `FR`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nationality: Option<String>,
     /// Optional club or federation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub club: Option<String>,
@@ -28,29 +35,41 @@ pub struct Player {
 /// with a freshly minted [`Uuid`].
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NewPlayer {
-    pub name: String,
+    pub last_name: String,
+    #[serde(default)]
+    pub first_name: String,
     #[serde(default)]
     pub rating: Option<u32>,
     #[serde(default)]
+    pub nationality: Option<String>,
+    #[serde(default)]
     pub club: Option<String>,
+}
+
+/// Trim a string; map empty to `None`.
+fn non_empty(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 impl Player {
     /// Create a player with a new random id from registration data.
     ///
-    /// The caller is responsible for validating `new.name` (see
-    /// [`crate::Tournament::add_player`]); this constructor trims surrounding
-    /// whitespace and normalizes an all-whitespace/empty club to `None`.
+    /// The caller is responsible for validating `new.last_name` (see
+    /// [`crate::Tournament::add_player`]); this constructor trims whitespace,
+    /// uppercases the nationality code, and normalizes empty optionals to `None`.
     pub(crate) fn from_new(new: NewPlayer) -> Self {
-        let club = new
-            .club
-            .map(|c| c.trim().to_string())
-            .filter(|c| !c.is_empty());
         Self {
             id: Uuid::new_v4(),
-            name: new.name.trim().to_string(),
+            last_name: new.last_name.trim().to_string(),
+            first_name: new.first_name.trim().to_string(),
             rating: new.rating,
-            club,
+            nationality: non_empty(new.nationality.unwrap_or_default()).map(|c| c.to_uppercase()),
+            club: non_empty(new.club.unwrap_or_default()),
         }
     }
 }

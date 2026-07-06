@@ -14,16 +14,28 @@ export interface HealthStatus {
 /** Mirror of `osp_core::Player`. */
 export interface Player {
   id: string; // UUID
-  name: string;
+  last_name: string;
+  first_name: string;
   rating?: number;
+  nationality?: string; // country code, e.g. "JP"
   club?: string;
 }
 
 /** Registration payload — mirror of `osp_core::NewPlayer`. */
 export interface NewPlayer {
-  name: string;
+  last_name: string;
+  first_name?: string;
   rating?: number;
+  nationality?: string;
   club?: string;
+}
+
+/** An entry from the FESA rating list — mirror of `osp_core::RatedPlayer`. */
+export interface RatedPlayer {
+  last_name: string;
+  first_name: string;
+  rating: number;
+  nationality: string;
 }
 
 /** Mirror of `osp_core::Tournament`. */

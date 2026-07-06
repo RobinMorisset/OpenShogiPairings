@@ -18,6 +18,8 @@ pub enum ApiError {
     BadRequest(String),
     /// A referenced resource (e.g. a player) does not exist (404).
     NotFound(String),
+    /// An upstream dependency (e.g. FESA) failed and no cache is available (502).
+    Upstream(String),
 }
 
 /// JSON body sent for every error: `{ "error": "..." }`.
@@ -48,6 +50,7 @@ impl IntoResponse for ApiError {
             ),
             ApiError::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
             ApiError::NotFound(message) => (StatusCode::NOT_FOUND, message),
+            ApiError::Upstream(message) => (StatusCode::BAD_GATEWAY, message),
         };
         (status, Json(ErrorBody { error: message })).into_response()
     }

@@ -17,8 +17,10 @@
     <thead>
       <tr>
         <th class="num">#</th>
-        <th>Name</th>
+        <th>Last name</th>
+        <th>First name</th>
         <th class="num">Rating</th>
+        <th>Nat.</th>
         <th>Club</th>
         <th aria-label="Actions"></th>
       </tr>
@@ -27,8 +29,10 @@
       {#each players as player, i (player.id)}
         <tr>
           <td class="num">{i + 1}</td>
-          <td>{player.name}</td>
+          <td>{player.last_name}</td>
+          <td>{player.first_name || "—"}</td>
           <td class="num">{player.rating ?? "—"}</td>
+          <td>{player.nationality ?? "—"}</td>
           <td>{player.club ?? "—"}</td>
           <td class="actions">
             <button

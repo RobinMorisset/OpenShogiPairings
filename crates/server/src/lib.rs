@@ -12,6 +12,7 @@
 //! truth shared by all connected clients; see [`AppState`].
 
 mod error;
+mod ratings;
 mod state;
 mod tournament;
 
@@ -32,6 +33,7 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/ratings", get(ratings::ratings_handler))
         .merge(tournament::routes())
         .with_state(state)
         .layer(cors)
@@ -115,7 +117,7 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::CREATED);
         assert_eq!(body["name"], "Paris Open");
-        assert_eq!(body["format_version"], 1);
+        assert_eq!(body["format_version"], 2);
         assert!(body["players"].as_array().unwrap().is_empty());
 
         // Register a player.
@@ -124,14 +126,16 @@ mod tests {
             json_req(
                 "POST",
                 "/api/tournament/players",
-                json!({ "name": "Alice", "rating": 1800 }),
+                json!({ "last_name": "Kobayashi", "first_name": "Taichi", "rating": 2556, "nationality": "jp" }),
             ),
         )
         .await;
         assert_eq!(status, StatusCode::CREATED);
         let players = body["players"].as_array().unwrap();
         assert_eq!(players.len(), 1);
-        assert_eq!(players[0]["name"], "Alice");
+        assert_eq!(players[0]["last_name"], "Kobayashi");
+        assert_eq!(players[0]["first_name"], "Taichi");
+        assert_eq!(players[0]["nationality"], "JP"); // uppercased server-side
         let player_id = players[0]["id"].as_str().unwrap().to_string();
 
         // Remove that player.
@@ -152,7 +156,7 @@ mod tests {
     async fn add_player_without_tournament_is_404() {
         let (status, _) = send(
             router(AppState::default()),
-            json_req("POST", "/api/tournament/players", json!({ "name": "Alice" })),
+            json_req("POST", "/api/tournament/players", json!({ "last_name": "Alice" })),
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
@@ -169,7 +173,7 @@ mod tests {
 
         let (status, _) = send(
             router(state.clone()),
-            json_req("POST", "/api/tournament/players", json!({ "name": "   " })),
+            json_req("POST", "/api/tournament/players", json!({ "last_name": "   " })),
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -182,7 +186,7 @@ mod tests {
         let mut saved = Tournament::new("Loaded Cup").unwrap();
         saved
             .add_player(osp_core::NewPlayer {
-                name: "Bob".into(),
+                last_name: "Bob".into(),
                 ..Default::default()
             })
             .unwrap();
@@ -198,7 +202,7 @@ mod tests {
 
         let (status, body) = send(router(state.clone()), get("/api/tournament")).await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body["players"][0]["name"], "Bob");
+        assert_eq!(body["players"][0]["last_name"], "Bob");
     }
 
     #[tokio::test]

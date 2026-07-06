@@ -14,7 +14,10 @@ use crate::player::{NewPlayer, Player};
 ///
 /// Bumped whenever the saved shape changes incompatibly, so that loading an old
 /// file can be detected (and, later, migrated) instead of silently mis-parsed.
-pub const TOURNAMENT_FORMAT_VERSION: u32 = 1;
+///
+/// v2: players carry `last_name` + `first_name` + `nationality` instead of a
+/// single `name`.
+pub const TOURNAMENT_FORMAT_VERSION: u32 = 2;
 
 fn default_format_version() -> u32 {
     TOURNAMENT_FORMAT_VERSION
@@ -41,8 +44,8 @@ pub enum TournamentError {
     /// The tournament name was empty or whitespace-only.
     #[error("tournament name must not be empty")]
     EmptyTournamentName,
-    /// A player name was empty or whitespace-only.
-    #[error("player name must not be empty")]
+    /// A player's last name was empty or whitespace-only.
+    #[error("player last name must not be empty")]
     EmptyPlayerName,
     /// No player with the given id exists in this tournament.
     #[error("no player with id {0}")]
@@ -71,9 +74,10 @@ impl Tournament {
 
     /// Register a new player and return a reference to the stored [`Player`].
     ///
-    /// Returns [`TournamentError::EmptyPlayerName`] if the name is blank.
+    /// Returns [`TournamentError::EmptyPlayerName`] if the last name is blank
+    /// (the last name is the required identifier; the first name is optional).
     pub fn add_player(&mut self, new: NewPlayer) -> Result<&Player, TournamentError> {
-        if new.name.trim().is_empty() {
+        if new.last_name.trim().is_empty() {
             return Err(TournamentError::EmptyPlayerName);
         }
         self.players.push(Player::from_new(new));
@@ -110,9 +114,9 @@ impl Tournament {
 mod tests {
     use super::*;
 
-    fn named(name: &str) -> NewPlayer {
+    fn named(last_name: &str) -> NewPlayer {
         NewPlayer {
-            name: name.to_string(),
+            last_name: last_name.to_string(),
             ..Default::default()
         }
     }
@@ -129,7 +133,7 @@ mod tests {
     fn add_player_trims_and_assigns_id() {
         let mut t = Tournament::new("Paris Open").unwrap();
         let player = t.add_player(named("  Alice  ")).unwrap().clone();
-        assert_eq!(player.name, "Alice");
+        assert_eq!(player.last_name, "Alice");
         assert_eq!(t.players.len(), 1);
         assert_eq!(t.players[0].id, player.id);
     }
@@ -146,13 +150,16 @@ mod tests {
         let mut t = Tournament::new("Paris Open").unwrap();
         let p = t
             .add_player(NewPlayer {
-                name: "Bob".into(),
+                last_name: "Bob".into(),
                 rating: Some(1500),
                 club: Some("   ".into()),
+                nationality: Some("fr".into()),
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(p.club, None);
         assert_eq!(p.rating, Some(1500));
+        assert_eq!(p.nationality.as_deref(), Some("FR")); // trimmed + uppercased
     }
 
     #[test]
