@@ -1,4 +1,10 @@
-import type { HealthStatus, NewPlayer, RatedPlayer, Tournament } from "./types";
+import type {
+  HealthStatus,
+  NewPlayer,
+  RatedPlayer,
+  Tournament,
+  TournamentResponse,
+} from "./types";
 import { isTauri } from "./platform";
 
 // Where the API lives.
@@ -85,9 +91,9 @@ export function refreshRatings(): Promise<RatedPlayer[]> {
  * Fetch the current tournament, or `null` if none has been created yet
  * (the server answers 404 in that case).
  */
-export async function fetchTournament(): Promise<Tournament | null> {
+export async function fetchTournament(): Promise<TournamentResponse | null> {
   try {
-    return await request<Tournament>("/api/tournament");
+    return await request<TournamentResponse>("/api/tournament");
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
     throw err;
@@ -95,32 +101,45 @@ export async function fetchTournament(): Promise<Tournament | null> {
 }
 
 /** Create a new, empty tournament with the given name. */
-export function createTournament(name: string): Promise<Tournament> {
-  return request<Tournament>("/api/tournament", {
+export function createTournament(name: string): Promise<TournamentResponse> {
+  return request<TournamentResponse>("/api/tournament", {
     method: "POST",
     body: JSON.stringify({ name }),
   });
 }
 
 /** Replace the current tournament wholesale (used when loading a saved file). */
-export function replaceTournament(tournament: Tournament): Promise<Tournament> {
-  return request<Tournament>("/api/tournament", {
+export function replaceTournament(tournament: Tournament): Promise<TournamentResponse> {
+  return request<TournamentResponse>("/api/tournament", {
     method: "PUT",
     body: JSON.stringify(tournament),
   });
 }
 
+/** Revert the last player change (linear server-side undo history). */
+export function undoTournament(): Promise<TournamentResponse> {
+  return request<TournamentResponse>("/api/tournament/undo", { method: "POST" });
+}
+
 /** Register a player in the current tournament. */
-export function addPlayer(player: NewPlayer): Promise<Tournament> {
-  return request<Tournament>("/api/tournament/players", {
+export function addPlayer(player: NewPlayer): Promise<TournamentResponse> {
+  return request<TournamentResponse>("/api/tournament/players", {
     method: "POST",
     body: JSON.stringify(player),
   });
 }
 
+/** Edit an existing player's fields in place. */
+export function editPlayer(id: string, player: NewPlayer): Promise<TournamentResponse> {
+  return request<TournamentResponse>(`/api/tournament/players/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(player),
+  });
+}
+
 /** Remove a player from the current tournament by id. */
-export function removePlayer(id: string): Promise<Tournament> {
-  return request<Tournament>(`/api/tournament/players/${id}`, {
+export function removePlayer(id: string): Promise<TournamentResponse> {
+  return request<TournamentResponse>(`/api/tournament/players/${id}`, {
     method: "DELETE",
   });
 }

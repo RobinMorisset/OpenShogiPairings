@@ -45,3 +45,12 @@ export interface Tournament {
   name: string;
   players: Player[];
 }
+
+/**
+ * API response for tournament endpoints: the tournament plus whether an undo is
+ * available. Kept separate from `Tournament` so the saved-file shape stays clean.
+ */
+export interface TournamentResponse {
+  tournament: Tournament;
+  can_undo: boolean;
+}

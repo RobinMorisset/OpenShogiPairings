@@ -85,6 +85,34 @@ impl Tournament {
         Ok(self.players.last().expect("just pushed a player"))
     }
 
+    /// Replace the editable fields of an existing player, keeping its id and
+    /// position. Used for in-place cell editing.
+    ///
+    /// Returns [`TournamentError::EmptyPlayerName`] if the new last name is blank
+    /// or [`TournamentError::PlayerNotFound`] if no player has that id.
+    pub fn edit_player(
+        &mut self,
+        id: Uuid,
+        new: NewPlayer,
+    ) -> Result<&Player, TournamentError> {
+        if new.last_name.trim().is_empty() {
+            return Err(TournamentError::EmptyPlayerName);
+        }
+        let player = self
+            .players
+            .iter_mut()
+            .find(|p| p.id == id)
+            .ok_or(TournamentError::PlayerNotFound(id))?;
+        // Reuse the normalization in `from_new`, but keep the existing id.
+        let normalized = Player::from_new(new);
+        player.last_name = normalized.last_name;
+        player.first_name = normalized.first_name;
+        player.rating = normalized.rating;
+        player.nationality = normalized.nationality;
+        player.club = normalized.club;
+        Ok(player)
+    }
+
     /// Remove the player with the given id.
     ///
     /// Returns [`TournamentError::PlayerNotFound`] if no such player exists.
@@ -160,6 +188,42 @@ mod tests {
         assert_eq!(p.club, None);
         assert_eq!(p.rating, Some(1500));
         assert_eq!(p.nationality.as_deref(), Some("FR")); // trimmed + uppercased
+    }
+
+    #[test]
+    fn edit_player_updates_fields_and_keeps_id() {
+        let mut t = Tournament::new("Paris Open").unwrap();
+        let id = t.add_player(named("Alice")).unwrap().id;
+
+        let edited = t
+            .edit_player(
+                id,
+                NewPlayer {
+                    last_name: "Alice".into(),
+                    first_name: "Anne".into(),
+                    rating: Some(1600),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(edited.id, id); // id preserved
+        assert_eq!(edited.first_name, "Anne");
+        assert_eq!(edited.rating, Some(1600));
+    }
+
+    #[test]
+    fn edit_player_rejects_blank_name_and_missing_id() {
+        let mut t = Tournament::new("Paris Open").unwrap();
+        let id = t.add_player(named("Alice")).unwrap().id;
+        assert_eq!(
+            t.edit_player(id, named("  ")),
+            Err(TournamentError::EmptyPlayerName)
+        );
+        let missing = uuid::Uuid::new_v4();
+        assert_eq!(
+            t.edit_player(missing, named("Bob")),
+            Err(TournamentError::PlayerNotFound(missing))
+        );
     }
 
     #[test]

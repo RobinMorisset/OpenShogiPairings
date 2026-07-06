@@ -29,9 +29,16 @@ solver for experimental formats beyond Swiss / MacMahon.
 > name + a list of players) as the shared source of truth, with a REST API to
 > create it, register/remove players, and replace it wholesale (for load).
 > Players have a last name, first name, optional rating, nationality and club.
-> Registration autocompletes names + ELOs from the FESA rating list. The web UI
-> drives all of that and can save/load the tournament as a JSON file. No rounds
-> or pairing logic yet.
+> Registration autocompletes names + ELOs from the FESA rating list. The player
+> table is sorted by descending ELO (unrated last), any cell is editable in
+> place, and a server-side undo history reverts player changes. The web UI drives
+> all of that and can save/load the tournament as a JSON file. No rounds or
+> pairing logic yet.
+
+Mutations go through a `TournamentStore` that keeps the current tournament plus a
+stack of prior snapshots (the undo history); create/load reset it. Endpoints
+return `{ tournament, can_undo }` so the client refreshes the view and the undo
+button together (the persisted save-file shape stays the bare tournament).
 
 ### API
 
@@ -43,7 +50,9 @@ solver for experimental formats beyond Swiss / MacMahon.
 | `POST /api/tournament` | Create a new (empty) tournament: `{ "name": "..." }`. |
 | `GET /api/tournament` | Fetch the current tournament (404 if none). |
 | `PUT /api/tournament` | Replace the current tournament (used by "load"). |
+| `POST /api/tournament/undo` | Revert the last player change (server-side undo history). |
 | `POST /api/tournament/players` | Register a player: `{ "last_name", "first_name?", "rating?", "nationality?", "club?" }`. |
+| `PUT /api/tournament/players/{id}` | Edit a player's fields in place. |
 | `DELETE /api/tournament/players/{id}` | Remove a player. |
 
 The FESA rating list is fixed-width, Latin-1 text (parsed in

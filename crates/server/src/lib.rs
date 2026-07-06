@@ -86,6 +86,14 @@ mod tests {
         Request::builder().uri(uri).body(Body::empty()).unwrap()
     }
 
+    fn post_empty(uri: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .body(Body::empty())
+            .unwrap()
+    }
+
     fn json_req(method: &str, uri: &str, body: serde_json::Value) -> Request<Body> {
         Request::builder()
             .method(method)
@@ -120,9 +128,10 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::CREATED);
-        assert_eq!(body["name"], "Paris Open");
-        assert_eq!(body["format_version"], 2);
-        assert!(body["players"].as_array().unwrap().is_empty());
+        assert_eq!(body["tournament"]["name"], "Paris Open");
+        assert_eq!(body["tournament"]["format_version"], 2);
+        assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
+        assert_eq!(body["can_undo"], false); // nothing to undo on a fresh tournament
 
         // Register a player.
         let (status, body) = send(
@@ -135,11 +144,12 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::CREATED);
-        let players = body["players"].as_array().unwrap();
+        let players = body["tournament"]["players"].as_array().unwrap();
         assert_eq!(players.len(), 1);
         assert_eq!(players[0]["last_name"], "Kobayashi");
         assert_eq!(players[0]["first_name"], "Taichi");
         assert_eq!(players[0]["nationality"], "JP"); // uppercased server-side
+        assert_eq!(body["can_undo"], true); // a mutation is now undoable
         let player_id = players[0]["id"].as_str().unwrap().to_string();
 
         // Remove that player.
@@ -153,7 +163,77 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert!(body["players"].as_array().unwrap().is_empty());
+        assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn edit_then_undo_reverts_step_by_step() {
+        let state = AppState::default();
+        send(
+            router(state.clone()),
+            json_req("POST", "/api/tournament", json!({ "name": "Cup" })),
+        )
+        .await;
+        let (_, body) = send(
+            router(state.clone()),
+            json_req(
+                "POST",
+                "/api/tournament/players",
+                json!({ "last_name": "Alice", "rating": 1500 }),
+            ),
+        )
+        .await;
+        let id = body["tournament"]["players"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // Edit the rating.
+        let (status, body) = send(
+            router(state.clone()),
+            json_req(
+                "PUT",
+                &format!("/api/tournament/players/{id}"),
+                json!({ "last_name": "Alice", "rating": 1900 }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tournament"]["players"][0]["rating"], 1900);
+
+        // Undo the edit → rating restored.
+        let (status, body) =
+            send(router(state.clone()), post_empty("/api/tournament/undo")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tournament"]["players"][0]["rating"], 1500);
+        assert_eq!(body["can_undo"], true); // the add is still undoable
+
+        // Undo the add → back to empty, nothing left to undo.
+        let (status, body) =
+            send(router(state.clone()), post_empty("/api/tournament/undo")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
+        assert_eq!(body["can_undo"], false);
+    }
+
+    #[tokio::test]
+    async fn edit_missing_player_is_404() {
+        let state = AppState::default();
+        send(
+            router(state.clone()),
+            json_req("POST", "/api/tournament", json!({ "name": "Cup" })),
+        )
+        .await;
+        let (status, _) = send(
+            router(state),
+            json_req(
+                "PUT",
+                &format!("/api/tournament/players/{}", uuid::Uuid::new_v4()),
+                json!({ "last_name": "Ghost" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -202,11 +282,11 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body["name"], "Loaded Cup");
+        assert_eq!(body["tournament"]["name"], "Loaded Cup");
 
         let (status, body) = send(router(state.clone()), get("/api/tournament")).await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body["players"][0]["last_name"], "Bob");
+        assert_eq!(body["tournament"]["players"][0]["last_name"], "Bob");
     }
 
     #[tokio::test]

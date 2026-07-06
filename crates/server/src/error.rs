@@ -9,6 +9,8 @@ use axum::Json;
 use osp_core::TournamentError;
 use serde::Serialize;
 
+use crate::state::MutateError;
+
 /// An error that can be returned from an API handler.
 #[derive(Debug)]
 pub enum ApiError {
@@ -37,6 +39,15 @@ impl From<TournamentError> for ApiError {
                 ApiError::BadRequest(err.to_string())
             }
             TournamentError::PlayerNotFound(_) => ApiError::NotFound(err.to_string()),
+        }
+    }
+}
+
+impl From<MutateError> for ApiError {
+    fn from(err: MutateError) -> Self {
+        match err {
+            MutateError::NoTournament => ApiError::NoTournament,
+            MutateError::Domain(e) => ApiError::from(e),
         }
     }
 }

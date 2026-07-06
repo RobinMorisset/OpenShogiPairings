@@ -4,13 +4,20 @@
     addPlayer,
     ApiError,
     createTournament,
+    editPlayer,
     fetchRatings,
     fetchTournament,
     refreshRatings,
     removePlayer,
     replaceTournament,
+    undoTournament,
   } from "./lib/api";
-  import type { NewPlayer, RatedPlayer, Tournament } from "./lib/types";
+  import type {
+    NewPlayer,
+    RatedPlayer,
+    Tournament,
+    TournamentResponse,
+  } from "./lib/types";
   import { loadTournament, saveTournament } from "./lib/tournamentFile";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
   import CreateTournament from "./lib/components/CreateTournament.svelte";
@@ -18,11 +25,18 @@
   import PlayerList from "./lib/components/PlayerList.svelte";
 
   let tournament = $state<Tournament | null>(null);
+  let canUndo = $state(false);
   let initialLoad = $state<"loading" | "done">("loading");
   let creatingNew = $state(false);
   let busy = $state(false);
   let error = $state<string | null>(null);
   let ratings = $state<RatedPlayer[]>([]);
+
+  /** Apply a tournament API response to local state. */
+  function apply(res: TournamentResponse) {
+    tournament = res.tournament;
+    canUndo = res.can_undo;
+  }
 
   // Show the create form when there is no tournament, or when the user
   // explicitly asked to start a new one.
@@ -38,7 +52,8 @@
       });
 
     try {
-      tournament = await fetchTournament();
+      const res = await fetchTournament();
+      if (res) apply(res);
     } catch (err) {
       error = describe(err);
     } finally {
@@ -68,7 +83,7 @@
 
   function handleCreate(name: string) {
     run(async () => {
-      tournament = await createTournament(name);
+      apply(await createTournament(name));
       creatingNew = false;
     });
   }
@@ -77,20 +92,32 @@
     run(async () => {
       const loaded = await loadTournament();
       if (!loaded) return; // user cancelled the file dialog
-      tournament = await replaceTournament(loaded);
+      apply(await replaceTournament(loaded));
       creatingNew = false;
     });
   }
 
   function handleAddPlayer(player: NewPlayer) {
     run(async () => {
-      tournament = await addPlayer(player);
+      apply(await addPlayer(player));
+    });
+  }
+
+  function handleEditPlayer(id: string, player: NewPlayer) {
+    run(async () => {
+      apply(await editPlayer(id, player));
     });
   }
 
   function handleRemovePlayer(id: string) {
     run(async () => {
-      tournament = await removePlayer(id);
+      apply(await removePlayer(id));
+    });
+  }
+
+  function handleUndo() {
+    run(async () => {
+      apply(await undoTournament());
     });
   }
 
@@ -140,6 +167,15 @@
           >
         </div>
         <div class="toolbar-actions">
+          <button
+            type="button"
+            class="ghost"
+            onclick={handleUndo}
+            disabled={busy || !canUndo}
+            title="Undo the last player change"
+          >
+            Undo
+          </button>
           <button type="button" class="ghost" onclick={handleSave} disabled={busy}>
             Save
           </button>
@@ -176,6 +212,7 @@
       <div class="players">
         <PlayerList
           players={tournament.players}
+          onEdit={handleEditPlayer}
           onRemove={handleRemovePlayer}
           {busy}
         />
