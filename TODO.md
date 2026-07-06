@@ -18,9 +18,10 @@ Known limitations and future work, roughly ordered by area.
   are compile-time constants; expose them (and let referees toggle/reorder rules)
   once the model settles. Colour balance is intentionally absent (sente/gote is
   random per game in shogi).
-- **Ranked standings.** The Results tab lists per-round results and a victory
-  count, ordered by tournament number. Add real standings ordering (by score,
-  then tie-breaks) and richer scoring (points, draws) on top of it.
+- **Ranked standings.** The Results tab lists per-round results, a victory count
+  and a total-points column (victories + MacMahon starting points), ordered by
+  tournament number. Add real standings *ordering* (by points, then tie-breaks)
+  on top of it.
 - **No-shows.** A player who was paired for a round but did not show up (distinct
   from a game simply not yet recorded) should appear as `0#` in the results
   table. This needs a way to mark a board as a no-show (a new board-result state,
@@ -35,6 +36,10 @@ Known limitations and future work, roughly ordered by area.
   game shows the actual sign with the handicap in parentheses (e.g. `3=−(−4p)`
   giving, `1=+(+4p)` receiving) while the victories column counts the effective
   winner.
+
+- ** Making club protection optional** as a tournament option. It should also be possible
+  to have it only active for the first N rounds of the tournament (also settable from the
+  tournament settings tab).
 
 ## FESA rating list
 
@@ -52,3 +57,17 @@ Known limitations and future work, roughly ordered by area.
   mis-split. Derive the column boundaries from the file itself (e.g. from the
   header row's `Name` / `Grades` positions, or by detecting the alignment) so the
   parser adapts automatically instead of silently breaking.
+
+## Results tab
+
+- **Markers for ascending/descending floaters** When a player plays against a player
+  with more (respectively less points), they should get a ^ (respectively v) at the end
+  of their result cell for that match. In the exceptional case of a game with a difference
+  in points greater than 1, it can be expressed by emitting multiple v or ^ in a row.
+  
+## Simulations
+
+- **Add an API to get random game results** This API should not be surfaced in the UI, it is
+  to be used in tests, and for doing simulations of various pairing methods. For each undecided match
+  in the current round, it should pick a winner based on the respective ELOs, using the following formula:
+  Chance of victory for player with elo A playing against player with elo B: 1 / (1 + 10^((B - A) / 400))

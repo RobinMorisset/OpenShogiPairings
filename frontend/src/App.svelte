@@ -19,6 +19,7 @@
     setBoardWinner,
     undoTournament,
     updateDraft,
+    updateSettings,
     type DraftUpdate,
   } from "./lib/api";
   import type {
@@ -37,6 +38,7 @@
   import RoundView from "./lib/components/RoundView.svelte";
   import RoundDraftView from "./lib/components/RoundDraftView.svelte";
   import ResultsView from "./lib/components/ResultsView.svelte";
+  import TournamentSettingsView from "./lib/components/TournamentSettingsView.svelte";
 
   let tournament = $state<Tournament | null>(null);
   let canUndo = $state(false);
@@ -119,6 +121,7 @@
   $effect(() => {
     if (!tournament) return;
     const valid = new Set([
+      "settings",
       "players",
       "results",
       ...tournament.rounds.map((r) => `round-${r.number}`),
@@ -268,6 +271,12 @@
       ratings = await refreshRatings();
     });
   }
+
+  function handleUpdateSettings(macmahonThresholds: number[]) {
+    run(async () => {
+      apply(await updateSettings(macmahonThresholds));
+    });
+  }
 </script>
 
 <div class="app">
@@ -320,6 +329,14 @@
       </div>
 
       <div class="tabs" role="tablist">
+        <button
+          type="button"
+          class="tab"
+          class:active={activeTab === "settings"}
+          onclick={() => (activeTab = "settings")}
+        >
+          Settings
+        </button>
         <button
           type="button"
           class="tab"
@@ -379,7 +396,14 @@
       </div>
 
       <div class="tab-content">
-        {#if activeTab === "players"}
+        {#if activeTab === "settings"}
+          <TournamentSettingsView
+            settings={tournament.settings}
+            finalized={tournament.registration_finalized}
+            onUpdate={handleUpdateSettings}
+            {busy}
+          />
+        {:else if activeTab === "players"}
           <PlayerRegistration onAdd={handleAddPlayer} {ratings} {busy} />
           <div class="ratings-status">
             <span>

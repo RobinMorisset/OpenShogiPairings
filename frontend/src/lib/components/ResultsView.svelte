@@ -95,6 +95,19 @@
     }
     return count;
   }
+
+  /** MacMahon starting points: one per ELO threshold the rating reaches. */
+  function macmahonPoints(player: Player): number {
+    const r = player.rating;
+    if (r == null) return 0;
+    return (tournament.settings?.macmahon_thresholds ?? []).filter((t) => r >= t)
+      .length;
+  }
+
+  /** Total score: victories plus MacMahon starting points. */
+  function points(player: Player): number {
+    return victories(player) + macmahonPoints(player);
+  }
 </script>
 
 {#if tournament.players.length === 0}
@@ -113,6 +126,7 @@
           <th class="num">R{round.number}</th>
         {/each}
         <th class="num">Victories</th>
+        <th class="num">Points</th>
       </tr>
     </thead>
     <tbody>
@@ -144,6 +158,7 @@
             </td>
           {/each}
           <td class="num victories">{victories(player)}</td>
+          <td class="num points" title="Victories + MacMahon points">{points(player)}</td>
         </tr>
       {/each}
     </tbody>
@@ -192,6 +207,10 @@
   }
   .victories {
     font-weight: 600;
+  }
+  .points {
+    font-weight: 700;
+    color: #d2a8ff;
   }
   .muted {
     color: #9a9aa2;

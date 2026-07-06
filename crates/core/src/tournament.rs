@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::pairing::pair_round_weighted;
 use crate::player::{NewPlayer, Player};
 use crate::round::{Board, Handicap, HandicapGame, Round, RoundDraft, Winner};
+use crate::settings::TournamentSettings;
 
 /// On-disk / on-the-wire format version for a serialized [`Tournament`].
 ///
@@ -42,6 +43,10 @@ pub struct Tournament {
     pub id: Uuid,
     /// Human-readable tournament name.
     pub name: String,
+    /// Tournament-wide settings (MacMahon groups, …). Defaulted so older saves
+    /// that predate it load with no MacMahon.
+    #[serde(default)]
+    pub settings: TournamentSettings,
     /// Registered players, in registration order.
     #[serde(default)]
     pub players: Vec<Player>,
@@ -124,6 +129,7 @@ impl Tournament {
             format_version: TOURNAMENT_FORMAT_VERSION,
             id: Uuid::new_v4(),
             name: name.to_string(),
+            settings: TournamentSettings::default(),
             players: Vec::new(),
             registration_finalized: false,
             draft: None,
@@ -200,6 +206,17 @@ impl Tournament {
             return Err(TournamentError::PlayerNotFound(id));
         }
         Ok(())
+    }
+
+    /// Replace the MacMahon threshold list (stored sorted and de-duplicated).
+    ///
+    /// Allowed at any point; the caller (UI) warns when registration is already
+    /// finalized, since changing the groups shifts everyone's points and future
+    /// pairings.
+    pub fn update_settings(&mut self, macmahon_thresholds: Vec<u32>) -> &TournamentSettings {
+        self.settings.macmahon_thresholds =
+            TournamentSettings::normalize_thresholds(macmahon_thresholds);
+        &self.settings
     }
 
     /// Finalize registration. Prerequisite for starting the first round.
@@ -398,6 +415,7 @@ impl Tournament {
         let mut round = pair_round_weighted(
             draft.number,
             &self.players,
+            &self.settings,
             &self.rounds,
             &present,
             &draft.forced_boards,

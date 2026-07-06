@@ -123,6 +123,16 @@ export function undoTournament(): Promise<TournamentResponse> {
   return request<TournamentResponse>("/api/tournament/undo", { method: "POST" });
 }
 
+/** Update tournament settings (the MacMahon thresholds). Server normalizes them. */
+export function updateSettings(
+  macmahonThresholds: number[],
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>("/api/tournament/settings", {
+    method: "PUT",
+    body: JSON.stringify({ macmahon_thresholds: macmahonThresholds }),
+  });
+}
+
 /** Finalize registration (prerequisite for starting the first round). */
 export function finalizeRegistration(): Promise<TournamentResponse> {
   return request<TournamentResponse>("/api/tournament/finalize-registration", {

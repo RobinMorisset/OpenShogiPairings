@@ -34,8 +34,11 @@ phantom vertex. The multiplier ladder approximates strict lexicographic priority
 and is sized for realistic events; an ILP/CP-SAT backend for stricter tiers and
 experimental formats is future work (see [TODO.md](TODO.md)).
 
-The UI organizes a tournament into tabs: **Players**, **Results** (placeholder
-until results land), and one tab per round created by "Start round".
+The UI organizes a tournament into tabs: **Settings** (MacMahon groups),
+**Players**, **Results** (per-round results plus Victories and total Points),
+and one tab per round. Points are each player's victories plus their MacMahon
+starting points (one per ELO threshold their rating reaches), and the pairing
+engine scores by total points.
 
 > **Current status:** early. The server holds a single in-memory tournament (a
 > name + a list of players) as the shared source of truth, with a REST API to
@@ -75,6 +78,7 @@ button together (the persisted save-file shape stays the bare tournament).
 | `GET /api/tournament` | Fetch the current tournament (404 if none). |
 | `PUT /api/tournament` | Replace the current tournament (used by "load"). |
 | `POST /api/tournament/undo` | Revert the last change (server-side undo history). |
+| `PUT /api/tournament/settings` | Update settings: `{ "macmahon_thresholds": [1200, 1700] }` (stored sorted & de-duplicated). |
 | `POST /api/tournament/finalize-registration` | Finalize registration (unlocks round 1). |
 | `POST /api/tournament/complete-round` | Complete the current round (all games must be played). |
 | `POST /api/tournament/rounds/prepare` | Begin drafting the next round. |

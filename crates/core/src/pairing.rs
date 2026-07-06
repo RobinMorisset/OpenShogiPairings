@@ -9,15 +9,16 @@
 //!
 //! 1. **No rematch / no repeat bye** — two players never meet twice, and no one
 //!    takes the bye twice.
-//! 2. **Equal scores** — prefer opponents with the same number of victories;
-//!    penalty grows with the *square* of the victory gap.
+//! 2. **Equal scores** — prefer opponents with the same number of points (each
+//!    player's MacMahon starting points plus their victories); the penalty grows
+//!    with the *square* of the points gap.
 //! 3. **No repeated float** — avoid making a player an ascending floater (meeting
-//!    someone with more victories) or a descending floater (fewer victories, or a
+//!    someone with more points) or a descending floater (fewer points, or a
 //!    bye) twice; the penalty fades with the number of rounds since the last such
 //!    float.
 //! 4. **Different clubs** — avoid pairing club-mates (ignored when a club is
 //!    unknown).
-//! 5. **Fold within a score group** — sort a group (equal victories) by rating
+//! 5. **Fold within a score group** — sort a group (equal points) by rating
 //!    (unrated = 1), descending; the Nth player of the top half should meet the
 //!    Nth of the bottom half, penalized by how far the actual pairing deviates.
 //!
@@ -37,6 +38,7 @@ use uuid::Uuid;
 use crate::matching::min_weight_perfect_matching;
 use crate::player::Player;
 use crate::round::{Board, Round, Winner};
+use crate::settings::TournamentSettings;
 
 /// Pair all the given players with no constraints (naïve mode).
 pub fn pair_round(number: u32, player_ids: &[Uuid]) -> Round {
@@ -126,7 +128,9 @@ const FLOAT_BASE: i128 = 720;
 /// Per-player state going into the round being paired, derived from the completed
 /// rounds. Holds everything the rules need.
 struct PlayerStanding {
-    victories: u32,
+    /// Total score driving the pairing: MacMahon starting points plus victories
+    /// (a bye and the effective winner of each board both count as a victory).
+    points: u32,
     opponents: HashSet<Uuid>,
     had_bye: bool,
     /// Round number of the most recent round in which the player was an ascending
@@ -143,16 +147,20 @@ struct Standings {
 }
 
 impl Standings {
-    /// Replay the completed rounds to accumulate each player's victories,
-    /// opponents, bye status and float history.
-    fn compute(players: &[Player], completed_rounds: &[Round]) -> Self {
+    /// Replay the completed rounds to accumulate each player's points (starting
+    /// from their MacMahon points), opponents, bye status and float history.
+    fn compute(
+        players: &[Player],
+        settings: &TournamentSettings,
+        completed_rounds: &[Round],
+    ) -> Self {
         let mut by_id: HashMap<Uuid, PlayerStanding> = players
             .iter()
             .map(|p| {
                 (
                     p.id,
                     PlayerStanding {
-                        victories: 0,
+                        points: settings.macmahon_points(p.rating),
                         opponents: HashSet::new(),
                         had_bye: false,
                         last_ascended: None,
@@ -170,7 +178,7 @@ impl Standings {
             for board in &round.boards {
                 let (a, b) = (board.player1, board.player2);
                 let (va, vb) = match (by_id.get(&a), by_id.get(&b)) {
-                    (Some(sa), Some(sb)) => (sa.victories, sb.victories),
+                    (Some(sa), Some(sb)) => (sa.points, sb.points),
                     _ => continue,
                 };
                 by_id.get_mut(&a).unwrap().opponents.insert(b);
@@ -199,12 +207,12 @@ impl Standings {
                 match board.effective_winner() {
                     Some(Winner::Player1) => {
                         if let Some(s) = by_id.get_mut(&board.player1) {
-                            s.victories += 1;
+                            s.points += 1;
                         }
                     }
                     Some(Winner::Player2) => {
                         if let Some(s) = by_id.get_mut(&board.player2) {
-                            s.victories += 1;
+                            s.points += 1;
                         }
                     }
                     None => {}
@@ -212,7 +220,7 @@ impl Standings {
             }
             if let Some(bye) = round.bye {
                 if let Some(s) = by_id.get_mut(&bye) {
-                    s.victories += 1;
+                    s.points += 1;
                 }
             }
         }
@@ -252,7 +260,7 @@ fn fold_ranks(stand: &Standings, players: &[Player], free: &[Uuid]) -> HashMap<U
         .collect();
     let mut groups: HashMap<u32, Vec<Uuid>> = HashMap::new();
     for &id in free {
-        groups.entry(stand.get(&id).victories).or_default().push(id);
+        groups.entry(stand.get(&id).points).or_default().push(id);
     }
     let mut info = HashMap::new();
     for group in groups.values_mut() {
@@ -301,12 +309,12 @@ fn edge_cost(
     }
 
     // Rule 2: prefer equal scores; penalty grows with the square of the gap.
-    let gap = (sa.victories as i128 - sb.victories as i128).abs();
+    let gap = (sa.points as i128 - sb.points as i128).abs();
     cost += W_SCORE * gap * gap;
 
     // Rule 3: avoid repeating a float in the same direction. The lower-scored
     // player floats up, the higher-scored one floats down.
-    match sa.victories.cmp(&sb.victories) {
+    match sa.points.cmp(&sb.points) {
         Ordering::Less => {
             cost += float_penalty(sa.last_ascended, round);
             cost += float_penalty(sb.last_descended, round);
@@ -326,7 +334,7 @@ fn edge_cost(
     }
 
     // Rule 5: fold within a score group.
-    if sa.victories == sb.victories {
+    if sa.points == sb.points {
         if let (Some(fa), Some(fb)) = (fold.get(&a), fold.get(&b)) {
             let ia = ideal_rank(fa.rank, fa.group_size) as i128;
             let ib = ideal_rank(fb.rank, fb.group_size) as i128;
@@ -360,12 +368,13 @@ fn bye_cost(stand: &Standings, player: Uuid, round: u32) -> i128 {
 pub fn pair_round_weighted(
     number: u32,
     players: &[Player],
+    settings: &TournamentSettings,
     completed_rounds: &[Round],
     present: &[Uuid],
     forced_boards: &[Board],
     forced_bye: Option<Uuid>,
 ) -> Round {
-    let stand = Standings::compute(players, completed_rounds);
+    let stand = Standings::compute(players, settings, completed_rounds);
 
     let mut placed: HashSet<Uuid> = HashSet::new();
     for board in forced_boards {
@@ -584,7 +593,8 @@ mod tests {
         );
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
 
-        let round = pair_round_weighted(2, &p, &[r1], &present, &[], None);
+        let round =
+            pair_round_weighted(2, &p, &TournamentSettings::default(), &[r1], &present, &[], None);
 
         assert_eq!(round.bye, None);
         assert_eq!(round.boards.len(), 2);
@@ -601,12 +611,43 @@ mod tests {
         let r1 = completed_round(1, &[(p[0].id, p[1].id, Winner::Player1)], Some(p[2].id));
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
 
-        let round = pair_round_weighted(2, &p, &[r1], &present, &[], None);
+        let round =
+            pair_round_weighted(2, &p, &TournamentSettings::default(), &[r1], &present, &[], None);
 
         // p2 already had a bye, so it must fall elsewhere; giving it to p1 also
         // leaves the same-score board p0 vs p2.
         assert_eq!(round.bye, Some(p[1].id));
         assert_eq!(board_pairs(&round), HashSet::from([unord(p[0].id, p[2].id)]));
+    }
+
+    #[test]
+    fn macmahon_points_group_the_pairings() {
+        // Round 1, everyone on 0 victories. With no MacMahon the four form one
+        // score group and the fold pairs p0-p2 / p1-p3. A 1500 threshold splits
+        // them into a top group {p0,p1} and a bottom group {p2,p3}, and rule 2
+        // (equal points) keeps the groups apart instead.
+        let p = vec![
+            player(1, Some(2000), None),
+            player(2, Some(1900), None),
+            player(3, Some(1000), None),
+            player(4, Some(900), None),
+        ];
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let settings = TournamentSettings {
+            macmahon_thresholds: vec![1500],
+        };
+
+        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);
+
+        let pairs = board_pairs(&round);
+        assert!(
+            pairs.contains(&unord(p[0].id, p[1].id)),
+            "top MacMahon group paired within itself"
+        );
+        assert!(
+            pairs.contains(&unord(p[2].id, p[3].id)),
+            "bottom MacMahon group paired within itself"
+        );
     }
 
     #[test]
@@ -622,7 +663,8 @@ mod tests {
         ];
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
 
-        let round = pair_round_weighted(1, &p, &[], &present, &[], None);
+        let round =
+            pair_round_weighted(1, &p, &TournamentSettings::default(), &[], &present, &[], None);
 
         assert_eq!(round.boards.len(), 2);
         let club_of = |id: Uuid| p.iter().find(|q| q.id == id).unwrap().club.clone();

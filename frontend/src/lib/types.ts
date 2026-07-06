@@ -99,11 +99,18 @@ export interface RoundDraft {
   forced_bye?: string; // player UUID
 }
 
+/** Mirror of `osp_core::TournamentSettings`. */
+export interface TournamentSettings {
+  /** ELO thresholds (ascending) defining the MacMahon starting groups. */
+  macmahon_thresholds: number[];
+}
+
 /** Mirror of `osp_core::Tournament`. */
 export interface Tournament {
   format_version: number;
   id: string; // UUID
   name: string;
+  settings: TournamentSettings;
   players: Player[];
   registration_finalized: boolean;
   draft?: RoundDraft | null;

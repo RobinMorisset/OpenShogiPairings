@@ -17,6 +17,7 @@ use crate::state::{AppState, TournamentStore};
 /// - `GET    /api/tournament`               fetch the current tournament
 /// - `PUT    /api/tournament`               replace the current tournament (load)
 /// - `POST   /api/tournament/undo`          revert the last player change
+/// - `PUT    /api/tournament/settings`      update tournament settings (MacMahon)
 /// - `POST   /api/tournament/finalize-registration`  finalize registration
 /// - `POST   /api/tournament/complete-round`         complete the current round
 /// - `POST   /api/tournament/rounds/prepare`         begin drafting the next round
@@ -41,6 +42,7 @@ pub fn routes() -> Router<AppState> {
                 .put(replace_tournament),
         )
         .route("/api/tournament/undo", post(undo))
+        .route("/api/tournament/settings", put(update_settings))
         .route(
             "/api/tournament/finalize-registration",
             post(finalize_registration),
@@ -128,6 +130,26 @@ async fn undo(State(state): State<AppState>) -> Result<Json<TournamentView>, Api
         return Err(ApiError::NoTournament);
     }
     store.undo();
+    view(&store)
+}
+
+/// Body of the settings endpoint. Only the MacMahon thresholds for now.
+#[derive(Debug, Deserialize)]
+struct UpdateSettingsRequest {
+    #[serde(default)]
+    macmahon_thresholds: Vec<u32>,
+}
+
+/// Update the tournament settings (stored normalized: sorted, de-duplicated).
+async fn update_settings(
+    State(state): State<AppState>,
+    Json(req): Json<UpdateSettingsRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.mutate(|t| {
+        t.update_settings(req.macmahon_thresholds);
+        Ok(())
+    })?;
     view(&store)
 }
 
