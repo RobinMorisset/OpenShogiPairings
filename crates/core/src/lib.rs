@@ -8,6 +8,7 @@
 //! desktop app.
 
 mod american_grid;
+mod cup;
 mod fesa;
 mod grid_import;
 mod matching;
@@ -20,11 +21,12 @@ mod standings;
 mod tournament;
 
 pub use american_grid::to_grid as american_grid;
+pub use cup::{Cup, CupPodium, CUP_SIZES};
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
 pub use grid_import::{import_american_grid, GridImportError};
 pub use pairing::{pair_round, pair_round_constrained, pair_round_weighted};
 pub use player::{NewPlayer, Player};
-pub use round::{Board, Handicap, HandicapGame, Round, RoundDraft, Winner};
+pub use round::{Board, CupStage, Handicap, HandicapGame, PairingSource, Round, RoundDraft, Winner};
 pub use settings::{FloaterStyle, TournamentSettings};
 pub use standings::{compute_standings, Standing};
 pub use tournament::{

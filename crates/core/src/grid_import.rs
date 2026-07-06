@@ -28,7 +28,7 @@
 use std::collections::HashMap;
 
 use crate::player::NewPlayer;
-use crate::round::{Board, Handicap, Winner};
+use crate::round::{Board, Handicap, PairingSource, Winner};
 use crate::tournament::{Tournament, TournamentError};
 
 /// Why an American Grid could not be imported.
@@ -173,14 +173,12 @@ fn rebuild_round(
                             b: *opponent,
                         });
                     }
-                    forced_boards.push(Board {
-                        player1: id_of[&row.number],
-                        player2: id_of[opponent],
-                        result: None,
-                        drawn: false,
-                        handicap: None,
-                        points_diff: None,
-                    });
+                    forced_boards.push(Board::pending(
+                        id_of[&row.number],
+                        id_of[opponent],
+                        None,
+                        PairingSource::Forced,
+                    ));
                     results.push((row.number, *opponent, *outcome, *handicap));
                 }
             }

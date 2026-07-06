@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::player::Player;
-use crate::round::{Round, Winner};
+use crate::round::{PairingSource, Round, Winner};
 use crate::settings::TournamentSettings;
 
 /// One player's accumulated state going into the next round.
@@ -106,6 +106,13 @@ pub(crate) fn compute_scores(
             by_id.get_mut(&a).unwrap().opponents.push(b);
             by_id.get_mut(&b).unwrap().opponents.push(a);
 
+            // A cup board is a forced bracket pairing, not a Swiss float, so it
+            // must not shape the players' float history (though it still counts as
+            // a game faced above, so a later Swiss round won't re-pair them).
+            if matches!(board.source, PairingSource::Cup { .. }) {
+                continue;
+            }
+
             // Direction from the frozen float, else from the live difference.
             let diff = board
                 .points_diff
@@ -157,7 +164,7 @@ pub(crate) fn compute_scores(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::Board;
+    use crate::round::{Board, CupStage};
 
     fn player(tid: u32, rating: Option<u32>) -> Player {
         Player {
@@ -168,6 +175,7 @@ mod tests {
             rating,
             nationality: None,
             club: None,
+            eligible: false,
         }
     }
 
@@ -181,12 +189,8 @@ mod tests {
         let round = Round {
             number: 1,
             boards: vec![Board {
-                player1: a.id,
-                player2: b.id,
                 result: Some(Winner::Player1),
-                drawn: false,
-                handicap: None,
-                points_diff: Some(2),
+                ..Board::pending(a.id, b.id, Some(2), PairingSource::Swiss)
             }],
             bye: None,
             absent: Vec::new(),
@@ -207,12 +211,8 @@ mod tests {
         let round = Round {
             number: 1,
             boards: vec![Board {
-                player1: a.id,
-                player2: b.id,
                 result: Some(Winner::Player1),
-                drawn: false,
-                handicap: None,
-                points_diff: None,
+                ..Board::pending(a.id, b.id, None, PairingSource::Swiss)
             }],
             bye: None,
             absent: Vec::new(),
@@ -225,5 +225,32 @@ mod tests {
         let scores = compute_scores(&[a.clone(), b.clone()], &settings, &[round]);
         assert_eq!(scores.get(&a.id).last_descended, Some(1));
         assert_eq!(scores.get(&b.id).last_ascended, Some(1));
+    }
+
+    #[test]
+    fn cup_boards_count_points_and_opponents_but_not_floats() {
+        // A cup board with a big frozen points_diff would be a heavy downfloat if
+        // it were a Swiss game — but the cup bypasses the float rules.
+        let a = player(1, None);
+        let b = player(2, None);
+        let round = Round {
+            number: 1,
+            boards: vec![Board {
+                result: Some(Winner::Player1),
+                ..Board::pending(a.id, b.id, Some(5), PairingSource::Cup { stage: CupStage::Final })
+            }],
+            bye: None,
+            absent: Vec::new(),
+            completed: true,
+        };
+        let scores = compute_scores(&[a.clone(), b.clone()], &TournamentSettings::default(), &[round]);
+        // The win still scores, and both are recorded as opponents faced (so a
+        // later Swiss round won't re-pair them).
+        assert_eq!(scores.get(&a.id).points, 1);
+        assert_eq!(scores.get(&a.id).opponents, vec![b.id]);
+        assert_eq!(scores.get(&b.id).opponents, vec![a.id]);
+        // ...but the cup game left no float history.
+        assert_eq!(scores.get(&a.id).last_descended, None);
+        assert_eq!(scores.get(&b.id).last_ascended, None);
     }
 }

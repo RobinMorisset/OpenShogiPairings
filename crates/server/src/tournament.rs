@@ -5,7 +5,9 @@ use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use osp_core::{Board, Handicap, NewPlayer, Standing, Tournament, TournamentSettings, Winner};
+use osp_core::{
+    Board, CupPodium, Handicap, NewPlayer, Standing, Tournament, TournamentSettings, Winner,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -33,6 +35,7 @@ use crate::state::{AppState, TournamentStore};
 /// - `POST   /api/tournament/players`       register a player
 /// - `PUT    /api/tournament/players/{id}`  edit a player
 /// - `DELETE /api/tournament/players/{id}`  remove a player
+/// - `POST   /api/tournament/players/{id}/eligible`  set cup eligibility
 ///
 /// Every endpoint returns a [`TournamentView`] (the tournament plus whether an
 /// undo is available), so clients can refresh their view and the undo button
@@ -77,6 +80,10 @@ pub fn routes() -> Router<AppState> {
             "/api/tournament/players/{id}",
             axum::routing::put(edit_player).delete(remove_player),
         )
+        .route(
+            "/api/tournament/players/{id}/eligible",
+            post(set_player_eligible),
+        )
 }
 
 /// API response: the current tournament, undo availability, and the derived
@@ -91,16 +98,22 @@ struct TournamentView {
     tournament: Tournament,
     can_undo: bool,
     standings: Vec<Standing>,
+    /// The cup podium once decided (champion / runner-up / third / fourth), for the
+    /// Results-tab medals. `None` when there is no cup or the final isn't finished.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cup_podium: Option<CupPodium>,
 }
 
 /// Build the view from the store, or 404 if no tournament exists.
 fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
     let tournament = store.current().cloned().ok_or(ApiError::NoTournament)?;
     let standings = tournament.standings();
+    let cup_podium = tournament.cup_podium();
     Ok(Json(TournamentView {
         tournament,
         can_undo: store.can_undo(),
         standings,
+        cup_podium,
     }))
 }
 
@@ -190,12 +203,22 @@ async fn update_settings(
     view(&store)
 }
 
-/// Finalize registration (prerequisite for starting the first round).
+/// Body of the finalize endpoint: the chosen cup size, if the cup is enabled.
+#[derive(Debug, Default, Deserialize)]
+struct FinalizeRequest {
+    #[serde(default)]
+    cup_size: Option<u32>,
+}
+
+/// Finalize registration (prerequisite for starting the first round). When the
+/// cup is enabled the body carries the chosen size; otherwise the body is empty.
 async fn finalize_registration(
     State(state): State<AppState>,
+    body: Option<Json<FinalizeRequest>>,
 ) -> Result<Json<TournamentView>, ApiError> {
+    let cup_size = body.and_then(|Json(b)| b.cup_size);
     let mut store = state.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.finalize_registration())?;
+    store.mutate(|t| t.finalize_registration_with(cup_size))?;
     view(&store)
 }
 
@@ -350,5 +373,22 @@ async fn remove_player(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = state.store.write().expect("store lock poisoned");
     store.mutate(|t| t.remove_player(id))?;
+    view(&store)
+}
+
+/// Body of the eligibility endpoint: the new cup-eligibility flag.
+#[derive(Debug, Deserialize)]
+struct SetEligibleRequest {
+    eligible: bool,
+}
+
+/// Set whether a player is eligible for the direct-elimination cup.
+async fn set_player_eligible(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<SetEligibleRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.mutate(|t| t.set_player_eligible(id, req.eligible).map(|_| ()))?;
     view(&store)
 }

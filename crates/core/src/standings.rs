@@ -100,7 +100,7 @@ pub fn compute_standings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::{Board, Winner};
+    use crate::round::{Board, PairingSource, Winner};
 
     fn player(tid: u32, rating: Option<u32>) -> Player {
         Player {
@@ -111,17 +111,14 @@ mod tests {
             rating,
             nationality: None,
             club: None,
+            eligible: false,
         }
     }
 
     fn board(a: Uuid, b: Uuid, winner: Winner) -> Board {
         Board {
-            player1: a,
-            player2: b,
             result: Some(winner),
-            drawn: false,
-            handicap: None,
-            points_diff: None,
+            ..Board::pending(a, b, None, PairingSource::Swiss)
         }
     }
 

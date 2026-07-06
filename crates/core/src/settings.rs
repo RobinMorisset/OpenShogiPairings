@@ -56,6 +56,11 @@ pub struct TournamentSettings {
     /// vs median Swiss). The descending floater is always the group's weakest.
     #[serde(default)]
     pub floater_style: FloaterStyle,
+    /// Whether this is a hybrid tournament with a direct-elimination cup among the
+    /// top eligible players. Off by default. When on, registration gains an
+    /// eligibility column and finalization asks for the cup size.
+    #[serde(default)]
+    pub cup_enabled: bool,
 }
 
 impl TournamentSettings {

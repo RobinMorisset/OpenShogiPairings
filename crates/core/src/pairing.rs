@@ -48,7 +48,7 @@ use uuid::Uuid;
 
 use crate::matching::min_weight_perfect_matching;
 use crate::player::Player;
-use crate::round::{Board, Round};
+use crate::round::{Board, PairingSource, Round};
 use crate::scoring::{compute_scores, Scores};
 use crate::settings::{FloaterStyle, TournamentSettings};
 
@@ -93,24 +93,10 @@ pub fn pair_round_constrained(
 
     let mut boards: Vec<Board> = forced_boards
         .iter()
-        .map(|b| Board {
-            player1: b.player1,
-            player2: b.player2,
-            result: None,
-            drawn: false,
-            handicap: None,
-            points_diff: None,
-        })
+        .map(|b| Board::pending(b.player1, b.player2, None, PairingSource::Forced))
         .collect();
     for pair in remaining.chunks(2) {
-        boards.push(Board {
-            player1: pair[0],
-            player2: pair[1],
-            result: None,
-            drawn: false,
-            handicap: None,
-            points_diff: None,
-        });
+        boards.push(Board::pending(pair[0], pair[1], None, PairingSource::Swiss));
     }
 
     Round {
@@ -435,13 +421,13 @@ pub fn pair_round_weighted(
 
     let mut boards: Vec<Board> = forced_boards
         .iter()
-        .map(|b| Board {
-            player1: b.player1,
-            player2: b.player2,
-            result: None,
-            drawn: false,
-            handicap: None,
-            points_diff: Some(diff(b.player1, b.player2)),
+        .map(|b| {
+            Board::pending(
+                b.player1,
+                b.player2,
+                Some(diff(b.player1, b.player2)),
+                PairingSource::Forced,
+            )
         })
         .collect();
     let mut bye = forced_bye;
@@ -501,14 +487,12 @@ pub fn pair_round_weighted(
                 let real = if i == k { j } else { i };
                 bye = Some(free[real]);
             } else {
-                boards.push(Board {
-                    player1: free[i],
-                    player2: free[j],
-                    result: None,
-                    drawn: false,
-                    handicap: None,
-                    points_diff: Some(diff(free[i], free[j])),
-                });
+                boards.push(Board::pending(
+                    free[i],
+                    free[j],
+                    Some(diff(free[i], free[j])),
+                    PairingSource::Swiss,
+                ));
             }
         }
     } else if k == 1 {
@@ -558,14 +542,7 @@ mod tests {
     fn forced_board_is_kept_and_rest_paired() {
         let p = ids(4);
         // Force p[0] vs p[3]; p[1] and p[2] should be paired automatically.
-        let forced = vec![Board {
-            player1: p[0],
-            player2: p[3],
-            result: None,
-            drawn: false,
-            handicap: None,
-            points_diff: None,
-        }];
+        let forced = vec![Board::pending(p[0], p[3], None, PairingSource::Swiss)];
         let round = pair_round_constrained(1, &p, &forced, None);
         assert_eq!(round.boards.len(), 2);
         assert_eq!(round.boards[0].player1, p[0]);
@@ -601,6 +578,7 @@ mod tests {
             rating,
             nationality: None,
             club: club.map(|c| c.to_string()),
+            eligible: false,
         }
     }
 
@@ -614,12 +592,8 @@ mod tests {
             boards: boards
                 .iter()
                 .map(|&(a, b, w)| Board {
-                    player1: a,
-                    player2: b,
                     result: Some(w),
-                    drawn: false,
-                    handicap: None,
-                    points_diff: None,
+                    ..Board::pending(a, b, None, PairingSource::Swiss)
                 })
                 .collect(),
             bye,
@@ -699,14 +673,8 @@ mod tests {
             None,
         );
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
-        let forced = vec![Board {
-            player1: p[0].id, // A (1 pt)
-            player2: p[3].id, // D (0 pt)
-            result: None,
-            drawn: false,
-            handicap: None,
-            points_diff: None,
-        }];
+        // A (1 pt) vs D (0 pt), forced.
+        let forced = vec![Board::pending(p[0].id, p[3].id, None, PairingSource::Swiss)];
 
         let round =
             pair_round_weighted(2, &p, &TournamentSettings::default(), &[r1], &present, &forced, None);

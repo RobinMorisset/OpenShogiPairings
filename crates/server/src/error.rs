@@ -46,9 +46,12 @@ impl From<TournamentError> for ApiError {
             | TournamentError::NoRoundToCancel
             | TournamentError::RoundHasUnplayedGames
             | TournamentError::HandicapNeedsRatingDifference
-            | TournamentError::UnsupportedFormatVersion { .. } => {
-                ApiError::BadRequest(err.to_string())
-            }
+            | TournamentError::UnsupportedFormatVersion { .. }
+            | TournamentError::CupSizeRequired
+            | TournamentError::InvalidCupSize { .. }
+            | TournamentError::NotEnoughEligiblePlayers { .. }
+            | TournamentError::CannotRemoveCupPlayer
+            | TournamentError::CupBracketInconsistent => ApiError::BadRequest(err.to_string()),
             TournamentError::PlayerNotFound(_)
             | TournamentError::RoundNotFound(_)
             | TournamentError::BoardNotFound { .. } => ApiError::NotFound(err.to_string()),

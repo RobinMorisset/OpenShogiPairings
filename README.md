@@ -92,8 +92,8 @@ by points, then the SOS / SODOS / SOSOS tie-breaks, then tournament number.
 | `POST /api/tournament/undo` | Revert the last change (server-side undo history). |
 | `GET /api/tournament/american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
 | `PUT /api/tournament/american-grid` | Import an American Grid (raw `text/plain` body), rebuilding the tournament from it — registers the players, forces every round's pairings, and replays the results. Replaces the current tournament; meant for seeding a non-trivial state in tests/simulations, not surfaced in the UI. |
-| `PUT /api/tournament/settings` | Update settings (the whole `TournamentSettings`): `{ "macmahon_thresholds": [1200, 1700], "macmahon_removals": [3], "club_protection_enabled": true, "club_protection_rounds": 3, "club_protection_exempt_clubs": ["Paris"] }`. Thresholds stored sorted & de-duplicated; `macmahon_removals` (degressive MacMahon: round-ends at which the bottom threshold is dropped) sorted & capped to the threshold count; club protection avoids same-club pairings (off by default; optional round limit; exempt clubs trimmed, de-duplicated case-insensitively). |
-| `POST /api/tournament/finalize-registration` | Finalize registration (unlocks round 1). |
+| `PUT /api/tournament/settings` | Update settings (the whole `TournamentSettings`): `{ "macmahon_thresholds": [1200, 1700], "macmahon_removals": [3], "club_protection_enabled": true, "club_protection_rounds": 3, "club_protection_exempt_clubs": ["Paris"] }`. Thresholds stored sorted & de-duplicated; `macmahon_removals` (degressive MacMahon: round-ends at which the bottom threshold is dropped) sorted & capped to the threshold count; club protection avoids same-club pairings (off by default; optional round limit; exempt clubs trimmed, de-duplicated case-insensitively). `floater_style` is `"classic"｜"median"`; `cup_enabled` toggles the hybrid direct-elimination cup (its size is chosen at finalization). |
+| `POST /api/tournament/finalize-registration` | Finalize registration (unlocks round 1). Body optional: `{ "cup_size": 8｜16｜32｜64 }` when the hybrid cup is enabled — seeds the top-N eligible players into a direct-elimination bracket (400 if fewer than N are eligible). |
 | `POST /api/tournament/complete-round` | Complete the current round (all games must be played). |
 | `POST /api/tournament/cancel-round` | Cancel the last round — discards the open draft if one is being prepared, otherwise removes the most recent round (undoable). Steps back one stage, e.g. to replay a round in a simulation. |
 | `POST /api/tournament/rounds/prepare` | Begin drafting the next round. |
@@ -104,7 +104,8 @@ by points, then the SOS / SODOS / SOSOS tie-breaks, then tournament number.
 | `PUT /api/tournament/rounds/{n}/boards/{i}/handicap` | Set/clear the handicap: `{ "handicap": "4p"｜null }` (giver frozen from ratings; 400 if ratings equal). |
 | `POST /api/tournament/players` | Register a player: `{ "last_name", "first_name?", "rating?", "nationality?", "club?" }`. |
 | `PUT /api/tournament/players/{id}` | Edit a player's fields in place. |
-| `DELETE /api/tournament/players/{id}` | Remove a player. |
+| `DELETE /api/tournament/players/{id}` | Remove a player (400 if they are seeded in the cup bracket). |
+| `POST /api/tournament/players/{id}/eligible` | Set cup eligibility: `{ "eligible": true｜false }`. |
 
 The FESA rating list is fixed-width, Latin-1 text (parsed in
 [`crates/core`](crates/core/src/fesa.rs)). It's shared reference data, so the

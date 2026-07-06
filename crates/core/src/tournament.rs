@@ -11,9 +11,10 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::cup::{Cup, CupPodium, CUP_SIZES};
 use crate::pairing::pair_round_weighted;
 use crate::player::{NewPlayer, Player};
-use crate::round::{Board, Handicap, HandicapGame, Round, RoundDraft, Winner};
+use crate::round::{Board, Handicap, HandicapGame, PairingSource, Round, RoundDraft, Winner};
 use crate::settings::TournamentSettings;
 use crate::standings::{compute_standings, Standing};
 
@@ -61,6 +62,10 @@ pub struct Tournament {
     /// Rounds played so far, in order.
     #[serde(default)]
     pub rounds: Vec<Round>,
+    /// The direct-elimination cup, if this is a hybrid tournament. Fixed at
+    /// finalization (see [`Cup`]); `None` when there is no cup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cup: Option<Cup>,
 }
 
 /// Errors that can arise while mutating a [`Tournament`].
@@ -118,6 +123,22 @@ pub enum TournamentError {
     /// The serialized record uses a format version this build cannot read.
     #[error("unsupported tournament format version {found} (this build supports {supported})")]
     UnsupportedFormatVersion { found: u32, supported: u32 },
+    /// The cup is enabled but no size was chosen at finalization.
+    #[error("choose a cup size to finalize (the cup is enabled)")]
+    CupSizeRequired,
+    /// The chosen cup size is not one of the supported powers of two.
+    #[error("invalid cup size {size} (must be one of 8, 16, 32, 64)")]
+    InvalidCupSize { size: u32 },
+    /// Fewer eligible players than the chosen cup size.
+    #[error("need at least {needed} eligible players for the cup (have {have})")]
+    NotEnoughEligiblePlayers { needed: u32, have: usize },
+    /// A player who is seeded in the cup bracket cannot be removed.
+    #[error("cannot remove a player seeded in the cup")]
+    CannotRemoveCupPlayer,
+    /// The cup bracket referenced an earlier result that is missing (internal
+    /// inconsistency — should not happen for a properly gated round).
+    #[error("the cup bracket is missing an earlier result")]
+    CupBracketInconsistent,
 }
 
 impl Tournament {
@@ -138,6 +159,7 @@ impl Tournament {
             registration_finalized: false,
             draft: None,
             rounds: Vec::new(),
+            cup: None,
         })
     }
 
@@ -202,8 +224,15 @@ impl Tournament {
 
     /// Remove the player with the given id.
     ///
-    /// Returns [`TournamentError::PlayerNotFound`] if no such player exists.
+    /// Returns [`TournamentError::PlayerNotFound`] if no such player exists, or
+    /// [`TournamentError::CannotRemoveCupPlayer`] if the player is seeded in the
+    /// cup bracket (removing them would corrupt it).
     pub fn remove_player(&mut self, id: Uuid) -> Result<(), TournamentError> {
+        if let Some(cup) = &self.cup {
+            if cup.seed_order.contains(&id) {
+                return Err(TournamentError::CannotRemoveCupPlayer);
+            }
+        }
         let before = self.players.len();
         self.players.retain(|p| p.id != id);
         if self.players.len() == before {
@@ -232,14 +261,47 @@ impl Tournament {
         compute_standings(&self.players, &self.settings, &self.rounds)
     }
 
-    /// Finalize registration. Prerequisite for starting the first round.
-    ///
-    /// A no-op beyond flipping the flag for now (registration stays editable);
-    /// it exists to gate round creation behind an explicit step.
+    /// Finalize registration with no cup (the common path). See
+    /// [`finalize_registration_with`](Self::finalize_registration_with).
     pub fn finalize_registration(&mut self) -> Result<(), TournamentError> {
+        self.finalize_registration_with(None)
+    }
+
+    /// Finalize registration, optionally seeding the direct-elimination cup.
+    ///
+    /// Assigns tournament numbers (highest ELO first, unrated last, ties by
+    /// registration order) and gates round creation behind this explicit step.
+    /// When the cup is enabled in the settings, `cup_size` must be a supported
+    /// power of two (8/16/32/64) with at least that many eligible players; the top
+    /// `cup_size` eligible players (by tournament number) are frozen into the
+    /// bracket. The cup is validated *before* any mutation, so a rejected cup
+    /// leaves registration open for the referee to fix.
+    pub fn finalize_registration_with(
+        &mut self,
+        cup_size: Option<u32>,
+    ) -> Result<(), TournamentError> {
         if self.registration_finalized {
             return Err(TournamentError::RegistrationAlreadyFinalized);
         }
+
+        // Pre-validate the cup so a bad request doesn't half-finalize.
+        let cup_size = if self.settings.cup_enabled {
+            let size = cup_size.ok_or(TournamentError::CupSizeRequired)?;
+            if !CUP_SIZES.contains(&size) {
+                return Err(TournamentError::InvalidCupSize { size });
+            }
+            let eligible = self.players.iter().filter(|p| p.eligible).count();
+            if eligible < size as usize {
+                return Err(TournamentError::NotEnoughEligiblePlayers {
+                    needed: size,
+                    have: eligible,
+                });
+            }
+            Some(size)
+        } else {
+            None
+        };
+
         // Assign tournament numbers 1..N in the sorted-table order: highest ELO
         // first, unrated players last, ties broken by registration order.
         let mut order: Vec<usize> = (0..self.players.len()).collect();
@@ -256,8 +318,44 @@ impl Tournament {
         for (rank, &idx) in order.iter().enumerate() {
             self.players[idx].tournament_id = Some(rank as u32 + 1);
         }
+
+        // Seed the cup from the top eligible players by tournament number.
+        if let Some(size) = cup_size {
+            let mut eligible: Vec<&Player> = self.players.iter().filter(|p| p.eligible).collect();
+            eligible.sort_by_key(|p| p.tournament_id.unwrap_or(u32::MAX));
+            let seed_order = eligible
+                .into_iter()
+                .take(size as usize)
+                .map(|p| p.id)
+                .collect();
+            self.cup = Some(Cup { size, seed_order });
+        }
+
         self.registration_finalized = true;
         Ok(())
+    }
+
+    /// Set whether a player is eligible for the cup. Only meaningful before
+    /// finalization (the bracket is frozen then); allowed at any time so the
+    /// column stays editable.
+    pub fn set_player_eligible(
+        &mut self,
+        id: Uuid,
+        eligible: bool,
+    ) -> Result<&Player, TournamentError> {
+        let player = self
+            .players
+            .iter_mut()
+            .find(|p| p.id == id)
+            .ok_or(TournamentError::PlayerNotFound(id))?;
+        player.eligible = eligible;
+        Ok(player)
+    }
+
+    /// The cup podium (champion, runner-up, third, fourth), once the final round is
+    /// decided; `None` when there is no cup or the final isn't finished.
+    pub fn cup_podium(&self) -> Option<CupPodium> {
+        self.cup.as_ref()?.podium(&self.rounds)
     }
 
     /// Complete the current (last, in-progress) round.
@@ -373,14 +471,7 @@ impl Tournament {
         draft.absent = absent;
         draft.forced_boards = forced_boards
             .into_iter()
-            .map(|b| Board {
-                player1: b.player1,
-                player2: b.player2,
-                result: None,
-                drawn: false,
-                handicap: None,
-                points_diff: None,
-            })
+            .map(|b| Board::pending(b.player1, b.player2, None, PairingSource::Forced))
             .collect();
         draft.forced_bye = forced_bye;
         Ok(self.draft.as_ref().expect("draft present"))
@@ -408,7 +499,32 @@ impl Tournament {
             });
         }
 
-        let present_set: HashSet<Uuid> = present.iter().copied().collect();
+        // Cup boards for this round (if it is a cup round). They bypass the engine
+        // and are generated from the bracket regardless of the absent set — an
+        // absent cup player still gets a board and the referee records the forfeit.
+        let cup_boards: Vec<Board> = match &self.cup {
+            Some(cup) => cup
+                .matches_for_round(&self.rounds, draft.number)
+                .ok_or(TournamentError::CupBracketInconsistent)?
+                .into_iter()
+                .map(|m| {
+                    Board::pending(m.player1, m.player2, None, PairingSource::Cup { stage: m.stage })
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+        let cup_players: HashSet<Uuid> =
+            cup_boards.iter().flat_map(|b| [b.player1, b.player2]).collect();
+
+        // The Swiss pool: present players not taken by the cup this round.
+        let swiss_present: Vec<Uuid> = present
+            .iter()
+            .copied()
+            .filter(|id| !cup_players.contains(id))
+            .collect();
+        let swiss_set: HashSet<Uuid> = swiss_present.iter().copied().collect();
+
+        // Validate the referee's forced boards/bye against the Swiss pool.
         let mut placed: HashSet<Uuid> = HashSet::new();
         for board in &draft.forced_boards {
             if board.player1 == board.player2 {
@@ -417,7 +533,12 @@ impl Tournament {
                 ));
             }
             for player in [board.player1, board.player2] {
-                if !present_set.contains(&player) {
+                if cup_players.contains(&player) {
+                    return Err(TournamentError::InvalidDraft(
+                        "a forced pairing includes a cup player".into(),
+                    ));
+                }
+                if !swiss_set.contains(&player) {
                     return Err(TournamentError::InvalidDraft(
                         "a forced pairing includes an absent player".into(),
                     ));
@@ -430,7 +551,12 @@ impl Tournament {
             }
         }
         if let Some(bye) = draft.forced_bye {
-            if !present_set.contains(&bye) {
+            if cup_players.contains(&bye) {
+                return Err(TournamentError::InvalidDraft(
+                    "the forced bye is a cup player".into(),
+                ));
+            }
+            if !swiss_set.contains(&bye) {
                 return Err(TournamentError::InvalidDraft(
                     "the forced bye is an absent player".into(),
                 ));
@@ -440,25 +566,34 @@ impl Tournament {
                     "the forced bye is also in a forced pairing".into(),
                 ));
             }
-            // With a forced bye, the players left to auto-pair must be even.
-            let leftover = present.len() - 2 * draft.forced_boards.len() - 1;
+            // With a forced bye, the Swiss players left to auto-pair must be even.
+            let leftover = swiss_present.len() - 2 * draft.forced_boards.len() - 1;
             if leftover % 2 != 0 {
                 return Err(TournamentError::InvalidDraft(
-                    "a forced bye needs an odd number of present players".into(),
+                    "a forced bye needs an odd number of Swiss players".into(),
                 ));
             }
         }
 
-        let mut round = pair_round_weighted(
+        // Pair the Swiss pool with the engine, then prepend the cup boards.
+        let swiss_round = pair_round_weighted(
             draft.number,
             &self.players,
             &self.settings,
             &self.rounds,
-            &present,
+            &swiss_present,
             &draft.forced_boards,
             draft.forced_bye,
         );
-        round.absent = draft.absent;
+        let mut boards = cup_boards;
+        boards.extend(swiss_round.boards);
+        let round = Round {
+            number: draft.number,
+            boards,
+            bye: swiss_round.bye,
+            absent: draft.absent,
+            completed: false,
+        };
         self.rounds.push(round);
         self.draft = None;
         Ok(self.rounds.last().expect("just pushed a round"))
@@ -928,14 +1063,7 @@ mod tests {
         t.finalize_registration().unwrap();
         t.prepare_round().unwrap();
         // Force A vs C, and E as the bye (5 present → odd, ok).
-        let forced = vec![Board {
-            player1: ids[0],
-            player2: ids[2],
-            result: None,
-            drawn: false,
-            handicap: None,
-            points_diff: None,
-        }];
+        let forced = vec![Board::pending(ids[0], ids[2], None, PairingSource::Swiss)];
         t.update_draft(vec![], forced, Some(ids[4])).unwrap();
         let round = t.confirm_round().unwrap();
         assert_eq!(round.bye, Some(ids[4]));
@@ -1075,5 +1203,201 @@ mod tests {
                 supported: TOURNAMENT_FORMAT_VERSION,
             })
         );
+    }
+
+    // --- Hybrid cup -------------------------------------------------------
+
+    use crate::round::CupStage;
+
+    fn enable_cup(t: &mut Tournament) {
+        t.update_settings(TournamentSettings {
+            cup_enabled: true,
+            ..Default::default()
+        });
+    }
+
+    fn add_rated(t: &mut Tournament, name: &str, rating: u32, eligible: bool) -> Uuid {
+        let id = t.add_player(rated(name, rating)).unwrap().id;
+        if eligible {
+            t.set_player_eligible(id, true).unwrap();
+        }
+        id
+    }
+
+    /// Find the board (in the round with the given number) pairing `a` and `b`.
+    fn find_board<'a>(t: &'a Tournament, rnum: u32, a: Uuid, b: Uuid) -> Option<&'a Board> {
+        t.rounds
+            .iter()
+            .find(|r| r.number == rnum)?
+            .boards
+            .iter()
+            .find(|bd| {
+                (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a)
+            })
+    }
+
+    /// Record `winner` beating `loser` on their board in round `rnum`.
+    fn decide(t: &mut Tournament, rnum: u32, winner: Uuid, loser: Uuid) {
+        let round = t.rounds.iter().find(|r| r.number == rnum).unwrap();
+        let idx = round
+            .boards
+            .iter()
+            .position(|b| {
+                (b.player1 == winner && b.player2 == loser)
+                    || (b.player1 == loser && b.player2 == winner)
+            })
+            .expect("board exists");
+        let clicked = if round.boards[idx].player1 == winner {
+            Winner::Player1
+        } else {
+            Winner::Player2
+        };
+        t.toggle_board_winner(rnum, idx, clicked).unwrap();
+    }
+
+    /// Give player1 the win on every still-unplayed board (to complete a round).
+    fn decide_rest(t: &mut Tournament, rnum: u32) {
+        let n = t.rounds.iter().find(|r| r.number == rnum).unwrap().boards.len();
+        for idx in 0..n {
+            let unplayed = t.rounds.iter().find(|r| r.number == rnum).unwrap().boards[idx]
+                .result
+                .is_none();
+            if unplayed {
+                t.toggle_board_winner(rnum, idx, Winner::Player1).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn cup_full_top8_run_produces_the_podium() {
+        let mut t = Tournament::new("Champ").unwrap();
+        enable_cup(&mut t);
+        // 8 eligible (E0 strongest … E7 weakest) + 2 non-eligible Swiss players.
+        let s: Vec<Uuid> = (0..8)
+            .map(|i| add_rated(&mut t, &format!("E{i}"), 2000 - i * 100, true))
+            .collect();
+        let n9 = add_rated(&mut t, "N9", 1250, false);
+        let n10 = add_rated(&mut t, "N10", 1200, false);
+        t.finalize_registration_with(Some(8)).unwrap();
+        assert_eq!(t.cup.as_ref().unwrap().seed_order, s); // seeded by rating
+
+        // Round 1 — quarterfinals fold the seeds, the two non-eligibles play Swiss.
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        let qf = find_board(&t, 1, s[0], s[7]).unwrap();
+        assert!(matches!(qf.source, PairingSource::Cup { stage: CupStage::Quarterfinal }));
+        assert!(find_board(&t, 1, s[3], s[4]).is_some());
+        let swiss = find_board(&t, 1, n9, n10).unwrap();
+        assert!(matches!(swiss.source, PairingSource::Swiss));
+        // Top seed of each QF wins.
+        for i in 0..4 {
+            decide(&mut t, 1, s[i], s[7 - i]);
+        }
+        decide_rest(&mut t, 1);
+        t.complete_current_round().unwrap();
+
+        // Round 2 — semifinals fold [E0,E1,E2,E3]; the four QF losers drop to Swiss.
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        assert!(matches!(
+            find_board(&t, 2, s[0], s[3]).unwrap().source,
+            PairingSource::Cup { stage: CupStage::Semifinal }
+        ));
+        assert!(find_board(&t, 2, s[1], s[2]).is_some());
+        // A QF loser is now Swiss-paired (not in a cup board).
+        assert!(matches!(
+            t.rounds[1].boards.iter().find(|b| b.player1 == s[4] || b.player2 == s[4]).unwrap().source,
+            PairingSource::Swiss
+        ));
+        decide(&mut t, 2, s[0], s[3]); // E0 beats E3
+        decide(&mut t, 2, s[1], s[2]); // E1 beats E2
+        decide_rest(&mut t, 2);
+        t.complete_current_round().unwrap();
+
+        // Round 3 — the final (E0 vs E1) and the small final (the SF losers E3 vs E2).
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        assert!(matches!(
+            find_board(&t, 3, s[0], s[1]).unwrap().source,
+            PairingSource::Cup { stage: CupStage::Final }
+        ));
+        assert!(matches!(
+            find_board(&t, 3, s[3], s[2]).unwrap().source,
+            PairingSource::Cup { stage: CupStage::SmallFinal }
+        ));
+        decide(&mut t, 3, s[0], s[1]); // champion E0, runner-up E1
+        decide(&mut t, 3, s[3], s[2]); // third E3, fourth E2
+        decide_rest(&mut t, 3);
+        t.complete_current_round().unwrap();
+
+        let podium = t.cup_podium().unwrap();
+        assert_eq!(podium.champion, s[0]);
+        assert_eq!(podium.runner_up, s[1]);
+        assert_eq!(podium.third, s[3]);
+        assert_eq!(podium.fourth, s[2]);
+    }
+
+    #[test]
+    fn finalize_validates_the_cup() {
+        // Cup enabled but no size chosen.
+        let mut t = Tournament::new("C").unwrap();
+        enable_cup(&mut t);
+        for i in 0..8 {
+            add_rated(&mut t, &format!("E{i}"), 2000 - i * 10, true);
+        }
+        assert_eq!(
+            t.clone().finalize_registration_with(None),
+            Err(TournamentError::CupSizeRequired)
+        );
+        assert_eq!(
+            t.clone().finalize_registration_with(Some(12)),
+            Err(TournamentError::InvalidCupSize { size: 12 })
+        );
+        // Only 8 eligible, ask for 16.
+        assert_eq!(
+            t.clone().finalize_registration_with(Some(16)),
+            Err(TournamentError::NotEnoughEligiblePlayers { needed: 16, have: 8 })
+        );
+        // A rejected cup leaves registration open.
+        assert!(!t.registration_finalized);
+        assert!(t.cup.is_none());
+        // Exactly enough works.
+        t.finalize_registration_with(Some(8)).unwrap();
+        assert_eq!(t.cup.unwrap().size, 8);
+    }
+
+    #[test]
+    fn cannot_remove_a_seeded_cup_player() {
+        let mut t = Tournament::new("C").unwrap();
+        enable_cup(&mut t);
+        let seeds: Vec<Uuid> = (0..8)
+            .map(|i| add_rated(&mut t, &format!("E{i}"), 2000 - i * 10, true))
+            .collect();
+        let bystander = add_rated(&mut t, "B", 1000, false);
+        t.finalize_registration_with(Some(8)).unwrap();
+        assert_eq!(
+            t.remove_player(seeds[0]),
+            Err(TournamentError::CannotRemoveCupPlayer)
+        );
+        // A non-seeded player can still be removed.
+        assert!(t.remove_player(bystander).is_ok());
+    }
+
+    #[test]
+    fn absent_cup_player_still_gets_a_bracket_board() {
+        let mut t = Tournament::new("C").unwrap();
+        enable_cup(&mut t);
+        let s: Vec<Uuid> = (0..8)
+            .map(|i| add_rated(&mut t, &format!("E{i}"), 2000 - i * 10, true))
+            .collect();
+        t.finalize_registration_with(Some(8)).unwrap();
+        // Mark the top seed absent — their QF board is still generated (unplayed),
+        // to be forfeited by the referee.
+        t.prepare_round().unwrap();
+        t.update_draft(vec![s[0]], vec![], None).unwrap();
+        t.confirm_round().unwrap();
+        let board = find_board(&t, 1, s[0], s[7]).expect("bracket board created despite absence");
+        assert!(matches!(board.source, PairingSource::Cup { .. }));
+        assert!(board.result.is_none());
     }
 }

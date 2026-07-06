@@ -32,6 +32,11 @@ pub struct Player {
     /// Optional club or federation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub club: Option<String>,
+    /// Whether the referee has marked this player eligible for the direct-
+    /// elimination cup (only meaningful when the cup is enabled). Set during
+    /// registration; frozen into the bracket at finalization.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub eligible: bool,
 }
 
 /// Data supplied when registering a player, before an id exists.
@@ -76,6 +81,7 @@ impl Player {
             rating: new.rating,
             nationality: non_empty(new.nationality.unwrap_or_default()).map(|c| c.to_uppercase()),
             club: non_empty(new.club.unwrap_or_default()),
+            eligible: false,
         }
     }
 }

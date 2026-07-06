@@ -191,7 +191,7 @@ fn pad(s: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::{Handicap, HandicapGame};
+    use crate::round::{Handicap, HandicapGame, PairingSource};
 
     /// Build a finalized two-player tournament (P1 rated 2000, P2 1000) plus one
     /// completed round whose single board is configured by `configure`.
@@ -220,12 +220,8 @@ mod tests {
         t.finalize_registration().unwrap();
 
         let mut board = Board {
-            player1: p1,
-            player2: p2,
             result: Some(Winner::Player1),
-            drawn: false,
-            handicap: None,
-            points_diff: None,
+            ..Board::pending(p1, p2, None, PairingSource::Swiss)
         };
         configure(&mut board);
         t.rounds.push(Round {
@@ -310,12 +306,8 @@ mod tests {
         t.rounds.push(Round {
             number: 1,
             boards: vec![Board {
-                player1: a,
-                player2: b,
                 result: Some(Winner::Player1),
-                drawn: false,
-                handicap: None,
-                points_diff: None,
+                ..Board::pending(a, b, None, PairingSource::Swiss)
             }],
             bye: Some(c),
             absent: Vec::new(),
@@ -329,12 +321,8 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             boards: vec![Board {
-                player1: a,
-                player2: b,
                 result: Some(Winner::Player2),
-                drawn: false,
-                handicap: None,
-                points_diff: None,
+                ..Board::pending(a, b, None, PairingSource::Swiss)
             }],
             bye: None,
             absent: vec![c],

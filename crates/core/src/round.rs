@@ -103,6 +103,41 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
+/// Which stage of the direct-elimination cup a board belongs to. `RoundOf(n)`
+/// covers the early bracket rounds (round of 64/32/16); the last three rounds are
+/// named explicitly. Used to label cup games in the pairings view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CupStage {
+    RoundOf(u32),
+    Quarterfinal,
+    Semifinal,
+    Final,
+    SmallFinal,
+}
+
+/// How a board's pairing was decided, surfaced to clients so the pairings view can
+/// flag each game. Serialized internally-tagged, e.g. `{"kind":"swiss"}` or
+/// `{"kind":"cup","stage":{"round_of":32}}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PairingSource {
+    /// Produced by the Swiss / MacMahon matching engine.
+    #[default]
+    Swiss,
+    /// Fixed by the referee (a forced pairing).
+    Forced,
+    /// Dictated by the direct-elimination cup bracket (bypasses the engine).
+    Cup { stage: CupStage },
+}
+
+impl PairingSource {
+    /// `skip_serializing_if` helper — Swiss is the default and omitted from JSON.
+    fn is_swiss(&self) -> bool {
+        matches!(self, PairingSource::Swiss)
+    }
+}
+
 /// A single board (game) in a round: two paired players and, once played, a
 /// result. `result` is `None` while the game hasn't been played yet.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -129,9 +164,27 @@ pub struct Board {
     /// this field (the scorer then falls back to the live points difference).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub points_diff: Option<i32>,
+    /// How this pairing was decided (Swiss / referee-forced / cup). Defaults to
+    /// Swiss for saves predating this field.
+    #[serde(default, skip_serializing_if = "PairingSource::is_swiss")]
+    pub source: PairingSource,
 }
 
 impl Board {
+    /// A not-yet-played board between two players, tagged with how it was paired
+    /// and (for engine pairings) its frozen float.
+    pub fn pending(player1: Uuid, player2: Uuid, points_diff: Option<i32>, source: PairingSource) -> Self {
+        Board {
+            player1,
+            player2,
+            result: None,
+            drawn: false,
+            handicap: None,
+            points_diff,
+            source,
+        }
+    }
+
     /// The winner that counts for standings and pairing. For a handicap game
     /// that is always the giver (once the game is decided), regardless of who
     /// actually won; otherwise it is the actual result.
@@ -140,6 +193,23 @@ impl Board {
             Some(h) => self.result.map(|_| h.giver),
             None => self.result,
         }
+    }
+
+    /// The loser (effective) of a decided board, if any — the side that isn't the
+    /// effective winner. `None` while the board is unplayed.
+    pub fn effective_loser(&self) -> Option<Uuid> {
+        self.effective_winner().map(|w| match w {
+            Winner::Player1 => self.player2,
+            Winner::Player2 => self.player1,
+        })
+    }
+
+    /// The player id of the effective winner, if the board is decided.
+    pub fn winner_id(&self) -> Option<Uuid> {
+        self.effective_winner().map(|w| match w {
+            Winner::Player1 => self.player1,
+            Winner::Player2 => self.player2,
+        })
     }
 }
 
