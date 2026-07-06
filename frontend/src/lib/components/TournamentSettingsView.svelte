@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import type { TournamentSettings } from "../types";
 
   interface Props {
@@ -11,74 +12,103 @@
 
   let { settings, finalized, onUpdate, busy = false }: Props = $props();
 
-  // Local editable copies, re-synced whenever the persisted settings change (e.g.
-  // after the server sorts/de-dups the thresholds or caps the removals, or on undo).
+  // Keep only positive integers, then sort ascending — the server's canonical
+  // order, used to compare our local state against what it stored.
+  function cleanSorted(arr: number[]): number[] {
+    return arr
+      .filter((v) => Number.isFinite(v) && v >= 1)
+      .map((v) => Math.round(v))
+      .sort((a, b) => a - b);
+  }
+
+  function eq(a: number[], b: number[]): boolean {
+    return a.length === b.length && a.every((v, i) => v === b[i]);
+  }
+
+  // Local editable rows, kept in *entry* order (not sorted) so the row a referee
+  // is editing never jumps or shows a stale value. The inputs bind to these.
   let thresholds = $state<number[]>([]);
   let removals = $state<number[]>([]);
+
+  // Adopt the persisted settings only on a genuine external change — a load, an
+  // undo, or the server de-duplicating/capping our input. When our own edit merely
+  // round-trips (the server just sorts it), our sorted local state already matches
+  // what it stored, so we keep the entry order rather than reshuffling under the
+  // cursor. `untrack` makes this fire on `settings` changes only, not our writes.
   $effect(() => {
-    thresholds = [...settings.macmahon_thresholds];
-    removals = [...settings.macmahon_removals];
+    const serverThresholds = settings.macmahon_thresholds;
+    const serverRemovals = settings.macmahon_removals;
+    untrack(() => {
+      if (
+        !eq(cleanSorted(thresholds), serverThresholds) ||
+        !eq(cleanSorted(removals), serverRemovals)
+      ) {
+        thresholds = [...serverThresholds];
+        removals = [...serverRemovals];
+      }
+    });
   });
 
-  function persist(nextThresholds: number[], nextRemovals: number[]) {
-    // Keep positive integers only; the server sorts, de-duplicates and caps the
+  function persist() {
+    // Send the current rows; the server sorts, de-duplicates and caps the
     // removals to the threshold count.
-    const cleanThresholds = nextThresholds
-      .filter((v) => Number.isFinite(v) && v > 0)
-      .map((v) => Math.round(v));
-    const cleanRemovals = nextRemovals
-      .filter((v) => Number.isFinite(v) && v >= 1)
-      .map((v) => Math.round(v));
     onUpdate({
-      macmahon_thresholds: cleanThresholds,
-      macmahon_removals: cleanRemovals,
+      macmahon_thresholds: thresholds
+        .filter((v) => Number.isFinite(v) && v >= 1)
+        .map((v) => Math.round(v)),
+      macmahon_removals: removals
+        .filter((v) => Number.isFinite(v) && v >= 1)
+        .map((v) => Math.round(v)),
     });
   }
 
   function addThreshold() {
-    const next = thresholds.length ? thresholds[thresholds.length - 1] + 100 : 1500;
-    persist([...thresholds, next], removals);
+    thresholds.push(thresholds.length ? Math.max(...thresholds) + 100 : 1500);
+    persist();
   }
 
   function removeThreshold(i: number) {
-    persist(
-      thresholds.filter((_, j) => j !== i),
-      removals,
-    );
+    thresholds.splice(i, 1);
+    persist();
   }
 
   function editThreshold(i: number, raw: string) {
-    const next = [...thresholds];
-    next[i] = Number(raw);
-    persist(next, removals);
+    thresholds[i] = Number(raw);
+    persist();
   }
 
   function addRemoval() {
     // Default to the round of the last removal (so repeated clicks stack drops on
     // the same round), or round 1 for the first one.
-    const next = removals.length ? Math.max(...removals) : 1;
-    persist(thresholds, [...removals, next]);
+    removals.push(removals.length ? Math.max(...removals) : 1);
+    persist();
   }
 
   function removeRemoval(i: number) {
-    persist(
-      thresholds,
-      removals.filter((_, j) => j !== i),
-    );
+    removals.splice(i, 1);
+    persist();
   }
 
   function editRemoval(i: number, raw: string) {
-    const next = [...removals];
-    next[i] = Number(raw);
-    persist(thresholds, next);
+    removals[i] = Number(raw);
+    persist();
   }
 
-  // Can't schedule more removals than there are thresholds to drop.
-  const canAddRemoval = $derived(removals.length < thresholds.length);
+  // Normalized (sorted, de-duplicated, capped) view of the local rows — drives the
+  // previews so they always reflect what the server will store, updated live on
+  // each edit rather than lagging a round-trip.
+  const normThresholds = $derived.by(() => {
+    const sorted = cleanSorted(thresholds);
+    return sorted.filter((v, i) => i === 0 || v !== sorted[i - 1]);
+  });
+  const normRemovals = $derived(cleanSorted(removals).slice(0, normThresholds.length));
+
+  // Can't schedule more removals than there are (distinct) thresholds to drop.
+  const canAddRemoval = $derived(removals.length < normThresholds.length);
 
   // Preview of the resulting bands, e.g. "below 1200 → 0".
   const bands = $derived.by(() => {
-    const t = settings.macmahon_thresholds;
+    const t = normThresholds;
     const rows: { label: string; points: number }[] = [];
     if (t.length === 0) return rows;
     rows.push({ label: `below ${t[0]}`, points: 0 });
@@ -93,10 +123,10 @@
   });
 
   // Preview of how the starting-point spread shrinks over the rounds, driven by
-  // the persisted (normalized) removal schedule.
+  // the normalized removal schedule.
   const schedule = $derived.by(() => {
-    const total = settings.macmahon_thresholds.length;
-    const rem = settings.macmahon_removals;
+    const total = normThresholds.length;
+    const rem = normRemovals;
     if (total === 0 || rem.length === 0) return [];
     const counts = new Map<number, number>();
     for (const r of rem) counts.set(r, (counts.get(r) ?? 0) + 1);
