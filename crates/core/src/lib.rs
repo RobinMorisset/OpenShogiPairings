@@ -1,10 +1,17 @@
 //! Core domain logic for OpenShogiPairings.
 //!
-//! At this early stage this crate only carries the data types shared between the
-//! server and its clients. The pairing engine (Blossom matching over a weighted
-//! player graph, and later an ILP/CP-SAT backend) will live here so that it can
-//! be reused unchanged by the HTTP server, a future CLI client, and the Tauri
+//! At this early stage this crate carries the data types shared between the
+//! server and its clients ([`Player`], [`Tournament`], …) plus the tournament
+//! mutation logic. The pairing engine (Blossom matching over a weighted player
+//! graph, and later an ILP/CP-SAT backend) will live here too so that it can be
+//! reused unchanged by the HTTP server, a future CLI client, and the Tauri
 //! desktop app.
+
+mod player;
+mod tournament;
+
+pub use player::{NewPlayer, Player};
+pub use tournament::{Tournament, TournamentError, TOURNAMENT_FORMAT_VERSION};
 
 use serde::{Deserialize, Serialize};
 

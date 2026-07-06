@@ -11,6 +11,8 @@ path = "src/main.rs"
 [dependencies]
 osp-core = { workspace = true }
 tokio = { workspace = true }
+uuid = { workspace = true }
+serde = { workspace = true }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"

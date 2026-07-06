@@ -10,3 +10,26 @@ export interface HealthStatus {
   service: string;
   version: string;
 }
+
+/** Mirror of `osp_core::Player`. */
+export interface Player {
+  id: string; // UUID
+  name: string;
+  rating?: number;
+  club?: string;
+}
+
+/** Registration payload — mirror of `osp_core::NewPlayer`. */
+export interface NewPlayer {
+  name: string;
+  rating?: number;
+  club?: string;
+}
+
+/** Mirror of `osp_core::Tournament`. */
+export interface Tournament {
+  format_version: number;
+  id: string; // UUID
+  name: string;
+  players: Player[];
+}

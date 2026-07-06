@@ -19,9 +19,26 @@ The pairing engine will model a round as a **minimum-weight perfect matching**
 over a weighted player graph (Blossom algorithm), graduating to an ILP/CP-SAT
 solver for experimental formats beyond Swiss / MacMahon.
 
-> **Current status:** bring-up phase. The server exposes only `GET /api/health`,
-> and the web UI does nothing but confirm it can reach that endpoint. No pairing
-> logic yet.
+> **Current status:** early. The server holds a single in-memory tournament (a
+> name + a list of players) as the shared source of truth, with a REST API to
+> create it, register/remove players, and replace it wholesale (for load). The
+> web UI drives all of that and can save/load the tournament as a JSON file. No
+> rounds or pairing logic yet.
+
+### API
+
+| Method & path | Purpose |
+|---------------|---------|
+| `GET /api/health` | Liveness check. |
+| `POST /api/tournament` | Create a new (empty) tournament: `{ "name": "..." }`. |
+| `GET /api/tournament` | Fetch the current tournament (404 if none). |
+| `PUT /api/tournament` | Replace the current tournament (used by "load"). |
+| `POST /api/tournament/players` | Register a player: `{ "name", "rating?", "club?" }`. |
+| `DELETE /api/tournament/players/{id}` | Remove a player. |
+
+Every mutating endpoint returns the full updated tournament. "Save" is a
+client-side JSON download; "load" uploads a saved file and `PUT`s it back so the
+server stays authoritative.
 
 ## Prerequisites
 
