@@ -8,12 +8,18 @@
 //! desktop app.
 
 mod fesa;
+mod pairing;
 mod player;
+mod round;
 mod tournament;
 
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
+pub use pairing::pair_round;
 pub use player::{NewPlayer, Player};
-pub use tournament::{Tournament, TournamentError, TOURNAMENT_FORMAT_VERSION};
+pub use round::{Board, Round};
+pub use tournament::{
+    Tournament, TournamentError, MIN_PLAYERS_PER_ROUND, TOURNAMENT_FORMAT_VERSION,
+};
 
 use serde::{Deserialize, Serialize};
 

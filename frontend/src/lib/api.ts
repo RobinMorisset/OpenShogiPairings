@@ -121,6 +121,11 @@ export function undoTournament(): Promise<TournamentResponse> {
   return request<TournamentResponse>("/api/tournament/undo", { method: "POST" });
 }
 
+/** Start (pair) the next round from the current players. */
+export function startRound(): Promise<TournamentResponse> {
+  return request<TournamentResponse>("/api/tournament/rounds", { method: "POST" });
+}
+
 /** Register a player in the current tournament. */
 export function addPlayer(player: NewPlayer): Promise<TournamentResponse> {
   return request<TournamentResponse>("/api/tournament/players", {

@@ -17,6 +17,7 @@ use crate::state::{AppState, TournamentStore};
 /// - `GET    /api/tournament`               fetch the current tournament
 /// - `PUT    /api/tournament`               replace the current tournament (load)
 /// - `POST   /api/tournament/undo`          revert the last player change
+/// - `POST   /api/tournament/rounds`        start (pair) the next round
 /// - `POST   /api/tournament/players`       register a player
 /// - `PUT    /api/tournament/players/{id}`  edit a player
 /// - `DELETE /api/tournament/players/{id}`  remove a player
@@ -33,6 +34,7 @@ pub fn routes() -> Router<AppState> {
                 .put(replace_tournament),
         )
         .route("/api/tournament/undo", post(undo))
+        .route("/api/tournament/rounds", post(start_round))
         .route("/api/tournament/players", post(add_player))
         .route(
             "/api/tournament/players/{id}",
@@ -101,6 +103,15 @@ async fn undo(State(state): State<AppState>) -> Result<Json<TournamentView>, Api
     }
     store.undo();
     view(&store)
+}
+
+/// Start (pair) the next round from the current players.
+async fn start_round(
+    State(state): State<AppState>,
+) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.mutate(|t| t.start_round().map(|_| ()))?;
+    Ok((StatusCode::CREATED, view(&store)?))
 }
 
 /// Register a player in the current tournament.

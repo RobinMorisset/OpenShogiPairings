@@ -10,6 +10,7 @@
     refreshRatings,
     removePlayer,
     replaceTournament,
+    startRound,
     undoTournament,
   } from "./lib/api";
   import type {
@@ -23,6 +24,7 @@
   import CreateTournament from "./lib/components/CreateTournament.svelte";
   import PlayerRegistration from "./lib/components/PlayerRegistration.svelte";
   import PlayerList from "./lib/components/PlayerList.svelte";
+  import RoundView from "./lib/components/RoundView.svelte";
 
   let tournament = $state<Tournament | null>(null);
   let canUndo = $state(false);
@@ -41,6 +43,24 @@
   // Show the create form when there is no tournament, or when the user
   // explicitly asked to start a new one.
   let showCreate = $derived(tournament === null || creatingNew);
+
+  // Which tab is open: "players", "results", or "round-{n}".
+  let activeTab = $state("players");
+
+  const activeRound = $derived(
+    tournament?.rounds.find((r) => `round-${r.number}` === activeTab) ?? null,
+  );
+
+  // Keep the selected tab valid (e.g. after undo removes a round).
+  $effect(() => {
+    if (!tournament) return;
+    const valid = new Set([
+      "players",
+      "results",
+      ...tournament.rounds.map((r) => `round-${r.number}`),
+    ]);
+    if (!valid.has(activeTab)) activeTab = "players";
+  });
 
   onMount(async () => {
     // Load the FESA ratings in the background — autocomplete is a nice-to-have,
@@ -121,6 +141,14 @@
     });
   }
 
+  function handleStartRound() {
+    run(async () => {
+      apply(await startRound());
+      // Jump to the round we just created.
+      if (tournament) activeTab = `round-${tournament.rounds.length}`;
+    });
+  }
+
   function handleSave() {
     if (!tournament) return;
     const current = tournament;
@@ -160,11 +188,6 @@
       <div class="toolbar">
         <div class="title">
           <h2>{tournament.name}</h2>
-          <span class="count"
-            >{tournament.players.length} player{tournament.players.length === 1
-              ? ""
-              : "s"}</span
-          >
         </div>
         <div class="toolbar-actions">
           <button
@@ -172,7 +195,7 @@
             class="ghost"
             onclick={handleUndo}
             disabled={busy || !canUndo}
-            title="Undo the last player change"
+            title="Undo the last change"
           >
             Undo
           </button>
@@ -190,32 +213,83 @@
         </div>
       </div>
 
-      <PlayerRegistration onAdd={handleAddPlayer} {ratings} {busy} />
-      <div class="ratings-status">
-        <span>
-          {#if ratings.length > 0}
-            {ratings.length} players in the FESA rating list
-          {:else}
-            FESA rating list not loaded
-          {/if}
-        </span>
+      <div class="tabs" role="tablist">
         <button
           type="button"
-          class="ghost small"
-          onclick={handleRefreshRatings}
-          disabled={busy}
-          title="Re-download the rating list from the FESA website"
+          class="tab"
+          class:active={activeTab === "players"}
+          onclick={() => (activeTab = "players")}
         >
-          Refresh FESA list
+          Players ({tournament.players.length})
+        </button>
+        <button
+          type="button"
+          class="tab"
+          class:active={activeTab === "results"}
+          onclick={() => (activeTab = "results")}
+        >
+          Results
+        </button>
+        {#each tournament.rounds as round (round.number)}
+          <button
+            type="button"
+            class="tab"
+            class:active={activeTab === `round-${round.number}`}
+            onclick={() => (activeTab = `round-${round.number}`)}
+          >
+            Round {round.number}
+          </button>
+        {/each}
+        <button
+          type="button"
+          class="tab start-round"
+          onclick={handleStartRound}
+          disabled={busy || tournament.players.length < 2}
+          title={tournament.players.length < 2
+            ? "Need at least 2 players to start a round"
+            : "Pair the next round"}
+        >
+          + Start round {tournament.rounds.length + 1}
         </button>
       </div>
-      <div class="players">
-        <PlayerList
-          players={tournament.players}
-          onEdit={handleEditPlayer}
-          onRemove={handleRemovePlayer}
-          {busy}
-        />
+
+      <div class="tab-content">
+        {#if activeTab === "players"}
+          <PlayerRegistration onAdd={handleAddPlayer} {ratings} {busy} />
+          <div class="ratings-status">
+            <span>
+              {#if ratings.length > 0}
+                {ratings.length} players in the FESA rating list
+              {:else}
+                FESA rating list not loaded
+              {/if}
+            </span>
+            <button
+              type="button"
+              class="ghost small"
+              onclick={handleRefreshRatings}
+              disabled={busy}
+              title="Re-download the rating list from the FESA website"
+            >
+              Refresh FESA list
+            </button>
+          </div>
+          <div class="players">
+            <PlayerList
+              players={tournament.players}
+              onEdit={handleEditPlayer}
+              onRemove={handleRemovePlayer}
+              {busy}
+            />
+          </div>
+        {:else if activeTab === "results"}
+          <p class="muted placeholder">
+            Standings will appear here once round results can be entered
+            (coming soon).
+          </p>
+        {:else if activeRound}
+          <RoundView round={activeRound} players={tournament.players} />
+        {/if}
       </div>
     </section>
   {/if}
@@ -259,13 +333,48 @@
     margin: 0;
     font-size: 1.25rem;
   }
-  .count {
-    color: #9a9aa2;
-    font-size: 0.85rem;
-  }
   .toolbar-actions {
     display: flex;
     gap: 0.5rem;
+  }
+
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    border-bottom: 1px solid #34343b;
+    margin-bottom: 1.25rem;
+  }
+  .tab {
+    padding: 0.4rem 0.8rem;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 0.4rem 0.4rem 0 0;
+    background: transparent;
+    color: #9a9aa2;
+    font: inherit;
+    cursor: pointer;
+    margin-bottom: -1px;
+  }
+  .tab:hover:not(:disabled):not(.active) {
+    color: #e6e6e6;
+  }
+  .tab.active {
+    color: #e6e6e6;
+    border-color: #34343b;
+    background: #232329;
+  }
+  .tab.start-round {
+    margin-left: auto;
+    color: #7aa2f7;
+  }
+  .tab.start-round:disabled {
+    color: #6a6a72;
+    cursor: not-allowed;
+  }
+  .placeholder {
+    padding: 1.5rem 0;
+    text-align: center;
   }
   .ratings-status {
     display: flex;

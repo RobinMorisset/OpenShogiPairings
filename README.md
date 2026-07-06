@@ -21,9 +21,16 @@ a library. The desktop app links the library and starts the API in-process on an
 prompts); the frontend asks Rust for that port via the `api_base` command. This
 is what lets the packaged app ship as a single self-contained executable.
 
-The pairing engine will model a round as a **minimum-weight perfect matching**
-over a weighted player graph (Blossom algorithm), graduating to an ILP/CP-SAT
-solver for experimental formats beyond Swiss / MacMahon.
+The pairing engine ([`crates/core/src/pairing.rs`](crates/core/src/pairing.rs))
+models a round as a **minimum-weight perfect matching** over a weighted player
+graph. Only the most naïve mode exists so far — every edge has weight 1, so it
+just pairs players consecutively with a bye for the odd one out. The real
+weighted matching (Blossom algorithm, then an ILP/CP-SAT solver for formats
+beyond Swiss / MacMahon) will replace `pair_round`'s internals; see
+[TODO.md](TODO.md).
+
+The UI organizes a tournament into tabs: **Players**, **Results** (placeholder
+until results land), and one tab per round created by "Start round".
 
 > **Current status:** early. The server holds a single in-memory tournament (a
 > name + a list of players) as the shared source of truth, with a REST API to
@@ -31,9 +38,10 @@ solver for experimental formats beyond Swiss / MacMahon.
 > Players have a last name, first name, optional rating, nationality and club.
 > Registration autocompletes names + ELOs from the FESA rating list. The player
 > table is sorted by descending ELO (unrated last), any cell is editable in
-> place, and a server-side undo history reverts player changes. The web UI drives
-> all of that and can save/load the tournament as a JSON file. No rounds or
-> pairing logic yet.
+> place, and a server-side undo history reverts changes. Rounds can be started,
+> which pairs players (naïve mode for now — see below). The web UI is organized
+> into tabs (Players / Results / one per round) and can save/load the tournament
+> as a JSON file. Round results and smarter pairings are next.
 
 Mutations go through a `TournamentStore` that keeps the current tournament plus a
 stack of prior snapshots (the undo history); create/load reset it. Endpoints
@@ -50,7 +58,8 @@ button together (the persisted save-file shape stays the bare tournament).
 | `POST /api/tournament` | Create a new (empty) tournament: `{ "name": "..." }`. |
 | `GET /api/tournament` | Fetch the current tournament (404 if none). |
 | `PUT /api/tournament` | Replace the current tournament (used by "load"). |
-| `POST /api/tournament/undo` | Revert the last player change (server-side undo history). |
+| `POST /api/tournament/undo` | Revert the last change (server-side undo history). |
+| `POST /api/tournament/rounds` | Start (pair) the next round. |
 | `POST /api/tournament/players` | Register a player: `{ "last_name", "first_name?", "rating?", "nationality?", "club?" }`. |
 | `PUT /api/tournament/players/{id}` | Edit a player's fields in place. |
 | `DELETE /api/tournament/players/{id}` | Remove a player. |

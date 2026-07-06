@@ -129,7 +129,7 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::CREATED);
         assert_eq!(body["tournament"]["name"], "Paris Open");
-        assert_eq!(body["tournament"]["format_version"], 2);
+        assert_eq!(body["tournament"]["format_version"], 3);
         assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
         assert_eq!(body["can_undo"], false); // nothing to undo on a fresh tournament
 
@@ -214,6 +214,54 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
         assert_eq!(body["can_undo"], false);
+    }
+
+    #[tokio::test]
+    async fn start_round_pairs_current_players() {
+        let state = AppState::default();
+        send(
+            router(state.clone()),
+            json_req("POST", "/api/tournament", json!({ "name": "Cup" })),
+        )
+        .await;
+        for name in ["Alice", "Bob", "Carol"] {
+            send(
+                router(state.clone()),
+                json_req(
+                    "POST",
+                    "/api/tournament/players",
+                    json!({ "last_name": name }),
+                ),
+            )
+            .await;
+        }
+
+        let (status, body) =
+            send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let rounds = body["tournament"]["rounds"].as_array().unwrap();
+        assert_eq!(rounds.len(), 1);
+        assert_eq!(rounds[0]["number"], 1);
+        assert_eq!(rounds[0]["boards"].as_array().unwrap().len(), 1); // 3 → 1 board
+        assert!(rounds[0]["bye"].is_string()); // + a bye
+    }
+
+    #[tokio::test]
+    async fn start_round_needs_two_players_is_400() {
+        let state = AppState::default();
+        send(
+            router(state.clone()),
+            json_req("POST", "/api/tournament", json!({ "name": "Cup" })),
+        )
+        .await;
+        send(
+            router(state.clone()),
+            json_req("POST", "/api/tournament/players", json!({ "last_name": "Solo" })),
+        )
+        .await;
+        let (status, _) =
+            send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

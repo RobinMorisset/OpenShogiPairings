@@ -38,12 +38,26 @@ export interface RatedPlayer {
   nationality: string;
 }
 
+/** Mirror of `osp_core::Board` — one game in a round. */
+export interface Board {
+  player1: string; // player UUID
+  player2: string; // player UUID
+}
+
+/** Mirror of `osp_core::Round`. */
+export interface Round {
+  number: number;
+  boards: Board[];
+  bye?: string; // player UUID sitting out
+}
+
 /** Mirror of `osp_core::Tournament`. */
 export interface Tournament {
   format_version: number;
   id: string; // UUID
   name: string;
   players: Player[];
+  rounds: Round[];
 }
 
 /**

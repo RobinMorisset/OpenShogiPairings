@@ -8,7 +8,9 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::pairing::pair_round;
 use crate::player::{NewPlayer, Player};
+use crate::round::Round;
 
 /// On-disk / on-the-wire format version for a serialized [`Tournament`].
 ///
@@ -17,11 +19,15 @@ use crate::player::{NewPlayer, Player};
 ///
 /// v2: players carry `last_name` + `first_name` + `nationality` instead of a
 /// single `name`.
-pub const TOURNAMENT_FORMAT_VERSION: u32 = 2;
+/// v3: tournaments carry a list of `rounds`.
+pub const TOURNAMENT_FORMAT_VERSION: u32 = 3;
 
 fn default_format_version() -> u32 {
     TOURNAMENT_FORMAT_VERSION
 }
+
+/// Minimum number of players required to start a round.
+pub const MIN_PLAYERS_PER_ROUND: usize = 2;
 
 /// A tournament: a name and its registered players.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,6 +42,9 @@ pub struct Tournament {
     /// Registered players, in registration order.
     #[serde(default)]
     pub players: Vec<Player>,
+    /// Rounds played so far, in order.
+    #[serde(default)]
+    pub rounds: Vec<Round>,
 }
 
 /// Errors that can arise while mutating a [`Tournament`].
@@ -50,6 +59,9 @@ pub enum TournamentError {
     /// No player with the given id exists in this tournament.
     #[error("no player with id {0}")]
     PlayerNotFound(Uuid),
+    /// Too few players to start a round.
+    #[error("need at least {needed} players to start a round (have {have})")]
+    NotEnoughPlayers { needed: usize, have: usize },
     /// The serialized record uses a format version this build cannot read.
     #[error("unsupported tournament format version {found} (this build supports {supported})")]
     UnsupportedFormatVersion { found: u32, supported: u32 },
@@ -69,6 +81,7 @@ impl Tournament {
             id: Uuid::new_v4(),
             name: name.to_string(),
             players: Vec::new(),
+            rounds: Vec::new(),
         })
     }
 
@@ -123,6 +136,23 @@ impl Tournament {
             return Err(TournamentError::PlayerNotFound(id));
         }
         Ok(())
+    }
+
+    /// Start the next round: compute its pairings from the current players and
+    /// append it. Returns the new [`Round`].
+    ///
+    /// Requires at least [`MIN_PLAYERS_PER_ROUND`] players.
+    pub fn start_round(&mut self) -> Result<&Round, TournamentError> {
+        if self.players.len() < MIN_PLAYERS_PER_ROUND {
+            return Err(TournamentError::NotEnoughPlayers {
+                needed: MIN_PLAYERS_PER_ROUND,
+                have: self.players.len(),
+            });
+        }
+        let number = self.rounds.len() as u32 + 1;
+        let ids: Vec<Uuid> = self.players.iter().map(|p| p.id).collect();
+        self.rounds.push(pair_round(number, &ids));
+        Ok(self.rounds.last().expect("just pushed a round"))
     }
 
     /// Validate a tournament that was deserialized from an untrusted source
@@ -233,6 +263,32 @@ mod tests {
         assert!(t.remove_player(id).is_ok());
         assert!(t.players.is_empty());
         assert_eq!(t.remove_player(id), Err(TournamentError::PlayerNotFound(id)));
+    }
+
+    #[test]
+    fn start_round_pairs_players_and_numbers_rounds() {
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B", "C"] {
+            t.add_player(named(name)).unwrap();
+        }
+        let round = t.start_round().unwrap();
+        assert_eq!(round.number, 1);
+        assert_eq!(round.boards.len(), 1); // 3 players → 1 board + 1 bye
+        assert!(round.bye.is_some());
+
+        let round2 = t.start_round().unwrap();
+        assert_eq!(round2.number, 2);
+        assert_eq!(t.rounds.len(), 2);
+    }
+
+    #[test]
+    fn start_round_needs_enough_players() {
+        let mut t = Tournament::new("Cup").unwrap();
+        t.add_player(named("Solo")).unwrap();
+        assert_eq!(
+            t.start_round(),
+            Err(TournamentError::NotEnoughPlayers { needed: 2, have: 1 })
+        );
     }
 
     #[test]

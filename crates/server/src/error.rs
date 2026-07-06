@@ -35,6 +35,7 @@ impl From<TournamentError> for ApiError {
         match err {
             TournamentError::EmptyTournamentName
             | TournamentError::EmptyPlayerName
+            | TournamentError::NotEnoughPlayers { .. }
             | TournamentError::UnsupportedFormatVersion { .. } => {
                 ApiError::BadRequest(err.to_string())
             }
