@@ -123,6 +123,30 @@ export function undoTournament(): Promise<TournamentResponse> {
   return request<TournamentResponse>("/api/tournament/undo", { method: "POST" });
 }
 
+/**
+ * Fetch the American Grid (cross-table) export as plain text, ready to save for
+ * an ELO update. Unlike the other endpoints this returns raw text, not JSON.
+ */
+export async function fetchAmericanGrid(): Promise<string> {
+  let response: Response;
+  try {
+    response = await fetch(await apiUrl("/api/tournament/american-grid"));
+  } catch (cause) {
+    throw new ApiError(0, cause instanceof Error ? cause.message : String(cause));
+  }
+  if (!response.ok) {
+    let message = `${response.status} ${response.statusText}`;
+    try {
+      const body = await response.json();
+      if (body && typeof body.error === "string") message = body.error;
+    } catch {
+      // Non-JSON error body; keep the status text.
+    }
+    throw new ApiError(response.status, message);
+  }
+  return response.text();
+}
+
 /** Update tournament settings (the MacMahon thresholds). Server normalizes them. */
 export function updateSettings(
   macmahonThresholds: number[],

@@ -1,8 +1,9 @@
 //! Tournament API: create, fetch, replace (load), player CRUD, and undo.
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
-use axum::routing::{post, put};
+use axum::http::{header, StatusCode};
+use axum::response::IntoResponse;
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{Board, Handicap, NewPlayer, Standing, Tournament, Winner};
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,7 @@ use crate::state::{AppState, TournamentStore};
 /// - `GET    /api/tournament`               fetch the current tournament
 /// - `PUT    /api/tournament`               replace the current tournament (load)
 /// - `POST   /api/tournament/undo`          revert the last player change
+/// - `GET    /api/tournament/american-grid` export the cross-table for ELO (text)
 /// - `PUT    /api/tournament/settings`      update tournament settings (MacMahon)
 /// - `POST   /api/tournament/finalize-registration`  finalize registration
 /// - `POST   /api/tournament/complete-round`         complete the current round
@@ -42,6 +44,7 @@ pub fn routes() -> Router<AppState> {
                 .put(replace_tournament),
         )
         .route("/api/tournament/undo", post(undo))
+        .route("/api/tournament/american-grid", get(american_grid))
         .route("/api/tournament/settings", put(update_settings))
         .route(
             "/api/tournament/finalize-registration",
@@ -137,6 +140,18 @@ async fn undo(State(state): State<AppState>) -> Result<Json<TournamentView>, Api
     }
     store.undo();
     view(&store)
+}
+
+/// Export the tournament as an American Grid document (`text/plain`).
+///
+/// Built from the same server-computed standings as [`view`], so the grid's
+/// final-rank ordering matches the Results tab. Unlike the other endpoints this
+/// returns the raw grid text rather than a [`TournamentView`].
+async fn american_grid(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    let store = state.store.read().expect("store lock poisoned");
+    let tournament = store.current().ok_or(ApiError::NoTournament)?;
+    let grid = osp_core::american_grid(tournament, &tournament.standings());
+    Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], grid))
 }
 
 /// Body of the settings endpoint. Only the MacMahon thresholds for now.

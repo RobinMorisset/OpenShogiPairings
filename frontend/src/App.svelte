@@ -7,6 +7,7 @@
     confirmRound,
     createTournament,
     editPlayer,
+    fetchAmericanGrid,
     fetchRatings,
     fetchTournament,
     finalizeRegistration,
@@ -31,7 +32,11 @@
     TournamentResponse,
     Winner,
   } from "./lib/types";
-  import { loadTournament, saveTournament } from "./lib/tournamentFile";
+  import {
+    loadTournament,
+    saveAmericanGrid,
+    saveTournament,
+  } from "./lib/tournamentFile";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
   import CreateTournament from "./lib/components/CreateTournament.svelte";
   import PlayerRegistration from "./lib/components/PlayerRegistration.svelte";
@@ -118,6 +123,22 @@
       : !enoughPlayers
         ? "Need at least 2 players"
         : "",
+  );
+
+  // "Export grid" button: available only in the "ready" phase (no draft, no
+  // round in progress) once at least one round has been completed.
+  const completedRoundCount = $derived(
+    tournament?.rounds.filter((r) => r.completed).length ?? 0,
+  );
+  const exportEnabled = $derived(
+    !busy && phase === "ready" && completedRoundCount > 0,
+  );
+  const exportTitle = $derived(
+    completedRoundCount === 0
+      ? "Complete a round first"
+      : phase !== "ready"
+        ? "Finish the current round before exporting"
+        : "Download the American Grid (cross-table) for ELO",
   );
 
   // Keep the selected tab valid (e.g. after undo removes a round).
@@ -280,6 +301,15 @@
       apply(await updateSettings(macmahonThresholds));
     });
   }
+
+  function handleExportGrid() {
+    if (!tournament) return;
+    const name = tournament.name;
+    run(async () => {
+      const grid = await fetchAmericanGrid();
+      await saveAmericanGrid(name, grid);
+    });
+  }
 </script>
 
 <div class="app">
@@ -394,6 +424,15 @@
             title={startTitle}
           >
             Prepare round {nextRoundNumber}
+          </button>
+          <button
+            type="button"
+            class="ctrl"
+            onclick={handleExportGrid}
+            disabled={!exportEnabled}
+            title={exportTitle}
+          >
+            Export grid
           </button>
         </div>
       </div>

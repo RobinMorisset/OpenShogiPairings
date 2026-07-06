@@ -7,6 +7,7 @@
 //! reused unchanged by the HTTP server, a future CLI client, and the Tauri
 //! desktop app.
 
+mod american_grid;
 mod fesa;
 mod matching;
 mod pairing;
@@ -17,6 +18,7 @@ mod settings;
 mod standings;
 mod tournament;
 
+pub use american_grid::to_grid as american_grid;
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
 pub use pairing::{pair_round, pair_round_constrained, pair_round_weighted};
 pub use player::{NewPlayer, Player};

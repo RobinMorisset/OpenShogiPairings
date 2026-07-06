@@ -79,6 +79,50 @@ export function loadTournament(): Promise<Tournament | null> {
   return isTauri() ? loadViaTauri() : loadViaBrowser();
 }
 
+/** Suffix used for exported American Grid documents. */
+const GRID_SUFFIX = "-american-grid.txt";
+
+/** Filters offered when saving the grid. */
+const GRID_FILTERS = [{ name: "American Grid", extensions: ["txt"] }];
+
+/**
+ * Save the American Grid text to a user-chosen file. `name` is the tournament
+ * name, used only to seed the default file name.
+ *
+ * Returns `true` if written, `false` if the user cancelled (browser downloads
+ * always return `true`).
+ */
+export function saveAmericanGrid(name: string, contents: string): Promise<boolean> {
+  const fileName = `${slugify(name)}${GRID_SUFFIX}`;
+  return isTauri()
+    ? saveTextViaTauri(fileName, contents)
+    : saveTextViaBrowser(fileName, contents);
+}
+
+async function saveTextViaTauri(fileName: string, contents: string): Promise<boolean> {
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  const path = await save({ defaultPath: fileName, filters: GRID_FILTERS });
+  if (!path) return false; // cancelled
+
+  await invoke("write_text_file", { path, contents });
+  return true;
+}
+
+function saveTextViaBrowser(fileName: string, contents: string): Promise<boolean> {
+  const blob = new Blob([contents], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  return Promise.resolve(true);
+}
+
 // ---------------------------------------------------------------------------
 // Tauri backend
 // ---------------------------------------------------------------------------
