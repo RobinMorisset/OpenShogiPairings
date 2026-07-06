@@ -13,6 +13,9 @@ frontend/.vite/
 frontend/src-tauri/target/
 frontend/src-tauri/gen/
 
+# Claude Code runtime artifacts (keep .claude/launch.json, ignore locks)
+.claude/scheduled_tasks.lock
+
 # Editor / OS
 .DS_Store
 Thumbs.db

@@ -1,13 +1,30 @@
 import type { HealthStatus, NewPlayer, Tournament } from "./types";
+import { isTauri } from "./platform";
 
-// Where the API lives. In browser dev and Tauri the frontend is served from a
-// different origin than the server, so we default to the server's dev address.
-// Override with `VITE_API_BASE` (e.g. to point referees at a central server).
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:3000";
+// Where the API lives.
+//   - Tauri: the server is embedded and bound to an OS-assigned port, so we ask
+//     the Rust side for the base URL via the `api_base` command.
+//   - Browser: a standalone server on the fixed dev address, overridable with
+//     `VITE_API_BASE` (e.g. to point referees at a central server).
+// Resolved once and cached.
+let apiBasePromise: Promise<string> | null = null;
+
+function resolveApiBase(): Promise<string> {
+  if (!apiBasePromise) {
+    apiBasePromise = (async () => {
+      if (isTauri()) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        return await invoke<string>("api_base");
+      }
+      return import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:3000";
+    })();
+  }
+  return apiBasePromise;
+}
 
 /** Build a full API URL from a path like `/api/health`. */
-function apiUrl(path: string): string {
-  return `${API_BASE}${path}`;
+async function apiUrl(path: string): Promise<string> {
+  return `${await resolveApiBase()}${path}`;
 }
 
 /** Error carrying the HTTP status, so callers can special-case e.g. 404. */
@@ -25,7 +42,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(apiUrl(path), {
+    response = await fetch(await apiUrl(path), {
       ...init,
       headers: { "content-type": "application/json", ...init?.headers },
     });

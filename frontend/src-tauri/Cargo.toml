@@ -17,6 +17,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
 
+# Strip debug symbols from the release binary so the distributed exe stays small.
+# (Deliberately no `panic = "abort"`: a panic in an embedded-server request
+# handler should not take down the whole desktop app.)
+[profile.release]
+strip = true
+
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -24,3 +30,7 @@ log = "0.4"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
+# The API server, embedded and run in-process so the packaged app is fully
+# self-contained (no separate server binary to launch).
+osp-server = { path = "../../crates/server" }
+tokio = { version = "1", features = ["net", "rt"] }

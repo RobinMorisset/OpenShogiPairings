@@ -9,17 +9,13 @@
 // Both return a "was it done?" signal so the UI can ignore a cancelled dialog.
 
 import type { Tournament } from "./types";
+import { isTauri } from "./platform";
 
 /** File extension used for saved tournaments. */
 const FILE_SUFFIX = ".osp.json";
 
 /** Filters offered in the native dialogs. */
 const DIALOG_FILTERS = [{ name: "Tournament", extensions: ["json"] }];
-
-/** True when running inside the Tauri desktop shell (vs a plain browser). */
-function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
 
 /** Turn a tournament name into a safe file-name stem. */
 function slugify(name: string): string {

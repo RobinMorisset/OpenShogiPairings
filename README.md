@@ -13,7 +13,13 @@ be added over time.
 | Domain / pairing engine | [`crates/core`](crates/core) | Rust | Correctness-critical logic + shared DTOs. Reused by every client. |
 | HTTP server | [`crates/server`](crates/server) | Rust + axum | Single source of truth; exposes the API. |
 | Web UI | [`frontend`](frontend) | TypeScript + Svelte 5 + Vite | Browser client; also the frontend embedded by Tauri. |
-| Desktop client | `frontend/src-tauri` | Tauri 2 (Rust + system webview) | Optional native wrapper of the web UI. |
+| Desktop app | `frontend/src-tauri` | Tauri 2 (Rust + system webview) | Self-contained app: **embeds the server** (`osp-server` as a library) and runs it in-process. |
+
+The `osp-server` crate is both a standalone binary (browser dev, future CLI) and
+a library. The desktop app links the library and starts the API in-process on an
+**OS-assigned port** (bound to `127.0.0.1:0` to avoid clashes and firewall
+prompts); the frontend asks Rust for that port via the `api_base` command. This
+is what lets the packaged app ship as a single self-contained executable.
 
 The pairing engine will model a round as a **minimum-weight perfect matching**
 over a weighted player graph (Blossom algorithm), graduating to an ILP/CP-SAT
@@ -70,18 +76,40 @@ npm run dev
 
 Open <http://localhost:5173>. The page reports whether it can reach the server.
 
-### Desktop client (optional)
+### Desktop app
 
 ```sh
 cd frontend
 npm run tauri dev
 ```
 
-> `tauri dev` starts its **own** Vite dev server on port 5173 (via
-> `beforeDevCommand`), so don't also have `npm run dev` (or another preview)
-> running on 5173 at the same time — the port is fixed (`strictPort`) and the
-> second one will fail with "Port 5173 is already in use". You still need the
-> **server** (`cargo run -p osp-server`) running for the app to reach the API.
+The desktop app **embeds the server**, so you do *not* run `cargo run -p osp-server`
+alongside it — it starts its own API in-process.
+
+> `tauri dev` starts its own Vite dev server on port 5173 (via
+> `beforeDevCommand`), so don't also have a browser `npm run dev` (or another
+> preview) running on 5173 at the same time — the port is fixed (`strictPort`)
+> and the second one will fail with "Port 5173 is already in use".
+
+## Packaging (Windows)
+
+Build the self-contained portable executable:
+
+```sh
+cd frontend
+npm run tauri build -- --no-bundle
+```
+
+The result is a single file at
+`frontend/src-tauri/target/release/OpenShogiPairings.exe` — server, UI, and logic
+all embedded. Referees just double-click it; no install, no command line, no
+separate server.
+
+The one system dependency is **WebView2** (the browser engine the UI renders
+in), which is preinstalled on all Windows 10 (2021+) and 11. To instead produce
+an installer that bundles WebView2 for fully-offline install on any machine, drop
+`--no-bundle` and set `bundle.windows.webviewInstallMode` to `offlineInstaller`
+in [`tauri.conf.json`](frontend/src-tauri/tauri.conf.json).
 
 ## Testing
 
