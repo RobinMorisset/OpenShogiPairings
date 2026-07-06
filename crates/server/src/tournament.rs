@@ -5,7 +5,7 @@ use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use osp_core::{Board, Handicap, NewPlayer, Standing, Tournament, Winner};
+use osp_core::{Board, Handicap, NewPlayer, Standing, Tournament, TournamentSettings, Winner};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -20,7 +20,7 @@ use crate::state::{AppState, TournamentStore};
 /// - `POST   /api/tournament/undo`          revert the last player change
 /// - `GET    /api/tournament/american-grid` export the cross-table for ELO (text)
 /// - `PUT    /api/tournament/american-grid` import a cross-table, rebuilding it (text)
-/// - `PUT    /api/tournament/settings`      update tournament settings (MacMahon)
+/// - `PUT    /api/tournament/settings`      update tournament settings (MacMahon, …)
 /// - `POST   /api/tournament/finalize-registration`  finalize registration
 /// - `POST   /api/tournament/complete-round`         complete the current round
 /// - `POST   /api/tournament/rounds/prepare`         begin drafting the next round
@@ -173,21 +173,16 @@ async fn import_american_grid(
     view(&store)
 }
 
-/// Body of the settings endpoint. Only the MacMahon thresholds for now.
-#[derive(Debug, Deserialize)]
-struct UpdateSettingsRequest {
-    #[serde(default)]
-    macmahon_thresholds: Vec<u32>,
-}
-
-/// Update the tournament settings (stored normalized: sorted, de-duplicated).
+/// Update the tournament settings. Takes the whole [`TournamentSettings`] object
+/// (MacMahon thresholds, degressive schedule, …) and stores it normalized so the
+/// surface grows without changing the endpoint shape.
 async fn update_settings(
     State(state): State<AppState>,
-    Json(req): Json<UpdateSettingsRequest>,
+    Json(settings): Json<TournamentSettings>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = state.store.write().expect("store lock poisoned");
-    store.mutate(|t| {
-        t.update_settings(req.macmahon_thresholds);
+    store.mutate(move |t| {
+        t.update_settings(settings);
         Ok(())
     })?;
     view(&store)

@@ -104,6 +104,12 @@ export interface RoundDraft {
 export interface TournamentSettings {
   /** ELO thresholds (ascending) defining the MacMahon starting groups. */
   macmahon_thresholds: number[];
+  /**
+   * Degressive MacMahon: round numbers at whose end one bottom threshold is
+   * dropped. Sorted ascending; a repeated round drops several at once. Length is
+   * capped server-side at the threshold count.
+   */
+  macmahon_removals: number[];
 }
 
 /** Mirror of `osp_core::Tournament`. */

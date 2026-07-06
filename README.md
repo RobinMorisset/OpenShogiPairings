@@ -82,7 +82,7 @@ by points, then the SOS / SODOS / SOSOS tie-breaks, then tournament number.
 | `GET /api/tournament` | Fetch the current tournament (404 if none). |
 | `PUT /api/tournament` | Replace the current tournament (used by "load"). |
 | `POST /api/tournament/undo` | Revert the last change (server-side undo history). |
-| `PUT /api/tournament/settings` | Update settings: `{ "macmahon_thresholds": [1200, 1700] }` (stored sorted & de-duplicated). |
+| `PUT /api/tournament/settings` | Update settings (the whole `TournamentSettings`): `{ "macmahon_thresholds": [1200, 1700], "macmahon_removals": [3] }` — thresholds stored sorted & de-duplicated, `macmahon_removals` (degressive MacMahon: round-ends at which the bottom threshold is dropped) sorted & capped to the threshold count. |
 | `POST /api/tournament/finalize-registration` | Finalize registration (unlocks round 1). |
 | `POST /api/tournament/complete-round` | Complete the current round (all games must be played). |
 | `POST /api/tournament/rounds/prepare` | Begin drafting the next round. |

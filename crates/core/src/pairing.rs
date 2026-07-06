@@ -1,11 +1,14 @@
 //! Round pairing.
 //!
 //! A round is modeled as a **minimum-weight perfect matching** over a complete
-//! graph of the present players (solved by [`crate::matching`]). Each edge's
-//! weight is the sum of penalties from a fixed set of rules, ordered by a ladder
-//! of priority multipliers ([`W_REMATCH`] ≫ [`W_SCORE`] ≫ [`W_FLOAT`] ≫
-//! [`W_CLUB`] ≫ [`W_FOLD`]) so that a violation of a higher rule always outweighs
-//! any amount of lower-rule imperfection. The rules, most important first:
+//! graph of the present players (solved by [`crate::matching`]). Each candidate
+//! pairing is scored by a fixed set of rules; a rule emits a small number of
+//! penalty *units*, and the edge weight is `Σ multiplier[rule] · units`. The
+//! multipliers are **derived** from each rule's worst-case units per round rather
+//! than hand-tuned, so one unit of any rule always outweighs the largest possible
+//! sum of every lower-priority rule combined — i.e. the scalar weight is a correct
+//! lexicographic ordering by rule priority, by construction. The rules, most
+//! important first:
 //!
 //! 1. **No rematch / no repeat bye** — two players never meet twice, and no one
 //!    takes the bye twice.
@@ -22,13 +25,16 @@
 //!    (unrated = 1), descending; the Nth player of the top half should meet the
 //!    Nth of the bottom half, penalized by how far the actual pairing deviates.
 //!
+//! Priority lives in exactly one place — the order of [`Rule::ORDER`] — and the
+//! separation between tiers is proven by construction (see [`scale_ladder`]), so
+//! adding or reordering rules stays sound with no magic numbers to retune.
+//!
 //! [`pair_round_weighted`] is the real pairing path. [`pair_round`] /
 //! [`pair_round_constrained`] remain as the trivial uniform-weight baseline
 //! (used by the odd unit test); the bye is modeled as a phantom vertex.
 //!
-//! The multiplier gaps hold comfortably for realistic events (≲128 players, ≲20
-//! rounds). Larger tournaments — and strict lexicographic tiers — are the
-//! motivation for the planned ILP/CP-SAT backend (see TODO.md).
+//! An ILP/CP-SAT backend is still planned (see TODO.md) for very large fields and
+//! for formats needing hard constraints a plain matching can't express.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -113,20 +119,170 @@ pub fn pair_round_constrained(
 
 // --- Weighted matching ----------------------------------------------------
 
-/// Priority multipliers for the pairing rules (see the module docs). Each is far
-/// larger than the maximum total the lower-priority rules can contribute over a
-/// whole round, so the combined scalar weight orders matchings lexicographically
-/// by rule priority.
-const W_REMATCH: i128 = 1_000_000_000_000_000_000_000_000; // 1e24 — rule 1
-const W_SCORE: i128 = 1_000_000_000_000_000_000; // 1e18 — rule 2
-const W_FLOAT: i128 = 1_000_000_000_000; // 1e12 — rule 3
-const W_CLUB: i128 = 1_000_000; // 1e6 — rule 4
-const W_FOLD: i128 = 1; // rule 5
-
 /// Numerator of the float-repeat penalty, divided by the number of rounds since
 /// the player last floated the same way. Chosen with many small divisors so the
 /// decay reads smoothly.
 const FLOAT_BASE: i128 = 720;
+
+/// The pairing rules, in priority order (highest first). This ordering is the
+/// single source of truth for priority; the scalar multipliers are derived from
+/// it (see [`scale_ladder`]).
+#[derive(Clone, Copy)]
+enum Rule {
+    /// Never play the same opponent twice / never take the bye twice.
+    Rematch,
+    /// Prefer equal scores; penalty grows with the square of the points gap.
+    ScoreGap,
+    /// Avoid repeating a float in the same direction; decays with rounds since.
+    FloatRepeat,
+    /// Avoid pairing club-mates (ignored when a club is unknown).
+    Club,
+    /// Fold within a score group (top half meets bottom half).
+    Fold,
+}
+
+impl Rule {
+    /// The rules from highest to lowest priority.
+    const ORDER: [Rule; 5] = [
+        Rule::Rematch,
+        Rule::ScoreGap,
+        Rule::FloatRepeat,
+        Rule::Club,
+        Rule::Fold,
+    ];
+    /// How many rules there are (the multiplier ladder's length).
+    const COUNT: usize = Self::ORDER.len();
+}
+
+/// Everything the rules need to score an edge, plus the per-round quantities their
+/// worst-case bounds (and hence multipliers) are derived from.
+struct Ctx<'a> {
+    scores: &'a Scores,
+    by_player: &'a HashMap<Uuid, &'a Player>,
+    fold: &'a HashMap<Uuid, FoldInfo>,
+    round: u32,
+    /// Edges in a perfect matching over the vertices (= vertices / 2).
+    edges: i128,
+    /// Largest points gap between any two vertices (bounds the score rule).
+    max_gap: i128,
+    /// Largest score-group size among the free players (bounds the fold rule).
+    max_group: i128,
+}
+
+/// Float-repeat units for one player/direction: 0 if they never floated that way,
+/// else `FLOAT_BASE` decayed by the rounds since (at least 1, so `≤ FLOAT_BASE`).
+fn float_units(last: Option<u32>, round: u32) -> i128 {
+    match last {
+        Some(k) => FLOAT_BASE / (round - k) as i128, // k < round always
+        None => 0,
+    }
+}
+
+impl Rule {
+    /// Penalty units for pairing `a` against `b` (before the priority multiplier).
+    fn edge_units(self, ctx: &Ctx, a: Uuid, b: Uuid) -> i128 {
+        let sa = ctx.scores.get(&a);
+        let sb = ctx.scores.get(&b);
+        match self {
+            // Rule 1: never play the same opponent twice.
+            Rule::Rematch => i128::from(sa.opponents.contains(&b)),
+            // Rule 2: prefer equal scores; penalty is the square of the gap.
+            Rule::ScoreGap => {
+                let gap = (sa.points as i128 - sb.points as i128).abs();
+                gap * gap
+            }
+            // Rule 3: the lower-scored player floats up, the higher-scored down.
+            Rule::FloatRepeat => match sa.points.cmp(&sb.points) {
+                Ordering::Less => {
+                    float_units(sa.last_ascended, ctx.round)
+                        + float_units(sb.last_descended, ctx.round)
+                }
+                Ordering::Greater => {
+                    float_units(sa.last_descended, ctx.round)
+                        + float_units(sb.last_ascended, ctx.round)
+                }
+                Ordering::Equal => 0,
+            },
+            // Rule 4: avoid pairing club-mates (ignored when a club is unknown).
+            Rule::Club => match (&ctx.by_player[&a].club, &ctx.by_player[&b].club) {
+                (Some(ca), Some(cb)) if ca == cb => 1,
+                _ => 0,
+            },
+            // Rule 5: fold within a score group — deviation from the ideal fold.
+            Rule::Fold => {
+                if sa.points != sb.points {
+                    return 0;
+                }
+                match (ctx.fold.get(&a), ctx.fold.get(&b)) {
+                    (Some(fa), Some(fb)) => {
+                        let ia = ideal_rank(fa.rank, fa.group_size) as i128;
+                        let ib = ideal_rank(fb.rank, fb.group_size) as i128;
+                        (fb.rank as i128 - ia).abs() + (fa.rank as i128 - ib).abs()
+                    }
+                    _ => 0,
+                }
+            }
+        }
+    }
+
+    /// Penalty units for giving `player` the bye (before the priority multiplier).
+    /// A bye repeats the rematch rule (never bye twice) and counts as a downfloat.
+    fn bye_units(self, ctx: &Ctx, player: Uuid) -> i128 {
+        let s = ctx.scores.get(&player);
+        match self {
+            Rule::Rematch => i128::from(s.had_bye),
+            Rule::FloatRepeat => float_units(s.last_descended, ctx.round),
+            Rule::ScoreGap | Rule::Club | Rule::Fold => 0,
+        }
+    }
+
+    /// A safe upper bound on the total units this rule can emit across one round's
+    /// matching: (largest units on any single edge or bye) × (number of edges).
+    fn max_total_units(self, ctx: &Ctx) -> i128 {
+        let per_edge = match self {
+            Rule::Rematch => 1,
+            Rule::ScoreGap => ctx.max_gap * ctx.max_gap,
+            Rule::FloatRepeat => 2 * FLOAT_BASE, // two directions, each ≤ FLOAT_BASE
+            Rule::Club => 1,
+            // Two |·| terms, each ≤ group_size − 1.
+            Rule::Fold => 2 * (ctx.max_group - 1).max(0),
+        };
+        per_edge * ctx.edges
+    }
+}
+
+/// Derive the priority multipliers from each rule's worst-case total units, given
+/// in priority order (highest first). Bottom-up, `mult[i] = 1 + Σ_{j>i}
+/// mult[j]·max_total[j]`, so one unit of rule `i` strictly exceeds the largest
+/// possible sum of all lower-priority rules combined — a correct lexicographic
+/// scalarization with no hand-tuned gaps.
+fn scale_ladder(max_total: [i128; Rule::COUNT]) -> [i128; Rule::COUNT] {
+    let mut mult = [0i128; Rule::COUNT];
+    let mut lower = 0i128; // Σ over the already-assigned lower-priority rules
+    for i in (0..Rule::COUNT).rev() {
+        mult[i] = 1 + lower;
+        lower += mult[i] * max_total[i];
+    }
+    mult
+}
+
+/// Total edge weight for pairing `a` against `b`: `Σ mult[rule] · units`.
+fn edge_cost(ctx: &Ctx, mult: &[i128; Rule::COUNT], a: Uuid, b: Uuid) -> i128 {
+    Rule::ORDER
+        .iter()
+        .zip(mult)
+        .map(|(rule, m)| m * rule.edge_units(ctx, a, b))
+        .sum()
+}
+
+/// Total edge weight for giving `player` the bye.
+fn bye_cost(ctx: &Ctx, mult: &[i128; Rule::COUNT], player: Uuid) -> i128 {
+    Rule::ORDER
+        .iter()
+        .zip(mult)
+        .map(|(rule, m)| m * rule.bye_units(ctx, player))
+        .sum()
+}
 
 /// Within-group fold placement of a player: its rank in the score group (by
 /// rating, descending) and the group's size.
@@ -170,86 +326,6 @@ fn fold_ranks(
         }
     }
     info
-}
-
-/// Penalty (0 if `last` is `None`) for floating the same direction again this
-/// `round`, decaying with the number of rounds since `last`.
-fn float_penalty(last: Option<u32>, round: u32) -> i128 {
-    match last {
-        Some(k) => {
-            let since = (round - k) as i128; // k < round always
-            W_FLOAT * (FLOAT_BASE / since)
-        }
-        None => 0,
-    }
-}
-
-/// Penalty for pairing `a` against `b` this round.
-fn edge_cost(
-    scores: &Scores,
-    by_player: &HashMap<Uuid, &Player>,
-    fold: &HashMap<Uuid, FoldInfo>,
-    a: Uuid,
-    b: Uuid,
-    round: u32,
-) -> i128 {
-    let sa = scores.get(&a);
-    let sb = scores.get(&b);
-    let mut cost = 0i128;
-
-    // Rule 1: never play the same opponent twice.
-    if sa.opponents.contains(&b) {
-        cost += W_REMATCH;
-    }
-
-    // Rule 2: prefer equal scores; penalty grows with the square of the gap.
-    let gap = (sa.points as i128 - sb.points as i128).abs();
-    cost += W_SCORE * gap * gap;
-
-    // Rule 3: avoid repeating a float in the same direction. The lower-scored
-    // player floats up, the higher-scored one floats down.
-    match sa.points.cmp(&sb.points) {
-        Ordering::Less => {
-            cost += float_penalty(sa.last_ascended, round);
-            cost += float_penalty(sb.last_descended, round);
-        }
-        Ordering::Greater => {
-            cost += float_penalty(sa.last_descended, round);
-            cost += float_penalty(sb.last_ascended, round);
-        }
-        Ordering::Equal => {}
-    }
-
-    // Rule 4: avoid pairing club-mates (ignored when a club is unknown).
-    if let (Some(ca), Some(cb)) = (&by_player[&a].club, &by_player[&b].club) {
-        if ca == cb {
-            cost += W_CLUB;
-        }
-    }
-
-    // Rule 5: fold within a score group.
-    if sa.points == sb.points {
-        if let (Some(fa), Some(fb)) = (fold.get(&a), fold.get(&b)) {
-            let ia = ideal_rank(fa.rank, fa.group_size) as i128;
-            let ib = ideal_rank(fb.rank, fb.group_size) as i128;
-            let dev = (fb.rank as i128 - ia).abs() + (fa.rank as i128 - ib).abs();
-            cost += W_FOLD * dev;
-        }
-    }
-
-    cost
-}
-
-/// Penalty for giving `player` the bye this round: a bye repeats rule 1 (never
-/// bye twice) and counts as a downfloat for rule 3.
-fn bye_cost(scores: &Scores, player: Uuid, round: u32) -> i128 {
-    let s = scores.get(&player);
-    let mut cost = 0i128;
-    if s.had_bye {
-        cost += W_REMATCH;
-    }
-    cost += float_penalty(s.last_descended, round);
-    cost
 }
 
 /// Pair the `present` players by minimizing the total rule penalty, honoring
@@ -309,10 +385,31 @@ pub fn pair_round_weighted(
     let mut bye = forced_bye;
 
     if vcount >= 2 {
+        // Per-round quantities the rule bounds (and hence multipliers) depend on:
+        // the number of matching edges, the widest points gap, and the largest
+        // score group. From these the multiplier ladder is derived so its tiers
+        // are guaranteed disjoint (see `scale_ladder`).
+        let (mut lo, mut hi) = (u32::MAX, 0u32);
+        for &id in &free {
+            let p = scores.get(&id).points;
+            lo = lo.min(p);
+            hi = hi.max(p);
+        }
+        let ctx = Ctx {
+            scores: &scores,
+            by_player: &by_player,
+            fold: &fold,
+            round: number,
+            edges: (vcount / 2) as i128,
+            max_gap: hi.saturating_sub(lo) as i128,
+            max_group: fold.values().map(|f| f.group_size).max().unwrap_or(0) as i128,
+        };
+        let mult = scale_ladder(Rule::ORDER.map(|r| r.max_total_units(&ctx)));
+
         let mut cost = vec![vec![0i128; vcount]; vcount];
         for i in 0..k {
             for j in (i + 1)..k {
-                let c = edge_cost(&scores, &by_player, &fold, free[i], free[j], number);
+                let c = edge_cost(&ctx, &mult, free[i], free[j]);
                 cost[i][j] = c;
                 cost[j][i] = c;
             }
@@ -320,7 +417,7 @@ pub fn pair_round_weighted(
         if need_phantom {
             let p = k;
             for i in 0..k {
-                let c = bye_cost(&scores, free[i], number);
+                let c = bye_cost(&ctx, &mult, free[i]);
                 cost[i][p] = c;
                 cost[p][i] = c;
             }
@@ -573,6 +670,7 @@ mod tests {
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
         let settings = TournamentSettings {
             macmahon_thresholds: vec![1500],
+            ..Default::default()
         };
 
         let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);
@@ -612,6 +710,87 @@ mod tests {
                 club_of(b.player2),
                 "club-mates were paired"
             );
+        }
+    }
+
+    #[test]
+    fn scale_ladder_tiers_are_disjoint() {
+        // Arbitrary per-rule worst-case totals, in priority order (highest first).
+        let max_total = [7i128, 40, 13, 5, 9];
+        let mult = scale_ladder(max_total);
+        // Each rule's multiplier is exactly 1 plus the most every lower-priority
+        // rule can contribute, so one of its units strictly dominates them all —
+        // a correct lexicographic ordering.
+        for i in 0..max_total.len() {
+            let lower_max: i128 = ((i + 1)..max_total.len())
+                .map(|j| mult[j] * max_total[j])
+                .sum();
+            assert_eq!(mult[i], 1 + lower_max);
+            assert!(mult[i] > lower_max);
+        }
+        assert_eq!(mult[Rule::COUNT - 1], 1); // the lowest-priority rule is the unit
+    }
+
+    #[test]
+    fn rule_bounds_are_valid_upper_bounds() {
+        // A field with rematches, a bye, floats, club-mates and a spread of scores
+        // so every rule can fire; then assert no single edge (or bye) can exceed
+        // the per-edge share of its rule's `max_total_units`.
+        let p = vec![
+            player(1, Some(2000), Some("X")),
+            player(2, Some(1800), Some("X")),
+            player(3, Some(1600), Some("Y")),
+            player(4, Some(1400), Some("Y")),
+            player(5, Some(1200), None),
+        ];
+        let id = |i: usize| p[i].id;
+        let r1 = completed_round(
+            1,
+            &[
+                (id(0), id(1), Winner::Player1),
+                (id(2), id(3), Winner::Player1),
+            ],
+            Some(id(4)), // p5 took a bye
+        );
+        let settings = TournamentSettings {
+            macmahon_thresholds: vec![1500],
+            ..Default::default()
+        };
+        let scores = compute_scores(&p, &settings, &[r1]);
+        let by_player: HashMap<Uuid, &Player> = p.iter().map(|q| (q.id, q)).collect();
+        let free: Vec<Uuid> = p.iter().map(|q| q.id).collect();
+        let fold = fold_ranks(&scores, &by_player, &free);
+        let (mut lo, mut hi) = (u32::MAX, 0u32);
+        for &pid in &free {
+            let pts = scores.get(&pid).points;
+            lo = lo.min(pts);
+            hi = hi.max(pts);
+        }
+        let edges = 3i128; // 5 free + phantom bye = 6 vertices → 3 edges
+        let ctx = Ctx {
+            scores: &scores,
+            by_player: &by_player,
+            fold: &fold,
+            round: 2,
+            edges,
+            max_gap: (hi - lo) as i128,
+            max_group: fold.values().map(|f| f.group_size).max().unwrap_or(0) as i128,
+        };
+
+        for rule in Rule::ORDER {
+            let bound = rule.max_total_units(&ctx);
+            for i in 0..free.len() {
+                for j in (i + 1)..free.len() {
+                    assert!(
+                        rule.edge_units(&ctx, free[i], free[j]) * edges <= bound,
+                        "an edge exceeded the rule's total-units bound"
+                    );
+                }
+                assert!(
+                    rule.bye_units(&ctx, free[i]) * edges <= bound,
+                    "a bye exceeded the rule's total-units bound"
+                );
+            }
         }
     }
 }
