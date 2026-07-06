@@ -38,6 +38,8 @@
     drawn: boolean;
     /** Present for a handicap game: the code, and whether this player conceded. */
     handicap?: { code: string; gave: boolean };
+    /** Points this player had over the opponent at pairing time (negative = played up). */
+    pointsDiff: number;
   };
 
   type Cell =
@@ -70,6 +72,13 @@
       effectiveWon = gave;
       handicap = { code: board.handicap.handicap, gave };
     }
+    // points_diff = points(player1) − points(player2), frozen at pairing time.
+    // From this player's own perspective: a positive diff for player1 means
+    // player1 outranked player2, i.e. player1 played down (▼); the sign flips
+    // for player2.
+    const diff = board.points_diff ?? 0;
+    const pointsDiff = isP1 ? diff : -diff;
+
     return {
       kind: "played",
       opponent,
@@ -77,17 +86,25 @@
       effectiveWon,
       drawn: board.drawn ?? false,
       handicap,
+      pointsDiff,
     };
   }
 
-  /** The results-cell label, e.g. `3+`, `4=−`, `3+(+4p)`, `4=+(−2p)`. */
+  /** Ascending/descending floater markers, e.g. `^`, `vv` — one per point of gap. */
+  function floatMarkers(cell: PlayedCell): string {
+    if (cell.pointsDiff === 0) return "";
+    const marker = cell.pointsDiff < 0 ? "^" : "v";
+    return marker.repeat(Math.abs(cell.pointsDiff));
+  }
+
+  /** The results-cell label, e.g. `3+`, `4=−`, `3+(+4p)`, `4=+(−2p)^`. */
   function playedLabel(cell: PlayedCell): string {
     const draw = cell.drawn ? "=" : "";
     const sign = cell.actualWon ? "+" : "−";
     const hc = cell.handicap
       ? `(${cell.handicap.gave ? "−" : "+"}${cell.handicap.code})`
       : "";
-    return `${cell.opponent}${draw}${sign}${hc}`;
+    return `${cell.opponent}${draw}${sign}${hc}${floatMarkers(cell)}`;
   }
 </script>
 

@@ -55,10 +55,6 @@ Known limitations and future work, roughly ordered by area.
 
 ## UI
 
-- **Markers for ascending/descending floaters** When a player plays against a player
-  with more (respectively less points), they should get a ^ (respectively v) at the end
-  of their result cell for that match. In the exceptional case of a game with a difference
-  in points greater than 1, it can be expressed by emitting multiple v or ^ in a row.
 - **Correct focus in the player registration form** When adding a player to the tournament,
   focus is currently lost. It should go back to the last name field.
   
