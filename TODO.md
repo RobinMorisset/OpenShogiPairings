@@ -60,22 +60,23 @@ Known limitations and future work, roughly ordered by area.
   header row's `Name` / `Grades` positions, or by detecting the alignment) so the
   parser adapts automatically instead of silently breaking.
 
-## Results tab
+## UI
 
 - **Markers for ascending/descending floaters** When a player plays against a player
   with more (respectively less points), they should get a ^ (respectively v) at the end
   of their result cell for that match. In the exceptional case of a game with a difference
   in points greater than 1, it can be expressed by emitting multiple v or ^ in a row.
+- **Correct focus in the player registration form** When adding a player to the tournament,
+  focus is currently lost. It should go back to the last name field.
   
 ## Simulations
 
-- **Add an API to load an american grid into a tournament** This API should not be surfaced in the UI, it is
-  to be used in tests, and for doing simulations of various pairing methods.
+- **Add an API and a button to cancel the last round** This should return to the state right after the last round completion
+  (right after player registration if the last round is the first one)
+  and make it easy to replay a round many times in simulation. It can have a button rather than just an API because it can also be useful to referees in rare situations
 - **Add an API to get random game results** This API should not be surfaced in the UI, it is
   to be used in tests, and for doing simulations of various pairing methods. For each undecided match
   in the current round, it should pick a winner based on the respective ELOs, using the following formula:
   Chance of victory for player with elo A playing against player with elo B: 1 / (1 + 10^((B - A) / 400))
-- **Add an API and a button to cancel the last round** This should return to the state right after the last round completion
-  and make it easy to replay a round many times in simulation. It can have a button because it can also be useful to referees in rare situations
 - **Add an API getting statistical results from a tournament** the one I'm interested in is specifically the distribution of
   ELO differences between players of games, ideally taking not the ELO at the start of the tournament for each player, but allowing an updated player -> ELO mapping to be provided by the client for this request only.
