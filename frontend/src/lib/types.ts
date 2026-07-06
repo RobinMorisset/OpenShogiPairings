@@ -116,6 +116,8 @@ export interface TournamentSettings {
   club_protection_rounds?: number | null;
   /** Clubs exempt from protection (the "local club"); matched case-insensitively. */
   club_protection_exempt_clubs: string[];
+  /** Which player each group floats up: "classic" (first) or "median" Swiss. */
+  floater_style: "classic" | "median";
 }
 
 /** Mirror of `osp_core::Tournament`. */

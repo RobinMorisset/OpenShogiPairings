@@ -68,6 +68,7 @@
   let clubEnabled = $state(false);
   let clubRounds = $state<number | null>(null);
   let exemptClubs = $state<string[]>([]);
+  let floaterStyle = $state<"classic" | "median">("classic");
 
   // Adopt the persisted settings only on a genuine external change — a load, an
   // undo, or the server normalizing our input. When our own edit merely
@@ -81,19 +82,22 @@
     const sEnabled = settings.club_protection_enabled;
     const sRounds = settings.club_protection_rounds ?? null;
     const sExempt = settings.club_protection_exempt_clubs;
+    const sFloater = settings.floater_style;
     untrack(() => {
       const matches =
         eq(cleanSorted(thresholds), sThresholds) &&
         eq(cleanSorted(removals), sRemovals) &&
         clubEnabled === sEnabled &&
         (clubRounds ?? null) === sRounds &&
-        eqStr(normExempt(exemptClubs), sExempt);
+        eqStr(normExempt(exemptClubs), sExempt) &&
+        floaterStyle === sFloater;
       if (!matches) {
         thresholds = [...sThresholds];
         removals = [...sRemovals];
         clubEnabled = sEnabled;
         clubRounds = sRounds;
         exemptClubs = [...sExempt];
+        floaterStyle = sFloater;
       }
     });
   });
@@ -113,7 +117,13 @@
       club_protection_exempt_clubs: exemptClubs
         .map((c) => c.trim())
         .filter((c) => c.length > 0),
+      floater_style: floaterStyle,
     });
+  }
+
+  function setFloaterStyle(v: "classic" | "median") {
+    floaterStyle = v;
+    persist();
   }
 
   function setClubEnabled(v: boolean) {
@@ -432,6 +442,36 @@
       </div>
     {/if}
   </div>
+
+  <div class="section">
+    <h3>Floater selection</h3>
+    <p class="desc">
+      When a score group has to pair across groups, who floats? The weakest of the
+      upper group always drops down; this chooses who the lower group sends up.
+    </p>
+    <label class="check">
+      <input
+        type="radio"
+        name="floater-style"
+        value="classic"
+        checked={floaterStyle === "classic"}
+        disabled={busy}
+        onchange={() => setFloaterStyle("classic")}
+      />
+      Classic Swiss — the strongest of the lower group floats up
+    </label>
+    <label class="check">
+      <input
+        type="radio"
+        name="floater-style"
+        value="median"
+        checked={floaterStyle === "median"}
+        disabled={busy}
+        onchange={() => setFloaterStyle("median")}
+      />
+      Median Swiss — the median of the lower group floats up
+    </label>
+  </div>
 </div>
 
 <style>
@@ -489,6 +529,9 @@
   .check input[type="checkbox"] {
     width: 1rem;
     height: 1rem;
+  }
+  .check + .check {
+    margin-top: 0.4rem;
   }
   .club-sub {
     margin: 0.8rem 0 0 1.6rem;

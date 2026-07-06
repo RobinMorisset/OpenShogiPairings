@@ -25,7 +25,7 @@ pub use grid_import::{import_american_grid, GridImportError};
 pub use pairing::{pair_round, pair_round_constrained, pair_round_weighted};
 pub use player::{NewPlayer, Player};
 pub use round::{Board, Handicap, HandicapGame, Round, RoundDraft, Winner};
-pub use settings::TournamentSettings;
+pub use settings::{FloaterStyle, TournamentSettings};
 pub use standings::{compute_standings, Standing};
 pub use tournament::{
     Tournament, TournamentError, MIN_PLAYERS_PER_ROUND, TOURNAMENT_FORMAT_VERSION,

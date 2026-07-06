@@ -19,9 +19,14 @@
 //!    someone with more points) or a descending floater (fewer points, or a
 //!    bye) twice; the penalty fades with the number of rounds since the last such
 //!    float.
-//! 4. **Different clubs** — avoid pairing club-mates (ignored when a club is
+//! 4. **Floater selection** — when a group has to pair across score groups, choose
+//!    *who* floats: the descending floater should be the last (weakest) of the
+//!    upper group, and the ascending floater the first (classic Swiss) or the
+//!    median (median Swiss) of the lower group. The penalty rises with the
+//!    distance from that ideal in-group rank.
+//! 5. **Different clubs** — avoid pairing club-mates (ignored when a club is
 //!    unknown).
-//! 5. **Fold within a score group** — sort a group (equal points) by rating
+//! 6. **Fold within a score group** — sort a group (equal points) by rating
 //!    (unrated = 1), descending; the Nth player of the top half should meet the
 //!    Nth of the bottom half, penalized by how far the actual pairing deviates.
 //!
@@ -45,7 +50,7 @@ use crate::matching::min_weight_perfect_matching;
 use crate::player::Player;
 use crate::round::{Board, Round};
 use crate::scoring::{compute_scores, Scores};
-use crate::settings::TournamentSettings;
+use crate::settings::{FloaterStyle, TournamentSettings};
 
 /// Pair all the given players with no constraints (naïve mode).
 pub fn pair_round(number: u32, player_ids: &[Uuid]) -> Round {
@@ -135,6 +140,10 @@ enum Rule {
     ScoreGap,
     /// Avoid repeating a float in the same direction; decays with rounds since.
     FloatRepeat,
+    /// When a pairing floats across groups, choose the right players to float:
+    /// the weakest of the upper group descends, and the first/median of the lower
+    /// group ascends.
+    FloaterSelection,
     /// Avoid pairing club-mates (ignored when a club is unknown).
     Club,
     /// Fold within a score group (top half meets bottom half).
@@ -143,10 +152,11 @@ enum Rule {
 
 impl Rule {
     /// The rules from highest to lowest priority.
-    const ORDER: [Rule; 5] = [
+    const ORDER: [Rule; 6] = [
         Rule::Rematch,
         Rule::ScoreGap,
         Rule::FloatRepeat,
+        Rule::FloaterSelection,
         Rule::Club,
         Rule::Fold,
     ];
@@ -161,6 +171,8 @@ struct Ctx<'a> {
     by_player: &'a HashMap<Uuid, &'a Player>,
     fold: &'a HashMap<Uuid, FoldInfo>,
     round: u32,
+    /// Which player each lower group sends up as its ascending floater.
+    floater_style: FloaterStyle,
     /// Whether club protection applies this round (enabled and within its window).
     club_active: bool,
     /// Clubs exempt from protection, in normalized form (see
@@ -181,6 +193,26 @@ fn float_units(last: Option<u32>, round: u32) -> i128 {
         Some(k) => FLOAT_BASE / (round - k) as i128, // k < round always
         None => 0,
     }
+}
+
+/// Floater-selection units for one floater: how far its in-group rank is from the
+/// ideal position for its float direction. A descending floater ideally sits last
+/// (weakest) in its group; an ascending floater ideally sits first (classic) or at
+/// the median (median Swiss). 0 if the player has no fold info (shouldn't happen
+/// for free players) or its group is a singleton.
+fn floater_units(ctx: &Ctx, id: Uuid, descending: bool) -> i128 {
+    let Some(f) = ctx.fold.get(&id) else {
+        return 0;
+    };
+    let ideal = if descending {
+        f.group_size.saturating_sub(1)
+    } else {
+        match ctx.floater_style {
+            FloaterStyle::Classic => 0,
+            FloaterStyle::Median => f.group_size / 2,
+        }
+    };
+    (f.rank as i128 - ideal as i128).abs()
 }
 
 impl Rule {
@@ -208,7 +240,17 @@ impl Rule {
                 }
                 Ordering::Equal => 0,
             },
-            // Rule 4: avoid pairing club-mates — but only when protection is active
+            // Rule 4: on a cross-group (float) edge, prefer the right floaters —
+            // the weakest of the upper group down, the first/median of the lower
+            // group up. Same-group edges aren't floats, so no penalty.
+            Rule::FloaterSelection => match sa.points.cmp(&sb.points) {
+                Ordering::Equal => 0,
+                _ => {
+                    let (descender, ascender) = if sa.points > sb.points { (a, b) } else { (b, a) };
+                    floater_units(ctx, descender, true) + floater_units(ctx, ascender, false)
+                }
+            },
+            // Rule 5: avoid pairing club-mates — but only when protection is active
             // this round, ignoring unknown clubs and clubs on the exempt list. Club
             // names are matched case-insensitively.
             Rule::Club => {
@@ -224,7 +266,7 @@ impl Rule {
                     _ => 0,
                 }
             }
-            // Rule 5: fold within a score group — deviation from the ideal fold.
+            // Rule 6: fold within a score group — deviation from the ideal fold.
             Rule::Fold => {
                 if sa.points != sb.points {
                     return 0;
@@ -248,6 +290,8 @@ impl Rule {
         match self {
             Rule::Rematch => i128::from(s.had_bye),
             Rule::FloatRepeat => float_units(s.last_descended, ctx.round),
+            // A bye is a downfloat, so prefer the weakest of the group to take it.
+            Rule::FloaterSelection => floater_units(ctx, player, true),
             Rule::ScoreGap | Rule::Club | Rule::Fold => 0,
         }
     }
@@ -259,6 +303,8 @@ impl Rule {
             Rule::Rematch => 1,
             Rule::ScoreGap => ctx.max_gap * ctx.max_gap,
             Rule::FloatRepeat => 2 * FLOAT_BASE, // two directions, each ≤ FLOAT_BASE
+            // A descender and an ascender term, each a rank distance ≤ group_size − 1.
+            Rule::FloaterSelection => 2 * (ctx.max_group - 1).max(0),
             Rule::Club => i128::from(ctx.club_active), // 0 when off — no wasted tier
             // Two |·| terms, each ≤ group_size − 1.
             Rule::Fold => 2 * (ctx.max_group - 1).max(0),
@@ -417,6 +463,7 @@ pub fn pair_round_weighted(
             by_player: &by_player,
             fold: &fold,
             round: number,
+            floater_style: settings.floater_style,
             club_active: settings.club_protection_active(number),
             exempt_clubs: &exempt_clubs,
             edges: (vcount / 2) as i128,
@@ -810,9 +857,72 @@ mod tests {
     }
 
     #[test]
+    fn floater_selection_floats_down_the_weakest() {
+        // Upper group (1 MacMahon point): X0>X1>X2 by rating. Lower group (0): a
+        // single Y. One X must float down; it should be X2, the weakest of X, so
+        // X0-X1 stay together.
+        let p = vec![
+            player(1, Some(2000), None), // X0 (rank 0 of the upper group)
+            player(2, Some(1900), None), // X1
+            player(3, Some(1800), None), // X2 (weakest)
+            player(4, Some(1000), None), // Y (lower group)
+        ];
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let settings = TournamentSettings {
+            macmahon_thresholds: vec![1500], // X0..X2 on 1 point, Y on 0
+            ..Default::default()
+        };
+
+        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);
+        assert!(
+            board_pairs(&round).contains(&unord(p[2].id, p[3].id)),
+            "the weakest of the upper group should float down"
+        );
+    }
+
+    #[test]
+    fn floater_selection_classic_vs_median_pick_different_ascenders() {
+        // Upper group (1 point): a single H. Lower group (0 points): L0>L1>L2 by
+        // rating. One L floats up: classic sends the first (L0), median the middle
+        // (L1). The fold is indifferent between those two outcomes, so the floater
+        // rule decides.
+        let p = vec![
+            player(1, Some(2000), None), // H  (1 MacMahon point)
+            player(2, Some(1400), None), // L0 (rank 0 of the lower group)
+            player(3, Some(1300), None), // L1 (median)
+            player(4, Some(1200), None), // L2
+        ];
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let base = TournamentSettings {
+            macmahon_thresholds: vec![1500],
+            ..Default::default()
+        };
+
+        let classic = TournamentSettings {
+            floater_style: FloaterStyle::Classic,
+            ..base.clone()
+        };
+        let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], None);
+        assert!(
+            board_pairs(&round).contains(&unord(p[0].id, p[1].id)),
+            "classic Swiss floats up the strongest of the group (L0)"
+        );
+
+        let median = TournamentSettings {
+            floater_style: FloaterStyle::Median,
+            ..base
+        };
+        let round = pair_round_weighted(1, &p, &median, &[], &present, &[], None);
+        assert!(
+            board_pairs(&round).contains(&unord(p[0].id, p[2].id)),
+            "median Swiss floats up the median of the group (L1)"
+        );
+    }
+
+    #[test]
     fn scale_ladder_tiers_are_disjoint() {
         // Arbitrary per-rule worst-case totals, in priority order (highest first).
-        let max_total = [7i128, 40, 13, 5, 9];
+        let max_total = [7i128, 40, 13, 21, 5, 9];
         let mult = scale_ladder(max_total);
         // Each rule's multiplier is exactly 1 plus the most every lower-priority
         // rule can contribute, so one of its units strictly dominates them all —
@@ -869,6 +979,7 @@ mod tests {
             by_player: &by_player,
             fold: &fold,
             round: 2,
+            floater_style: FloaterStyle::Median, // exercise the floater-selection bound
             club_active: true, // exercise the club rule's bound
             exempt_clubs: &exempt_clubs,
             edges,

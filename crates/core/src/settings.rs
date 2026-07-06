@@ -4,6 +4,19 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
+/// Which player a score group sends *up* as its ascending floater when it has to
+/// pair across groups. The descending floater is always the last (weakest) of the
+/// upper group; this only chooses the ascending one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FloaterStyle {
+    /// Classic Swiss: the first (strongest) of the lower group floats up.
+    #[default]
+    Classic,
+    /// Median Swiss: the median of the lower group floats up.
+    Median,
+}
+
 /// Configuration that isn't tied to a single player or round.
 ///
 /// Kept as its own record so it can grow (time controls, tie-break choices, …)
@@ -39,6 +52,10 @@ pub struct TournamentSettings {
     /// share the host club and are expected to meet. Matched case-insensitively.
     #[serde(default)]
     pub club_protection_exempt_clubs: Vec<String>,
+    /// Which player each score group sends up as its ascending floater (classic
+    /// vs median Swiss). The descending floater is always the group's weakest.
+    #[serde(default)]
+    pub floater_style: FloaterStyle,
 }
 
 impl TournamentSettings {
@@ -238,5 +255,14 @@ mod tests {
         // First spelling kept, trimmed; the case-variant dup and the blank dropped.
         assert_eq!(s.club_protection_exempt_clubs, vec!["Paris", "Lyon"]);
         assert!(s.exempt_clubs_normalized().contains("paris")); // matched lower-cased
+    }
+
+    #[test]
+    fn floater_style_defaults_to_classic_and_round_trips_snake_case() {
+        assert_eq!(TournamentSettings::default().floater_style, FloaterStyle::Classic);
+        assert_eq!(serde_json::to_string(&FloaterStyle::Median).unwrap(), "\"median\"");
+        // Omitted in the payload → the default (Classic).
+        let s: TournamentSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.floater_style, FloaterStyle::Classic);
     }
 }

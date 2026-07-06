@@ -28,9 +28,11 @@ Hungarian doesn't apply); the edge weights come from a set of Swiss rules
 ([`crates/core/src/pairing.rs`](crates/core/src/pairing.rs)) combined on a
 priority ladder of multipliers — most important first: never rematch or repeat a
 bye, prefer equal scores (penalty ∝ gap²), avoid repeating a float in the same
-direction (decaying with time), avoid club-mates (optional per tournament, and
-optionally only for the first N rounds or with some clubs exempt), and fold each
-score group (top-half Nth meets bottom-half Nth). The odd player's bye is modeled
+direction (decaying with time), select floaters (the weakest of the upper group
+drops, the first — classic Swiss — or median lower-group player rises), avoid
+club-mates (optional per tournament, and optionally only for the first N rounds
+or with some clubs exempt), and fold each score group (top-half Nth meets
+bottom-half Nth). The odd player's bye is modeled
 as a phantom vertex. The multipliers are *derived* from each rule's worst-case
 contribution, so the tiers are strictly disjoint by construction (lexicographic
 priority) with no hand-tuned gaps; an ILP/CP-SAT backend for very large fields and
