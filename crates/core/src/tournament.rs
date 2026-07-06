@@ -358,6 +358,23 @@ impl Tournament {
         self.cup.as_ref()?.podium(&self.rounds)
     }
 
+    /// The players the cup bracket will pair in the round currently being drafted
+    /// (empty when there is no draft, no cup, or the draft round is past the cup).
+    /// Lets clients keep those players out of the Swiss customization UI.
+    pub fn draft_cup_players(&self) -> Vec<Uuid> {
+        let (Some(draft), Some(cup)) = (&self.draft, &self.cup) else {
+            return Vec::new();
+        };
+        cup.matches_for_round(&self.rounds, draft.number)
+            .map(|matches| {
+                matches
+                    .into_iter()
+                    .flat_map(|m| [m.player1, m.player2])
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Complete the current (last, in-progress) round.
     ///
     /// Only possible once every game in the round has a result. Completing a

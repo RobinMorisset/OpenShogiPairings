@@ -38,8 +38,17 @@ contribution, so the tiers are strictly disjoint by construction (lexicographic
 priority) with no hand-tuned gaps; an ILP/CP-SAT backend for very large fields and
 formats needing hard constraints is future work (see [TODO.md](TODO.md)).
 
+An optional **hybrid cup** runs a seeded direct-elimination bracket (top 8/16/32/
+64 eligible players) over the first `log2(size)` rounds alongside the Swiss — the
+French / European Championship format. Eligibility is marked per player during
+registration, the size is chosen at finalization, and eliminated players drop
+back into the Swiss (their cup games count, but a bracket pairing is not a Swiss
+float). The semifinal losers play a small final for third place; the pairings
+view badges every board as Swiss, referee-forced, or its cup stage, and the
+Results tab shows the podium medals (without reordering the Swiss ranking).
+
 The UI organizes a tournament into tabs: **Settings** (MacMahon groups,
-degressive schedule, club protection),
+degressive schedule, club protection, floater style, hybrid cup),
 **Players**, **Results** (per-round results plus Victories and total Points),
 and one tab per round. Points are each player's victories plus their MacMahon
 starting points (one per ELO threshold their rating reaches), and the pairing

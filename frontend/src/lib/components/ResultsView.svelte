@@ -1,13 +1,26 @@
 <script lang="ts">
-  import type { Player, Round, Standing, Tournament } from "../types";
+  import type { CupPodium, Player, Round, Standing, Tournament } from "../types";
 
   interface Props {
     tournament: Tournament;
     /** Ranked standings computed server-side (the canonical ordering). */
     standings: Standing[];
+    /** The cup podium, once decided (adds medals; doesn't reorder the table). */
+    cupPodium?: CupPodium | null;
   }
 
-  let { tournament, standings }: Props = $props();
+  let { tournament, standings, cupPodium = null }: Props = $props();
+
+  // Player id → medal, from the cup podium (the table order stays pure-Swiss).
+  const medalOf = $derived.by(() => {
+    const m = new Map<string, string>();
+    if (cupPodium) {
+      m.set(cupPodium.champion, "🥇");
+      m.set(cupPodium.runner_up, "🥈");
+      m.set(cupPodium.third, "🥉");
+    }
+    return m;
+  });
 
   // One column per completed round.
   const completedRounds = $derived(tournament.rounds.filter((r) => r.completed));
@@ -111,6 +124,18 @@
 {#if tournament.players.length === 0}
   <p class="muted">No players registered yet.</p>
 {:else}
+  {#if cupPodium}
+    {@const nameOf = (id: string) => {
+      const p = byId.get(id);
+      return p ? `${p.last_name} ${p.first_name}`.trim() : "—";
+    }}
+    <div class="podium">
+      <span class="cup-title">Cup</span>
+      <span>🥇 <strong>{nameOf(cupPodium.champion)}</strong></span>
+      <span>🥈 {nameOf(cupPodium.runner_up)}</span>
+      <span>🥉 {nameOf(cupPodium.third)}</span>
+    </div>
+  {/if}
   <table>
     <thead>
       <tr>
@@ -134,7 +159,7 @@
       {#each rows as { standing, player } (player.id)}
         <tr>
           <td class="num">{player.tournament_id ?? "—"}</td>
-          <td>{player.last_name}</td>
+          <td>{#if medalOf.has(player.id)}<span class="medal">{medalOf.get(player.id)}</span> {/if}{player.last_name}</td>
           <td>{player.first_name || "—"}</td>
           <td class="num">{player.rating ?? "—"}</td>
           <td>{player.nationality ?? "—"}</td>
@@ -219,6 +244,28 @@
   .tiebreak {
     color: #9a9aa2;
     font-variant-numeric: tabular-nums;
+  }
+  .podium {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.9rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #5a4711;
+    background: #2a2410;
+    border-radius: 0.5rem;
+    font-size: 0.9rem;
+  }
+  .cup-title {
+    font-weight: 700;
+    color: #e3b341;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+  }
+  .medal {
+    font-size: 0.85rem;
   }
   .muted {
     color: #9a9aa2;

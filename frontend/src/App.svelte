@@ -19,12 +19,14 @@
     setBoardDrawn,
     setBoardHandicap,
     setBoardWinner,
+    setPlayerEligible,
     undoTournament,
     updateDraft,
     updateSettings,
     type DraftUpdate,
   } from "./lib/api";
   import type {
+    CupPodium,
     Handicap,
     NewPlayer,
     RatedPlayer,
@@ -50,6 +52,8 @@
 
   let tournament = $state<Tournament | null>(null);
   let standings = $state<Standing[]>([]);
+  let cupPodium = $state<CupPodium | null>(null);
+  let draftCupPlayers = $state<string[]>([]);
   let canUndo = $state(false);
   let initialLoad = $state<"loading" | "done">("loading");
   let creatingNew = $state(false);
@@ -61,6 +65,8 @@
   function apply(res: TournamentResponse) {
     tournament = res.tournament;
     standings = res.standings;
+    cupPodium = res.cup_podium ?? null;
+    draftCupPlayers = res.draft_cup_players ?? [];
     canUndo = res.can_undo;
   }
 
@@ -93,6 +99,24 @@
     currentRound ? currentRound.boards.every((b) => b.result != null) : false,
   );
 
+  // Hybrid cup: which bracket sizes are choosable at finalization depends on how
+  // many players the referee has marked eligible.
+  const cupEnabled = $derived(tournament?.settings.cup_enabled ?? false);
+  const eligibleCount = $derived(
+    tournament?.players.filter((p) => p.eligible).length ?? 0,
+  );
+  const validCupSizes = $derived([8, 16, 32, 64].filter((s) => s <= eligibleCount));
+  let cupSizeChoice = $state<number | null>(null);
+  // Default the size to the largest that fits, and keep it valid as eligibility
+  // changes.
+  $effect(() => {
+    if (!cupEnabled) return;
+    if (cupSizeChoice == null || !validCupSizes.includes(cupSizeChoice)) {
+      cupSizeChoice = validCupSizes.at(-1) ?? null;
+    }
+  });
+  const cupReady = $derived(!cupEnabled || cupSizeChoice != null);
+
   // "Advance" button (finalize registration / complete current round).
   const advanceLabel = $derived(
     phase === "registration"
@@ -105,15 +129,17 @@
   );
   const advanceEnabled = $derived(
     !busy &&
-      ((phase === "registration" && enoughPlayers) ||
+      ((phase === "registration" && enoughPlayers && cupReady) ||
         (phase === "in_progress" && currentRoundAllPlayed)),
   );
   const advanceTitle = $derived(
     phase === "registration" && !enoughPlayers
       ? "Register at least 2 players first"
-      : phase === "in_progress" && !currentRoundAllPlayed
-        ? "All games in the round must be played first"
-        : "",
+      : phase === "registration" && !cupReady
+        ? "Mark at least 8 players eligible for the cup, or turn the cup off in Settings"
+        : phase === "in_progress" && !currentRoundAllPlayed
+          ? "All games in the round must be played first"
+          : "",
   );
 
   // "Start round" button.
@@ -242,6 +268,12 @@
     });
   }
 
+  function handleToggleEligible(id: string, eligible: boolean) {
+    run(async () => {
+      apply(await setPlayerEligible(id, eligible));
+    });
+  }
+
   function handleUndo() {
     run(async () => {
       apply(await undoTournament());
@@ -250,7 +282,8 @@
 
   function handleAdvance() {
     if (phase === "registration") {
-      run(async () => apply(await finalizeRegistration()));
+      const size = cupEnabled ? (cupSizeChoice ?? undefined) : undefined;
+      run(async () => apply(await finalizeRegistration(size)));
     } else if (phase === "in_progress") {
       run(async () => apply(await completeRound()));
     }
@@ -427,6 +460,20 @@
           </button>
         {/if}
         <div class="round-controls">
+          {#if phase === "registration" && cupEnabled}
+            <label class="cup-size" title="Bracket size for the direct-elimination cup">
+              Cup:
+              {#if validCupSizes.length > 0}
+                <select bind:value={cupSizeChoice} disabled={busy}>
+                  {#each validCupSizes as s (s)}
+                    <option value={s}>Top {s}</option>
+                  {/each}
+                </select>
+              {:else}
+                <span class="cup-warn">need ≥8 eligible</span>
+              {/if}
+            </label>
+          {/if}
           <button
             type="button"
             class="ctrl"
@@ -498,17 +545,20 @@
           <div class="players">
             <PlayerList
               players={tournament.players}
+              showEligible={cupEnabled}
               onEdit={handleEditPlayer}
               onRemove={handleRemovePlayer}
+              onToggleEligible={handleToggleEligible}
               {busy}
             />
           </div>
         {:else if activeTab === "results"}
-          <ResultsView {tournament} {standings} />
+          <ResultsView {tournament} {standings} {cupPodium} />
         {:else if activeTab === "draft" && tournament.draft}
           <RoundDraftView
             draft={tournament.draft}
             players={tournament.players}
+            cupPlayers={draftCupPlayers}
             onUpdate={handleUpdateDraft}
             onConfirm={handleConfirmRound}
             {busy}
@@ -610,6 +660,24 @@
     gap: 0.5rem;
     align-items: center;
     padding-bottom: 0.3rem;
+  }
+  .cup-size {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    color: #9a9aa2;
+  }
+  .cup-size select {
+    background: #2d2d34;
+    color: inherit;
+    border: 1px solid #34343b;
+    border-radius: 0.4rem;
+    padding: 0.3rem 0.4rem;
+    font: inherit;
+  }
+  .cup-warn {
+    color: #d29922;
   }
   .ctrl {
     padding: 0.35rem 0.75rem;

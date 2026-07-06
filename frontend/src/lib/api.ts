@@ -159,10 +159,14 @@ export function updateSettings(
   });
 }
 
-/** Finalize registration (prerequisite for starting the first round). */
-export function finalizeRegistration(): Promise<TournamentResponse> {
+/** Finalize registration (prerequisite for starting the first round). When the
+ *  cup is enabled, pass the chosen bracket size (8/16/32/64). */
+export function finalizeRegistration(
+  cupSize?: number,
+): Promise<TournamentResponse> {
   return request<TournamentResponse>("/api/tournament/finalize-registration", {
     method: "POST",
+    body: JSON.stringify({ cup_size: cupSize ?? null }),
   });
 }
 
@@ -266,5 +270,16 @@ export function editPlayer(id: string, player: NewPlayer): Promise<TournamentRes
 export function removePlayer(id: string): Promise<TournamentResponse> {
   return request<TournamentResponse>(`/api/tournament/players/${id}`, {
     method: "DELETE",
+  });
+}
+
+/** Set whether a player is eligible for the direct-elimination cup. */
+export function setPlayerEligible(
+  id: string,
+  eligible: boolean,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(`/api/tournament/players/${id}/eligible`, {
+    method: "POST",
+    body: JSON.stringify({ eligible }),
   });
 }

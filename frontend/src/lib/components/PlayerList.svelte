@@ -3,13 +3,26 @@
 
   interface Props {
     players: Player[];
+    /** Show the cup-eligibility column (when the hybrid cup is enabled). */
+    showEligible?: boolean;
     /** Commit an in-place edit of a player's fields. */
     onEdit: (id: string, player: NewPlayer) => void;
     onRemove: (id: string) => void;
+    /** Toggle a player's cup eligibility. */
+    onToggleEligible?: (id: string, eligible: boolean) => void;
     busy?: boolean;
   }
 
-  let { players, onEdit, onRemove, busy = false }: Props = $props();
+  let {
+    players,
+    showEligible = false,
+    onEdit,
+    onRemove,
+    onToggleEligible,
+    busy = false,
+  }: Props = $props();
+
+  const eligibleCount = $derived(players.filter((p) => p.eligible).length);
 
   type Field = "last_name" | "first_name" | "rating" | "nationality" | "club";
 
@@ -142,6 +155,9 @@
   {/if}
 {/snippet}
 
+{#if showEligible}
+  <p class="elig-count">{eligibleCount} eligible for the cup</p>
+{/if}
 {#if players.length === 0}
   <p class="empty">No players registered yet.</p>
 {:else}
@@ -154,6 +170,7 @@
         <th class="num">Rating</th>
         <th>Nat.</th>
         <th>Club</th>
+        {#if showEligible}<th class="elig" title="Eligible for the cup">Cup</th>{/if}
         <th aria-label="Actions"></th>
       </tr>
     </thead>
@@ -166,6 +183,17 @@
           <td class="num">{@render cell(player, "rating", true)}</td>
           <td>{@render cell(player, "nationality", false)}</td>
           <td>{@render cell(player, "club", false)}</td>
+          {#if showEligible}
+            <td class="elig">
+              <input
+                type="checkbox"
+                checked={player.eligible ?? false}
+                disabled={busy}
+                title="Eligible for the direct-elimination cup"
+                onchange={(e) => onToggleEligible?.(player.id, e.currentTarget.checked)}
+              />
+            </td>
+          {/if}
           <td class="actions">
             <button
               type="button"
@@ -212,6 +240,15 @@
   .actions {
     text-align: right;
     width: 2rem;
+  }
+  .elig {
+    text-align: center;
+    width: 2.5rem;
+  }
+  .elig-count {
+    color: #9a9aa2;
+    font-size: 0.82rem;
+    margin: 0 0 0.5rem;
   }
 
   /* Editable cells: a plain-looking, full-width button that reveals an input. */

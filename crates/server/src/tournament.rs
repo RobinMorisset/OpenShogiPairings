@@ -102,6 +102,10 @@ struct TournamentView {
     /// Results-tab medals. `None` when there is no cup or the final isn't finished.
     #[serde(skip_serializing_if = "Option::is_none")]
     cup_podium: Option<CupPodium>,
+    /// Players the cup will pair in the round being drafted, so the draft UI can
+    /// keep them out of the Swiss customization. Empty otherwise.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    draft_cup_players: Vec<uuid::Uuid>,
 }
 
 /// Build the view from the store, or 404 if no tournament exists.
@@ -109,11 +113,13 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
     let tournament = store.current().cloned().ok_or(ApiError::NoTournament)?;
     let standings = tournament.standings();
     let cup_podium = tournament.cup_podium();
+    let draft_cup_players = tournament.draft_cup_players();
     Ok(Json(TournamentView {
         tournament,
         can_undo: store.can_undo(),
         standings,
         cup_podium,
+        draft_cup_players,
     }))
 }
 

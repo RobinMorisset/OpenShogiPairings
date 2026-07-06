@@ -1,5 +1,6 @@
 <script lang="ts">
   import { HANDICAPS, type Board, type Handicap, type Player, type Round, type Winner } from "../types";
+  import { sourceBadge } from "../pairingSource";
 
   interface Props {
     round: Round;
@@ -61,6 +62,7 @@
       <thead>
         <tr>
           <th class="num">Board</th>
+          <th class="type-col">Type</th>
           <th>Player 1</th>
           <th>Player 2</th>
           <th class="draw-col">Draw</th>
@@ -71,6 +73,11 @@
         {#each round.boards as board, i (i)}
           <tr>
             <td class="num">{i + 1}</td>
+            <td class="type-col">
+              <span class="src src-{sourceBadge(board.source).kind}"
+                >{sourceBadge(board.source).text}</span
+              >
+            </td>
             <td>
               <button
                 type="button"
@@ -172,6 +179,31 @@
     text-align: right;
     width: 3.5rem;
     font-variant-numeric: tabular-nums;
+  }
+  .type-col {
+    width: 6.5rem;
+  }
+  .src {
+    display: inline-block;
+    padding: 0.1rem 0.45rem;
+    border-radius: 0.7rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .src-swiss {
+    color: #7a7a83;
+  }
+  .src-forced {
+    color: #7aa2f7;
+    border-color: #2b3a67;
+    background: #1b2340;
+  }
+  .src-cup {
+    color: #e3b341;
+    border-color: #5a4711;
+    background: #2a2410;
   }
 
   .player {

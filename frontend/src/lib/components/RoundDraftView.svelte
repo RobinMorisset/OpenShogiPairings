@@ -5,6 +5,8 @@
   interface Props {
     draft: RoundDraft;
     players: Player[];
+    /** Players the cup bracket will pair this round (not Swiss-customizable). */
+    cupPlayers?: string[];
     /** Push the edited draft to the server. */
     onUpdate: (update: DraftUpdate) => void;
     /** Confirm the draft: pair remaining players and start the round. */
@@ -12,10 +14,18 @@
     busy?: boolean;
   }
 
-  let { draft, players, onUpdate, onConfirm, busy = false }: Props = $props();
+  let {
+    draft,
+    players,
+    cupPlayers = [],
+    onUpdate,
+    onConfirm,
+    busy = false,
+  }: Props = $props();
 
   const byId = $derived(new Map(players.map((p) => [p.id, p])));
   const absentSet = $derived(new Set(draft.absent));
+  const cupSet = $derived(new Set(cupPlayers));
   const forcedIds = $derived(
     new Set([
       ...draft.forced_boards.flatMap((b) => [b.player1, b.player2]),
@@ -27,9 +37,18 @@
     return (a.tournament_id ?? Infinity) - (b.tournament_id ?? Infinity);
   }
   const allSorted = $derived([...players].sort(byNumber));
-  const present = $derived(allSorted.filter((p) => !absentSet.has(p.id)));
+  // The Swiss pool: present players the cup hasn't already taken.
+  const present = $derived(
+    allSorted.filter((p) => !absentSet.has(p.id) && !cupSet.has(p.id)),
+  );
   // Present players not already fixed into a forced pairing / bye.
   const forceable = $derived(present.filter((p) => !forcedIds.has(p.id)));
+
+  // Cup players the referee has marked absent — their bracket game is still
+  // created, so the referee is warned to record the forfeit.
+  const absentCupPlayers = $derived(
+    allSorted.filter((p) => cupSet.has(p.id) && absentSet.has(p.id)),
+  );
 
   function label(id: string): string {
     const p = byId.get(id);
@@ -93,7 +112,8 @@
 
   // Client-side validation (the server validates authoritatively too).
   const problem = $derived.by<string | null>(() => {
-    if (present.length < 2) return "Need at least 2 present players.";
+    if (cupPlayers.length === 0 && present.length < 2)
+      return "Need at least 2 present players.";
     if (draft.forced_bye) {
       if (present.length % 2 === 0)
         return "A forced bye needs an odd number of present players.";
@@ -106,10 +126,27 @@
 
 <div class="draft">
   <p class="summary">
-    Preparing <strong>round {draft.number}</strong> — {present.length} present,
+    Preparing <strong>round {draft.number}</strong> — {present.length} in the Swiss
+    pool{#if cupPlayers.length > 0}, {cupPlayers.length} in the cup bracket{/if},
     {draft.absent.length} absent. Players you don't pair by hand are matched
     automatically.
   </p>
+
+  {#if cupPlayers.length > 0}
+    <p class="cup-note">
+      The {cupPlayers.length} cup players are paired by the bracket (shown once the
+      round starts) and can't be customized here.
+    </p>
+  {/if}
+
+  {#if absentCupPlayers.length > 0}
+    <p class="hint warning">
+      ⚠ {absentCupPlayers.map((p) => label(p.id)).join(", ")}
+      {absentCupPlayers.length === 1 ? "is" : "are"} in the cup but marked absent —
+      the bracket game is still created; record the forfeit result when the round
+      starts.
+    </p>
+  {/if}
 
   <section>
     <h3>Absent this round</h3>
@@ -123,7 +160,7 @@
             disabled={busy}
             onchange={() => toggleAbsent(p.id)}
           />
-          {label(p.id)}
+          {label(p.id)}{#if cupSet.has(p.id)}<span class="cup-tag">cup</span>{/if}
         </label>
       {/each}
     </div>
@@ -214,6 +251,27 @@
   .summary {
     margin: 0;
     color: #c9c9d1;
+  }
+  .cup-note {
+    margin: 0;
+    color: #9a9aa2;
+    font-size: 0.85rem;
+  }
+  .hint.warning {
+    margin: 0;
+    color: #d29922;
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+  .cup-tag {
+    margin-left: 0.35rem;
+    padding: 0 0.3rem;
+    border-radius: 0.6rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #e3b341;
+    border: 1px solid #5a4711;
+    background: #2a2410;
   }
   section {
     border: 1px solid #2b2b31;

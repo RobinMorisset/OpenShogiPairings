@@ -69,6 +69,7 @@
   let clubRounds = $state<number | null>(null);
   let exemptClubs = $state<string[]>([]);
   let floaterStyle = $state<"classic" | "median">("classic");
+  let cupEnabled = $state(false);
 
   // Adopt the persisted settings only on a genuine external change — a load, an
   // undo, or the server normalizing our input. When our own edit merely
@@ -83,6 +84,7 @@
     const sRounds = settings.club_protection_rounds ?? null;
     const sExempt = settings.club_protection_exempt_clubs;
     const sFloater = settings.floater_style;
+    const sCup = settings.cup_enabled;
     untrack(() => {
       const matches =
         eq(cleanSorted(thresholds), sThresholds) &&
@@ -90,7 +92,8 @@
         clubEnabled === sEnabled &&
         (clubRounds ?? null) === sRounds &&
         eqStr(normExempt(exemptClubs), sExempt) &&
-        floaterStyle === sFloater;
+        floaterStyle === sFloater &&
+        cupEnabled === sCup;
       if (!matches) {
         thresholds = [...sThresholds];
         removals = [...sRemovals];
@@ -98,6 +101,7 @@
         clubRounds = sRounds;
         exemptClubs = [...sExempt];
         floaterStyle = sFloater;
+        cupEnabled = sCup;
       }
     });
   });
@@ -118,11 +122,17 @@
         .map((c) => c.trim())
         .filter((c) => c.length > 0),
       floater_style: floaterStyle,
+      cup_enabled: cupEnabled,
     });
   }
 
   function setFloaterStyle(v: "classic" | "median") {
     floaterStyle = v;
+    persist();
+  }
+
+  function setCupEnabled(v: boolean) {
+    cupEnabled = v;
     persist();
   }
 
@@ -470,6 +480,25 @@
         onchange={() => setFloaterStyle("median")}
       />
       Median Swiss — the median of the lower group floats up
+    </label>
+  </div>
+
+  <div class="section">
+    <h3>Hybrid cup</h3>
+    <p class="desc">
+      Run a direct-elimination cup among the top eligible players alongside the
+      Swiss (the French / European Championship format). Enabling this adds an
+      eligibility column to registration; you pick the bracket size (top 8/16/32/
+      64) when you finalize registration.
+    </p>
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={cupEnabled}
+        disabled={busy}
+        onchange={(e) => setCupEnabled(e.currentTarget.checked)}
+      />
+      Hybrid tournament with a direct-elimination cup
     </label>
   </div>
 </div>

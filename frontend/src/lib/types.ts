@@ -20,6 +20,7 @@ export interface Player {
   rating?: number;
   nationality?: string; // country code, e.g. "JP"
   club?: string;
+  eligible?: boolean; // eligible for the direct-elimination cup
 }
 
 /** Registration payload — mirror of `osp_core::NewPlayer`. */
@@ -73,6 +74,20 @@ export interface HandicapGame {
   giver: Winner; // frozen: the higher-rated player
 }
 
+/** Which stage of the cup a board belongs to — mirror of `osp_core::CupStage`. */
+export type CupStage =
+  | { round_of: number }
+  | "quarterfinal"
+  | "semifinal"
+  | "final"
+  | "small_final";
+
+/** How a board was paired — mirror of `osp_core::PairingSource` (internally tagged). */
+export type PairingSource =
+  | { kind: "swiss" }
+  | { kind: "forced" }
+  | { kind: "cup"; stage: CupStage };
+
 /** Mirror of `osp_core::Board` — one game in a round. */
 export interface Board {
   player1: string; // player UUID
@@ -81,6 +96,7 @@ export interface Board {
   drawn?: boolean; // a draw occurred before the decisive game
   handicap?: HandicapGame | null; // piece odds, if any
   points_diff?: number | null; // points(p1) − points(p2) frozen at pairing time
+  source?: PairingSource; // how the pairing was decided; absent = swiss
 }
 
 /** Mirror of `osp_core::Round`. */
@@ -118,6 +134,22 @@ export interface TournamentSettings {
   club_protection_exempt_clubs: string[];
   /** Which player each group floats up: "classic" (first) or "median" Swiss. */
   floater_style: "classic" | "median";
+  /** Whether this is a hybrid tournament with a direct-elimination cup. */
+  cup_enabled: boolean;
+}
+
+/** Mirror of `osp_core::Cup` — the seeded direct-elimination bracket. */
+export interface Cup {
+  size: number; // 8/16/32/64
+  seed_order: string[]; // player UUIDs, seed 1..size
+}
+
+/** Mirror of `osp_core::CupPodium` — decided once the final round is played. */
+export interface CupPodium {
+  champion: string; // player UUID
+  runner_up: string;
+  third: string;
+  fourth: string;
 }
 
 /** Mirror of `osp_core::Tournament`. */
@@ -130,6 +162,7 @@ export interface Tournament {
   registration_finalized: boolean;
   draft?: RoundDraft | null;
   rounds: Round[];
+  cup?: Cup | null;
 }
 
 /** One player's standing — mirror of `osp_core::Standing`. */
@@ -152,4 +185,6 @@ export interface TournamentResponse {
   tournament: Tournament;
   can_undo: boolean;
   standings: Standing[];
+  cup_podium?: CupPodium | null; // present once the cup final is decided
+  draft_cup_players?: string[]; // players the cup pairs in the round being drafted
 }
