@@ -29,6 +29,7 @@
     Standing,
     Tournament,
     TournamentResponse,
+    TournamentSettings,
     Winner,
   } from "./lib/types";
   import { loadTournament, saveTournament } from "./lib/tournamentFile";
@@ -275,9 +276,9 @@
     });
   }
 
-  function handleUpdateSettings(macmahonThresholds: number[]) {
+  function handleUpdateSettings(settings: TournamentSettings) {
     run(async () => {
-      apply(await updateSettings(macmahonThresholds));
+      apply(await updateSettings(settings));
     });
   }
 </script>

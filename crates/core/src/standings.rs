@@ -183,6 +183,7 @@ mod tests {
         let rounds = vec![round(1, vec![board(a.id, b.id, Winner::Player1)])];
         let settings = TournamentSettings {
             macmahon_thresholds: vec![1500],
+            ..Default::default()
         };
         let standings = compute_standings(&[a.clone(), b.clone()], &settings, &rounds);
 
@@ -192,5 +193,25 @@ mod tests {
         assert_eq!(of(a.id).sos, 1); // opponent B has 1 point
         assert_eq!(of(a.id).sodos, 1); // defeated B (1 point)
         assert_eq!(standings[0].player_id, a.id); // A ranks first
+    }
+
+    #[test]
+    fn degressive_macmahon_drops_the_head_start_after_the_scheduled_round() {
+        // A (2000) starts one MacMahon point above B (1000) thanks to the 1500
+        // threshold, but that group is dropped at the end of round 1. After A
+        // beats B in round 1, A's starting bonus is gone: A keeps only the real
+        // win, so A is on 1 point rather than 2.
+        let a = player(1, Some(2000));
+        let b = player(2, Some(1000));
+        let rounds = vec![round(1, vec![board(a.id, b.id, Winner::Player1)])];
+        let settings = TournamentSettings {
+            macmahon_thresholds: vec![1500],
+            macmahon_removals: vec![1],
+        };
+        let standings = compute_standings(&[a.clone(), b.clone()], &settings, &rounds);
+
+        let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
+        assert_eq!((of(a.id).macmahon, of(a.id).victories, of(a.id).points), (0, 1, 1));
+        assert_eq!((of(b.id).macmahon, of(b.id).victories, of(b.id).points), (0, 0, 0));
     }
 }

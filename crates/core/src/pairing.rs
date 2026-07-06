@@ -573,6 +573,7 @@ mod tests {
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
         let settings = TournamentSettings {
             macmahon_thresholds: vec![1500],
+            ..Default::default()
         };
 
         let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);

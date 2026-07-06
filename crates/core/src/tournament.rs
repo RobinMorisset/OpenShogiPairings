@@ -209,14 +209,14 @@ impl Tournament {
         Ok(())
     }
 
-    /// Replace the MacMahon threshold list (stored sorted and de-duplicated).
+    /// Replace the tournament settings (MacMahon groups, degressive schedule, …),
+    /// stored in canonical form (see [`TournamentSettings::normalized`]).
     ///
     /// Allowed at any point; the caller (UI) warns when registration is already
     /// finalized, since changing the groups shifts everyone's points and future
     /// pairings.
-    pub fn update_settings(&mut self, macmahon_thresholds: Vec<u32>) -> &TournamentSettings {
-        self.settings.macmahon_thresholds =
-            TournamentSettings::normalize_thresholds(macmahon_thresholds);
+    pub fn update_settings(&mut self, settings: TournamentSettings) -> &TournamentSettings {
+        self.settings = settings.normalized();
         &self.settings
     }
 

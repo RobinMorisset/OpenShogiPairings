@@ -5,6 +5,7 @@ import type {
   RatedPlayer,
   Tournament,
   TournamentResponse,
+  TournamentSettings,
   Winner,
 } from "./types";
 import { isTauri } from "./platform";
@@ -123,13 +124,14 @@ export function undoTournament(): Promise<TournamentResponse> {
   return request<TournamentResponse>("/api/tournament/undo", { method: "POST" });
 }
 
-/** Update tournament settings (the MacMahon thresholds). Server normalizes them. */
+/** Update tournament settings (MacMahon groups, degressive schedule, …). The
+ *  server stores them normalized (sorted, de-duplicated, removals capped). */
 export function updateSettings(
-  macmahonThresholds: number[],
+  settings: TournamentSettings,
 ): Promise<TournamentResponse> {
   return request<TournamentResponse>("/api/tournament/settings", {
     method: "PUT",
-    body: JSON.stringify({ macmahon_thresholds: macmahonThresholds }),
+    body: JSON.stringify(settings),
   });
 }
 

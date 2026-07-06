@@ -70,10 +70,15 @@ pub(crate) fn compute_scores(
     settings: &TournamentSettings,
     rounds: &[Round],
 ) -> Scores {
+    // MacMahon starting points use the thresholds in effect *now* — after all
+    // the completed rounds — so degressive MacMahon shrinks the spread as the
+    // tournament goes on. Which round each player floated in is read separately
+    // from the frozen `points_diff`, so a later removal can't rewrite history.
+    let rounds_played = rounds.iter().filter(|r| r.completed).count() as u32;
     let mut by_id: HashMap<Uuid, PlayerScore> = players
         .iter()
         .map(|p| {
-            let macmahon = settings.macmahon_points(p.rating);
+            let macmahon = settings.macmahon_points_at(p.rating, rounds_played);
             (
                 p.id,
                 PlayerScore {
@@ -215,6 +220,7 @@ mod tests {
         };
         let settings = TournamentSettings {
             macmahon_thresholds: vec![1500],
+            ..Default::default()
         };
         let scores = compute_scores(&[a.clone(), b.clone()], &settings, &[round]);
         assert_eq!(scores.get(&a.id).last_descended, Some(1));
