@@ -161,6 +161,11 @@ struct Ctx<'a> {
     by_player: &'a HashMap<Uuid, &'a Player>,
     fold: &'a HashMap<Uuid, FoldInfo>,
     round: u32,
+    /// Whether club protection applies this round (enabled and within its window).
+    club_active: bool,
+    /// Clubs exempt from protection, in normalized form (see
+    /// [`TournamentSettings::normalize_club`]).
+    exempt_clubs: &'a HashSet<String>,
     /// Edges in a perfect matching over the vertices (= vertices / 2).
     edges: i128,
     /// Largest points gap between any two vertices (bounds the score rule).
@@ -203,11 +208,22 @@ impl Rule {
                 }
                 Ordering::Equal => 0,
             },
-            // Rule 4: avoid pairing club-mates (ignored when a club is unknown).
-            Rule::Club => match (&ctx.by_player[&a].club, &ctx.by_player[&b].club) {
-                (Some(ca), Some(cb)) if ca == cb => 1,
-                _ => 0,
-            },
+            // Rule 4: avoid pairing club-mates — but only when protection is active
+            // this round, ignoring unknown clubs and clubs on the exempt list. Club
+            // names are matched case-insensitively.
+            Rule::Club => {
+                if !ctx.club_active {
+                    return 0;
+                }
+                match (&ctx.by_player[&a].club, &ctx.by_player[&b].club) {
+                    (Some(ca), Some(cb)) => {
+                        let na = TournamentSettings::normalize_club(ca);
+                        let same = na == TournamentSettings::normalize_club(cb);
+                        i128::from(same && !ctx.exempt_clubs.contains(&na))
+                    }
+                    _ => 0,
+                }
+            }
             // Rule 5: fold within a score group — deviation from the ideal fold.
             Rule::Fold => {
                 if sa.points != sb.points {
@@ -243,7 +259,7 @@ impl Rule {
             Rule::Rematch => 1,
             Rule::ScoreGap => ctx.max_gap * ctx.max_gap,
             Rule::FloatRepeat => 2 * FLOAT_BASE, // two directions, each ≤ FLOAT_BASE
-            Rule::Club => 1,
+            Rule::Club => i128::from(ctx.club_active), // 0 when off — no wasted tier
             // Two |·| terms, each ≤ group_size − 1.
             Rule::Fold => 2 * (ctx.max_group - 1).max(0),
         };
@@ -395,11 +411,14 @@ pub fn pair_round_weighted(
             lo = lo.min(p);
             hi = hi.max(p);
         }
+        let exempt_clubs = settings.exempt_clubs_normalized();
         let ctx = Ctx {
             scores: &scores,
             by_player: &by_player,
             fold: &fold,
             round: number,
+            club_active: settings.club_protection_active(number),
+            exempt_clubs: &exempt_clubs,
             edges: (vcount / 2) as i128,
             max_gap: hi.saturating_sub(lo) as i128,
             max_group: fold.values().map(|f| f.group_size).max().unwrap_or(0) as i128,
@@ -686,21 +705,28 @@ mod tests {
         );
     }
 
-    #[test]
-    fn weighted_avoids_pairing_club_mates() {
-        // Everyone unbeaten (round 1), one score group of four. Rating order
-        // p0>p1>p2>p3 makes the fold ideal p0-p2 and p1-p3 — but those are
-        // club-mates, so the club rule must override the fold.
-        let p = vec![
+    /// Round 1, one score group of four, rating order p0>p1>p2>p3 so the fold
+    /// ideal is p0-p2 and p1-p3 — which are club-mates (X and Y). Used by the club
+    /// tests below to see whether protection overrides the fold.
+    fn two_clubs_where_fold_pairs_mates() -> Vec<Player> {
+        vec![
             player(1, Some(2000), Some("X")),
             player(2, Some(1900), Some("Y")),
             player(3, Some(1800), Some("X")),
             player(4, Some(1700), Some("Y")),
-        ];
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        ]
+    }
 
-        let round =
-            pair_round_weighted(1, &p, &TournamentSettings::default(), &[], &present, &[], None);
+    #[test]
+    fn weighted_avoids_pairing_club_mates_when_protection_on() {
+        let p = two_clubs_where_fold_pairs_mates();
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let settings = TournamentSettings {
+            club_protection_enabled: true,
+            ..Default::default()
+        };
+
+        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);
 
         assert_eq!(round.boards.len(), 2);
         let club_of = |id: Uuid| p.iter().find(|q| q.id == id).unwrap().club.clone();
@@ -708,9 +734,79 @@ mod tests {
             assert_ne!(
                 club_of(b.player1),
                 club_of(b.player2),
-                "club-mates were paired"
+                "club-mates were paired despite protection"
             );
         }
+    }
+
+    #[test]
+    fn club_protection_off_by_default_pairs_the_fold() {
+        // With protection off (the default), the club rule is silent, so the fold
+        // ideal wins and club-mates X-X / Y-Y are paired.
+        let p = two_clubs_where_fold_pairs_mates();
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+
+        let round =
+            pair_round_weighted(1, &p, &TournamentSettings::default(), &[], &present, &[], None);
+
+        let pairs = board_pairs(&round);
+        assert!(pairs.contains(&unord(p[0].id, p[2].id)), "fold pairs the X club-mates");
+        assert!(pairs.contains(&unord(p[1].id, p[3].id)), "fold pairs the Y club-mates");
+    }
+
+    #[test]
+    fn exempt_club_members_may_be_paired() {
+        // Fold ideal is p0-p2 (both "Home") and p1-p3 (both unclubbed). With
+        // protection on but "Home" exempt (spelled differently to prove the match
+        // is case-insensitive), the Home pair is allowed and the fold wins; without
+        // the exemption the club rule breaks that pairing up.
+        let p = vec![
+            player(1, Some(2000), Some("Home")),
+            player(2, Some(1900), None),
+            player(3, Some(1800), Some("Home")),
+            player(4, Some(1700), None),
+        ];
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+
+        let exempt = TournamentSettings {
+            club_protection_enabled: true,
+            club_protection_exempt_clubs: vec!["  HOME ".into()],
+            ..Default::default()
+        };
+        let round = pair_round_weighted(1, &p, &exempt, &[], &present, &[], None);
+        assert!(
+            board_pairs(&round).contains(&unord(p[0].id, p[2].id)),
+            "exempt club-mates should be paired by the fold"
+        );
+
+        let protected = TournamentSettings {
+            club_protection_enabled: true,
+            ..Default::default()
+        };
+        let round = pair_round_weighted(1, &p, &protected, &[], &present, &[], None);
+        assert!(
+            !board_pairs(&round).contains(&unord(p[0].id, p[2].id)),
+            "non-exempt club-mates should not be paired"
+        );
+    }
+
+    #[test]
+    fn club_protection_only_applies_within_its_round_window() {
+        // Protection limited to round 1: round 2 must ignore clubs, so the fold
+        // ideal (club-mate pairs) wins again.
+        let p = two_clubs_where_fold_pairs_mates();
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let settings = TournamentSettings {
+            club_protection_enabled: true,
+            club_protection_rounds: Some(1),
+            ..Default::default()
+        };
+
+        // Pair round 2 directly (no completed rounds needed to exercise the window).
+        let round = pair_round_weighted(2, &p, &settings, &[], &present, &[], None);
+        let pairs = board_pairs(&round);
+        assert!(pairs.contains(&unord(p[0].id, p[2].id)), "past the window, fold pairs X-X");
+        assert!(pairs.contains(&unord(p[1].id, p[3].id)), "past the window, fold pairs Y-Y");
     }
 
     #[test]
@@ -767,11 +863,14 @@ mod tests {
             hi = hi.max(pts);
         }
         let edges = 3i128; // 5 free + phantom bye = 6 vertices → 3 edges
+        let exempt_clubs = HashSet::new();
         let ctx = Ctx {
             scores: &scores,
             by_player: &by_player,
             fold: &fold,
             round: 2,
+            club_active: true, // exercise the club rule's bound
+            exempt_clubs: &exempt_clubs,
             edges,
             max_gap: (hi - lo) as i128,
             max_group: fold.values().map(|f| f.group_size).max().unwrap_or(0) as i128,

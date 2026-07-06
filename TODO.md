@@ -37,10 +37,6 @@ Known limitations and future work, roughly ordered by area.
   giving, `1=+(+4p)` receiving) while the victories column counts the effective
   winner.
 
-- **Making club protection optional** as a tournament option. It should also be possible
-  to have it only active for the first N rounds of the tournament (also settable from the
-  tournament settings tab).
-
 - **Add proper selection of floaters**: classic swiss vs median swiss as an option 
 
 ## FESA rating list

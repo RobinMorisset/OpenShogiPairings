@@ -471,6 +471,7 @@
           <TournamentSettingsView
             settings={tournament.settings}
             finalized={tournament.registration_finalized}
+            players={tournament.players}
             onUpdate={handleUpdateSettings}
             {busy}
           />

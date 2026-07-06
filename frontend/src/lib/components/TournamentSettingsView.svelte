@@ -1,16 +1,33 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { TournamentSettings } from "../types";
+  import type { Player, TournamentSettings } from "../types";
 
   interface Props {
     settings: TournamentSettings;
     /** Registration already finalized — edits here get a warning. */
     finalized: boolean;
+    /** The registered players, used to suggest club names for exemptions. */
+    players: Player[];
     onUpdate: (settings: TournamentSettings) => void;
     busy?: boolean;
   }
 
-  let { settings, finalized, onUpdate, busy = false }: Props = $props();
+  let { settings, finalized, players, onUpdate, busy = false }: Props = $props();
+
+  // Distinct club names among the players (first spelling kept), for the exempt
+  // datalist.
+  const knownClubs = $derived.by(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const p of players) {
+      const c = p.club?.trim();
+      if (c && !seen.has(c.toLowerCase())) {
+        seen.add(c.toLowerCase());
+        out.push(c);
+      }
+    }
+    return out.sort((a, b) => a.localeCompare(b));
+  });
 
   // Keep only positive integers, then sort ascending — the server's canonical
   // order, used to compare our local state against what it stored.
@@ -25,33 +42,65 @@
     return a.length === b.length && a.every((v, i) => v === b[i]);
   }
 
+  function eqStr(a: string[], b: string[]): boolean {
+    return a.length === b.length && a.every((v, i) => v === b[i]);
+  }
+
+  // Mirror the server's exempt-club normalization: trim, drop empties, and
+  // de-duplicate case-insensitively keeping the first spelling.
+  function normExempt(list: string[]): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of list) {
+      const c = raw.trim();
+      if (c && !seen.has(c.toLowerCase())) {
+        seen.add(c.toLowerCase());
+        out.push(c);
+      }
+    }
+    return out;
+  }
+
   // Local editable rows, kept in *entry* order (not sorted) so the row a referee
   // is editing never jumps or shows a stale value. The inputs bind to these.
   let thresholds = $state<number[]>([]);
   let removals = $state<number[]>([]);
+  let clubEnabled = $state(false);
+  let clubRounds = $state<number | null>(null);
+  let exemptClubs = $state<string[]>([]);
 
   // Adopt the persisted settings only on a genuine external change — a load, an
-  // undo, or the server de-duplicating/capping our input. When our own edit merely
-  // round-trips (the server just sorts it), our sorted local state already matches
-  // what it stored, so we keep the entry order rather than reshuffling under the
-  // cursor. `untrack` makes this fire on `settings` changes only, not our writes.
+  // undo, or the server normalizing our input. When our own edit merely
+  // round-trips (the server just sorts/dedups it into the same canonical form),
+  // our local state already matches, so we keep the entry order rather than
+  // reshuffling under the cursor. `untrack` makes this fire on `settings` changes
+  // only, not our own writes.
   $effect(() => {
-    const serverThresholds = settings.macmahon_thresholds;
-    const serverRemovals = settings.macmahon_removals;
+    const sThresholds = settings.macmahon_thresholds;
+    const sRemovals = settings.macmahon_removals;
+    const sEnabled = settings.club_protection_enabled;
+    const sRounds = settings.club_protection_rounds ?? null;
+    const sExempt = settings.club_protection_exempt_clubs;
     untrack(() => {
-      if (
-        !eq(cleanSorted(thresholds), serverThresholds) ||
-        !eq(cleanSorted(removals), serverRemovals)
-      ) {
-        thresholds = [...serverThresholds];
-        removals = [...serverRemovals];
+      const matches =
+        eq(cleanSorted(thresholds), sThresholds) &&
+        eq(cleanSorted(removals), sRemovals) &&
+        clubEnabled === sEnabled &&
+        (clubRounds ?? null) === sRounds &&
+        eqStr(normExempt(exemptClubs), sExempt);
+      if (!matches) {
+        thresholds = [...sThresholds];
+        removals = [...sRemovals];
+        clubEnabled = sEnabled;
+        clubRounds = sRounds;
+        exemptClubs = [...sExempt];
       }
     });
   });
 
   function persist() {
-    // Send the current rows; the server sorts, de-duplicates and caps the
-    // removals to the threshold count.
+    // Send the current values; the server normalizes them (sorts/de-dups the
+    // MacMahon lists, caps the removals, trims/de-dups the exempt clubs).
     onUpdate({
       macmahon_thresholds: thresholds
         .filter((v) => Number.isFinite(v) && v >= 1)
@@ -59,7 +108,43 @@
       macmahon_removals: removals
         .filter((v) => Number.isFinite(v) && v >= 1)
         .map((v) => Math.round(v)),
+      club_protection_enabled: clubEnabled,
+      club_protection_rounds: clubRounds,
+      club_protection_exempt_clubs: exemptClubs
+        .map((c) => c.trim())
+        .filter((c) => c.length > 0),
     });
+  }
+
+  function setClubEnabled(v: boolean) {
+    clubEnabled = v;
+    persist();
+  }
+
+  function setRoundLimit(limited: boolean) {
+    clubRounds = limited ? (clubRounds ?? 1) : null;
+    persist();
+  }
+
+  function editClubRounds(raw: string) {
+    const n = Math.round(Number(raw));
+    clubRounds = Number.isFinite(n) && n >= 1 ? n : 1;
+    persist();
+  }
+
+  function addExempt() {
+    exemptClubs.push("");
+    persist();
+  }
+
+  function removeExempt(i: number) {
+    exemptClubs.splice(i, 1);
+    persist();
+  }
+
+  function editExempt(i: number, raw: string) {
+    exemptClubs[i] = raw;
+    persist();
   }
 
   function addThreshold() {
@@ -264,6 +349,89 @@
       {/if}
     </div>
   {/if}
+
+  <div class="section">
+    <h3>Club protection</h3>
+    <p class="desc">
+      Avoid pairing players from the same club. Off by default. Club names are
+      matched case-insensitively; players with no club set are never protected.
+    </p>
+
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={clubEnabled}
+        disabled={busy}
+        onchange={(e) => setClubEnabled(e.currentTarget.checked)}
+      />
+      Avoid pairing players from the same club
+    </label>
+
+    {#if clubEnabled}
+      <div class="club-sub">
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={clubRounds != null}
+            disabled={busy}
+            onchange={(e) => setRoundLimit(e.currentTarget.checked)}
+          />
+          Only for the first
+          <input
+            type="number"
+            min="1"
+            step="1"
+            class="threshold narrow"
+            value={clubRounds ?? 1}
+            disabled={busy || clubRounds == null}
+            onchange={(e) => editClubRounds(e.currentTarget.value)}
+          />
+          round(s)
+        </label>
+
+        <p class="desc exempt-desc">
+          Clubs exempt from protection — their members may still be paired (e.g.
+          the host club, whose entrants are expected to meet):
+        </p>
+        <div class="thresholds">
+          {#each exemptClubs as c, i (i)}
+            <div class="threshold-row">
+              <input
+                type="text"
+                class="club-input"
+                list="known-clubs"
+                placeholder="club name"
+                value={c}
+                disabled={busy}
+                onchange={(e) => editExempt(i, e.currentTarget.value)}
+              />
+              <button
+                type="button"
+                class="remove"
+                disabled={busy}
+                title="Remove this exemption"
+                onclick={() => removeExempt(i)}>✕</button
+              >
+            </div>
+          {/each}
+          {#if exemptClubs.length === 0}
+            <p class="muted">No exemptions — every club is protected.</p>
+          {/if}
+          <button
+            type="button"
+            class="ghost small"
+            disabled={busy}
+            onclick={addExempt}>Add exempt club</button
+          >
+        </div>
+        {#if knownClubs.length > 0}
+          <datalist id="known-clubs">
+            {#each knownClubs as club}<option value={club}></option>{/each}
+          </datalist>
+        {/if}
+      </div>
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -310,6 +478,35 @@
   }
   .threshold.narrow {
     width: 4rem;
+  }
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.9rem;
+    color: #c9c9d0;
+  }
+  .check input[type="checkbox"] {
+    width: 1rem;
+    height: 1rem;
+  }
+  .club-sub {
+    margin: 0.8rem 0 0 1.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+  }
+  .exempt-desc {
+    margin: 0;
+  }
+  .club-input {
+    width: 12rem;
+    background: #1c1c22;
+    color: inherit;
+    border: 1px solid #3a3a42;
+    border-radius: 0.4rem;
+    padding: 0.3rem 0.45rem;
+    font: inherit;
   }
   .remove {
     background: transparent;

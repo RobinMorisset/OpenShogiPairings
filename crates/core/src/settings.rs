@@ -1,5 +1,7 @@
 //! Tournament-wide settings.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 /// Configuration that isn't tied to a single player or round.
@@ -25,6 +27,18 @@ pub struct TournamentSettings {
     /// at `macmahon_thresholds.len()` — you can't drop more groups than exist.
     #[serde(default)]
     pub macmahon_removals: Vec<u32>,
+    /// Whether the pairing engine avoids pairing players from the same club
+    /// ("club protection"). Off by default — enable it per tournament.
+    #[serde(default)]
+    pub club_protection_enabled: bool,
+    /// If `Some(n)`, club protection applies only to rounds `1..=n`; later rounds
+    /// pair on score alone. `None` (the default) means every round.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub club_protection_rounds: Option<u32>,
+    /// Clubs exempt from protection — the "local club" case, where many entrants
+    /// share the host club and are expected to meet. Matched case-insensitively.
+    #[serde(default)]
+    pub club_protection_exempt_clubs: Vec<String>,
 }
 
 impl TournamentSettings {
@@ -63,9 +77,30 @@ impl TournamentSettings {
         }
     }
 
+    /// The canonical form of a club name for comparison: trimmed and lower-cased,
+    /// so "Paris" and " paris " count as the same club.
+    pub fn normalize_club(club: &str) -> String {
+        club.trim().to_lowercase()
+    }
+
+    /// Whether club protection applies to the given (1-based) round: enabled and,
+    /// if a round limit is set, within it.
+    pub fn club_protection_active(&self, round: u32) -> bool {
+        self.club_protection_enabled && self.club_protection_rounds.is_none_or(|n| round <= n)
+    }
+
+    /// The exempt clubs in canonical (normalized) form, for membership tests.
+    pub fn exempt_clubs_normalized(&self) -> HashSet<String> {
+        self.club_protection_exempt_clubs
+            .iter()
+            .map(|c| Self::normalize_club(c))
+            .collect()
+    }
+
     /// Return these settings in canonical form: thresholds sorted ascending and
     /// de-duplicated, removals sorted ascending with zeros dropped and the list
-    /// truncated to the threshold count (can't drop more groups than exist).
+    /// truncated to the threshold count (can't drop more groups than exist), and
+    /// exempt clubs trimmed, emptied-dropped and de-duplicated case-insensitively.
     /// Independent of the order fields were entered, so pairing/standings are
     /// reproducible from the stored settings.
     pub fn normalized(mut self) -> Self {
@@ -75,6 +110,15 @@ impl TournamentSettings {
         // Keeping the earliest removals matches "these fire soonest"; the excess
         // couldn't take effect anyway once every threshold is gone.
         self.macmahon_removals.truncate(self.macmahon_thresholds.len());
+
+        // Exempt clubs: keep the first spelling of each, trimmed and non-empty.
+        let mut seen = HashSet::new();
+        self.club_protection_exempt_clubs = self
+            .club_protection_exempt_clubs
+            .into_iter()
+            .map(|c| c.trim().to_string())
+            .filter(|c| !c.is_empty() && seen.insert(c.to_lowercase()))
+            .collect();
         self
     }
 
@@ -126,6 +170,7 @@ mod tests {
         let s = TournamentSettings {
             macmahon_thresholds: vec![1200, 1500, 1800],
             macmahon_removals: vec![2, 2, 4],
+            ..Default::default()
         };
         // Rounds 1–2: full thresholds.
         assert_eq!(s.effective_macmahon_thresholds(0), &[1200, 1500, 1800]);
@@ -148,9 +193,50 @@ mod tests {
         let s = TournamentSettings {
             macmahon_thresholds: vec![1500, 1200, 1200], // → [1200, 1500]
             macmahon_removals: vec![4, 0, 1, 2],         // 0 dropped, capped to 2
+            ..Default::default()
         }
         .normalized();
         assert_eq!(s.macmahon_thresholds, vec![1200, 1500]);
         assert_eq!(s.macmahon_removals, vec![1, 2]); // earliest two kept
+    }
+
+    #[test]
+    fn club_protection_active_respects_toggle_and_round_window() {
+        let off = TournamentSettings::default();
+        assert!(!off.club_protection_active(1)); // disabled by default
+
+        let all = TournamentSettings {
+            club_protection_enabled: true,
+            ..Default::default()
+        };
+        assert!(all.club_protection_active(1));
+        assert!(all.club_protection_active(99)); // None = every round
+
+        let limited = TournamentSettings {
+            club_protection_enabled: true,
+            club_protection_rounds: Some(2),
+            ..Default::default()
+        };
+        assert!(limited.club_protection_active(1));
+        assert!(limited.club_protection_active(2));
+        assert!(!limited.club_protection_active(3)); // past the window
+    }
+
+    #[test]
+    fn normalized_trims_and_dedups_exempt_clubs_case_insensitively() {
+        let s = TournamentSettings {
+            club_protection_enabled: true,
+            club_protection_exempt_clubs: vec![
+                "  Paris  ".into(),
+                "paris".into(), // duplicate of Paris (case/space)
+                "   ".into(),   // empty after trim
+                "Lyon".into(),
+            ],
+            ..Default::default()
+        }
+        .normalized();
+        // First spelling kept, trimmed; the case-variant dup and the blank dropped.
+        assert_eq!(s.club_protection_exempt_clubs, vec!["Paris", "Lyon"]);
+        assert!(s.exempt_clubs_normalized().contains("paris")); // matched lower-cased
     }
 }

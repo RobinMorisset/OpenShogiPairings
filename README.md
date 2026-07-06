@@ -28,13 +28,16 @@ Hungarian doesn't apply); the edge weights come from a set of Swiss rules
 ([`crates/core/src/pairing.rs`](crates/core/src/pairing.rs)) combined on a
 priority ladder of multipliers — most important first: never rematch or repeat a
 bye, prefer equal scores (penalty ∝ gap²), avoid repeating a float in the same
-direction (decaying with time), avoid club-mates, and fold each score group
-(top-half Nth meets bottom-half Nth). The odd player's bye is modeled as a
-phantom vertex. The multiplier ladder approximates strict lexicographic priority
-and is sized for realistic events; an ILP/CP-SAT backend for stricter tiers and
-experimental formats is future work (see [TODO.md](TODO.md)).
+direction (decaying with time), avoid club-mates (optional per tournament, and
+optionally only for the first N rounds or with some clubs exempt), and fold each
+score group (top-half Nth meets bottom-half Nth). The odd player's bye is modeled
+as a phantom vertex. The multipliers are *derived* from each rule's worst-case
+contribution, so the tiers are strictly disjoint by construction (lexicographic
+priority) with no hand-tuned gaps; an ILP/CP-SAT backend for very large fields and
+formats needing hard constraints is future work (see [TODO.md](TODO.md)).
 
-The UI organizes a tournament into tabs: **Settings** (MacMahon groups),
+The UI organizes a tournament into tabs: **Settings** (MacMahon groups,
+degressive schedule, club protection),
 **Players**, **Results** (per-round results plus Victories and total Points),
 and one tab per round. Points are each player's victories plus their MacMahon
 starting points (one per ELO threshold their rating reaches), and the pairing
@@ -87,7 +90,7 @@ by points, then the SOS / SODOS / SOSOS tie-breaks, then tournament number.
 | `POST /api/tournament/undo` | Revert the last change (server-side undo history). |
 | `GET /api/tournament/american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
 | `PUT /api/tournament/american-grid` | Import an American Grid (raw `text/plain` body), rebuilding the tournament from it — registers the players, forces every round's pairings, and replays the results. Replaces the current tournament; meant for seeding a non-trivial state in tests/simulations, not surfaced in the UI. |
-| `PUT /api/tournament/settings` | Update settings (the whole `TournamentSettings`): `{ "macmahon_thresholds": [1200, 1700], "macmahon_removals": [3] }` — thresholds stored sorted & de-duplicated, `macmahon_removals` (degressive MacMahon: round-ends at which the bottom threshold is dropped) sorted & capped to the threshold count. |
+| `PUT /api/tournament/settings` | Update settings (the whole `TournamentSettings`): `{ "macmahon_thresholds": [1200, 1700], "macmahon_removals": [3], "club_protection_enabled": true, "club_protection_rounds": 3, "club_protection_exempt_clubs": ["Paris"] }`. Thresholds stored sorted & de-duplicated; `macmahon_removals` (degressive MacMahon: round-ends at which the bottom threshold is dropped) sorted & capped to the threshold count; club protection avoids same-club pairings (off by default; optional round limit; exempt clubs trimmed, de-duplicated case-insensitively). |
 | `POST /api/tournament/finalize-registration` | Finalize registration (unlocks round 1). |
 | `POST /api/tournament/complete-round` | Complete the current round (all games must be played). |
 | `POST /api/tournament/cancel-round` | Cancel the last round — discards the open draft if one is being prepared, otherwise removes the most recent round (undoable). Steps back one stage, e.g. to replay a round in a simulation. |

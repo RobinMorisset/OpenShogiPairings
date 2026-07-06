@@ -207,6 +207,7 @@ mod tests {
         let settings = TournamentSettings {
             macmahon_thresholds: vec![1500],
             macmahon_removals: vec![1],
+            ..Default::default()
         };
         let standings = compute_standings(&[a.clone(), b.clone()], &settings, &rounds);
 

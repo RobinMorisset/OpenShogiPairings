@@ -110,6 +110,12 @@ export interface TournamentSettings {
    * capped server-side at the threshold count.
    */
   macmahon_removals: number[];
+  /** Whether pairings avoid same-club players (off by default). */
+  club_protection_enabled: boolean;
+  /** If set, club protection applies only to rounds 1..=n; null/absent = all. */
+  club_protection_rounds?: number | null;
+  /** Clubs exempt from protection (the "local club"); matched case-insensitively. */
+  club_protection_exempt_clubs: string[];
 }
 
 /** Mirror of `osp_core::Tournament`. */
