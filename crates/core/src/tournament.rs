@@ -15,6 +15,7 @@ use crate::pairing::pair_round_weighted;
 use crate::player::{NewPlayer, Player};
 use crate::round::{Board, Handicap, HandicapGame, Round, RoundDraft, Winner};
 use crate::settings::TournamentSettings;
+use crate::standings::{compute_standings, Standing};
 
 /// On-disk / on-the-wire format version for a serialized [`Tournament`].
 ///
@@ -217,6 +218,15 @@ impl Tournament {
         self.settings.macmahon_thresholds =
             TournamentSettings::normalize_thresholds(macmahon_thresholds);
         &self.settings
+    }
+
+    /// The ranked standings (points and tie-breaks) from the completed rounds.
+    ///
+    /// This is the canonical ordering — used by the Results tab and, later, the
+    /// American grid — so scoring lives in one place rather than being re-derived
+    /// by each client.
+    pub fn standings(&self) -> Vec<Standing> {
+        compute_standings(&self.players, &self.settings, &self.rounds)
     }
 
     /// Finalize registration. Prerequisite for starting the first round.

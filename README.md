@@ -56,16 +56,20 @@ engine scores by total points.
 > click the winner again to clear — three states); completed rounds stay editable
 > with a warning. Finalizing registration assigns each player a tournament
 > number (by ELO, unrated last; later additions get the next free number). The
-> **Results** tab has a row per player with one column per completed round
-> (`opponent-number` + `+`/`−`, or `0+` for a bye / `0-` for an absence) and a
-> victory count (wins and byes). The web UI is organized into
-> tabs (Players / Results / one per round) and can save/load the tournament as a
-> JSON file. Ranked standings are next.
+> **Results** tab is a ranked table: a row per player (ordered by points, then
+> SOS / SODOS / SOSOS tie-breaks) with one column per completed round
+> (`opponent-number` + `+`/`−`, or `0+` for a bye / `0-` for an absence), a
+> victory count, and Points / SOS / SODOS / SOSOS columns. The web UI is organized
+> into tabs (Settings / Players / Results / one per round) and can save/load the
+> tournament as a JSON file.
 
 Mutations go through a `TournamentStore` that keeps the current tournament plus a
 stack of prior snapshots (the undo history); create/load reset it. Endpoints
-return `{ tournament, can_undo }` so the client refreshes the view and the undo
-button together (the persisted save-file shape stays the bare tournament).
+return `{ tournament, can_undo, standings }` so the client refreshes the view,
+the undo button, and the ranked table together (the persisted save-file shape
+stays the bare tournament). `standings` is computed server-side (in `osp-core`)
+so every client — and the future American grid — shares one canonical ranking:
+by points, then the SOS / SODOS / SOSOS tie-breaks, then tournament number.
 
 ### API
 

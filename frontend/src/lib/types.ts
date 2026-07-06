@@ -117,11 +117,24 @@ export interface Tournament {
   rounds: Round[];
 }
 
+/** One player's standing — mirror of `osp_core::Standing`. */
+export interface Standing {
+  player_id: string; // UUID
+  victories: number;
+  macmahon: number;
+  points: number; // victories + macmahon
+  sos: number; // sum of opponents' points
+  sodos: number; // sum of defeated opponents' points
+  sosos: number; // sum of opponents' SOS
+}
+
 /**
- * API response for tournament endpoints: the tournament plus whether an undo is
- * available. Kept separate from `Tournament` so the saved-file shape stays clean.
+ * API response for tournament endpoints: the tournament, whether an undo is
+ * available, and the server-computed ranked standings. Kept separate from
+ * `Tournament` so the saved-file shape stays clean.
  */
 export interface TournamentResponse {
   tournament: Tournament;
   can_undo: boolean;
+  standings: Standing[];
 }

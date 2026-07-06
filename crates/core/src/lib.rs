@@ -13,6 +13,7 @@ mod pairing;
 mod player;
 mod round;
 mod settings;
+mod standings;
 mod tournament;
 
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
@@ -20,6 +21,7 @@ pub use pairing::{pair_round, pair_round_constrained, pair_round_weighted};
 pub use player::{NewPlayer, Player};
 pub use round::{Board, Handicap, HandicapGame, Round, RoundDraft, Winner};
 pub use settings::TournamentSettings;
+pub use standings::{compute_standings, Standing};
 pub use tournament::{
     Tournament, TournamentError, MIN_PLAYERS_PER_ROUND, TOURNAMENT_FORMAT_VERSION,
 };

@@ -26,6 +26,7 @@
     Handicap,
     NewPlayer,
     RatedPlayer,
+    Standing,
     Tournament,
     TournamentResponse,
     Winner,
@@ -41,6 +42,7 @@
   import TournamentSettingsView from "./lib/components/TournamentSettingsView.svelte";
 
   let tournament = $state<Tournament | null>(null);
+  let standings = $state<Standing[]>([]);
   let canUndo = $state(false);
   let initialLoad = $state<"loading" | "done">("loading");
   let creatingNew = $state(false);
@@ -51,6 +53,7 @@
   /** Apply a tournament API response to local state. */
   function apply(res: TournamentResponse) {
     tournament = res.tournament;
+    standings = res.standings;
     canUndo = res.can_undo;
   }
 
@@ -432,7 +435,7 @@
             />
           </div>
         {:else if activeTab === "results"}
-          <ResultsView {tournament} />
+          <ResultsView {tournament} {standings} />
         {:else if activeTab === "draft" && tournament.draft}
           <RoundDraftView
             draft={tournament.draft}

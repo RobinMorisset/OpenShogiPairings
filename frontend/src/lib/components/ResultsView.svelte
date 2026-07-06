@@ -1,11 +1,13 @@
 <script lang="ts">
-  import type { Player, Round, Tournament } from "../types";
+  import type { Player, Round, Standing, Tournament } from "../types";
 
   interface Props {
     tournament: Tournament;
+    /** Ranked standings computed server-side (the canonical ordering). */
+    standings: Standing[];
   }
 
-  let { tournament }: Props = $props();
+  let { tournament, standings }: Props = $props();
 
   // One column per completed round.
   const completedRounds = $derived(tournament.rounds.filter((r) => r.completed));
@@ -15,11 +17,14 @@
     new Map(tournament.players.map((p) => [p.id, p.tournament_id])),
   );
 
-  // Rows ordered by tournament number (unnumbered players last).
+  // Rows follow the server's ranked order, joined to each player's details.
+  const byId = $derived(new Map(tournament.players.map((p) => [p.id, p])));
   const rows = $derived(
-    [...tournament.players].sort(
-      (a, b) => (a.tournament_id ?? Infinity) - (b.tournament_id ?? Infinity),
-    ),
+    standings
+      .map((standing) => ({ standing, player: byId.get(standing.player_id) }))
+      .filter(
+        (r): r is { standing: Standing; player: Player } => r.player != null,
+      ),
   );
 
   type PlayedCell = {
@@ -84,30 +89,6 @@
       : "";
     return `${cell.opponent}${draw}${sign}${hc}`;
   }
-
-  function victories(player: Player): number {
-    let count = 0;
-    for (const round of completedRounds) {
-      const cell = cellFor(player, round);
-      // A standings win at the board, or a bye, both count as a victory.
-      if ((cell.kind === "played" && cell.effectiveWon) || cell.kind === "bye")
-        count++;
-    }
-    return count;
-  }
-
-  /** MacMahon starting points: one per ELO threshold the rating reaches. */
-  function macmahonPoints(player: Player): number {
-    const r = player.rating;
-    if (r == null) return 0;
-    return (tournament.settings?.macmahon_thresholds ?? []).filter((t) => r >= t)
-      .length;
-  }
-
-  /** Total score: victories plus MacMahon starting points. */
-  function points(player: Player): number {
-    return victories(player) + macmahonPoints(player);
-  }
 </script>
 
 {#if tournament.players.length === 0}
@@ -127,10 +108,13 @@
         {/each}
         <th class="num">Victories</th>
         <th class="num">Points</th>
+        <th class="num" title="Sum of opponents' scores">SOS</th>
+        <th class="num" title="Sum of defeated opponents' scores">SODOS</th>
+        <th class="num" title="Sum of opponents' SOS">SOSOS</th>
       </tr>
     </thead>
     <tbody>
-      {#each rows as player (player.id)}
+      {#each rows as { standing, player } (player.id)}
         <tr>
           <td class="num">{player.tournament_id ?? "—"}</td>
           <td>{player.last_name}</td>
@@ -157,8 +141,11 @@
               {/if}
             </td>
           {/each}
-          <td class="num victories">{victories(player)}</td>
-          <td class="num points" title="Victories + MacMahon points">{points(player)}</td>
+          <td class="num victories">{standing.victories}</td>
+          <td class="num points" title="Victories + MacMahon points">{standing.points}</td>
+          <td class="num tiebreak">{standing.sos}</td>
+          <td class="num tiebreak">{standing.sodos}</td>
+          <td class="num tiebreak">{standing.sosos}</td>
         </tr>
       {/each}
     </tbody>
@@ -211,6 +198,10 @@
   .points {
     font-weight: 700;
     color: #d2a8ff;
+  }
+  .tiebreak {
+    color: #9a9aa2;
+    font-variant-numeric: tabular-nums;
   }
   .muted {
     color: #9a9aa2;

@@ -4,7 +4,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{post, put};
 use axum::{Json, Router};
-use osp_core::{Board, Handicap, NewPlayer, Tournament, Winner};
+use osp_core::{Board, Handicap, NewPlayer, Standing, Tournament, Winner};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -70,22 +70,28 @@ pub fn routes() -> Router<AppState> {
         )
 }
 
-/// API response: the current tournament plus undo availability.
+/// API response: the current tournament, undo availability, and the derived
+/// standings.
 ///
 /// Deliberately *not* the bare `Tournament` (which is what save/load uses) — the
-/// `can_undo` flag is server session state, kept out of the persisted shape.
+/// `can_undo` flag is server session state and `standings` is derived, both kept
+/// out of the persisted shape. Standings are computed server-side so every
+/// client (and the future American grid) shares one ranking.
 #[derive(Serialize)]
 struct TournamentView {
     tournament: Tournament,
     can_undo: bool,
+    standings: Vec<Standing>,
 }
 
 /// Build the view from the store, or 404 if no tournament exists.
 fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
     let tournament = store.current().cloned().ok_or(ApiError::NoTournament)?;
+    let standings = tournament.standings();
     Ok(Json(TournamentView {
         tournament,
         can_undo: store.can_undo(),
+        standings,
     }))
 }
 

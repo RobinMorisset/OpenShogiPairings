@@ -18,10 +18,11 @@ Known limitations and future work, roughly ordered by area.
   are compile-time constants; expose them (and let referees toggle/reorder rules)
   once the model settles. Colour balance is intentionally absent (sente/gote is
   random per game in shogi).
-- **Ranked standings.** The Results tab lists per-round results, a victory count
-  and a total-points column (victories + MacMahon starting points), ordered by
-  tournament number. Add real standings *ordering* (by points, then tie-breaks)
-  on top of it.
+- **American grid (cross-table).** Standings are now computed server-side
+  (`osp-core` `compute_standings`) and ranked by points, then SOS / SODOS / SOSOS,
+  then tournament number — surfaced on the Results tab and in the tournament-view
+  envelope. The end-of-tournament American grid (cross-table) should be built from
+  this same canonical ordering.
 - **No-shows.** A player who was paired for a round but did not show up (distinct
   from a game simply not yet recorded) should appear as `0#` in the results
   table. This needs a way to mark a board as a no-show (a new board-result state,
