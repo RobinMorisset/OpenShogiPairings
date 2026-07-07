@@ -164,6 +164,10 @@ export interface RoundExplanation {
   report: RuleTotal[];
 }
 
+/** Which alternative a referee probes — mirror of `CounterfactualMode`.
+ *  "force" = why aren't A and B paired?; "forbid" = why did you pair A and B? */
+export type CounterfactualMode = "force" | "forbid";
+
 /** Why a probed player is out of the engine's hands — mirror of `ScopeReason`. */
 export type ScopeReason = "forced" | "cup" | "absent";
 

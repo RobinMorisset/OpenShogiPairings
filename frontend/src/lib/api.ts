@@ -1,6 +1,7 @@
 import type {
   BackupInfo,
   Counterfactual,
+  CounterfactualMode,
   Handicap,
   HealthStatus,
   NewPlayer,
@@ -223,16 +224,26 @@ export function fetchRoundExplanation(
   );
 }
 
-/** Explain what forcing the pairing `a`–`b` in a round would cost. */
+/** Explain what forcing (or forbidding) the pairing `a`–`b` in a round would cost. */
 export function fetchCounterfactual(
   roundNumber: number,
   a: string,
   b: string,
+  mode: CounterfactualMode = "force",
 ): Promise<Counterfactual> {
   return request<Counterfactual>(
     `/api/tournament/rounds/${roundNumber}/counterfactual`,
-    { method: "POST", body: JSON.stringify({ mode: "force", a, b }) },
+    { method: "POST", body: JSON.stringify({ mode, a, b }) },
   );
+}
+
+/** Force the pairing `a`–`b` onto the current round (re-pairs it around that
+ *  board). Fails if the round already has recorded results. */
+export function forcePairing(a: string, b: string): Promise<TournamentResponse> {
+  return request<TournamentResponse>("/api/tournament/rounds/force-pairing", {
+    method: "POST",
+    body: JSON.stringify({ a, b }),
+  });
 }
 
 /**

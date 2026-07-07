@@ -192,8 +192,7 @@ its unit vector. `report` is the column-sum of the board ledgers.
 
 ### 4. The counterfactual (force — shipped)
 
-Phase 2 ships the **force** direction only ("why aren't A and B paired?");
-forbid is phase 3. What actually shipped:
+Both directions ship (force in phase 2, forbid in phase 3). What shipped:
 
 ```rust
 /// Why a probed player is out of the engine's hands.
@@ -233,13 +232,15 @@ Two refinements from the original sketch above:
   lowest-priority rule to `scale_ladder`, but localized to the re-solve and with
   no new `RuleId` to thread through serialization.
 
-Mechanics:
+Mechanics (shared `baseline_matching` + `diff_matchings`, one solve each):
 
 1. Build the `PairingModel` for the round (§2). Baseline `M0` = the round's Swiss
    boards + `(bye, PHANTOM)` as normalized pairs (`PHANTOM` = nil UUID).
-2. Pre-place the forced edge `A–B` (drop both from the vertex set; the phantom
-   stays if there was a bye), then `solve_stable(rest, baseline = M0)`. Add the
-   forced edge back → `M1`.
+2. **Force**: pre-place `A–B` (drop both from the vertex set; the phantom stays
+   if there was a bye), `solve_stable(rest, baseline = M0)`, add the edge back →
+   `M1`. **Forbid**: keep the full vertex set, `solve_stable(all, baseline = M0,
+   forbidden = {A–B})` → `M1`. Forbidding prices the edge above any matching that
+   avoids it (`max·edges + 1`), so it's never chosen while an alternative exists.
 3. `M0 Δ M1` decomposes into vertex-disjoint alternating cycles (`alternating_
    cycles`) — the affected rings; the probed edge sits on one.
 4. `cost_delta` = per-rule `Σ(added units) − Σ(removed units)` (unchanged boards
@@ -255,6 +256,25 @@ Because the picker only offers this round's Swiss players, the UI never triggers
 
 The bye is the phantom vertex throughout, so "player X now takes the bye" falls
 out of the diff naturally and renders as "(bye)" on the frontend.
+
+### 4a. Applying a force — `force_pairing` (phase 3)
+
+The "force this pairing" action closes the loop from *"why not?"* to *"then do
+it."* `Tournament::force_pairing(a, b)` re-pairs the **current** round with
+`a–b` fixed, by reconstructing the draft the round came from (its absentees and
+existing forced boards, plus the new forced pair) and running `confirm_round`
+again. Reusing `confirm_round` means all the cup/forced/validation machinery and
+board ordering come for free. It refuses (`RoundHasResults`) if the round is
+completed or already has any recorded result, since re-pairing would discard it.
+
+`POST /api/tournament/rounds/force-pairing` (mutating; takes a backup). The
+frontend offers the action only after a *force* probe with a non-empty diff, on a
+round that is current, in progress, and result-free (`canForce`).
+
+Note: `force_pairing` re-solves through `confirm_round` (no stability tier), so
+with the rare tie it may differ slightly from the previewed minimal cascade —
+acceptable, since ties are rare and `confirm_round` is the single source of truth
+for how rounds are built.
 
 ### 5. Rule identity for serialization
 
@@ -393,6 +413,11 @@ float", "club clash", "fold"), not the internal enum names.
 - Forcing the status quo changes nothing; forcing a worse pairing reports a
   positive `cost_delta`; forcing across a bye reassigns the sit-out (a changed
   board with no `player2`). *(shipped as three more tests.)*
+- Forbid drops the engine's board and re-pairs without it (worse `cost_delta`);
+  forbidding an unused pairing is a no-op. *(shipped.)*
+- `force_pairing` re-pairs the same round with `a–b` as a forced board and
+  refuses once a result is recorded (`RoundHasResults`). *(shipped in
+  `tournament.rs`.)*
 
 **Server**: the two endpoints return 200 with the expected shape; 404 for a
 missing round; 400 for `a == b` or a non-`force` mode.
@@ -410,9 +435,10 @@ the probe panel returns a normal diff (cost summary + changed boards) and the
    surfaces 1–2. The always-on layer.
 2. **Counterfactual force** — *shipped.* Core §4 force path (arithmetic stability
    tie-break), `POST …/counterfactual`, frontend surface 3. The centrepiece.
-3. **Forbid direction** and a "force this pairing" action that cancels the round
-   and re-drafts with the probed edge as a `Forced` board — closing the loop
-   from *"why not?"* to *"then do it."*
+3. **Forbid direction** and the "force this pairing" action — *shipped.* Forbid
+   re-solves with the edge priced out; the apply action re-pairs the current
+   round through `confirm_round` with the probed edge as a `Forced` board,
+   closing the loop from *"why not?"* to *"then do it."*
 
 ---
 

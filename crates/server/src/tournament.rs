@@ -6,8 +6,8 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{
-    Board, Counterfactual, CupPodium, Handicap, NewPlayer, RoundExplanation, Standing, Tournament,
-    TournamentSettings, Winner,
+    Board, Counterfactual, CounterfactualMode, CupPodium, Handicap, NewPlayer, RoundExplanation,
+    Standing, Tournament, TournamentSettings, Winner,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -32,7 +32,8 @@ use crate::state::{AppState, TournamentStore};
 /// - `PUT    /api/tournament/draft`                  edit the draft
 /// - `POST   /api/tournament/rounds`                 confirm the draft (pair & start)
 /// - `GET    /api/tournament/rounds/{n}/explanation` explain a round's Swiss pairings
-/// - `POST   /api/tournament/rounds/{n}/counterfactual` explain forcing a pairing
+/// - `POST   /api/tournament/rounds/{n}/counterfactual` explain forcing/forbidding a pairing
+/// - `POST   /api/tournament/rounds/force-pairing`      re-pair the round with a forced board
 /// - `POST   /api/tournament/rounds/{n}/boards/{i}/result`  toggle a board winner
 /// - `POST   /api/tournament/rounds/{n}/boards/{i}/drawn`   set the draw flag
 /// - `PUT    /api/tournament/rounds/{n}/boards/{i}/handicap` set/clear the handicap
@@ -79,6 +80,7 @@ pub fn routes() -> Router<AppState> {
             "/api/tournament/rounds/{round_number}/counterfactual",
             post(round_counterfactual),
         )
+        .route("/api/tournament/rounds/force-pairing", post(force_pairing))
         .route(
             "/api/tournament/rounds/{round_number}/boards/{board_index}/result",
             post(set_board_result),
@@ -401,21 +403,23 @@ async fn round_explanation(
     Ok(Json(explanation))
 }
 
-/// Body of the counterfactual endpoint: the two players to probe and the mode.
-/// Only `"force"` ("why aren't these two paired?") is supported today.
+/// Body of the counterfactual endpoint: the two players to probe and the mode —
+/// `"force"` ("why aren't these two paired?") or `"forbid"` ("why did you pair
+/// them?"). Defaults to force.
 #[derive(Debug, Deserialize)]
 struct CounterfactualRequest {
-    #[serde(default = "default_mode")]
-    mode: String,
+    #[serde(default = "default_counterfactual_mode")]
+    mode: CounterfactualMode,
     a: Uuid,
     b: Uuid,
 }
 
-fn default_mode() -> String {
-    "force".to_string()
+fn default_counterfactual_mode() -> CounterfactualMode {
+    CounterfactualMode::Force
 }
 
-/// Explain what forcing the pairing `a`–`b` in this round would cost. Read-only.
+/// Explain what forcing or forbidding the pairing `a`–`b` in this round would
+/// cost. Read-only.
 async fn round_counterfactual(
     State(state): State<AppState>,
     Path(round_number): Path<u32>,
@@ -426,16 +430,35 @@ async fn round_counterfactual(
             "a counterfactual needs two different players".into(),
         ));
     }
-    if req.mode != "force" {
-        return Err(ApiError::BadRequest(format!(
-            "unsupported counterfactual mode '{}' (only 'force')",
-            req.mode
-        )));
-    }
     let store = state.store.read().expect("store lock poisoned");
     let tournament = store.current().ok_or(ApiError::NoTournament)?;
-    let result = tournament.explain_counterfactual(round_number, req.a, req.b)?;
+    let result = tournament.explain_counterfactual(round_number, req.a, req.b, req.mode)?;
     Ok(Json(result))
+}
+
+/// Body of the force-pairing endpoint: the two players to pair.
+#[derive(Debug, Deserialize)]
+struct ForcePairingRequest {
+    a: Uuid,
+    b: Uuid,
+}
+
+/// Force the pairing `a`–`b` onto the current round (re-pairs it with that board
+/// fixed). Mutates, so a backup is taken.
+async fn force_pairing(
+    State(state): State<AppState>,
+    Json(req): Json<ForcePairingRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    if req.a == req.b {
+        return Err(ApiError::BadRequest(
+            "a forced pairing needs two different players".into(),
+        ));
+    }
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.mutate(|t| t.force_pairing(req.a, req.b).map(|_| ()))?;
+    let label = round_label(&store, "round", "re-paired");
+    backup_after(&store, &label);
+    view(&store)
 }
 
 /// Body of the board-result endpoint: which player the referee clicked.

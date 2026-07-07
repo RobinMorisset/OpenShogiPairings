@@ -13,6 +13,7 @@
     fetchAmericanGrid,
     fetchBackups,
     fetchCounterfactual,
+    forcePairing,
     fetchRatings,
     fetchRoundExplanation,
     fetchTournament,
@@ -161,6 +162,16 @@
   const enoughPlayers = $derived((tournament?.players.length ?? 0) >= 2);
   const currentRoundAllPlayed = $derived(
     currentRound ? currentRound.boards.every((b) => b.result != null) : false,
+  );
+
+  // The active round can be re-paired (via "force this pairing") only if it is
+  // the current, in-progress round with no results recorded yet.
+  const canForceActiveRound = $derived(
+    !!activeRound &&
+      !!currentRound &&
+      activeRound.number === currentRound.number &&
+      !activeRound.completed &&
+      activeRound.boards.every((b) => b.result == null),
   );
 
   // Hybrid cup: which bracket sizes are choosable at finalization depends on how
@@ -752,7 +763,9 @@
             handicapPolicy={tournament.settings.handicap_policy}
             suggestedHandicaps={activeRoundSuggested}
             explanation={roundExplanation}
-            onProbe={(a, b) => fetchCounterfactual(activeRound.number, a, b)}
+            onProbe={(a, b, mode) => fetchCounterfactual(activeRound.number, a, b, mode)}
+            canForce={canForceActiveRound}
+            onForcePairing={(a, b) => run(async () => apply(await forcePairing(a, b)))}
             onClickWinner={(boardIndex, clicked) =>
               handleSetResult(activeRound.number, boardIndex, clicked)}
             onToggleDrawn={(boardIndex, drawn) =>

@@ -13,8 +13,8 @@ use uuid::Uuid;
 
 use crate::cup::{Cup, CupPodium, CUP_SIZES};
 use crate::pairing::{
-    counterfactual_force, explain_pairing, pair_round_weighted, Counterfactual, RoundExplanation,
-    ScopeReason,
+    counterfactual_forbid, counterfactual_force, explain_pairing, pair_round_weighted,
+    Counterfactual, CounterfactualMode, RoundExplanation, ScopeReason,
 };
 use crate::player::{NewPlayer, Player, PointAdjustment};
 use crate::round::{Board, Handicap, HandicapGame, PairingSource, Round, RoundDraft, Winner};
@@ -114,6 +114,9 @@ pub enum TournamentError {
     /// The round still has games without a result.
     #[error("all games in the round must be played first")]
     RoundHasUnplayedGames,
+    /// A pairing can't be forced onto a round that already has recorded results.
+    #[error("cannot re-pair a round that already has recorded results")]
+    RoundHasResults,
     /// No round with the given number exists.
     #[error("no round number {0}")]
     RoundNotFound(u32),
@@ -761,9 +764,11 @@ impl Tournament {
         ))
     }
 
-    /// Explain what forcing the pairing `a`–`b` in round `round_number` would
-    /// cost, relative to the round's confirmed Swiss pairing: which boards would
-    /// change, the rings of affected players, and the net per-rule cost.
+    /// Explain a counterfactual pairing in round `round_number`, relative to the
+    /// round's confirmed Swiss pairing: which boards would change, the rings of
+    /// affected players, and the net per-rule cost. [`CounterfactualMode::Force`]
+    /// asks "why aren't A and B paired?"; [`CounterfactualMode::Forbid`] asks
+    /// "why did you pair A and B?".
     ///
     /// If either player isn't an engine-paired Swiss player of that round (they
     /// were forced, are a cup player, or sat out), the result is `scoped_out`
@@ -773,6 +778,7 @@ impl Tournament {
         round_number: u32,
         a: Uuid,
         b: Uuid,
+        mode: CounterfactualMode,
     ) -> Result<Counterfactual, TournamentError> {
         let idx = self
             .rounds
@@ -803,7 +809,11 @@ impl Tournament {
             }
         }
 
-        Ok(counterfactual_force(
+        let solve = match mode {
+            CounterfactualMode::Force => counterfactual_force,
+            CounterfactualMode::Forbid => counterfactual_forbid,
+        };
+        Ok(solve(
             round.number,
             &self.players,
             &self.settings,
@@ -813,6 +823,47 @@ impl Tournament {
             a,
             b,
         ))
+    }
+
+    /// Actually force the pairing `a`–`b` onto the current (last, in-progress)
+    /// round: re-pair the round with `a`–`b` added as a referee-forced board,
+    /// keeping the round's existing forced boards and absentees. Closes the loop
+    /// from the counterfactual preview ("why not pair them?") to applying it.
+    ///
+    /// Refuses if the round is completed or already has recorded results (re-
+    /// pairing would discard them). The pair is validated by the re-pairing path
+    /// exactly like any referee-forced board (both must be present Swiss players,
+    /// neither a cup player nor already forced elsewhere).
+    pub fn force_pairing(&mut self, a: Uuid, b: Uuid) -> Result<&Round, TournamentError> {
+        let round = self.rounds.last().ok_or(TournamentError::NoRoundToCancel)?;
+        if round.completed {
+            return Err(TournamentError::RoundHasResults);
+        }
+        if round.boards.iter().any(|bd| bd.result.is_some()) {
+            return Err(TournamentError::RoundHasResults);
+        }
+
+        // Rebuild the draft the round came from: its absentees, its existing
+        // forced boards, plus the newly forced pair. The engine re-picks the bye.
+        let mut forced_boards: Vec<Board> = round
+            .boards
+            .iter()
+            .filter(|bd| matches!(bd.source, PairingSource::Forced))
+            .map(|bd| Board::pending(bd.player1, bd.player2, None, PairingSource::Forced))
+            .collect();
+        forced_boards.push(Board::pending(a, b, None, PairingSource::Forced));
+        let draft = RoundDraft {
+            number: round.number,
+            absent: round.absent.clone(),
+            forced_boards,
+            forced_bye: None,
+        };
+
+        // Drop the round and re-confirm from the reconstructed draft. Earlier
+        // rounds stay completed, so the standings entering this round are intact.
+        self.rounds.pop();
+        self.draft = Some(draft);
+        self.confirm_round()
     }
 
     /// Why `id` is out of the engine's hands for `round`: forced, a cup player,
@@ -1398,6 +1449,58 @@ mod tests {
             .iter()
             .any(|b| b.player1 == ids[0] && b.player2 == ids[2]));
         assert_eq!(round.boards.len(), 2);
+    }
+
+    #[test]
+    fn force_pairing_repairs_the_round_with_the_forced_board() {
+        let mut t = Tournament::new("Cup").unwrap();
+        let ids: Vec<Uuid> = ["A", "B", "C", "D"]
+            .iter()
+            .map(|n| t.add_player(named(n)).unwrap().id)
+            .collect();
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+
+        // Two players the engine put on different boards.
+        let r1 = t.rounds.last().unwrap();
+        let a = r1.boards[0].player1;
+        let b = r1.boards[1].player1;
+        let paired = |bd: &Board, x, y| (bd.player1 == x && bd.player2 == y) || (bd.player1 == y && bd.player2 == x);
+        assert!(!r1.boards.iter().any(|bd| paired(bd, a, b)), "a and b start unpaired");
+
+        let round = t.force_pairing(a, b).unwrap();
+        assert_eq!(round.number, 1, "the same round is re-paired, not a new one");
+        assert!(
+            round
+                .boards
+                .iter()
+                .any(|bd| matches!(bd.source, PairingSource::Forced) && paired(bd, a, b)),
+            "a and b are now a forced board"
+        );
+        assert_eq!(t.rounds.len(), 1);
+        let _ = ids;
+    }
+
+    #[test]
+    fn force_pairing_refuses_when_results_exist() {
+        use crate::round::Winner;
+        let mut t = Tournament::new("Cup").unwrap();
+        let ids: Vec<Uuid> = ["A", "B", "C", "D"]
+            .iter()
+            .map(|n| t.add_player(named(n)).unwrap().id)
+            .collect();
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+
+        // Cross-pair two players from different boards; the recorded result blocks it.
+        let r1 = t.rounds.last().unwrap();
+        let a = r1.boards[0].player1;
+        let b = r1.boards[1].player1;
+        assert_eq!(t.force_pairing(a, b), Err(TournamentError::RoundHasResults));
+        let _ = ids;
     }
 
     fn rated(last_name: &str, rating: u32) -> NewPlayer {

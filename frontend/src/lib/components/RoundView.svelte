@@ -5,6 +5,7 @@
     type Board,
     type BoardLedger,
     type Counterfactual,
+    type CounterfactualMode,
     type Handicap,
     type HandicapPolicy,
     type Player,
@@ -25,8 +26,14 @@
     /** Why the engine chose these pairings (per-board rule ledger + report).
      *  `null` while loading or unavailable. */
     explanation?: RoundExplanation | null;
-    /** Ask what forcing the pairing `a`–`b` would cost. Absent = probe disabled. */
-    onProbe?: (a: string, b: string) => Promise<Counterfactual>;
+    /** Ask what forcing/forbidding the pairing `a`–`b` would cost. Absent =
+     *  probe disabled. */
+    onProbe?: (a: string, b: string, mode: CounterfactualMode) => Promise<Counterfactual>;
+    /** Whether this round can be re-paired (it is the current round and has no
+     *  recorded results). Gates the "force this pairing" action. */
+    canForce?: boolean;
+    /** Apply a forced pairing: re-pair the round with `a`–`b` fixed. */
+    onForcePairing?: (a: string, b: string) => Promise<void>;
     /** Register a click on a board's player (toggles the winner). */
     onClickWinner: (boardIndex: number, clicked: Winner) => void;
     /** Set/clear the "a draw occurred" flag on a board. */
@@ -43,6 +50,8 @@
     suggestedHandicaps,
     explanation = null,
     onProbe,
+    canForce = false,
+    onForcePairing,
     onClickWinner,
     onToggleDrawn,
     onSetHandicap,
@@ -130,19 +139,27 @@
   });
 
   let probeOpen = $state(false);
+  let probeMode = $state<CounterfactualMode>("force");
   let probeA = $state("");
   let probeB = $state("");
   let probeBusy = $state(false);
   let probeResult = $state<Counterfactual | null>(null);
+  // The mode the current result was computed for (so the "force" action only
+  // shows for a force probe, not after the pickers/mode change).
+  let resultMode = $state<CounterfactualMode>("force");
   let probeError = $state("");
 
-  // Reset the probe whenever the round changes.
-  $effect(() => {
-    void round.number;
+  // Reset the probe whenever the round changes (its pairings changed under us).
+  function resetProbe() {
     probeA = "";
     probeB = "";
     probeResult = null;
     probeError = "";
+  }
+  $effect(() => {
+    void round.number;
+    void round.boards;
+    resetProbe();
   });
 
   const canProbe = $derived(
@@ -155,7 +172,36 @@
     probeError = "";
     probeResult = null;
     try {
-      probeResult = await onProbe(probeA, probeB);
+      probeResult = await onProbe(probeA, probeB, probeMode);
+      resultMode = probeMode;
+    } catch (err) {
+      probeError = err instanceof Error ? err.message : String(err);
+    } finally {
+      probeBusy = false;
+    }
+  }
+
+  // The "force this pairing" action is offered only after a *force* probe that
+  // actually changes something, on a round that can still be re-paired.
+  const canApplyForce = $derived(
+    !!onForcePairing &&
+      canForce &&
+      resultMode === "force" &&
+      (probeResult?.changed.length ?? 0) > 0 &&
+      !probeResult?.scoped_out &&
+      !probeBusy,
+  );
+
+  async function applyForce() {
+    if (!onForcePairing || !canApplyForce) return;
+    const a = probeA;
+    const b = probeB;
+    probeBusy = true;
+    probeError = "";
+    try {
+      await onForcePairing(a, b);
+      // The round re-paired; the fresh pairings make the old result stale.
+      resetProbe();
     } catch (err) {
       probeError = err instanceof Error ? err.message : String(err);
     } finally {
@@ -415,7 +461,31 @@
       </button>
       {#if probeOpen}
         <div class="probe-body">
-          <p class="probe-hint">{$_("roundView.probe.hint")}</p>
+          <div class="probe-modes">
+            <button
+              type="button"
+              class="probe-mode"
+              class:active={probeMode === "force"}
+              disabled={probeBusy}
+              onclick={() => (probeMode = "force")}
+            >
+              {$_("roundView.probe.modeForce")}
+            </button>
+            <button
+              type="button"
+              class="probe-mode"
+              class:active={probeMode === "forbid"}
+              disabled={probeBusy}
+              onclick={() => (probeMode = "forbid")}
+            >
+              {$_("roundView.probe.modeForbid")}
+            </button>
+          </div>
+          <p class="probe-hint">
+            {probeMode === "force"
+              ? $_("roundView.probe.hintForce")
+              : $_("roundView.probe.hintForbid")}
+          </p>
           <div class="probe-controls">
             <select bind:value={probeA} disabled={probeBusy}>
               <option value="">{$_("roundView.probe.pick")}</option>
@@ -466,6 +536,11 @@
                     <li>{changedBoardText(board)}</li>
                   {/each}
                 </ul>
+                {#if canApplyForce}
+                  <button type="button" class="probe-apply" disabled={probeBusy} onclick={applyForce}>
+                    {$_("roundView.probe.apply")}
+                  </button>
+                {/if}
               </div>
             {/if}
           {/if}
@@ -593,9 +668,49 @@
     border: 1px solid var(--border-divider);
     border-radius: 0.4rem;
   }
+  .probe-modes {
+    display: flex;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+  }
+  .probe-mode {
+    padding: 0.25rem 0.6rem;
+    border: 1px solid var(--border-soft);
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    cursor: pointer;
+  }
+  .probe-mode:hover:not(:disabled) {
+    background: var(--bg-hover);
+  }
+  .probe-mode.active {
+    border-color: var(--color-accent, var(--border-strong));
+    color: var(--text-primary);
+    font-weight: 600;
+  }
   .probe-hint {
     margin: 0 0 0.5rem;
     color: var(--text-secondary);
+  }
+  .probe-apply {
+    margin-top: 0.6rem;
+    padding: 0.35rem 0.7rem;
+    border: 1px solid var(--color-warning);
+    border-radius: 0.4rem;
+    background: var(--bg-warning);
+    color: var(--color-warning);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .probe-apply:hover:not(:disabled) {
+    filter: brightness(1.05);
+  }
+  .probe-apply:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .probe-controls {
     display: flex;

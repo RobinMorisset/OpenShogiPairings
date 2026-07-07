@@ -45,6 +45,7 @@ impl From<TournamentError> for ApiError {
             | TournamentError::NoRoundToComplete
             | TournamentError::NoRoundToCancel
             | TournamentError::RoundHasUnplayedGames
+            | TournamentError::RoundHasResults
             | TournamentError::HandicapNeedsRatingDifference
             | TournamentError::HandicapNotAllowedForCup
             | TournamentError::UnsupportedFormatVersion { .. }

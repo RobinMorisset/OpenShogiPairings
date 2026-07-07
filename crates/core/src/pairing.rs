@@ -813,7 +813,8 @@ pub struct Counterfactual {
 /// Minimum-cost perfect matching over `verts` (real players, plus a trailing
 /// [`PHANTOM`] when a bye participates), tie-broken toward `baseline` so among
 /// equal-cost solutions the one closest to the baseline wins (fewest boards
-/// changed). Returned as normalized pairs.
+/// changed), and never using any edge in `forbidden`. Returned as normalized
+/// pairs.
 ///
 /// The stability tier is folded in arithmetically rather than as an extra
 /// [`Rule`]: each edge costs `real_cost · (edges + 1) + (edge not in baseline)`.
@@ -821,10 +822,15 @@ pub struct Counterfactual {
 /// rules and the stability term is at most `edges < edges + 1`, this is exactly
 /// the lexicographic order `(real rules, then boards changed)` — the same
 /// ordering appending a lowest-priority rule to [`scale_ladder`] would give.
+///
+/// A forbidden edge is priced above any whole matching that avoids it (`max ·
+/// edges + 1`), so it is never chosen when an alternative perfect matching
+/// exists — which it always does on a complete graph of ≥ 4 vertices.
 fn solve_stable(
     model: &PairingModel,
     verts: &[Uuid],
     baseline: &HashSet<(Uuid, Uuid)>,
+    forbidden: &HashSet<(Uuid, Uuid)>,
 ) -> Vec<(Uuid, Uuid)> {
     let n = verts.len();
     if n < 2 {
@@ -841,12 +847,26 @@ fn solve_stable(
         }
     };
     let mut cost = vec![vec![0i128; n]; n];
+    let mut max_c = 0i128;
     for i in 0..n {
         for j in (i + 1)..n {
             let stray = i128::from(!baseline.contains(&unord_pair(verts[i], verts[j])));
             let c = base(verts[i], verts[j]) * stab + stray;
             cost[i][j] = c;
             cost[j][i] = c;
+            max_c = max_c.max(c);
+        }
+    }
+    if !forbidden.is_empty() {
+        // Above the total of any perfect matching that avoids the edge.
+        let prohibitive = max_c * (n as i128 / 2) + 1;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                if forbidden.contains(&unord_pair(verts[i], verts[j])) {
+                    cost[i][j] = prohibitive;
+                    cost[j][i] = prohibitive;
+                }
+            }
         }
     }
     let mate = min_weight_perfect_matching(&cost);
@@ -905,21 +925,26 @@ fn alternating_cycles(
     cycles
 }
 
-/// Explain what forcing the pairing `a`–`b` would cost, relative to the round's
-/// confirmed Swiss pairing. Both must be engine-paired players of this round (the
-/// caller checks scope). Re-solves the rest with the forced edge pre-placed and a
-/// stability tie-break toward the confirmed pairing, then diffs the two.
-pub fn counterfactual_force(
+/// Which alternative a referee is probing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CounterfactualMode {
+    /// "Why aren't A and B paired?" — force the edge, re-solve the rest.
+    Force,
+    /// "Why did you pair A and B?" — forbid the edge, re-solve.
+    Forbid,
+}
+
+/// The Swiss free set, the pairing model, and the confirmed matching `M0` (with
+/// the bye as a phantom edge) — the shared setup for either counterfactual.
+fn baseline_matching<'a>(
     number: u32,
-    players: &[Player],
+    players: &'a [Player],
     settings: &TournamentSettings,
     completed_rounds: &[Round],
     swiss_boards: &[(Uuid, Uuid)],
     bye: Option<Uuid>,
-    a: Uuid,
-    b: Uuid,
-) -> Counterfactual {
-    // The Swiss free set and the confirmed matching M0 (bye ↔ phantom).
+) -> (PairingModel<'a>, Vec<Uuid>, bool, HashSet<(Uuid, Uuid)>) {
     let mut free: Vec<Uuid> = swiss_boards.iter().flat_map(|&(x, y)| [x, y]).collect();
     if let Some(p) = bye {
         free.push(p);
@@ -927,23 +952,23 @@ pub fn counterfactual_force(
     let need_phantom = bye.is_some();
     let model =
         PairingModel::build(number, players, settings, completed_rounds, &free, need_phantom);
-    let rules = model.rules();
-
     let mut m0: HashSet<(Uuid, Uuid)> =
         swiss_boards.iter().map(|&(x, y)| unord_pair(x, y)).collect();
     if let Some(p) = bye {
         m0.insert(unord_pair(p, PHANTOM));
     }
+    (model, free, need_phantom, m0)
+}
 
-    // Re-solve everyone but the forced pair (phantom still in play if there is a
-    // bye), then add the forced edge back for the full counterfactual matching.
-    let mut verts: Vec<Uuid> = free.iter().copied().filter(|&v| v != a && v != b).collect();
-    if need_phantom {
-        verts.push(PHANTOM);
-    }
-    let mut m1: HashSet<(Uuid, Uuid)> = solve_stable(&model, &verts, &m0).into_iter().collect();
-    m1.insert(unord_pair(a, b));
-
+/// Diff the confirmed matching `m0` against the counterfactual `m1` into a
+/// [`Counterfactual`]: the net per-rule cost, the affected rings, and the new
+/// boards as ledgers.
+fn diff_matchings(
+    model: &PairingModel,
+    m0: &HashSet<(Uuid, Uuid)>,
+    m1: &HashSet<(Uuid, Uuid)>,
+) -> Counterfactual {
+    let rules = model.rules();
     let units_of = |e: &(Uuid, Uuid)| -> Vec<i128> {
         let (x, y) = *e;
         if x == PHANTOM {
@@ -968,12 +993,12 @@ pub fn counterfactual_force(
     // Net per-rule delta: added boards contribute +units, removed boards −units;
     // boards common to both matchings cancel.
     let mut delta: HashMap<RuleId, i64> = HashMap::new();
-    for e in m1.difference(&m0) {
+    for e in m1.difference(m0) {
         for (r, &u) in rules.iter().zip(&units_of(e)) {
             *delta.entry(r.id()).or_insert(0) += u as i64;
         }
     }
-    for e in m0.difference(&m1) {
+    for e in m0.difference(m1) {
         for (r, &u) in rules.iter().zip(&units_of(e)) {
             *delta.entry(r.id()).or_insert(0) -= u as i64;
         }
@@ -987,16 +1012,75 @@ pub fn counterfactual_force(
         .collect();
 
     // The new boards (added edges), sorted for a stable order, as ledgers.
-    let mut added: Vec<(Uuid, Uuid)> = m1.difference(&m0).copied().collect();
+    let mut added: Vec<(Uuid, Uuid)> = m1.difference(m0).copied().collect();
     added.sort();
     let changed: Vec<BoardLedger> = added.iter().map(ledger_of).collect();
 
     Counterfactual {
         scoped_out: None,
         cost_delta,
-        cycles: alternating_cycles(&m0, &m1),
+        cycles: alternating_cycles(m0, m1),
         changed,
     }
+}
+
+/// Explain what forcing the pairing `a`–`b` would cost, relative to the round's
+/// confirmed Swiss pairing. Both must be engine-paired players of this round (the
+/// caller checks scope). Re-solves the rest with the forced edge pre-placed and a
+/// stability tie-break toward the confirmed pairing, then diffs the two.
+pub fn counterfactual_force(
+    number: u32,
+    players: &[Player],
+    settings: &TournamentSettings,
+    completed_rounds: &[Round],
+    swiss_boards: &[(Uuid, Uuid)],
+    bye: Option<Uuid>,
+    a: Uuid,
+    b: Uuid,
+) -> Counterfactual {
+    let (model, free, need_phantom, m0) =
+        baseline_matching(number, players, settings, completed_rounds, swiss_boards, bye);
+
+    // Re-solve everyone but the forced pair (phantom still in play if there is a
+    // bye), then add the forced edge back for the full counterfactual matching.
+    let mut verts: Vec<Uuid> = free.iter().copied().filter(|&v| v != a && v != b).collect();
+    if need_phantom {
+        verts.push(PHANTOM);
+    }
+    let no_forbidden = HashSet::new();
+    let mut m1: HashSet<(Uuid, Uuid)> =
+        solve_stable(&model, &verts, &m0, &no_forbidden).into_iter().collect();
+    m1.insert(unord_pair(a, b));
+
+    diff_matchings(&model, &m0, &m1)
+}
+
+/// Explain why the engine paired `a`–`b` rather than something else: forbid that
+/// edge, re-solve the whole free set with a stability tie-break toward the
+/// confirmed pairing, and diff. If `a`–`b` wasn't the engine's choice anyway, the
+/// diff is empty.
+pub fn counterfactual_forbid(
+    number: u32,
+    players: &[Player],
+    settings: &TournamentSettings,
+    completed_rounds: &[Round],
+    swiss_boards: &[(Uuid, Uuid)],
+    bye: Option<Uuid>,
+    a: Uuid,
+    b: Uuid,
+) -> Counterfactual {
+    let (model, free, need_phantom, m0) =
+        baseline_matching(number, players, settings, completed_rounds, swiss_boards, bye);
+
+    let mut verts = free.clone();
+    if need_phantom {
+        verts.push(PHANTOM);
+    }
+    let forbidden: HashSet<(Uuid, Uuid)> = [unord_pair(a, b)].into_iter().collect();
+    let m1: HashSet<(Uuid, Uuid)> =
+        solve_stable(&model, &verts, &m0, &forbidden).into_iter().collect();
+
+    diff_matchings(&model, &m0, &m1)
 }
 
 /// Pair the `present` players by minimizing the total rule penalty, honoring
@@ -1870,5 +1954,52 @@ mod tests {
             cf.changed.iter().any(|b| b.player2.is_none()),
             "someone new takes the bye"
         );
+    }
+
+    #[test]
+    fn forbidding_an_engine_board_repairs_without_it() {
+        // Round 1, group of four: the engine's fold ideal is p0-p2 / p1-p3.
+        // Forbid p0-p2 and the only alternative (p0-p1 / p2-p3) must be chosen,
+        // so p0-p2 is gone and the fold cost rises.
+        let p: Vec<Player> = (1..=4).map(|i| player(i, Some(2000 - i * 10), None)).collect();
+        let boards = [(p[0].id, p[2].id), (p[1].id, p[3].id)];
+
+        let cf = counterfactual_forbid(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &[],
+            &boards,
+            None,
+            p[0].id,
+            p[2].id,
+        );
+
+        let changed = changed_pairs(&cf);
+        assert!(!changed.contains(&unord(p[0].id, p[2].id)), "the forbidden board is gone");
+        assert!(!cf.changed.is_empty());
+        let fold = cf.cost_delta.iter().find(|d| d.rule == RuleId::Fold);
+        assert!(matches!(fold, Some(d) if d.units > 0), "avoiding the ideal costs fold units");
+    }
+
+    #[test]
+    fn forbidding_an_unused_pairing_changes_nothing() {
+        // p0-p1 was never the engine's choice, so forbidding it is a no-op.
+        let p: Vec<Player> = (1..=4).map(|i| player(i, Some(2000 - i * 10), None)).collect();
+        let boards = [(p[0].id, p[2].id), (p[1].id, p[3].id)];
+
+        let cf = counterfactual_forbid(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &[],
+            &boards,
+            None,
+            p[0].id,
+            p[1].id,
+        );
+
+        assert!(cf.changed.is_empty());
+        assert!(cf.cost_delta.is_empty());
     }
 }
