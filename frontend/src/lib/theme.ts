@@ -9,9 +9,9 @@ function getInitialTheme(): Theme {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored === "dark" || stored === "light") return stored;
 
-  if (window.matchMedia("(prefers-color-scheme: light)").matches) return "light";
-
-  return "dark";
+  // Light is the default regardless of OS preference — deliberate choice,
+  // not a fallback signal like the locale's navigator.language check.
+  return "light";
 }
 
 function apply(t: Theme) {

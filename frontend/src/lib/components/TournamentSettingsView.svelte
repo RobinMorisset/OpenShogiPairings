@@ -209,6 +209,18 @@
     persist();
   }
 
+  // Drag-and-drop reordering — an alternative to the ▲▼ buttons above, not a
+  // replacement (buttons stay for keyboard/accessibility).
+  let dragIndex = $state<number | null>(null);
+  let dragOverIndex = $state<number | null>(null);
+
+  function reorderTiebreak(from: number, to: number) {
+    if (from === to) return;
+    const [item] = tiebreaks.splice(from, 1);
+    tiebreaks.splice(to, 0, item);
+    persist();
+  }
+
   function setFloaterStyle(v: "classic" | "median") {
     floaterStyle = v;
     persist();
@@ -299,12 +311,36 @@
   // Can't schedule more removals than there are (distinct) thresholds to drop.
   const canAddRemoval = $derived(removals.length < normThresholds.length);
 
+  // How many registered players fall into each MacMahon band — unrated
+  // players and those below the first threshold count as band 0, mirroring
+  // the server's own point calculation (one point per threshold reached).
+  const bandPlayerCounts = $derived.by(() => {
+    const t = normThresholds;
+    const counts = new Array(t.length + 1).fill(0);
+    for (const p of players) {
+      let band = 0;
+      if (p.rating != null) {
+        for (const threshold of t) {
+          if (p.rating >= threshold) band++;
+          else break;
+        }
+      }
+      counts[band]++;
+    }
+    return counts;
+  });
+
   // Preview of the resulting bands, e.g. "below 1200 → 0".
   const bands = $derived.by(() => {
     const t = normThresholds;
-    const rows: { label: string; points: number }[] = [];
+    const rows: { label: string; points: number; count: number }[] = [];
     if (t.length === 0) return rows;
-    rows.push({ label: $_("settings.bandBelow", { values: { value: t[0] } }), points: 0 });
+    const counts = bandPlayerCounts;
+    rows.push({
+      label: $_("settings.bandBelow", { values: { value: t[0] } }),
+      points: 0,
+      count: counts[0],
+    });
     for (let i = 0; i < t.length; i++) {
       const hi = t[i + 1];
       rows.push({
@@ -313,6 +349,7 @@
             ? $_("settings.bandRange", { values: { lo: t[i], hi: hi - 1 } })
             : $_("settings.bandAndAbove", { values: { value: t[i] } }),
         points: i + 1,
+        count: counts[i + 1],
       });
     }
     return rows;
@@ -444,7 +481,12 @@
       <h4>{$_("settings.startingPoints")}</h4>
       <ul>
         {#each bands as b (b.points)}
-          <li><span class="band">{b.label}</span> → <strong>{b.points}</strong></li>
+          <li>
+            <span class="band">{b.label}</span> → <strong>{b.points}</strong>
+            <span class="band-count">
+              ({$_(b.count === 1 ? "settings.playerCountSingular" : "settings.playerCountPlural", { values: { count: b.count } })})
+            </span>
+          </li>
         {/each}
       </ul>
     </div>
@@ -690,7 +732,38 @@
 
     <div class="thresholds">
       {#each tiebreaks as code, i (code)}
-        <div class="threshold-row">
+        <div
+          class="threshold-row"
+          class:dragging={dragIndex === i}
+          class:drag-over={dragOverIndex === i && dragIndex !== null && dragIndex !== i}
+          role="listitem"
+          draggable={!busy}
+          ondragstart={(e) => {
+            dragIndex = i;
+            e.dataTransfer?.setData("text/plain", String(i));
+            if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+          }}
+          ondragover={(e) => {
+            e.preventDefault();
+            dragOverIndex = i;
+          }}
+          ondragleave={() => {
+            if (dragOverIndex === i) dragOverIndex = null;
+          }}
+          ondrop={(e) => {
+            e.preventDefault();
+            if (dragIndex !== null) reorderTiebreak(dragIndex, i);
+            dragIndex = null;
+            dragOverIndex = null;
+          }}
+          ondragend={() => {
+            dragIndex = null;
+            dragOverIndex = null;
+          }}
+        >
+          <span class="drag-handle" title={$_("settings.dragToReorder")} aria-hidden="true"
+            >⠿</span
+          >
           <span class="tb-rank">{i + 1}.</span>
           <span class="tb-label" title={titleOf(code)}>{labelOf(code)}</span>
           <button
@@ -796,6 +869,18 @@
     display: flex;
     gap: 0.4rem;
     align-items: center;
+  }
+  .threshold-row.dragging {
+    opacity: 0.4;
+  }
+  .threshold-row.drag-over {
+    box-shadow: 0 -2px 0 0 var(--border-accent-strong);
+  }
+  .drag-handle {
+    cursor: grab;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    line-height: 1;
   }
   .prefix {
     color: var(--text-strong);
@@ -916,6 +1001,10 @@
   .band {
     color: var(--text-strong);
     font-variant-numeric: tabular-nums;
+  }
+  .band-count {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
   }
   .muted {
     color: var(--text-secondary);
