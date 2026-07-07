@@ -180,7 +180,7 @@
               {#if cell.kind === "bye"}
                 <span class="win" title="Bye (counts as a win)">0+</span>
               {:else if cell.kind === "absent"}
-                <span class="loss" title="Absent (counts as a loss)">0−</span>
+                <span class="absent" title="Absent (counts as a loss)">0−</span>
               {:else if cell.kind === "pending"}
                 <span class="pending">{cell.opponent}?</span>
               {:else}
@@ -244,6 +244,9 @@
   }
   .loss {
     color: #f85149;
+  }
+  .absent {
+    color: #6a6a72;
   }
   .pending {
     color: #d29922;

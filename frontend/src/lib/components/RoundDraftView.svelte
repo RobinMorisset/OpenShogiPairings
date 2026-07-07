@@ -85,7 +85,8 @@
     onUpdate(update);
   }
 
-  // Transient selection for the "add forced pairing" controls.
+  // Transient selection for the "add forced pairing" controls. As soon as
+  // both are picked, the pairing is forced immediately — no separate button.
   let pairA = $state("");
   let pairB = $state("");
 
@@ -96,6 +97,16 @@
     pairA = "";
     pairB = "";
     onUpdate(update);
+  }
+
+  function selectPairA(id: string) {
+    pairA = id;
+    addForcedPair();
+  }
+
+  function selectPairB(id: string) {
+    pairB = id;
+    addForcedPair();
   }
 
   function removeForcedPair(index: number) {
@@ -185,14 +196,22 @@
       </ul>
     {/if}
     <div class="add-pair">
-      <select bind:value={pairA} disabled={busy}>
+      <select
+        value={pairA}
+        disabled={busy}
+        onchange={(e) => selectPairA(e.currentTarget.value)}
+      >
         <option value="">Player…</option>
         {#each forceable as p (p.id)}
           <option value={p.id}>{label(p.id)}</option>
         {/each}
       </select>
       <span class="vs">vs</span>
-      <select bind:value={pairB} disabled={busy}>
+      <select
+        value={pairB}
+        disabled={busy}
+        onchange={(e) => selectPairB(e.currentTarget.value)}
+      >
         <option value="">Player…</option>
         {#each forceable as p (p.id)}
           {#if p.id !== pairA}
@@ -200,21 +219,15 @@
           {/if}
         {/each}
       </select>
-      <button
-        type="button"
-        class="ghost"
-        disabled={busy || !pairA || !pairB || pairA === pairB}
-        onclick={addForcedPair}>Force pairing</button
-      >
     </div>
   </section>
 
-  <section>
+  <section class:disabled={present.length % 2 === 0}>
     <h3>Forced bye</h3>
     <p class="muted small">Only applies with an odd number of present players.</p>
     <select
       value={draft.forced_bye ?? ""}
-      disabled={busy}
+      disabled={busy || present.length % 2 === 0}
       onchange={(e) => setForcedBye(e.currentTarget.value)}
     >
       <option value="">Automatic (lowest of remaining)</option>
@@ -277,6 +290,9 @@
     border: 1px solid #2b2b31;
     border-radius: 0.6rem;
     padding: 0.75rem 1rem;
+  }
+  section.disabled {
+    opacity: 0.45;
   }
   h3 {
     margin: 0 0 0.4rem;

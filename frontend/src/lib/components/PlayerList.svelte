@@ -289,13 +289,19 @@
           <td>{@render cell(player, "club", false)}</td>
           {#if showEligible}
             <td class="elig">
-              <input
-                type="checkbox"
-                checked={player.eligible ?? false}
-                disabled={busy}
-                title="Eligible for the direct-elimination cup"
-                onchange={(e) => onToggleEligible?.(player.id, e.currentTarget.checked)}
-              />
+              {#if finalized}
+                <span title="Eligible for the direct-elimination cup" class="elig-frozen">
+                  {player.eligible ? "✓" : ""}
+                </span>
+              {:else}
+                <input
+                  type="checkbox"
+                  checked={player.eligible ?? false}
+                  disabled={busy}
+                  title="Eligible for the direct-elimination cup"
+                  onchange={(e) => onToggleEligible?.(player.id, e.currentTarget.checked)}
+                />
+              {/if}
             </td>
           {/if}
           <td class="actions">
@@ -415,6 +421,10 @@
   .elig {
     text-align: center;
     width: 2.5rem;
+  }
+  .elig-frozen {
+    color: #3fb950;
+    font-weight: 700;
   }
   .elig-count {
     color: #9a9aa2;

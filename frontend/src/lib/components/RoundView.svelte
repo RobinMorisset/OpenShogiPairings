@@ -87,10 +87,6 @@
     return sourceBadge(board.source).kind === "cup";
   }
 
-  function handicapLabel(h: Handicap): string {
-    return HANDICAPS.find((x) => x.value === h)?.label ?? h;
-  }
-
   // A single emoji flagging a non-Swiss pairing (forced or cup); blank for a
   // normal Swiss pairing. Kept as a narrow, header-less column between the two
   // players so it doesn't compete for attention with the pairing itself.
@@ -196,9 +192,10 @@
                       {#each HANDICAPS as h (h.value)}
                         <option
                           value={h.value}
+                          title={h.label}
                           style={suggestedHandicaps[index] === h.value ? "font-weight:700" : ""}
                         >
-                          {suggestedHandicaps[index] === h.value ? "★ " : ""}{h.label}
+                          {suggestedHandicaps[index] === h.value ? "★ " : ""}{h.value}
                         </option>
                       {/each}
                     </select>
@@ -215,7 +212,9 @@
               {#if handicapPolicy === "suggested"}
                 <td class="suggested">
                   {#if !isCup(board) && suggestedHandicaps[index]}
-                    {handicapLabel(suggestedHandicaps[index] as Handicap)}
+                    <span title={HANDICAPS.find((h) => h.value === suggestedHandicaps[index])?.label}
+                      >{suggestedHandicaps[index]}</span
+                    >
                   {/if}
                 </td>
               {/if}
@@ -300,8 +299,12 @@
     width: 3.5rem;
   }
   .draw {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: 1.9rem;
     height: 1.9rem;
+    padding: 0;
     border: 1px solid #3a3a42;
     border-radius: 0.4rem;
     background: transparent;
@@ -333,7 +336,7 @@
     font-size: 0.8rem;
   }
   .suggested {
-    color: #d29922;
+    color: #c9c9d0;
     font-size: 0.85rem;
   }
   .na {
