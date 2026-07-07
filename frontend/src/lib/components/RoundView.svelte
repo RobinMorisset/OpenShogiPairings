@@ -162,8 +162,29 @@
     resetProbe();
   });
 
+  // Each player's opponent in this round's Swiss boards (both directions). The
+  // bye-taker has none.
+  const opponentOf = $derived.by(() => {
+    const m = new Map<string, string>();
+    for (const b of round.boards) {
+      if (!b.source || b.source.kind === "swiss") {
+        m.set(b.player1, b.player2);
+        m.set(b.player2, b.player1);
+      }
+    }
+    return m;
+  });
+
+  // Forbid ("why paired?") only has something to say about a player's *actual*
+  // opponent, so it needs a single pick — the partner is derived. Force ("why
+  // not?") proposes a new pairing, so it needs both.
+  const forbidPartner = $derived(
+    probeMode === "forbid" ? opponentOf.get(probeA) : undefined,
+  );
+  const effectiveB = $derived(probeMode === "force" ? probeB : (forbidPartner ?? ""));
+
   const canProbe = $derived(
-    !!onProbe && !!probeA && !!probeB && probeA !== probeB && !probeBusy,
+    !!onProbe && !!probeA && !!effectiveB && probeA !== effectiveB && !probeBusy,
   );
 
   async function runProbe() {
@@ -172,7 +193,7 @@
     probeError = "";
     probeResult = null;
     try {
-      probeResult = await onProbe(probeA, probeB, probeMode);
+      probeResult = await onProbe(probeA, effectiveB, probeMode);
       resultMode = probeMode;
     } catch (err) {
       probeError = err instanceof Error ? err.message : String(err);
@@ -493,13 +514,24 @@
                 <option value={id}>{name(id)}</option>
               {/each}
             </select>
-            <span class="probe-vs">{$_("roundView.probe.and")}</span>
-            <select bind:value={probeB} disabled={probeBusy}>
-              <option value="">{$_("roundView.probe.pick")}</option>
-              {#each swissPlayers as id (id)}
-                <option value={id}>{name(id)}</option>
-              {/each}
-            </select>
+            {#if probeMode === "force"}
+              <span class="probe-vs">{$_("roundView.probe.and")}</span>
+              <select bind:value={probeB} disabled={probeBusy}>
+                <option value="">{$_("roundView.probe.pick")}</option>
+                {#each swissPlayers as id (id)}
+                  <option value={id}>{name(id)}</option>
+                {/each}
+              </select>
+            {:else}
+              <span class="probe-vs">{$_("roundView.probe.pairedWith")}</span>
+              <span class="probe-partner">
+                {#if probeA}
+                  {forbidPartner ? name(forbidPartner) : $_("roundView.probe.noPartner")}
+                {:else}
+                  —
+                {/if}
+              </span>
+            {/if}
             <button type="button" class="ghost" disabled={!canProbe} onclick={runProbe}>
               {$_("roundView.probe.submit")}
             </button>
@@ -728,6 +760,9 @@
   }
   .probe-vs {
     color: var(--text-secondary);
+  }
+  .probe-partner {
+    font-weight: 600;
   }
   .probe-status {
     margin: 0.6rem 0 0;

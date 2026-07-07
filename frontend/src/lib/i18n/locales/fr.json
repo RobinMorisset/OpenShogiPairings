@@ -130,6 +130,8 @@
       "hintForbid": "Choisissez deux joueurs appariés pour voir pourquoi le moteur les a réunis.",
       "pick": "Choisir un joueur…",
       "and": "avec",
+      "pairedWith": "apparié avec",
+      "noPartner": "— était exempt",
       "submit": "Expliquer",
       "working": "Calcul…",
       "bye": "(exempt)",

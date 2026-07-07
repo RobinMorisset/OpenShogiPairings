@@ -130,6 +130,8 @@
       "hintForbid": "Pick two paired players to see why the engine paired them.",
       "pick": "Choose a player…",
       "and": "with",
+      "pairedWith": "paired with",
+      "noPartner": "— took the bye",
       "submit": "Explain",
       "working": "Working…",
       "bye": "(bye)",
