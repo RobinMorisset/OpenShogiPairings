@@ -144,7 +144,12 @@ export interface TournamentSettings {
   floater_style: "classic" | "median";
   /** Whether this is a hybrid tournament with a direct-elimination cup. */
   cup_enabled: boolean;
+  /** How handicap games are treated: hidden, allowed, or suggested. */
+  handicap_policy: HandicapPolicy;
 }
+
+/** Mirror of `osp_core::HandicapPolicy`. */
+export type HandicapPolicy = "none" | "allowed" | "suggested";
 
 /** Mirror of `osp_core::Cup` — the seeded direct-elimination bracket. */
 export interface Cup {
@@ -195,4 +200,10 @@ export interface TournamentResponse {
   standings: Standing[];
   cup_podium?: CupPodium | null; // present once the cup final is decided
   draft_cup_players?: string[]; // players the cup pairs in the round being drafted
+  /**
+   * Suggested handicap per board, indexed like `tournament.rounds[i].boards[j]`.
+   * Computed regardless of `handicap_policy`; `null` = no suggestion (near-equal
+   * strength, an unrated player, or a cup board).
+   */
+  suggested_handicaps: (Handicap | null)[][];
 }

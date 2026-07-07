@@ -1,5 +1,14 @@
 <script lang="ts">
-  import { HANDICAPS, type Board, type Handicap, type Player, type Round, type Standing, type Winner } from "../types";
+  import {
+    HANDICAPS,
+    type Board,
+    type Handicap,
+    type HandicapPolicy,
+    type Player,
+    type Round,
+    type Standing,
+    type Winner,
+  } from "../types";
   import { sourceBadge } from "../pairingSource";
 
   interface Props {
@@ -7,6 +16,10 @@
     players: Player[];
     /** Ranked standings (canonical order), used to sort boards by top player. */
     standings: Standing[];
+    /** Whether/how handicap games are shown: none, allowed, or suggested. */
+    handicapPolicy: HandicapPolicy;
+    /** Suggested handicap per board, indexed like `round.boards`. */
+    suggestedHandicaps: (Handicap | null)[];
     /** Register a click on a board's player (toggles the winner). */
     onClickWinner: (boardIndex: number, clicked: Winner) => void;
     /** Set/clear the "a draw occurred" flag on a board. */
@@ -20,6 +33,8 @@
     round,
     players,
     standings,
+    handicapPolicy,
+    suggestedHandicaps,
     onClickWinner,
     onToggleDrawn,
     onSetHandicap,
@@ -67,6 +82,15 @@
     return r1 !== r2;
   }
 
+  // Cup games are always played even — no picker, no suggestion, empty cells.
+  function isCup(board: Board): boolean {
+    return sourceBadge(board.source).kind === "cup";
+  }
+
+  function handicapLabel(h: Handicap): string {
+    return HANDICAPS.find((x) => x.value === h)?.label ?? h;
+  }
+
   // Name of the frozen handicap giver, for the "X gives" hint.
   function giverName(board: Board): string {
     if (!board.handicap) return "";
@@ -92,7 +116,12 @@
           <th>Player 1</th>
           <th>Player 2</th>
           <th class="draw-col">Draw</th>
-          <th>Handicap</th>
+          {#if handicapPolicy !== "none"}
+            <th>Handicap</th>
+            {#if handicapPolicy === "suggested"}
+              <th>Suggested</th>
+            {/if}
+          {/if}
         </tr>
       </thead>
       <tbody>
@@ -143,28 +172,44 @@
                 =
               </button>
             </td>
-            <td>
-              {#if handicapAllowed(board)}
-                <select
-                  class="handicap"
-                  disabled={busy}
-                  value={board.handicap?.handicap ?? ""}
-                  onchange={(e) => onHandicapChange(index, e.currentTarget.value)}
-                >
-                  <option value="">None</option>
-                  {#each HANDICAPS as h (h.value)}
-                    <option value={h.value}>{h.label}</option>
-                  {/each}
-                </select>
-                {#if board.handicap}
-                  <span class="giver" title="The higher-rated player concedes the odds"
-                    >{giverName(board)} gives</span
-                  >
+            {#if handicapPolicy !== "none"}
+              <td>
+                {#if !isCup(board)}
+                  {#if handicapAllowed(board)}
+                    <select
+                      class="handicap"
+                      disabled={busy}
+                      value={board.handicap?.handicap ?? ""}
+                      onchange={(e) => onHandicapChange(index, e.currentTarget.value)}
+                    >
+                      <option value=""></option>
+                      {#each HANDICAPS as h (h.value)}
+                        <option
+                          value={h.value}
+                          style={suggestedHandicaps[index] === h.value ? "font-weight:700" : ""}
+                        >
+                          {suggestedHandicaps[index] === h.value ? "★ " : ""}{h.label}
+                        </option>
+                      {/each}
+                    </select>
+                    {#if board.handicap}
+                      <span class="giver" title="The higher-rated player concedes the odds"
+                        >{giverName(board)} gives</span
+                      >
+                    {/if}
+                  {:else}
+                    <span class="na" title="Needs two players with different ratings">—</span>
+                  {/if}
                 {/if}
-              {:else}
-                <span class="na" title="Needs two players with different ratings">—</span>
+              </td>
+              {#if handicapPolicy === "suggested"}
+                <td class="suggested">
+                  {#if !isCup(board) && suggestedHandicaps[index]}
+                    {handicapLabel(suggestedHandicaps[index] as Handicap)}
+                  {/if}
+                </td>
               {/if}
-            </td>
+            {/if}
           </tr>
         {/each}
       </tbody>
@@ -294,6 +339,10 @@
     margin-left: 0.5rem;
     color: #6a6a72;
     font-size: 0.8rem;
+  }
+  .suggested {
+    color: #d29922;
+    font-size: 0.85rem;
   }
   .na {
     color: #4a4a52;

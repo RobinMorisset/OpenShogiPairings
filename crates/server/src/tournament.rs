@@ -116,6 +116,11 @@ struct TournamentView {
     /// keep them out of the Swiss customization. Empty otherwise.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     draft_cup_players: Vec<uuid::Uuid>,
+    /// Suggested handicap per board, indexed like `tournament.rounds[i].boards[j]`.
+    /// Computed from current ratings regardless of `handicap_policy` — the
+    /// frontend decides how to surface it. `None` = no suggestion (near-equal
+    /// strength, an unrated player, or a cup board).
+    suggested_handicaps: Vec<Vec<Option<Handicap>>>,
 }
 
 /// Build the view from the store, or 404 if no tournament exists.
@@ -124,12 +129,24 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
     let standings = tournament.standings();
     let cup_podium = tournament.cup_podium();
     let draft_cup_players = tournament.draft_cup_players();
+    let suggested_handicaps = tournament
+        .rounds
+        .iter()
+        .map(|round| {
+            round
+                .boards
+                .iter()
+                .map(|board| tournament.suggested_handicap_for_board(board))
+                .collect()
+        })
+        .collect();
     Ok(Json(TournamentView {
         tournament,
         can_undo: store.can_undo(),
         standings,
         cup_podium,
         draft_cup_players,
+        suggested_handicaps,
     }))
 }
 

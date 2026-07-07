@@ -121,6 +121,10 @@ pub enum TournamentError {
     /// unrated), so there is no unambiguous handicap giver.
     #[error("a handicap game needs two players with different ratings")]
     HandicapNeedsRatingDifference,
+    /// A handicap was requested for a cup (direct-elimination) board — cup games
+    /// are always played even.
+    #[error("cup games cannot have a handicap")]
+    HandicapNotAllowedForCup,
     /// The serialized record uses a format version this build cannot read.
     #[error("unsupported tournament format version {found} (this build supports {supported})")]
     UnsupportedFormatVersion { found: u32, supported: u32 },
@@ -738,7 +742,9 @@ impl Tournament {
     /// current ratings and frozen onto the board, so a later rating edit can't
     /// change who conceded the odds. Returns
     /// [`TournamentError::HandicapNeedsRatingDifference`] when the two players'
-    /// ratings are equal (or both unrated), since then there is no giver.
+    /// ratings are equal (or both unrated), since then there is no giver, or
+    /// [`TournamentError::HandicapNotAllowedForCup`] for a cup board — cup games
+    /// are always played even.
     pub fn set_board_handicap(
         &mut self,
         round_number: u32,
@@ -751,6 +757,9 @@ impl Tournament {
             None => None,
             Some(handicap) => {
                 let board = self.board(round_number, board_index)?;
+                if matches!(board.source, PairingSource::Cup { .. }) {
+                    return Err(TournamentError::HandicapNotAllowedForCup);
+                }
                 let rating = |id| self.players.iter().find(|p| p.id == id).and_then(|p| p.rating);
                 let giver = Self::rating_giver(rating(board.player1), rating(board.player2))
                     .ok_or(TournamentError::HandicapNeedsRatingDifference)?;
@@ -760,6 +769,17 @@ impl Tournament {
         let board = self.board_mut(round_number, board_index)?;
         board.handicap = game;
         Ok(board)
+    }
+
+    /// The suggested handicap for a board, from the two players' current
+    /// ratings — always `None` for cup boards, whatever their ratings.
+    /// Display-only: never affects pairing and is never auto-filled.
+    pub fn suggested_handicap_for_board(&self, board: &Board) -> Option<Handicap> {
+        if matches!(board.source, PairingSource::Cup { .. }) {
+            return None;
+        }
+        let rating = |id| self.players.iter().find(|p| p.id == id).and_then(|p| p.rating);
+        crate::handicap::suggested_handicap(rating(board.player1), rating(board.player2))
     }
 
     /// Which side gives the handicap, given the two players' ratings: the higher
@@ -1318,6 +1338,25 @@ mod tests {
         );
         // Clearing a handicap is always allowed, even with equal ratings.
         assert!(t.set_board_handicap(1, 0, None).unwrap().handicap.is_none());
+    }
+
+    #[test]
+    fn handicap_rejected_for_cup_board() {
+        let mut t = Tournament::new("Cup").unwrap();
+        t.add_player(rated("High", 2000)).unwrap();
+        t.add_player(rated("Low", 1000)).unwrap();
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+        t.rounds[0].boards[0].source = PairingSource::Cup { stage: CupStage::Final };
+        assert_eq!(
+            t.set_board_handicap(1, 0, Some(Handicap::Rook)),
+            Err(TournamentError::HandicapNotAllowedForCup)
+        );
+        // Clearing a handicap is still allowed.
+        assert!(t.set_board_handicap(1, 0, None).unwrap().handicap.is_none());
+        // No suggestion either, despite the large rating gap.
+        let board = t.rounds[0].boards[0].clone();
+        assert_eq!(t.suggested_handicap_for_board(&board), None);
     }
 
     #[test]

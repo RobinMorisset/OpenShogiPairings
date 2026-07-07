@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { Player, TournamentSettings } from "../types";
+  import type { HandicapPolicy, Player, TournamentSettings } from "../types";
 
   interface Props {
     settings: TournamentSettings;
@@ -70,6 +70,7 @@
   let exemptClubs = $state<string[]>([]);
   let floaterStyle = $state<"classic" | "median">("classic");
   let cupEnabled = $state(false);
+  let handicapPolicy = $state<HandicapPolicy>("allowed");
 
   // Adopt the persisted settings only on a genuine external change — a load, an
   // undo, or the server normalizing our input. When our own edit merely
@@ -85,6 +86,7 @@
     const sExempt = settings.club_protection_exempt_clubs;
     const sFloater = settings.floater_style;
     const sCup = settings.cup_enabled;
+    const sHandicap = settings.handicap_policy;
     untrack(() => {
       const matches =
         eq(cleanSorted(thresholds), sThresholds) &&
@@ -93,7 +95,8 @@
         (clubRounds ?? null) === sRounds &&
         eqStr(normExempt(exemptClubs), sExempt) &&
         floaterStyle === sFloater &&
-        cupEnabled === sCup;
+        cupEnabled === sCup &&
+        handicapPolicy === sHandicap;
       if (!matches) {
         thresholds = [...sThresholds];
         removals = [...sRemovals];
@@ -102,6 +105,7 @@
         exemptClubs = [...sExempt];
         floaterStyle = sFloater;
         cupEnabled = sCup;
+        handicapPolicy = sHandicap;
       }
     });
   });
@@ -123,6 +127,7 @@
         .filter((c) => c.length > 0),
       floater_style: floaterStyle,
       cup_enabled: cupEnabled,
+      handicap_policy: handicapPolicy,
     });
   }
 
@@ -133,6 +138,11 @@
 
   function setCupEnabled(v: boolean) {
     cupEnabled = v;
+    persist();
+  }
+
+  function setHandicapPolicy(v: HandicapPolicy) {
+    handicapPolicy = v;
     persist();
   }
 
@@ -499,6 +509,49 @@
         onchange={(e) => setCupEnabled(e.currentTarget.checked)}
       />
       Hybrid tournament with a direct-elimination cup
+    </label>
+  </div>
+
+  <div class="section">
+    <h3>Handicap games</h3>
+    <p class="desc">
+      Controls the handicap column(s) in the pairings view. A recommended
+      handicap (FFS Annexe 7, from the rating gap) is highlighted in the picker
+      whenever it's shown, whichever option is chosen below. Cup games never
+      have a handicap.
+    </p>
+    <label class="check">
+      <input
+        type="radio"
+        name="handicap-policy"
+        value="none"
+        checked={handicapPolicy === "none"}
+        disabled={busy}
+        onchange={() => setHandicapPolicy("none")}
+      />
+      No handicap games — hide the column
+    </label>
+    <label class="check">
+      <input
+        type="radio"
+        name="handicap-policy"
+        value="allowed"
+        checked={handicapPolicy === "allowed"}
+        disabled={busy}
+        onchange={() => setHandicapPolicy("allowed")}
+      />
+      Handicap games allowed — show the picker
+    </label>
+    <label class="check">
+      <input
+        type="radio"
+        name="handicap-policy"
+        value="suggested"
+        checked={handicapPolicy === "suggested"}
+        disabled={busy}
+        onchange={() => setHandicapPolicy("suggested")}
+      />
+      Handicap games suggested — also show a suggested-handicap column
     </label>
   </div>
 </div>

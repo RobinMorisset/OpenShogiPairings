@@ -17,6 +17,22 @@ pub enum FloaterStyle {
     Median,
 }
 
+/// How the referee wants handicap games treated in this tournament, controlling
+/// both what the pairings view shows and whether a suggested handicap is
+/// computed for display. The suggestion never affects pairing itself and is
+/// never auto-filled — the referee always picks the handicap by hand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HandicapPolicy {
+    /// No handicap column at all.
+    None,
+    /// The handicap picker is shown, but no suggested-handicap column.
+    #[default]
+    Allowed,
+    /// The handicap picker plus a suggested-handicap column.
+    Suggested,
+}
+
 /// Configuration that isn't tied to a single player or round.
 ///
 /// Kept as its own record so it can grow (time controls, tie-break choices, …)
@@ -61,6 +77,10 @@ pub struct TournamentSettings {
     /// eligibility column and finalization asks for the cup size.
     #[serde(default)]
     pub cup_enabled: bool,
+    /// How handicap games are treated: hidden, allowed, or suggested (see
+    /// [`HandicapPolicy`]).
+    #[serde(default)]
+    pub handicap_policy: HandicapPolicy,
 }
 
 impl TournamentSettings {
@@ -260,6 +280,15 @@ mod tests {
         // First spelling kept, trimmed; the case-variant dup and the blank dropped.
         assert_eq!(s.club_protection_exempt_clubs, vec!["Paris", "Lyon"]);
         assert!(s.exempt_clubs_normalized().contains("paris")); // matched lower-cased
+    }
+
+    #[test]
+    fn handicap_policy_defaults_to_allowed_and_round_trips_snake_case() {
+        assert_eq!(TournamentSettings::default().handicap_policy, HandicapPolicy::Allowed);
+        assert_eq!(serde_json::to_string(&HandicapPolicy::Suggested).unwrap(), "\"suggested\"");
+        // Omitted in the payload → the default (Allowed).
+        let s: TournamentSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.handicap_policy, HandicapPolicy::Allowed);
     }
 
     #[test]

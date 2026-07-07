@@ -56,6 +56,7 @@
   let standings = $state<Standing[]>([]);
   let cupPodium = $state<CupPodium | null>(null);
   let draftCupPlayers = $state<string[]>([]);
+  let suggestedHandicaps = $state<(Handicap | null)[][]>([]);
   let canUndo = $state(false);
   let initialLoad = $state<"loading" | "done">("loading");
   let creatingNew = $state(false);
@@ -69,6 +70,7 @@
     standings = res.standings;
     cupPodium = res.cup_podium ?? null;
     draftCupPlayers = res.draft_cup_players ?? [];
+    suggestedHandicaps = res.suggested_handicaps ?? [];
     canUndo = res.can_undo;
   }
 
@@ -82,6 +84,14 @@
   const activeRound = $derived(
     tournament?.rounds.find((r) => `round-${r.number}` === activeTab) ?? null,
   );
+
+  // The suggested-handicap slice for the active round, matched by position
+  // (rounds are numbered sequentially without gaps).
+  const activeRoundSuggested = $derived.by(() => {
+    if (!tournament || !activeRound) return [];
+    const idx = tournament.rounds.findIndex((r) => r.number === activeRound.number);
+    return idx >= 0 ? (suggestedHandicaps[idx] ?? []) : [];
+  });
 
   // Tournament phase, derived from the finalize flag, the draft, and the last
   // round's state.
@@ -590,6 +600,8 @@
             round={activeRound}
             players={tournament.players}
             {standings}
+            handicapPolicy={tournament.settings.handicap_policy}
+            suggestedHandicaps={activeRoundSuggested}
             onClickWinner={(boardIndex, clicked) =>
               handleSetResult(activeRound.number, boardIndex, clicked)}
             onToggleDrawn={(boardIndex, drawn) =>

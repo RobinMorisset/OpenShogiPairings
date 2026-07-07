@@ -65,12 +65,6 @@ Known limitations and future work, roughly ordered by area.
   https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md
   Which one is used and in which order should be configurable (and only those should appear in the results tab.
 
-- **Recommended handicap** When picking a handicap, highlight the recommended one.
-  Also an option to add that recommended handicap as a column to the pairing when printing.
-  Actually it should have three values: no handicap games, handicap games allowed, handicap games suggested.
-
-- **Blocked handicap** Check that no handicap is allowed for cup games
-
 - **Allow storing default properties** which apply to all new started tournament.
   I'm not sure it is worthwhile, just a savec tournament with no players and just the properties set is equivalent.
 
