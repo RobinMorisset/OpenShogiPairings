@@ -88,6 +88,9 @@
 </script>
 
 <div class="round">
+  <div class="round-toolbar print-hide">
+    <button type="button" class="ghost" onclick={() => window.print()}>🖨 Print</button>
+  </div>
   {#if round.boards.length === 0}
     <p class="empty">No boards in this round.</p>
   {:else}
@@ -100,9 +103,9 @@
           <th>Player 2</th>
           <th class="draw-col">Draw</th>
           {#if handicapPolicy !== "none"}
-            <th>Handicap</th>
+            <th class="handicap-col">Handicap</th>
             {#if handicapPolicy === "suggested"}
-              <th>Suggested</th>
+              <th class="suggested-col">Suggested</th>
             {/if}
           {/if}
         </tr>
@@ -110,7 +113,9 @@
       <tbody>
         {#each round.boards as board, index (index)}
           <tr>
-            <td class="src-col" title={sourceBadge(board.source).text}>{sourceEmoji(board)}</td>
+            <td class="src-col src-{sourceBadge(board.source).kind}" title={sourceBadge(board.source).text}
+              >{sourceEmoji(board)}</td
+            >
             <td class="num">{index + 1}</td>
             <td class="p1-col">
               <button
@@ -152,7 +157,7 @@
               </button>
             </td>
             {#if handicapPolicy !== "none"}
-              <td>
+              <td class="handicap-col">
                 {#if !isCup(board)}
                   {#if handicapAllowed(board)}
                     <select
@@ -183,7 +188,7 @@
                 {/if}
               </td>
               {#if handicapPolicy === "suggested"}
-                <td class="suggested">
+                <td class="suggested suggested-col">
                   {#if !isCup(board) && suggestedHandicaps[index]}
                     <span title={HANDICAPS.find((h) => h.value === suggestedHandicaps[index])?.label}
                       >{suggestedHandicaps[index]}</span
@@ -212,6 +217,11 @@
 </div>
 
 <style>
+  .round-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.5rem;
+  }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -340,5 +350,42 @@
     margin-top: 1rem;
     color: #9a9aa2;
     font-size: 0.9rem;
+  }
+
+  @media print {
+    .print-hide {
+      display: none;
+    }
+    .draw-col,
+    .handicap-col,
+    .suggested-col {
+      display: none;
+    }
+    /* Only the forced-pairing lock is dropped from print — the cup trophy stays. */
+    .src-forced {
+      visibility: hidden;
+    }
+    table,
+    th,
+    td,
+    .player,
+    .giver,
+    .na,
+    .hint,
+    .bye {
+      color: #000 !important;
+      background: transparent !important;
+      border-color: #000 !important;
+    }
+    .player.winner,
+    .player.loser {
+      color: #000 !important;
+    }
+    .player {
+      border-color: transparent !important;
+    }
+    tbody tr:nth-child(even) {
+      background: transparent !important;
+    }
   }
 </style>

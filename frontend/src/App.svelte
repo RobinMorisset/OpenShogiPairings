@@ -792,4 +792,19 @@
     display: flex;
     justify-content: center;
   }
+
+  @media print {
+    header,
+    .toolbar,
+    .tabs,
+    .round-controls,
+    footer {
+      display: none;
+    }
+    .card {
+      border: none;
+      background: transparent;
+      padding: 0;
+    }
+  }
 </style>

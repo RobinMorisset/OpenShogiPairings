@@ -40,8 +40,8 @@ Known limitations and future work, roughly ordered by area.
 
 - **The results tab is too wide for its container/background**
 
-- **Button to print the pairings of a round, and button to print the results**.
-  The latter probably needs landscape mode.
+- **Button to print the results tab**, probably needs landscape mode. (The
+  pairings-view print button is done.)
 
 - **Add a button to load a CSV of player names in the players tab**
 

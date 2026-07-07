@@ -42,3 +42,11 @@ button:disabled {
 button.ghost {
   background: transparent;
 }
+
+@media print {
+  :root,
+  body {
+    background: #fff;
+    color: #000;
+  }
+}
