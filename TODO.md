@@ -38,11 +38,6 @@ Known limitations and future work, roughly ordered by area.
 
 ## Frontend
 
-- **The results tab is too wide for its container/background**
-
-- **Button to print the results tab**, probably needs landscape mode. (The
-  pairings-view print button is done.)
-
 - **Add a button to load a CSV of player names in the players tab**
 
 ## Simulations
@@ -70,7 +65,7 @@ Known limitations and future work, roughly ordered by area.
   There should be an option to load a backup tournament instead.
 
 - **New tournament protection** Starting a tournament loses the current one. So there should be a flag (non-undoable) on the tournament
-  when saving it manually, and there should be a confirmation dialog when the user tries to overwrite an unsaved tournament.
+  that is set when saving it manually, and there should be a confirmation dialog when the user tries to overwrite an unsaved tournament.
 
 - **Webhook for pushing results and pulling players** See https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification
 

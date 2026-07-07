@@ -134,6 +134,10 @@
 {#if tournament.players.length === 0}
   <p class="muted">No players registered yet.</p>
 {:else}
+  <div class="results">
+  <div class="results-toolbar print-hide">
+    <button type="button" class="ghost" onclick={() => window.print()}>🖨 Print</button>
+  </div>
   {#if cupPodium}
     {@const nameOf = (id: string) => {
       const p = byId.get(id);
@@ -212,9 +216,15 @@
       No rounds completed yet — results appear here as rounds are completed.
     </p>
   {/if}
+  </div>
 {/if}
 
 <style>
+  .results-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.5rem;
+  }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -295,5 +305,37 @@
     font-size: 0.85rem;
     margin-top: 0.75rem;
     text-align: center;
+  }
+
+  /* A named page so only this tab's print job goes landscape — the table is
+     wide (one column per round plus the tie-breaks), unlike the pairings view. */
+  @page results-landscape {
+    size: landscape;
+  }
+
+  @media print {
+    .print-hide {
+      display: none;
+    }
+    .results {
+      page: results-landscape;
+    }
+    table,
+    th,
+    td,
+    .win,
+    .loss,
+    .absent,
+    .pending,
+    .points,
+    .tiebreak,
+    .muted,
+    .note,
+    .podium,
+    .cup-title {
+      color: #000 !important;
+      background: transparent !important;
+      border-color: #000 !important;
+    }
   }
 </style>
