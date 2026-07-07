@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { _ } from "svelte-i18n";
-  import { waitLocale } from "./lib/i18n";
   import {
     addPlayer,
     addPointAdjustment,
@@ -66,8 +65,6 @@
   let suggestedHandicaps = $state<(Handicap | null)[][]>([]);
   let canUndo = $state(false);
   let initialLoad = $state<"loading" | "done">("loading");
-  let i18nReady = $state(false);
-  waitLocale().then(() => (i18nReady = true));
   let creatingNew = $state(false);
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -473,16 +470,12 @@
     <div class="header-top">
       <div class="header-titles">
         <h1>OpenShogiPairings</h1>
-        {#if i18nReady}
-          <p class="subtitle">{$_("app.subtitle")}</p>
-        {/if}
+        <p class="subtitle">{$_("app.subtitle")}</p>
       </div>
-      {#if i18nReady}
-        <div class="header-controls">
-          <ThemeSwitcher />
-          <LocaleSwitcher />
-        </div>
-      {/if}
+      <div class="header-controls">
+        <ThemeSwitcher />
+        <LocaleSwitcher />
+      </div>
     </div>
   </header>
 
@@ -490,9 +483,7 @@
     <p class="error-banner" role="alert">{error}</p>
   {/if}
 
-  {#if !i18nReady}
-    <p class="muted">Loading…</p>
-  {:else if initialLoad === "loading"}
+  {#if initialLoad === "loading"}
     <p class="muted">{$_("app.loading")}</p>
   {:else if showCreate}
     <CreateTournament
