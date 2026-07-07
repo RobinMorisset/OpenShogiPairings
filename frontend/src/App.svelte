@@ -573,6 +573,7 @@
           <RoundView
             round={activeRound}
             players={tournament.players}
+            {standings}
             onClickWinner={(boardIndex, clicked) =>
               handleSetResult(activeRound.number, boardIndex, clicked)}
             onToggleDrawn={(boardIndex, drawn) =>

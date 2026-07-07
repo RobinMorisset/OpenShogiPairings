@@ -41,9 +41,6 @@ Known limitations and future work, roughly ordered by area.
 
 ## Frontend
 
-- **Smart sorting of pairings** First by cup vs non-cup, then within each category by the ranking
-  of the highest ranked player of the game according to the same criteria as the results tab
-  
 - **The results tab is too wide for its container/background**
 
 - **Button to print the pairings of a round, and button to print the results**.

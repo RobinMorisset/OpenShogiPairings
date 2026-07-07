@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { HANDICAPS, type Board, type Handicap, type Player, type Round, type Winner } from "../types";
+  import { HANDICAPS, type Board, type Handicap, type Player, type Round, type Standing, type Winner } from "../types";
   import { sourceBadge } from "../pairingSource";
 
   interface Props {
     round: Round;
     players: Player[];
+    /** Ranked standings (canonical order), used to sort boards by top player. */
+    standings: Standing[];
     /** Register a click on a board's player (toggles the winner). */
     onClickWinner: (boardIndex: number, clicked: Winner) => void;
     /** Set/clear the "a draw occurred" flag on a board. */
@@ -17,6 +19,7 @@
   let {
     round,
     players,
+    standings,
     onClickWinner,
     onToggleDrawn,
     onSetHandicap,
@@ -25,6 +28,29 @@
 
   // Resolve player ids to display names.
   const byId = $derived(new Map(players.map((p) => [p.id, p])));
+
+  // Rank of each player per the results tab's canonical ordering (0 = first
+  // place). Missing from standings (e.g. not yet part of the tournament)
+  // sorts last.
+  const rankById = $derived(new Map(standings.map((s, i) => [s.player_id, i])));
+  function rank(id: string): number {
+    return rankById.get(id) ?? Infinity;
+  }
+
+  // Smart sort: cup games before non-cup, then by the rank of the game's
+  // best-placed player (per the results tab's criteria).
+  const orderedBoards = $derived(
+    round.boards
+      .map((board, index) => ({ board, index }))
+      .sort((a, b) => {
+        const aCup = sourceBadge(a.board.source).kind === "cup" ? 0 : 1;
+        const bCup = sourceBadge(b.board.source).kind === "cup" ? 0 : 1;
+        if (aCup !== bCup) return aCup - bCup;
+        const aRank = Math.min(rank(a.board.player1), rank(a.board.player2));
+        const bRank = Math.min(rank(b.board.player1), rank(b.board.player2));
+        return aRank - bRank;
+      }),
+  );
 
   function name(id: string): string {
     const p = byId.get(id);
@@ -70,9 +96,9 @@
         </tr>
       </thead>
       <tbody>
-        {#each round.boards as board, i (i)}
+        {#each orderedBoards as { board, index } (index)}
           <tr>
-            <td class="num">{i + 1}</td>
+            <td class="num">{index + 1}</td>
             <td class="type-col">
               <span class="src src-{sourceBadge(board.source).kind}"
                 >{sourceBadge(board.source).text}</span
@@ -86,7 +112,7 @@
                 class:loser={board.result === "player2"}
                 disabled={busy}
                 title="Click to set as winner"
-                onclick={() => onClickWinner(i, "player1")}
+                onclick={() => onClickWinner(index, "player1")}
               >
                 {name(board.player1)}
               </button>
@@ -99,7 +125,7 @@
                 class:loser={board.result === "player1"}
                 disabled={busy}
                 title="Click to set as winner"
-                onclick={() => onClickWinner(i, "player2")}
+                onclick={() => onClickWinner(index, "player2")}
               >
                 {name(board.player2)}
               </button>
@@ -112,7 +138,7 @@
                 disabled={busy}
                 title="A draw occurred before the decisive game (recorded for ELO)"
                 aria-pressed={board.drawn ?? false}
-                onclick={() => onToggleDrawn(i, !board.drawn)}
+                onclick={() => onToggleDrawn(index, !board.drawn)}
               >
                 =
               </button>
@@ -123,7 +149,7 @@
                   class="handicap"
                   disabled={busy}
                   value={board.handicap?.handicap ?? ""}
-                  onchange={(e) => onHandicapChange(i, e.currentTarget.value)}
+                  onchange={(e) => onHandicapChange(index, e.currentTarget.value)}
                 >
                   <option value="">None</option>
                   {#each HANDICAPS as h (h.value)}
