@@ -1,4 +1,5 @@
 import type {
+  BackupInfo,
   Handicap,
   HealthStatus,
   NewPlayer,
@@ -305,4 +306,17 @@ export function removePointAdjustment(
     `/api/tournament/players/${id}/adjustments/${adjustmentId}`,
     { method: "DELETE" },
   );
+}
+
+/** List automatic server-side backups for the current tournament, newest first. */
+export function fetchBackups(): Promise<BackupInfo[]> {
+  return request<BackupInfo[]>("/api/tournament/backups");
+}
+
+/** Restore a backup as the current tournament (like loading a file, but from
+ *  the server's own rotating backup store). Resets undo history. */
+export function restoreBackup(id: string): Promise<TournamentResponse> {
+  return request<TournamentResponse>(`/api/tournament/backups/${id}/restore`, {
+    method: "POST",
+  });
 }

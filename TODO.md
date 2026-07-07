@@ -23,6 +23,7 @@ Known limitations and future work, roughly ordered by area.
   be disabled/greyed out. In it, OSP keeps track of an estimated ELO for each player throughout the tournament based on
   Bayesian reasoning; and the constraints related to victories, floaters, fold, etc.. (everything but rematch and club)
   get replaced by a constraint minimizing the square of ELO differences per game (sitting between rematch and club).
+  **Design:** [`docs/elo-pairing-mode.md`](docs/elo-pairing-mode.md).
 
 
 ## FESA rating list
@@ -59,10 +60,6 @@ Known limitations and future work, roughly ordered by area.
   I'm not sure it is worthwhile, just a savec tournament with no players and just the properties set is equivalent.
 
 - **Add authentication to the distributed instance** So that only referees with the right password can access it.
-
-- **Automatic backups** This is just a save of the tournament file, but done on the server side after every step transition
-  of the round state machine (coarser than the undo stack). Should be parameterized how many are kept (rotating), default to 10 for now.
-  There should be a way to load a backup tournament.
 
 - **Webhook for pushing results and pulling players** See https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification
 

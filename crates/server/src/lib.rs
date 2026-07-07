@@ -11,6 +11,7 @@
 //! The server holds the current tournament in memory as the single source of
 //! truth shared by all connected clients; see [`AppState`].
 
+mod backup;
 mod error;
 mod ratings;
 mod state;
@@ -575,6 +576,78 @@ mod tests {
         let (status, body) = send(router(state.clone()), get("/api/tournament")).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["tournament"]["players"][0]["last_name"], "Bob");
+    }
+
+    #[tokio::test]
+    async fn backups_are_taken_on_round_transitions_and_can_be_restored() {
+        let state = AppState::default();
+        send(
+            router(state.clone()),
+            json_req("POST", "/api/tournament", json!({ "name": "Backup Cup" })),
+        )
+        .await;
+        for name in ["Alice", "Bob"] {
+            send(
+                router(state.clone()),
+                json_req("POST", "/api/tournament/players", json!({ "last_name": name })),
+            )
+            .await;
+        }
+
+        // Transition 1: finalize registration.
+        send(
+            router(state.clone()),
+            post_empty("/api/tournament/finalize-registration"),
+        )
+        .await;
+
+        // A plain player edit is *not* a round-state-machine transition, so it
+        // must not show up as an extra backup.
+        send(
+            router(state.clone()),
+            json_req("POST", "/api/tournament/players", json!({ "last_name": "Carol" })),
+        )
+        .await;
+
+        // Transitions 2 and 3: prepare, then start, round 1.
+        send(
+            router(state.clone()),
+            post_empty("/api/tournament/rounds/prepare"),
+        )
+        .await;
+        send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+
+        let (status, backups) =
+            send(router(state.clone()), get("/api/tournament/backups")).await;
+        assert_eq!(status, StatusCode::OK);
+        let backups = backups.as_array().unwrap();
+        assert_eq!(backups.len(), 3);
+        // Newest first.
+        assert_eq!(backups[0]["label"], "round 1 started");
+        assert_eq!(backups[1]["label"], "round 1 drafting");
+        assert_eq!(backups[2]["label"], "registration finalized");
+
+        // Restore the "registration finalized" backup: back to 2 players, no
+        // rounds, but still finalized — and the later edit/rounds are gone.
+        let backup_id = backups[2]["id"].as_str().unwrap();
+        let (status, body) = send(
+            router(state.clone()),
+            post_empty(&format!("/api/tournament/backups/{backup_id}/restore")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tournament"]["players"].as_array().unwrap().len(), 2);
+        assert_eq!(body["tournament"]["registration_finalized"], true);
+        assert!(body["tournament"]["rounds"].as_array().unwrap().is_empty());
+        assert_eq!(body["can_undo"], false); // restoring resets undo history, like load
+
+        // An unknown backup id is a 404.
+        let (status, _) = send(
+            router(state.clone()),
+            post_empty("/api/tournament/backups/nonexistent-0-id/restore"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

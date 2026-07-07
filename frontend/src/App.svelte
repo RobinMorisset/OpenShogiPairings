@@ -10,6 +10,7 @@
     createTournament,
     editPlayer,
     fetchAmericanGrid,
+    fetchBackups,
     fetchRatings,
     fetchTournament,
     finalizeRegistration,
@@ -18,6 +19,7 @@
     removePlayer,
     removePointAdjustment,
     replaceTournament,
+    restoreBackup,
     setBoardDrawn,
     setBoardHandicap,
     setBoardWinner,
@@ -28,6 +30,7 @@
     type DraftUpdate,
   } from "./lib/api";
   import type {
+    BackupInfo,
     CupPodium,
     Handicap,
     NewPlayer,
@@ -410,6 +413,28 @@
     });
   }
 
+  // Automatic server-side backups, taken at round state-machine transitions —
+  // shown in a small toggled panel, fetched lazily when opened.
+  let showBackups = $state(false);
+  let backups = $state<BackupInfo[]>([]);
+
+  function handleToggleBackups() {
+    showBackups = !showBackups;
+    if (!showBackups) return;
+    run(async () => {
+      backups = await fetchBackups();
+    });
+  }
+
+  function handleRestoreBackup(id: string) {
+    if (!confirmDiscard()) return;
+    run(async () => {
+      apply(await restoreBackup(id));
+      hasUnsavedChanges = false; // matches what the server had at that point
+      showBackups = false;
+    });
+  }
+
   function handleRefreshRatings() {
     run(async () => {
       ratings = await refreshRatings();
@@ -481,6 +506,16 @@
           <button
             type="button"
             class="ghost"
+            class:active={showBackups}
+            onclick={handleToggleBackups}
+            disabled={busy}
+            title="Automatic backups taken at each round transition"
+          >
+            Backups…
+          </button>
+          <button
+            type="button"
+            class="ghost"
             onclick={() => (creatingNew = true)}
             disabled={busy}
           >
@@ -488,6 +523,34 @@
           </button>
         </div>
       </div>
+
+      {#if showBackups}
+        <div class="backups-panel">
+          {#if backups.length === 0}
+            <p class="small">
+              No backups yet — taken automatically as the round moves through
+              finalize/prepare/start/complete/cancel.
+            </p>
+          {:else}
+            <ul class="backups-list">
+              {#each backups as b (b.id)}
+                <li>
+                  <span class="backup-time">{new Date(b.taken_at * 1000).toLocaleString()}</span>
+                  <span class="backup-label">{b.label}</span>
+                  <button
+                    type="button"
+                    class="ghost small"
+                    disabled={busy}
+                    onclick={() => handleRestoreBackup(b.id)}
+                  >
+                    Restore
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+      {/if}
 
       <div class="tabs" role="tablist">
         <button
@@ -707,6 +770,51 @@
   .toolbar-actions {
     display: flex;
     gap: 0.5rem;
+  }
+  .toolbar-actions .ghost.active {
+    border-color: #4a4a8a;
+    color: #cdd6f4;
+  }
+
+  .backups-panel {
+    margin-bottom: 1.25rem;
+    padding: 0.6rem 0.9rem;
+    border: 1px solid #34343b;
+    border-radius: 0.5rem;
+    background: #1c1c22;
+  }
+  .backups-panel .small {
+    font-size: 0.8rem;
+    color: #9a9aa2;
+    margin: 0;
+  }
+  .backups-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 0.85rem;
+  }
+  .backups-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.3rem 0;
+    border-bottom: 1px solid #2b2b31;
+  }
+  .backups-list li:last-child {
+    border-bottom: none;
+  }
+  .backup-time {
+    color: #9a9aa2;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .backup-label {
+    flex: 1;
+  }
+  .backups-list button.small {
+    padding: 0.2rem 0.6rem;
+    font-size: 0.78rem;
   }
 
   .tabs {

@@ -11,6 +11,7 @@ use osp_core::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::backup;
 use crate::error::ApiError;
 use crate::state::{AppState, TournamentStore};
 
@@ -38,6 +39,8 @@ use crate::state::{AppState, TournamentStore};
 /// - `POST   /api/tournament/players/{id}/eligible`  set cup eligibility
 /// - `POST   /api/tournament/players/{id}/adjustments`             add a manual point bonus/malus
 /// - `DELETE /api/tournament/players/{id}/adjustments/{adjustment_id}` remove one
+/// - `GET    /api/tournament/backups`         list automatic backups, newest first
+/// - `POST   /api/tournament/backups/{id}/restore` restore a backup as the current tournament
 ///
 /// Every endpoint returns a [`TournamentView`] (the tournament plus whether an
 /// undo is available), so clients can refresh their view and the undo button
@@ -94,6 +97,8 @@ pub fn routes() -> Router<AppState> {
             "/api/tournament/players/{id}/adjustments/{adjustment_id}",
             axum::routing::delete(remove_point_adjustment),
         )
+        .route("/api/tournament/backups", get(list_backups))
+        .route("/api/tournament/backups/{id}/restore", post(restore_backup))
 }
 
 /// API response: the current tournament, undo availability, and the derived
@@ -194,6 +199,32 @@ async fn undo(State(state): State<AppState>) -> Result<Json<TournamentView>, Api
     view(&store)
 }
 
+/// List automatic backups for the current tournament, newest first (see
+/// [`backup`]). 404 if there is no current tournament (there is nothing to
+/// scope the list to).
+async fn list_backups(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<backup::BackupInfo>>, ApiError> {
+    let store = state.store.read().expect("store lock poisoned");
+    let tournament = store.current().ok_or(ApiError::NoTournament)?;
+    Ok(Json(backup::list(tournament.id)))
+}
+
+/// Restore a backup as the current tournament — like "load", but from the
+/// server's own backup store rather than an uploaded file. Resets undo
+/// history.
+async fn restore_backup(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = state.store.write().expect("store lock poisoned");
+    let tournament_id = store.current().ok_or(ApiError::NoTournament)?.id;
+    let restored = backup::load(tournament_id, &id)
+        .ok_or_else(|| ApiError::NotFound(format!("no backup {id}")))?;
+    store.set_current(restored);
+    view(&store)
+}
+
 /// Export the tournament as an American Grid document (`text/plain`).
 ///
 /// Built from the same server-computed standings as [`view`], so the grid's
@@ -252,6 +283,7 @@ async fn finalize_registration(
     let cup_size = body.and_then(|Json(b)| b.cup_size);
     let mut store = state.store.write().expect("store lock poisoned");
     store.mutate(|t| t.finalize_registration_with(cup_size))?;
+    backup_after(&store, "registration finalized");
     view(&store)
 }
 
@@ -261,6 +293,8 @@ async fn complete_round(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = state.store.write().expect("store lock poisoned");
     store.mutate(|t| t.complete_current_round())?;
+    let label = round_label(&store, "round", "completed");
+    backup_after(&store, &label);
     view(&store)
 }
 
@@ -271,6 +305,7 @@ async fn cancel_round(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = state.store.write().expect("store lock poisoned");
     store.mutate(|t| t.cancel_last_round())?;
+    backup_after(&store, "round cancelled");
     view(&store)
 }
 
@@ -280,7 +315,31 @@ async fn prepare_round(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = state.store.write().expect("store lock poisoned");
     store.mutate(|t| t.prepare_round().map(|_| ()))?;
+    let label = store
+        .current()
+        .and_then(|t| t.draft.as_ref())
+        .map(|d| format!("round {} drafting", d.number))
+        .unwrap_or_else(|| "round drafting".to_string());
+    backup_after(&store, &label);
     view(&store)
+}
+
+/// A round-numbered backup label, e.g. "round 3 completed" — falls back to
+/// `noun` alone if there is (unexpectedly) no last round to number.
+fn round_label(store: &TournamentStore, noun: &str, verb: &str) -> String {
+    match store.current().and_then(|t| t.rounds.last()) {
+        Some(round) => format!("{noun} {} {verb}", round.number),
+        None => format!("{noun} {verb}"),
+    }
+}
+
+/// Take a backup of the current tournament, if any. Best-effort and silent on
+/// failure (logged inside [`backup::take`]) — a backup problem must never
+/// surface as an API error.
+fn backup_after(store: &TournamentStore, label: &str) {
+    if let Some(tournament) = store.current() {
+        backup::take(tournament, label);
+    }
 }
 
 /// Body of `PUT /api/tournament/draft`: the draft's customization.
@@ -314,6 +373,8 @@ async fn confirm_round(
 ) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
     let mut store = state.store.write().expect("store lock poisoned");
     store.mutate(|t| t.confirm_round().map(|_| ()))?;
+    let label = round_label(&store, "round", "started");
+    backup_after(&store, &label);
     Ok((StatusCode::CREATED, view(&store)?))
 }
 

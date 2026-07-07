@@ -189,6 +189,15 @@ export interface Standing {
   sosos: number; // sum of opponents' SOS
 }
 
+/** One automatic server-side backup's metadata — mirror of `osp_server`'s
+ *  `BackupInfo`. Taken at round state-machine transitions (finalize, prepare,
+ *  confirm, complete, cancel); the tournament body is only fetched on restore. */
+export interface BackupInfo {
+  id: string; // opaque, used to restore this backup
+  taken_at: number; // Unix seconds
+  label: string; // e.g. "round 2 started"
+}
+
 /**
  * API response for tournament endpoints: the tournament, whether an undo is
  * available, and the server-computed ranked standings. Kept separate from
