@@ -45,8 +45,6 @@ Known limitations and future work, roughly ordered by area.
 
 - **Add a button to load a CSV of player names in the players tab**
 
-- **Allow sorting the players list by any column**
-
 - **Exempt club selection** should show the number of players of each club next to that club name, and sort the clubs by decreasing number of players.
 
 ## Simulations
