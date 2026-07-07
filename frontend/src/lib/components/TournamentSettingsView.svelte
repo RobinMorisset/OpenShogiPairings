@@ -14,19 +14,22 @@
 
   let { settings, finalized, players, onUpdate, busy = false }: Props = $props();
 
-  // Distinct club names among the players (first spelling kept), for the exempt
-  // datalist.
+  // Distinct club names among the players (first spelling kept) with their
+  // player count, for the exempt datalist — sorted by decreasing count (ties
+  // broken alphabetically) so the clubs most worth exempting sort first.
   const knownClubs = $derived.by(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
+    const counts = new Map<string, { name: string; count: number }>();
     for (const p of players) {
-      const c = p.club?.trim();
-      if (c && !seen.has(c.toLowerCase())) {
-        seen.add(c.toLowerCase());
-        out.push(c);
-      }
+      const name = p.club?.trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      const existing = counts.get(key);
+      if (existing) existing.count++;
+      else counts.set(key, { name, count: 1 });
     }
-    return out.sort((a, b) => a.localeCompare(b));
+    return [...counts.values()].sort(
+      (a, b) => b.count - a.count || a.name.localeCompare(b.name),
+    );
   });
 
   // Keep only positive integers, then sort ascending — the server's canonical
@@ -456,7 +459,14 @@
         </div>
         {#if knownClubs.length > 0}
           <datalist id="known-clubs">
-            {#each knownClubs as club}<option value={club}></option>{/each}
+            {#each knownClubs as club (club.name)}
+              <option
+                value={club.name}
+                label={`${club.name} (${club.count})`}
+              >
+                {club.name} ({club.count})
+              </option>
+            {/each}
           </datalist>
         {/if}
       </div>

@@ -45,8 +45,6 @@ Known limitations and future work, roughly ordered by area.
 
 - **Add a button to load a CSV of player names in the players tab**
 
-- **Exempt club selection** should show the number of players of each club next to that club name, and sort the clubs by decreasing number of players.
-
 ## Simulations
 
 - **Add an API to get random game results** This API should not be surfaced in the UI, it is
