@@ -64,6 +64,14 @@
   let error = $state<string | null>(null);
   let ratings = $state<RatedPlayer[]>([]);
 
+  // Whether the in-memory tournament has changes not yet written to a file —
+  // purely client-side bookkeeping (the server has no notion of "saved to
+  // disk"), and deliberately not part of the undo stack: undoing a change
+  // doesn't retroactively make the tournament "saved" again. Reset to false
+  // only by a fresh create/load or a successful save; every other mutation
+  // (including undo) sets it, via `apply`.
+  let hasUnsavedChanges = $state(false);
+
   /** Apply a tournament API response to local state. */
   function apply(res: TournamentResponse) {
     tournament = res.tournament;
@@ -72,6 +80,16 @@
     draftCupPlayers = res.draft_cup_players ?? [];
     suggestedHandicaps = res.suggested_handicaps ?? [];
     canUndo = res.can_undo;
+    hasUnsavedChanges = true;
+  }
+
+  /** Warn before an action that discards the current tournament, if it has
+   * unsaved changes. Returns whether the caller should proceed. */
+  function confirmDiscard(): boolean {
+    if (!hasUnsavedChanges || !tournament) return true;
+    return window.confirm(
+      `"${tournament.name}" has unsaved changes that will be lost. Continue anyway?`,
+    );
   }
 
   // Show the create form when there is no tournament, or when the user
@@ -224,7 +242,12 @@
 
     try {
       const res = await fetchTournament();
-      if (res) apply(res);
+      if (res) {
+        apply(res);
+        // Resuming whatever the server already had isn't a new edit made in
+        // this session — nothing to warn about losing yet.
+        hasUnsavedChanges = false;
+      }
     } catch (err) {
       error = describe(err);
     } finally {
@@ -253,17 +276,21 @@
   }
 
   function handleCreate(name: string) {
+    if (!confirmDiscard()) return;
     run(async () => {
       apply(await createTournament(name));
+      hasUnsavedChanges = false; // brand new — nothing to lose yet
       creatingNew = false;
     });
   }
 
   function handleLoad() {
+    if (!confirmDiscard()) return;
     run(async () => {
       const loaded = await loadTournament();
       if (!loaded) return; // user cancelled the file dialog
       apply(await replaceTournament(loaded));
+      hasUnsavedChanges = false; // matches what's on disk
       creatingNew = false;
     });
   }
@@ -378,7 +405,8 @@
     if (!tournament) return;
     const current = tournament;
     run(async () => {
-      await saveTournament(current);
+      const saved = await saveTournament(current);
+      if (saved) hasUnsavedChanges = false;
     });
   }
 
@@ -433,6 +461,9 @@
       <div class="toolbar">
         <div class="title">
           <h2>{tournament.name}</h2>
+          {#if hasUnsavedChanges}
+            <span class="unsaved-dot" title="Unsaved changes">●</span>
+          {/if}
         </div>
         <div class="toolbar-actions">
           <button
@@ -668,6 +699,10 @@
   .title h2 {
     margin: 0;
     font-size: 1.25rem;
+  }
+  .unsaved-dot {
+    color: #d29922;
+    font-size: 0.6rem;
   }
   .toolbar-actions {
     display: flex;

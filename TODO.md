@@ -20,8 +20,8 @@ Known limitations and future work, roughly ordered by area.
   giving the opponent the win); not handled yet. Byes (`0+`, win) and absences
   (`0-`, loss) are already handled.
 - **Experimental ELO-based, non-swiss system** When that mode is active, all MacMahon and swiss option should
-  be disabled/greyed out. In it, OSP keeps track of an estimated ELO for each player along the tournament based on
-  Bayesian reasoning, and the constraints related to victories, floaters, fold, etc.. (everything but rematch and club)
+  be disabled/greyed out. In it, OSP keeps track of an estimated ELO for each player throughout the tournament based on
+  Bayesian reasoning; and the constraints related to victories, floaters, fold, etc.. (everything but rematch and club)
   get replaced by a constraint minimizing the square of ELO differences per game (sitting between rematch and club).
 
 
@@ -61,11 +61,8 @@ Known limitations and future work, roughly ordered by area.
 - **Add authentication to the distributed instance** So that only referees with the right password can access it.
 
 - **Automatic backups** This is just a save of the tournament file, but done on the server side after every step transition
-  of the round state machine (coarser than the undo stack). Should be parameterized how many are kept (rotating).
-  There should be an option to load a backup tournament instead.
-
-- **New tournament protection** Starting a tournament loses the current one. So there should be a flag (non-undoable) on the tournament
-  that is set when saving it manually, and there should be a confirmation dialog when the user tries to overwrite an unsaved tournament.
+  of the round state machine (coarser than the undo stack). Should be parameterized how many are kept (rotating), default to 10 for now.
+  There should be a way to load a backup tournament.
 
 - **Webhook for pushing results and pulling players** See https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification
 
