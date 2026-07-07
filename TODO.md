@@ -52,10 +52,6 @@ Known limitations and future work, roughly ordered by area.
 
 ## Other
 
-- **Alternative scoring rules** See from PairGoth reference doc: SOSMM1, SOSMM2, CUSSM, the various non-mac-mahon versions.
-  https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md
-  Which one is used and in which order should be configurable (and only those should appear in the results tab.
-
 - **Allow storing default properties** which apply to all new started tournament.
   I'm not sure it is worthwhile, just a savec tournament with no players and just the properties set is equivalent.
 

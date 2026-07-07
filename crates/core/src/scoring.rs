@@ -28,6 +28,12 @@ pub(crate) struct PlayerScore {
     pub opponents: Vec<Uuid>,
     /// Opponents defeated (effective winner), one entry per game.
     pub defeated: Vec<Uuid>,
+    /// Cumulative sum of the player's running points total, added up after each
+    /// completed round (the "cumulative" tie-break, MacMahon-inclusive).
+    pub cuss_m: u32,
+    /// Cumulative sum of the player's running win total, added up after each
+    /// completed round (the "cumulative" tie-break, wins only).
+    pub cuss_w: u32,
     /// Whether the player has taken a bye.
     pub had_bye: bool,
     /// Round number of the most recent round the player floated up / down (a bye
@@ -51,6 +57,11 @@ impl Scores {
     /// opponent that was later removed).
     pub fn points(&self, id: &Uuid) -> u32 {
         self.by_id.get(id).map_or(0, |s| s.points)
+    }
+
+    /// A player's win total, or 0 if they aren't in the tournament.
+    pub fn victories(&self, id: &Uuid) -> u32 {
+        self.by_id.get(id).map_or(0, |s| s.victories)
     }
 }
 
@@ -93,6 +104,8 @@ pub(crate) fn compute_scores(
                     macmahon,
                     opponents: Vec::new(),
                     defeated: Vec::new(),
+                    cuss_m: 0,
+                    cuss_w: 0,
                     had_bye: false,
                     last_ascended: None,
                     last_descended: None,
@@ -161,6 +174,15 @@ pub(crate) fn compute_scores(
                 s.points += 1;
                 s.victories += 1;
             }
+        }
+
+        // Cumulative tie-break: after this round is scored, add every player's
+        // running total to their running sum. A round the player sat out still
+        // contributes their (unchanged) total, matching the classic "cumulative"
+        // definition of a sum over the sequence of rounds.
+        for s in by_id.values_mut() {
+            s.cuss_m += s.points;
+            s.cuss_w += s.victories;
         }
     }
 

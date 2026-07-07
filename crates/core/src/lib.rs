@@ -29,7 +29,7 @@ pub use handicap::suggested_handicap;
 pub use pairing::{pair_round, pair_round_constrained, pair_round_weighted};
 pub use player::{NewPlayer, Player, PointAdjustment};
 pub use round::{Board, CupStage, Handicap, HandicapGame, PairingSource, Round, RoundDraft, Winner};
-pub use settings::{FloaterStyle, HandicapPolicy, TournamentSettings};
+pub use settings::{FloaterStyle, HandicapPolicy, Tiebreak, TournamentSettings};
 pub use standings::{compute_standings, Standing};
 pub use tournament::{
     Tournament, TournamentError, MIN_PLAYERS_PER_ROUND, TOURNAMENT_FORMAT_VERSION,

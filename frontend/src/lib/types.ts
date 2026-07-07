@@ -146,10 +146,57 @@ export interface TournamentSettings {
   cup_enabled: boolean;
   /** How handicap games are treated: hidden, allowed, or suggested. */
   handicap_policy: HandicapPolicy;
+  /**
+   * Tie-breaks used to rank the standings, in priority order (points is always
+   * the primary key). Only these columns show on the Results tab. Defaults to
+   * the classic SOSM → SODOSM → SOSOSM order.
+   */
+  tiebreaks: Tiebreak[];
 }
 
 /** Mirror of `osp_core::HandicapPolicy`. */
 export type HandicapPolicy = "none" | "allowed" | "suggested";
+
+/** Mirror of `osp_core::Tiebreak` (serde snake_case codes). Points is a ranking
+ *  criterion like the rest; each opponent-sum metric has a MacMahon-inclusive
+ *  (`…_m`) and a wins-only (`…_w`) flavour. */
+export type Tiebreak =
+  | "points"
+  | "sos_m"
+  | "sos_w"
+  | "sodos_m"
+  | "sodos_w"
+  | "sosos_m"
+  | "sosos_w"
+  | "sos_m1"
+  | "sos_m2"
+  | "sos_w1"
+  | "sos_w2"
+  | "cuss_m"
+  | "cuss_w";
+
+/** Column label, tooltip, and the `Standing` field for each tie-break metric —
+ *  the single source shared by the Settings picker and the Results headers. */
+export const TIEBREAKS: {
+  code: Tiebreak;
+  label: string;
+  field: keyof Standing;
+  title: string;
+}[] = [
+  { code: "points", label: "Points", field: "points", title: "Total score: MacMahon start + wins" },
+  { code: "sos_m", label: "SOSM", field: "sosm", title: "Sum of opponents' points (MacMahon-inclusive)" },
+  { code: "sos_w", label: "SOSW", field: "sosw", title: "Sum of opponents' wins" },
+  { code: "sodos_m", label: "SODOSM", field: "sodosm", title: "Sum of defeated opponents' points" },
+  { code: "sodos_w", label: "SODOSW", field: "sodosw", title: "Sum of defeated opponents' wins" },
+  { code: "sosos_m", label: "SOSOSM", field: "sososm", title: "Sum of opponents' SOSM" },
+  { code: "sosos_w", label: "SOSOSW", field: "sososw", title: "Sum of opponents' SOSW" },
+  { code: "sos_m1", label: "SOSM-1", field: "sosm1", title: "SOSM dropping the lowest-scoring opponent" },
+  { code: "sos_m2", label: "SOSM-2", field: "sosm2", title: "SOSM dropping the two lowest-scoring opponents" },
+  { code: "sos_w1", label: "SOSW-1", field: "sosw1", title: "SOSW dropping the lowest-scoring opponent" },
+  { code: "sos_w2", label: "SOSW-2", field: "sosw2", title: "SOSW dropping the two lowest-scoring opponents" },
+  { code: "cuss_m", label: "CUSSM", field: "cussm", title: "Cumulative sum of the running points total each round" },
+  { code: "cuss_w", label: "CUSSW", field: "cussw", title: "Cumulative sum of the running win total each round" },
+];
 
 /** Mirror of `osp_core::Cup` — the seeded direct-elimination bracket. */
 export interface Cup {
@@ -178,15 +225,25 @@ export interface Tournament {
   cup?: Cup | null;
 }
 
-/** One player's standing — mirror of `osp_core::Standing`. */
+/** One player's standing — mirror of `osp_core::Standing`. All twelve tie-break
+ *  metrics are always present; the settings decide which are shown/used. */
 export interface Standing {
   player_id: string; // UUID
   victories: number;
   macmahon: number;
   points: number; // victories + macmahon
-  sos: number; // sum of opponents' points
-  sodos: number; // sum of defeated opponents' points
-  sosos: number; // sum of opponents' SOS
+  sosm: number; // sum of opponents' points
+  sosw: number; // sum of opponents' wins
+  sodosm: number; // sum of defeated opponents' points
+  sodosw: number; // sum of defeated opponents' wins
+  sososm: number; // sum of opponents' SOSM
+  sososw: number; // sum of opponents' SOSW
+  sosm1: number; // SOSM dropping the lowest opponent
+  sosm2: number; // SOSM dropping the two lowest opponents
+  sosw1: number; // SOSW dropping the lowest opponent
+  sosw2: number; // SOSW dropping the two lowest opponents
+  cussm: number; // cumulative running points total
+  cussw: number; // cumulative running win total
 }
 
 /** One automatic server-side backup's metadata — mirror of `osp_server`'s

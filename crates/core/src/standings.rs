@@ -6,13 +6,16 @@
 //!
 //! Each player's score is their **points** (MacMahon starting points plus
 //! victories, counting the *effective* winner of a board — the handicap giver
-//! always scores — and a bye as a win). Ties are broken, in order, by:
+//! always scores — and a bye as a win). The table is ranked by the
+//! referee-chosen criteria (see [`TournamentSettings::tiebreaks`]) in order —
+//! points is one of them, normally first — and finally by tournament number so
+//! the order is always deterministic.
 //!
-//! 1. **SOS** — sum of opponents' points.
-//! 2. **SODOS** — sum of defeated opponents' points.
-//! 3. **SOSOS** — sum of opponents' SOS.
-//!
-//! and finally by tournament number, so the order is always deterministic.
+//! Points plus every one of the twelve tie-break metrics is computed for every
+//! player, so the Results tab can show whichever the referee selected without
+//! recomputing. Each opponent-sum metric comes in a MacMahon-inclusive (`…M`)
+//! and a wins-only (`…W`) flavour, according to how an opponent's "score" is
+//! measured.
 
 use std::collections::HashMap;
 
@@ -22,10 +25,10 @@ use uuid::Uuid;
 use crate::player::Player;
 use crate::round::Round;
 use crate::scoring::compute_scores;
-use crate::settings::TournamentSettings;
+use crate::settings::{Tiebreak, TournamentSettings};
 
-/// One player's standing: score and tie-breaks. The position in the returned
-/// [`compute_standings`] vector is the player's rank.
+/// One player's standing: score and every tie-break metric. The position in the
+/// returned [`compute_standings`] vector is the player's rank.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Standing {
     pub player_id: Uuid,
@@ -36,11 +39,57 @@ pub struct Standing {
     /// Total score: `macmahon + victories`.
     pub points: u32,
     /// Sum of opponents' points.
-    pub sos: u32,
+    pub sosm: u32,
+    /// Sum of opponents' wins.
+    pub sosw: u32,
     /// Sum of defeated opponents' points.
-    pub sodos: u32,
-    /// Sum of opponents' SOS.
-    pub sosos: u32,
+    pub sodosm: u32,
+    /// Sum of defeated opponents' wins.
+    pub sodosw: u32,
+    /// Sum of opponents' SOSM.
+    pub sososm: u32,
+    /// Sum of opponents' SOSW.
+    pub sososw: u32,
+    /// SOSM dropping the single lowest-scoring opponent.
+    pub sosm1: u32,
+    /// SOSM dropping the two lowest-scoring opponents.
+    pub sosm2: u32,
+    /// SOSW dropping the single lowest-scoring opponent.
+    pub sosw1: u32,
+    /// SOSW dropping the two lowest-scoring opponents.
+    pub sosw2: u32,
+    /// Cumulative sum of the running points total after each round.
+    pub cussm: u32,
+    /// Cumulative sum of the running win total after each round.
+    pub cussw: u32,
+}
+
+impl Standing {
+    /// The value of a given ranking criterion for this player.
+    pub fn tiebreak(&self, tb: Tiebreak) -> u32 {
+        match tb {
+            Tiebreak::Points => self.points,
+            Tiebreak::SosM => self.sosm,
+            Tiebreak::SosW => self.sosw,
+            Tiebreak::SodosM => self.sodosm,
+            Tiebreak::SodosW => self.sodosw,
+            Tiebreak::SososM => self.sososm,
+            Tiebreak::SososW => self.sososw,
+            Tiebreak::SosM1 => self.sosm1,
+            Tiebreak::SosM2 => self.sosm2,
+            Tiebreak::SosW1 => self.sosw1,
+            Tiebreak::SosW2 => self.sosw2,
+            Tiebreak::CussM => self.cussm,
+            Tiebreak::CussW => self.cussw,
+        }
+    }
+}
+
+/// Sum a list of opponent scores after dropping the `drop` lowest — the
+/// Buchholz-cut family (`drop` = 0 is the plain sum).
+fn sum_dropping_lowest(mut scores: Vec<u32>, drop: usize) -> u32 {
+    scores.sort_unstable();
+    scores.into_iter().skip(drop).sum()
 }
 
 /// Compute the ranked standings from the completed rounds.
@@ -52,47 +101,63 @@ pub fn compute_standings(
     settings: &TournamentSettings,
     rounds: &[Round],
 ) -> Vec<Standing> {
-    // Points, opponents and victories come from the shared scorer; the tie-breaks
-    // are then sums over each player's opponents.
+    // Points, opponents, wins and cumulative sums come from the shared scorer; the
+    // opponent-based tie-breaks are then sums over each player's opponents, in two
+    // flavours: `…M` scores an opponent by their points, `…W` by their wins.
     let scores = compute_scores(players, settings, rounds);
-    let point_sum = |ids: &[Uuid]| ids.iter().map(|o| scores.points(o)).sum();
+    let score_m = |o: &Uuid| scores.points(o);
+    let score_w = |o: &Uuid| scores.victories(o);
 
-    // SOS first (needed on its own for each player's SOSOS).
-    let sos: HashMap<Uuid, u32> = players
+    // SOSM and SOSW first — each needed on its own for the SOSOS metrics.
+    let sosm: HashMap<Uuid, u32> = players
         .iter()
-        .map(|p| (p.id, point_sum(&scores.get(&p.id).opponents)))
+        .map(|p| (p.id, scores.get(&p.id).opponents.iter().map(score_m).sum()))
         .collect();
-    let sos_sum = |ids: &[Uuid]| ids.iter().map(|o| sos.get(o).copied().unwrap_or(0)).sum();
+    let sosw: HashMap<Uuid, u32> = players
+        .iter()
+        .map(|p| (p.id, scores.get(&p.id).opponents.iter().map(score_w).sum()))
+        .collect();
 
     let mut standings: Vec<Standing> = players
         .iter()
         .map(|p| {
             let s = scores.get(&p.id);
+            let opp_m: Vec<u32> = s.opponents.iter().map(&score_m).collect();
+            let opp_w: Vec<u32> = s.opponents.iter().map(&score_w).collect();
             Standing {
                 player_id: p.id,
                 victories: s.victories,
                 macmahon: s.macmahon,
                 points: s.points,
-                sos: sos[&p.id],
-                sodos: point_sum(&s.defeated),
-                sosos: sos_sum(&s.opponents),
+                sosm: sosm[&p.id],
+                sosw: sosw[&p.id],
+                sodosm: s.defeated.iter().map(&score_m).sum(),
+                sodosw: s.defeated.iter().map(&score_w).sum(),
+                sososm: s.opponents.iter().map(|o| sosm.get(o).copied().unwrap_or(0)).sum(),
+                sososw: s.opponents.iter().map(|o| sosw.get(o).copied().unwrap_or(0)).sum(),
+                sosm1: sum_dropping_lowest(opp_m.clone(), 1),
+                sosm2: sum_dropping_lowest(opp_m, 2),
+                sosw1: sum_dropping_lowest(opp_w.clone(), 1),
+                sosw2: sum_dropping_lowest(opp_w, 2),
+                cussm: s.cuss_m,
+                cussw: s.cuss_w,
             }
         })
         .collect();
 
-    // Rank by points, then SOS, SODOS, SOSOS; tournament number breaks any
-    // remaining tie so the order is deterministic (unnumbered players last).
+    // Rank by each configured criterion in order (points is one of them, normally
+    // first); the tournament number breaks any remaining tie so the order is
+    // deterministic (unnumbered players last).
     let tnum: HashMap<Uuid, u32> = players
         .iter()
         .map(|p| (p.id, p.tournament_id.unwrap_or(u32::MAX)))
         .collect();
     standings.sort_by(|a, b| {
-        b.points
-            .cmp(&a.points)
-            .then(b.sos.cmp(&a.sos))
-            .then(b.sodos.cmp(&a.sodos))
-            .then(b.sosos.cmp(&a.sosos))
-            .then(tnum[&a.player_id].cmp(&tnum[&b.player_id]))
+        let mut ord = std::cmp::Ordering::Equal;
+        for &tb in &settings.tiebreaks {
+            ord = ord.then_with(|| b.tiebreak(tb).cmp(&a.tiebreak(tb)));
+        }
+        ord.then(tnum[&a.player_id].cmp(&tnum[&b.player_id]))
     });
     standings
 }
@@ -166,9 +231,9 @@ mod tests {
         assert_eq!(order, vec![a.id, d.id, b.id, c.id]);
 
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
-        assert_eq!((of(a.id).points, of(a.id).sos), (2, 1));
-        assert_eq!((of(d.id).points, of(d.id).sos), (1, 3)); // faced A(2)+B(1)
-        assert_eq!((of(b.id).points, of(b.id).sos), (1, 1)); // faced D(1)+C(0)
+        assert_eq!((of(a.id).points, of(a.id).sosm), (2, 1));
+        assert_eq!((of(d.id).points, of(d.id).sosm), (1, 3)); // faced A(2)+B(1)
+        assert_eq!((of(b.id).points, of(b.id).sosm), (1, 1)); // faced D(1)+C(0)
         assert_eq!(of(c.id).points, 0);
     }
 
@@ -188,8 +253,8 @@ mod tests {
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
         assert_eq!((of(a.id).macmahon, of(a.id).victories, of(a.id).points), (1, 1, 2));
         assert_eq!((of(b.id).macmahon, of(b.id).victories, of(b.id).points), (1, 0, 1));
-        assert_eq!(of(a.id).sos, 1); // opponent B has 1 point
-        assert_eq!(of(a.id).sodos, 1); // defeated B (1 point)
+        assert_eq!(of(a.id).sosm, 1); // opponent B has 1 point
+        assert_eq!(of(a.id).sodosm, 1); // defeated B (1 point)
         assert_eq!(standings[0].player_id, a.id); // A ranks first
     }
 
@@ -212,5 +277,126 @@ mod tests {
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
         assert_eq!((of(a.id).macmahon, of(a.id).victories, of(a.id).points), (0, 1, 1));
         assert_eq!((of(b.id).macmahon, of(b.id).victories, of(b.id).points), (0, 0, 0));
+    }
+
+    #[test]
+    fn wins_only_tiebreaks_ignore_macmahon_start() {
+        // A 1500 threshold gives the higher-rated players a MacMahon head start,
+        // so the M and W flavours of the opponent-sum tie-breaks diverge. After
+        // A>B and A>C: A faced B and C. With the threshold, B and C each have 1
+        // point (MacMahon) but 0 wins, so A's SOSM = 2 but SOSW = 0. A also
+        // defeated both, so SODOSM = 2, SODOSW = 0.
+        let a = player(1, Some(2000));
+        let b = player(2, Some(1800));
+        let c = player(3, Some(1700));
+        let rounds = vec![
+            round(1, vec![board(a.id, b.id, Winner::Player1)]),
+            round(2, vec![board(a.id, c.id, Winner::Player1)]),
+        ];
+        let settings = TournamentSettings {
+            macmahon_thresholds: vec![1500],
+            ..Default::default()
+        };
+        let standings = compute_standings(&[a.clone(), b.clone(), c.clone()], &settings, &rounds);
+        let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
+        assert_eq!((of(a.id).sosm, of(a.id).sosw), (2, 0));
+        assert_eq!((of(a.id).sodosm, of(a.id).sodosw), (2, 0));
+    }
+
+    #[test]
+    fn buchholz_cut_drops_the_lowest_opponents() {
+        // A round robin: A wins everything (3 wins); B beats C and D (2 wins); C
+        // beats D (1 win); D loses everything (0 wins). A's opponents' win scores
+        // are therefore {2, 1, 0}.
+        let a = player(1, None);
+        let b = player(2, None);
+        let c = player(3, None);
+        let d = player(4, None);
+        let rounds = vec![
+            round(1, vec![board(a.id, b.id, Winner::Player1), board(c.id, d.id, Winner::Player1)]),
+            round(2, vec![board(a.id, c.id, Winner::Player1), board(b.id, d.id, Winner::Player1)]),
+            round(3, vec![board(a.id, d.id, Winner::Player1), board(b.id, c.id, Winner::Player1)]),
+        ];
+        let standings =
+            compute_standings(&[a.clone(), b.clone(), c.clone(), d.clone()], &TournamentSettings::default(), &rounds);
+        let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
+        // A faced B (2 wins), C (1 win), D (0 wins) → {2, 1, 0}.
+        assert_eq!(of(a.id).sosw, 3);
+        assert_eq!(of(a.id).sosw1, 3); // drop the 0
+        assert_eq!(of(a.id).sosw2, 2); // drop the 0 and the 1
+    }
+
+    #[test]
+    fn cumulative_sums_running_totals_over_rounds() {
+        // A: win, loss, win → running wins 1, 1, 2 → CUSSW = 4. B mirrors: loss,
+        // win, loss → running wins 0, 1, 1 → CUSSW = 2.
+        let a = player(1, None);
+        let b = player(2, None);
+        let c = player(3, None);
+        let d = player(4, None);
+        let rounds = vec![
+            round(1, vec![board(a.id, b.id, Winner::Player1), board(c.id, d.id, Winner::Player1)]),
+            round(2, vec![board(a.id, c.id, Winner::Player2), board(b.id, d.id, Winner::Player1)]),
+            round(3, vec![board(a.id, d.id, Winner::Player1), board(b.id, c.id, Winner::Player2)]),
+        ];
+        let standings =
+            compute_standings(&[a.clone(), b.clone(), c.clone(), d.clone()], &TournamentSettings::default(), &rounds);
+        let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
+        assert_eq!(of(a.id).cussw, 4); // 1 + 1 + 2
+        assert_eq!(of(b.id).cussw, 2); // 0 + 1 + 1
+        // No MacMahon here, so the M flavour matches the W flavour.
+        assert_eq!(of(a.id).cussm, 4);
+    }
+
+    #[test]
+    fn configured_tiebreak_order_decides_the_ranking() {
+        // With a 1500 threshold, A and B start on 1 MacMahon point. E and F both
+        // finish on 1 point. E faced A (1 pt, 0 wins) and B (3 pts, 2 wins); F
+        // faced C (2 pts, 2 wins) and D (1 pt, 1 win). So SOSM(E)=4 > SOSM(F)=3,
+        // but SOSW(E)=2 < SOSW(F)=3 — the two flavours order E and F oppositely.
+        let a = player(1, Some(2000));
+        let b = player(2, Some(2000));
+        let c = player(3, Some(1000));
+        let d = player(4, Some(1000));
+        let e = player(5, Some(1000));
+        let f = player(6, Some(1000));
+        let rounds = vec![
+            round(
+                1,
+                vec![
+                    board(e.id, a.id, Winner::Player1), // E beats A
+                    board(f.id, c.id, Winner::Player2), // C beats F
+                    board(b.id, d.id, Winner::Player2), // D beats B
+                ],
+            ),
+            round(
+                2,
+                vec![
+                    board(e.id, b.id, Winner::Player2), // B beats E
+                    board(f.id, d.id, Winner::Player1), // F beats D
+                    board(a.id, c.id, Winner::Player2), // C beats A
+                ],
+            ),
+        ];
+        let players = vec![a.clone(), b.clone(), c.clone(), d.clone(), e.clone(), f.clone()];
+        let base = TournamentSettings {
+            macmahon_thresholds: vec![1500],
+            ..Default::default()
+        };
+        let pos = |st: &[Standing], id| st.iter().position(|s| s.player_id == id).unwrap();
+
+        let by_m = compute_standings(
+            &players,
+            &TournamentSettings { tiebreaks: vec![Tiebreak::SosM], ..base.clone() },
+            &rounds,
+        );
+        assert!(pos(&by_m, e.id) < pos(&by_m, f.id)); // E above F by SOSM
+
+        let by_w = compute_standings(
+            &players,
+            &TournamentSettings { tiebreaks: vec![Tiebreak::SosW], ..base },
+            &rounds,
+        );
+        assert!(pos(&by_w, f.id) < pos(&by_w, e.id)); // F above E by SOSW
     }
 }

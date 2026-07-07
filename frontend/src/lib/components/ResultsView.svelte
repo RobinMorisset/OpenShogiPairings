@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { TIEBREAKS } from "../types";
   import type { CupPodium, Player, Round, Standing, Tournament } from "../types";
 
   interface Props {
@@ -10,6 +11,15 @@
   }
 
   let { tournament, standings, cupPodium = null }: Props = $props();
+
+  // The tie-break columns to show, in the referee-chosen order — resolved from
+  // the settings to their label/field/tooltip. Unknown codes (from a newer save)
+  // are skipped.
+  const tiebreakColumns = $derived(
+    (tournament.settings.tiebreaks ?? [])
+      .map((code) => TIEBREAKS.find((t) => t.code === code))
+      .filter((t): t is (typeof TIEBREAKS)[number] => t != null),
+  );
 
   // Player id → medal, from the cup podium (the table order stays pure-Swiss).
   const medalOf = $derived.by(() => {
@@ -163,10 +173,9 @@
           <th class="num">R{round.number}</th>
         {/each}
         <th class="num">Victories</th>
-        <th class="num">Points</th>
-        <th class="num" title="Sum of opponents' scores">SOS</th>
-        <th class="num" title="Sum of defeated opponents' scores">SODOS</th>
-        <th class="num" title="Sum of opponents' SOS">SOSOS</th>
+        {#each tiebreakColumns as col (col.code)}
+          <th class="num" title={col.title}>{col.label}</th>
+        {/each}
       </tr>
     </thead>
     <tbody>
@@ -198,14 +207,17 @@
             </td>
           {/each}
           <td class="num victories">{standing.victories}</td>
-          <td
-            class="num points"
-            class:adjusted={(player.adjustments ?? []).length > 0}
-            title={pointsTitle(player)}>{standing.points}</td
-          >
-          <td class="num tiebreak">{standing.sos}</td>
-          <td class="num tiebreak">{standing.sodos}</td>
-          <td class="num tiebreak">{standing.sosos}</td>
+          {#each tiebreakColumns as col (col.code)}
+            {#if col.code === "points"}
+              <td
+                class="num points"
+                class:adjusted={(player.adjustments ?? []).length > 0}
+                title={pointsTitle(player)}>{standing.points}</td
+              >
+            {:else}
+              <td class="num tiebreak">{standing[col.field]}</td>
+            {/if}
+          {/each}
         </tr>
       {/each}
     </tbody>

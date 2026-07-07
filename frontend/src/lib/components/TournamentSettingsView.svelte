@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { HandicapPolicy, Player, TournamentSettings } from "../types";
+  import { TIEBREAKS } from "../types";
+  import type { HandicapPolicy, Player, Tiebreak, TournamentSettings } from "../types";
 
   interface Props {
     settings: TournamentSettings;
@@ -74,6 +75,16 @@
   let floaterStyle = $state<"classic" | "median">("classic");
   let cupEnabled = $state(false);
   let handicapPolicy = $state<HandicapPolicy>("allowed");
+  let tiebreaks = $state<Tiebreak[]>([]);
+
+  // Metrics not yet in the ranking order — the choices for the "add" dropdown.
+  const availableTiebreaks = $derived(
+    TIEBREAKS.filter((t) => !tiebreaks.includes(t.code)),
+  );
+  const labelOf = (code: Tiebreak) =>
+    TIEBREAKS.find((t) => t.code === code)?.label ?? code;
+  const titleOf = (code: Tiebreak) =>
+    TIEBREAKS.find((t) => t.code === code)?.title ?? "";
 
   // Adopt the persisted settings only on a genuine external change — a load, an
   // undo, or the server normalizing our input. When our own edit merely
@@ -90,6 +101,7 @@
     const sFloater = settings.floater_style;
     const sCup = settings.cup_enabled;
     const sHandicap = settings.handicap_policy;
+    const sTiebreaks = settings.tiebreaks ?? [];
     untrack(() => {
       const matches =
         eq(cleanSorted(thresholds), sThresholds) &&
@@ -99,7 +111,8 @@
         eqStr(normExempt(exemptClubs), sExempt) &&
         floaterStyle === sFloater &&
         cupEnabled === sCup &&
-        handicapPolicy === sHandicap;
+        handicapPolicy === sHandicap &&
+        eqStr(tiebreaks, sTiebreaks);
       if (!matches) {
         thresholds = [...sThresholds];
         removals = [...sRemovals];
@@ -109,6 +122,7 @@
         floaterStyle = sFloater;
         cupEnabled = sCup;
         handicapPolicy = sHandicap;
+        tiebreaks = [...sTiebreaks];
       }
     });
   });
@@ -131,7 +145,26 @@
       floater_style: floaterStyle,
       cup_enabled: cupEnabled,
       handicap_policy: handicapPolicy,
+      tiebreaks: [...tiebreaks],
     });
+  }
+
+  function addTiebreak(code: Tiebreak) {
+    if (!code || tiebreaks.includes(code)) return;
+    tiebreaks.push(code);
+    persist();
+  }
+
+  function removeTiebreak(i: number) {
+    tiebreaks.splice(i, 1);
+    persist();
+  }
+
+  function moveTiebreak(i: number, delta: number) {
+    const j = i + delta;
+    if (j < 0 || j >= tiebreaks.length) return;
+    [tiebreaks[i], tiebreaks[j]] = [tiebreaks[j], tiebreaks[i]];
+    persist();
   }
 
   function setFloaterStyle(v: "classic" | "median") {
@@ -564,6 +597,70 @@
       Handicap games suggested — also show a suggested-handicap column
     </label>
   </div>
+
+  <div class="section">
+    <h3>Ranking criteria</h3>
+    <p class="desc">
+      Players are ranked by these criteria in order (the tournament number breaks
+      anything still level), and only these columns appear on the Results tab.
+      Points is one of them — normally first, but you can reorder it like the
+      rest. Each opponent-sum metric comes in a MacMahon-inclusive (M) and a
+      wins-only (W) flavour.
+    </p>
+
+    <div class="thresholds">
+      {#each tiebreaks as code, i (code)}
+        <div class="threshold-row">
+          <span class="tb-rank">{i + 1}.</span>
+          <span class="tb-label" title={titleOf(code)}>{labelOf(code)}</span>
+          <button
+            type="button"
+            class="remove"
+            disabled={busy || i === 0}
+            title="Move up"
+            onclick={() => moveTiebreak(i, -1)}>▲</button
+          >
+          <button
+            type="button"
+            class="remove"
+            disabled={busy || i === tiebreaks.length - 1}
+            title="Move down"
+            onclick={() => moveTiebreak(i, 1)}>▼</button
+          >
+          <button
+            type="button"
+            class="remove"
+            disabled={busy}
+            title="Remove this tie-break"
+            onclick={() => removeTiebreak(i)}>✕</button
+          >
+        </div>
+      {/each}
+      {#if tiebreaks.length === 0}
+        <p class="muted">
+          No tie-breaks — players level on points are ordered by tournament number.
+        </p>
+      {/if}
+      {#if availableTiebreaks.length > 0}
+        <div class="threshold-row">
+          <select
+            class="tb-select"
+            disabled={busy}
+            value=""
+            onchange={(e) => {
+              addTiebreak(e.currentTarget.value as Tiebreak);
+              e.currentTarget.value = "";
+            }}
+          >
+            <option value="" disabled>Add a tie-break…</option>
+            {#each availableTiebreaks as t (t.code)}
+              <option value={t.code} title={t.title}>{t.label} — {t.title}</option>
+            {/each}
+          </select>
+        </div>
+      {/if}
+    </div>
+  </div>
 </div>
 
 <style>
@@ -633,6 +730,25 @@
   }
   .exempt-desc {
     margin: 0;
+  }
+  .tb-rank {
+    color: #9a9aa2;
+    font-variant-numeric: tabular-nums;
+    width: 1.4rem;
+    text-align: right;
+  }
+  .tb-label {
+    min-width: 5.5rem;
+    font-weight: 600;
+    color: #c9c9d0;
+  }
+  .tb-select {
+    background: #1c1c22;
+    color: inherit;
+    border: 1px solid #3a3a42;
+    border-radius: 0.4rem;
+    padding: 0.3rem 0.45rem;
+    font: inherit;
   }
   .club-input {
     width: 12rem;

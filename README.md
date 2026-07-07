@@ -71,10 +71,15 @@ engine scores by total points.
 > click the winner again to clear — three states); completed rounds stay editable
 > with a warning. Finalizing registration assigns each player a tournament
 > number (by ELO, unrated last; later additions get the next free number). The
-> **Results** tab is a ranked table: a row per player (ordered by points, then
-> SOS / SODOS / SOSOS tie-breaks) with one column per completed round
+> **Results** tab is a ranked table: a row per player (ordered by the
+> referee-chosen criteria) with one column per completed round
 > (`opponent-number` + `+`/`−`, or `0+` for a bye / `0-` for an absence), a
-> victory count, and Points / SOS / SODOS / SOSOS columns. The web UI is organized
+> victory count, and one column per selected ranking criterion. The criteria are
+> Points plus twelve tie-break metrics — SOS / SODOS / SOSOS, the Buchholz cuts
+> (SOSM-1/-2), and the cumulative score (CUSS), each in a MacMahon-inclusive (M)
+> and a wins-only (W) flavour — and the Settings tab picks which ones rank the
+> table and in what order (default: the classic Points → SOSM → SODOSM → SOSOSM;
+> Points is reorderable like the rest). The web UI is organized
 > into tabs (Settings / Players / Results / one per round) and can save/load the
 > tournament as a JSON file. Once a round is complete it can also export the
 > **American Grid** cross-table (the federation's ELO-update format); a matching
@@ -86,7 +91,8 @@ return `{ tournament, can_undo, standings }` so the client refreshes the view,
 the undo button, and the ranked table together (the persisted save-file shape
 stays the bare tournament). `standings` is computed server-side (in `osp-core`)
 so every client — and the American grid export — shares one canonical ranking:
-by points, then the SOS / SODOS / SOSOS tie-breaks, then tournament number.
+by the criteria chosen in the settings (in order; points is one of them, normally
+first), then tournament number.
 
 ### API
 

@@ -33,13 +33,69 @@ pub enum HandicapPolicy {
     Suggested,
 }
 
+/// A tie-break metric the referee can put in the ranking order.
+///
+/// Every metric comes in two flavours: the `…M` variants score an opponent by
+/// their **MacMahon-inclusive points** (MacMahon start + wins — the classic
+/// behaviour), the `…W` variants by their **wins only**. All twelve are always
+/// computed for every player ([`crate::standings::Standing`]); the referee picks
+/// which ones rank the table, and in which order, via
+/// [`TournamentSettings::tiebreaks`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Tiebreak {
+    /// Total score: MacMahon start + wins. Normally the primary ranking key, but
+    /// the referee can reorder it like any other criterion.
+    Points,
+    /// Sum of opponents' points (classic SOS).
+    SosM,
+    /// Sum of opponents' wins.
+    SosW,
+    /// Sum of defeated opponents' points (classic SODOS).
+    SodosM,
+    /// Sum of defeated opponents' wins.
+    SodosW,
+    /// Sum of opponents' SOSM (classic SOSOS).
+    SososM,
+    /// Sum of opponents' SOSW.
+    SososW,
+    /// SOSM dropping the single lowest-scoring opponent (Buchholz cut 1).
+    SosM1,
+    /// SOSM dropping the two lowest-scoring opponents (Buchholz cut 2).
+    SosM2,
+    /// SOSW dropping the single lowest-scoring opponent.
+    SosW1,
+    /// SOSW dropping the two lowest-scoring opponents.
+    SosW2,
+    /// Cumulative sum of the running points total after each round.
+    CussM,
+    /// Cumulative sum of the running win total after each round.
+    CussW,
+}
+
+impl Tiebreak {
+    /// The default ranking order — the classic points → SOS → SODOS → SOSOS
+    /// order that preceded this setting, so pre-existing tournaments (and new
+    /// ones that never touch the setting) rank exactly as before.
+    pub fn default_order() -> Vec<Tiebreak> {
+        vec![Tiebreak::Points, Tiebreak::SosM, Tiebreak::SodosM, Tiebreak::SososM]
+    }
+}
+
+/// The default value for [`TournamentSettings::tiebreaks`]. Kept as a free
+/// function so `#[serde(default = …)]` can name it for tournaments saved before
+/// the field existed.
+fn default_tiebreaks() -> Vec<Tiebreak> {
+    Tiebreak::default_order()
+}
+
 /// Configuration that isn't tied to a single player or round.
 ///
 /// Kept as its own record so it can grow (time controls, tie-break choices, …)
 /// without disturbing the rest of the tournament shape. Added as an additive,
 /// defaulted field, so tournaments saved before it existed still load (with no
 /// MacMahon groups).
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TournamentSettings {
     /// ELO thresholds (ascending, de-duplicated) defining the MacMahon starting
     /// groups. A player's MacMahon points is the number of thresholds their
@@ -81,6 +137,28 @@ pub struct TournamentSettings {
     /// [`HandicapPolicy`]).
     #[serde(default)]
     pub handicap_policy: HandicapPolicy,
+    /// The criteria used to rank the standings, in order of priority (the
+    /// tournament number breaks anything still level). Points is one of these and
+    /// can be reordered like any other. Only these columns are shown on the
+    /// Results tab. Defaults to the classic points → SOS → SODOS → SOSOS order.
+    #[serde(default = "default_tiebreaks")]
+    pub tiebreaks: Vec<Tiebreak>,
+}
+
+impl Default for TournamentSettings {
+    fn default() -> Self {
+        TournamentSettings {
+            macmahon_thresholds: Vec::new(),
+            macmahon_removals: Vec::new(),
+            club_protection_enabled: false,
+            club_protection_rounds: None,
+            club_protection_exempt_clubs: Vec::new(),
+            floater_style: FloaterStyle::default(),
+            cup_enabled: false,
+            handicap_policy: HandicapPolicy::default(),
+            tiebreaks: default_tiebreaks(),
+        }
+    }
 }
 
 impl TournamentSettings {
@@ -161,6 +239,12 @@ impl TournamentSettings {
             .map(|c| c.trim().to_string())
             .filter(|c| !c.is_empty() && seen.insert(c.to_lowercase()))
             .collect();
+
+        // Tie-breaks: drop duplicates keeping the first occurrence (so the order
+        // is meaningful and each metric appears at most once as a column).
+        let mut seen_tb = HashSet::new();
+        self.tiebreaks.retain(|&tb| seen_tb.insert(tb));
+
         self
     }
 
@@ -289,6 +373,28 @@ mod tests {
         // Omitted in the payload → the default (Allowed).
         let s: TournamentSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(s.handicap_policy, HandicapPolicy::Allowed);
+    }
+
+    #[test]
+    fn tiebreaks_default_to_the_classic_order_and_dedup_in_place() {
+        // Missing from an old save → the classic points → SOS → SODOS → SOSOS order.
+        let s: TournamentSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            s.tiebreaks,
+            vec![Tiebreak::Points, Tiebreak::SosM, Tiebreak::SodosM, Tiebreak::SososM]
+        );
+        // Snake-case codes on the wire.
+        assert_eq!(serde_json::to_string(&Tiebreak::Points).unwrap(), "\"points\"");
+        assert_eq!(serde_json::to_string(&Tiebreak::CussW).unwrap(), "\"cuss_w\"");
+
+        // Normalizing drops duplicates, keeping the first occurrence (so order is
+        // meaningful and each column appears once).
+        let n = TournamentSettings {
+            tiebreaks: vec![Tiebreak::SosW, Tiebreak::SosM, Tiebreak::SosW, Tiebreak::CussM],
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(n.tiebreaks, vec![Tiebreak::SosW, Tiebreak::SosM, Tiebreak::CussM]);
     }
 
     #[test]
