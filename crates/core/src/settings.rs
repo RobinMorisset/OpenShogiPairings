@@ -287,6 +287,12 @@ impl TournamentSettings {
         // is meaningful and each metric appears at most once as a column).
         let mut seen_tb = HashSet::new();
         self.tiebreaks.retain(|&tb| seen_tb.insert(tb));
+        // The estimated-ELO tie-break is meaningless outside ELO pairing mode —
+        // the estimate just sits at each player's registration rating — so it is
+        // not a valid ranking criterion there.
+        if !self.elo_pairing_enabled {
+            self.tiebreaks.retain(|&tb| tb != Tiebreak::EstElo);
+        }
 
         // A zero K multiplier would give a degenerate (zero-width) prior, freezing
         // every estimate at its registration rating and dividing by zero in the
@@ -457,6 +463,27 @@ mod tests {
         }
         .normalized();
         assert_eq!(n.tiebreaks, vec![Tiebreak::SosW, Tiebreak::SosM, Tiebreak::CussM]);
+    }
+
+    #[test]
+    fn normalizing_drops_est_elo_tiebreak_when_elo_mode_off() {
+        // Off (the default): the estimated-ELO tie-break is dropped.
+        let off = TournamentSettings {
+            tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM],
+            elo_pairing_enabled: false,
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(off.tiebreaks, vec![Tiebreak::Points, Tiebreak::SosM]);
+
+        // On: it is kept, in place.
+        let on = TournamentSettings {
+            tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM],
+            elo_pairing_enabled: true,
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(on.tiebreaks, vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM]);
     }
 
     #[test]

@@ -169,6 +169,12 @@ pub fn compute_standings(
     standings.sort_by(|a, b| {
         let mut ord = std::cmp::Ordering::Equal;
         for &tb in &settings.tiebreaks {
+            // Estimated ELO only ranks in ELO pairing mode; otherwise the estimate
+            // is just the registration rating, so skip it (defends against a
+            // loaded save that predates normalization dropping it).
+            if tb == Tiebreak::EstElo && !settings.elo_pairing_enabled {
+                continue;
+            }
             ord = ord.then_with(|| b.tiebreak(tb).cmp(&a.tiebreak(tb)));
         }
         ord.then(tnum[&a.player_id].cmp(&tnum[&b.player_id]))
@@ -380,6 +386,40 @@ mod tests {
         let after = compute_standings(&[a.clone(), b.clone()], &TournamentSettings::default(), &rounds);
         assert!(of(&after, a.id) > 1400, "the winner's estimate rises");
         assert!(of(&after, b.id) < 1800, "the loser's estimate falls");
+    }
+
+    #[test]
+    fn est_elo_tiebreak_is_ignored_without_elo_mode() {
+        // Equal on everything but rating; no games, so estimates sit at the seeds.
+        let a = player(1, Some(1400));
+        let b = player(2, Some(1800));
+        let players = vec![a.clone(), b.clone()];
+        let pos = |st: &[Standing], id| st.iter().position(|s| s.player_id == id).unwrap();
+
+        // Mode off: est_elo can't break the tie, so the tournament number does
+        // (A before B) — the stronger estimate does *not* win.
+        let off = compute_standings(
+            &players,
+            &TournamentSettings {
+                tiebreaks: vec![Tiebreak::EstElo],
+                elo_pairing_enabled: false,
+                ..Default::default()
+            },
+            &[],
+        );
+        assert!(pos(&off, a.id) < pos(&off, b.id));
+
+        // Mode on: est_elo ranks the stronger estimate first (B above A).
+        let on = compute_standings(
+            &players,
+            &TournamentSettings {
+                tiebreaks: vec![Tiebreak::EstElo],
+                elo_pairing_enabled: true,
+                ..Default::default()
+            },
+            &[],
+        );
+        assert!(pos(&on, b.id) < pos(&on, a.id));
     }
 
     #[test]

@@ -19,6 +19,12 @@
   // are skipped.
   const tiebreakColumns = $derived(
     (tournament.settings.tiebreaks ?? [])
+      // Estimated ELO only ranks in ELO pairing mode; drop it as a column
+      // otherwise (defends against a loaded save that still lists it).
+      .filter(
+        (code) =>
+          code !== "est_elo" || (tournament.settings.elo_pairing_enabled ?? false),
+      )
       .map((code) => TIEBREAKS.find((t) => t.code === code))
       .filter((t): t is (typeof TIEBREAKS)[number] => t != null),
   );

@@ -87,8 +87,12 @@
   const swissDisabled = $derived(eloEnabled);
 
   // Metrics not yet in the ranking order — the choices for the "add" dropdown.
+  // Estimated ELO is only meaningful in ELO pairing mode (otherwise it just sits
+  // at the registration rating), so it isn't offered while that mode is off.
   const availableTiebreaks = $derived(
-    TIEBREAKS.filter((t) => !tiebreaks.includes(t.code)),
+    TIEBREAKS.filter(
+      (t) => !tiebreaks.includes(t.code) && (eloEnabled || t.code !== "est_elo"),
+    ),
   );
   const labelOf = (code: Tiebreak) => tiebreakLabel(code, $_);
   const titleOf = (code: Tiebreak) => tiebreakTitle(code, $_);
@@ -170,6 +174,9 @@
 
   function setEloEnabled(v: boolean) {
     eloEnabled = v;
+    // Estimated ELO isn't a valid ranking criterion without this mode, so drop
+    // it from the order when turning the mode off (mirrors the server).
+    if (!v) tiebreaks = tiebreaks.filter((c) => c !== "est_elo");
     persist();
   }
 
