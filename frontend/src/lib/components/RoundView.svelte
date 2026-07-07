@@ -91,6 +91,20 @@
     return HANDICAPS.find((x) => x.value === h)?.label ?? h;
   }
 
+  // A single emoji flagging a non-Swiss pairing (forced or cup); blank for a
+  // normal Swiss pairing. Kept as a narrow, header-less column between the two
+  // players so it doesn't compete for attention with the pairing itself.
+  function sourceEmoji(board: Board): string {
+    switch (sourceBadge(board.source).kind) {
+      case "forced":
+        return "\u{1F512}";
+      case "cup":
+        return "\u{1F3C6}";
+      default:
+        return "";
+    }
+  }
+
   // Name of the frozen handicap giver, for the "X gives" hint.
   function giverName(board: Board): string {
     if (!board.handicap) return "";
@@ -112,8 +126,8 @@
       <thead>
         <tr>
           <th class="num">Board</th>
-          <th class="type-col">Type</th>
           <th>Player 1</th>
+          <th class="src-col"></th>
           <th>Player 2</th>
           <th class="draw-col">Draw</th>
           {#if handicapPolicy !== "none"}
@@ -128,11 +142,6 @@
         {#each orderedBoards as { board, index } (index)}
           <tr>
             <td class="num">{index + 1}</td>
-            <td class="type-col">
-              <span class="src src-{sourceBadge(board.source).kind}"
-                >{sourceBadge(board.source).text}</span
-              >
-            </td>
             <td>
               <button
                 type="button"
@@ -146,6 +155,7 @@
                 {name(board.player1)}
               </button>
             </td>
+            <td class="src-col" title={sourceBadge(board.source).text}>{sourceEmoji(board)}</td>
             <td>
               <button
                 type="button"
@@ -251,30 +261,12 @@
     width: 3.5rem;
     font-variant-numeric: tabular-nums;
   }
-  .type-col {
-    width: 6.5rem;
-  }
-  .src {
-    display: inline-block;
-    padding: 0.1rem 0.45rem;
-    border-radius: 0.7rem;
-    font-size: 0.72rem;
-    font-weight: 600;
-    white-space: nowrap;
-    border: 1px solid transparent;
-  }
-  .src-swiss {
-    color: #7a7a83;
-  }
-  .src-forced {
-    color: #7aa2f7;
-    border-color: #2b3a67;
-    background: #1b2340;
-  }
-  .src-cup {
-    color: #e3b341;
-    border-color: #5a4711;
-    background: #2a2410;
+  .src-col {
+    width: 1.6rem;
+    text-align: center;
+    padding-left: 0.2rem;
+    padding-right: 0.2rem;
+    font-size: 0.95rem;
   }
 
   .player {
