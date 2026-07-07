@@ -616,4 +616,189 @@ Nr Name        Nat Elo  1        2   Pts
         let g2 = crate::american_grid(&t2, &t2.standings());
         assert_eq!(g1, g2, "export is not a fixpoint:\n---g1---\n{g1}\n---g2---\n{g2}");
     }
+
+    #[test]
+    fn imports_an_absent_player() {
+        // C sits out round 1 (absent, not a bye); A and B still play each other.
+        let grid = "\
+[Abs]
+Nr Name    Nat Elo  1   Pts
+1  [A] [a] FR  2000 [2+] 1
+2  [B] [b] FR  1000 [1-] 0
+3  [C] [c] FR  1500 [0-] 0
+";
+        let t = import_american_grid(grid).unwrap();
+        assert_eq!(t.rounds[0].absent, vec![player(&t, "C").id]);
+        assert_eq!(t.rounds[0].bye, None);
+    }
+
+    #[test]
+    fn imports_a_loss_recorded_by_the_lower_numbered_player() {
+        // The processing side (lower Nr) is the one who lost, not the winner —
+        // exercises the `Outcome::Loss` arm of `Outcome::winner`.
+        let grid = "\
+[Loss]
+Nr Name    Nat Elo  1   Pts
+1  [A] [a] FR  2000 [2-] 0
+2  [B] [b] FR  1000 [1+] 1
+";
+        let t = import_american_grid(grid).unwrap();
+        let b = board(&t, 0, "A", "B");
+        assert_eq!(b.effective_winner(), Some(Winner::Player2));
+    }
+
+    #[test]
+    fn rejects_a_grid_with_no_player_rows() {
+        let grid = "\
+[Empty]
+Nr Name Nat Elo 1 Pts
+";
+        assert_eq!(import_american_grid(grid), Err(GridImportError::NoPlayers));
+    }
+
+    #[test]
+    fn rejects_rows_with_inconsistent_round_counts() {
+        let grid = "\
+[Bad]
+Nr Name    Nat Elo  1   2   Pts
+1  [A] [a] FR  2000 [2+ 0+] 2
+2  [B] [b] FR  1000 [1-] 0
+";
+        assert!(matches!(
+            import_american_grid(grid),
+            Err(GridImportError::InconsistentRounds { expected: 2, found: 1 })
+        ));
+    }
+
+    #[test]
+    fn rejects_duplicate_player_numbers() {
+        let grid = "\
+[Bad]
+Nr Name    Nat Elo  1   Pts
+1  [A] [a] FR  2000 [2+] 1
+1  [B] [b] FR  1000 [1-] 0
+";
+        assert_eq!(
+            import_american_grid(grid),
+            Err(GridImportError::DuplicateNumber(1))
+        );
+    }
+
+    #[test]
+    fn rejects_multiple_byes_in_one_round() {
+        let grid = "\
+[Bad]
+Nr Name    Nat Elo  1   Pts
+1  [A] [a] FR  2000 [0+] 0
+2  [B] [b] FR  1000 [0+] 0
+";
+        assert!(matches!(
+            import_american_grid(grid),
+            Err(GridImportError::MultipleByes { round: 1 })
+        ));
+    }
+
+    #[test]
+    fn rejects_bad_row_missing_player_number() {
+        let grid = "\
+[Bad]
+Nr Name    Nat Elo  1   Pts
+X  [A] [a] FR  2000 [2+] 1
+2  [B] [b] FR  1000 [1-] 0
+";
+        assert!(matches!(
+            import_american_grid(grid),
+            Err(GridImportError::BadRow { reason, .. }) if reason == "missing player number"
+        ));
+    }
+
+    #[test]
+    fn rejects_bad_row_with_no_round_cells() {
+        let grid = "\
+[Bad]
+Nr Name    Nat Elo  1  Pts
+1  [A] [a] FR  2000 [] 1
+";
+        assert!(matches!(
+            import_american_grid(grid),
+            Err(GridImportError::BadRow { reason, .. }) if reason == "no round cells"
+        ));
+    }
+
+    #[test]
+    fn rejects_malformed_round_cells() {
+        // No digits at all before the sign.
+        assert!(matches!(
+            import_american_grid(
+                "[Bad]\nNr Name    Nat Elo  1   Pts\n1  [A] [a] FR  2000 [x+] 1\n"
+            ),
+            Err(GridImportError::BadCell { cell, .. }) if cell == "x+"
+        ));
+        // A non-game (`0`) cell must not carry a trailing suffix.
+        assert!(matches!(
+            import_american_grid(
+                "[Bad]\nNr Name    Nat Elo  1    Pts\n1  [A] [a] FR  2000 [0+x] 1\n"
+            ),
+            Err(GridImportError::BadCell { cell, .. }) if cell == "0+x"
+        ));
+        // A non-game cell's sign must be `+`/`-`/`#`.
+        assert!(matches!(
+            import_american_grid(
+                "[Bad]\nNr Name    Nat Elo  1   Pts\n1  [A] [a] FR  2000 [0*] 1\n"
+            ),
+            Err(GridImportError::BadCell { cell, .. }) if cell == "0*"
+        ));
+        // A game cell's sign must be `+`/`-`/`=`.
+        assert!(matches!(
+            import_american_grid(
+                "[Bad]\nNr Name    Nat Elo  1   Pts\n1  [A] [a] FR  2000 [2*] 1\n"
+            ),
+            Err(GridImportError::BadCell { cell, .. }) if cell == "2*"
+        ));
+    }
+
+    #[test]
+    fn rejects_bad_handicap_suffix() {
+        let grid = "\
+[Bad]
+Nr Name    Nat Elo  1        Pts
+1  [A] [a] FR  2000 [2+(-z)] 1
+2  [B] [b] FR  1000 [1-]     0
+";
+        assert!(matches!(
+            import_american_grid(grid),
+            Err(GridImportError::BadCell { cell, .. }) if cell == "2+(-z)"
+        ));
+    }
+
+    #[test]
+    fn rejects_asymmetric_game_when_opponent_does_not_reciprocate() {
+        // A claims a game vs B, but B's cell for the round is a bye, not a game.
+        let grid = "\
+[Bad]
+Nr Name    Nat Elo  1   Pts
+1  [A] [a] FR  2000 [2+] 1
+2  [B] [b] FR  1000 [0+] 0
+";
+        assert!(matches!(
+            import_american_grid(grid),
+            Err(GridImportError::Asymmetric { round: 1, a: 1, b: 2 })
+        ));
+    }
+
+    #[test]
+    fn rejects_asymmetric_game_when_opponent_references_someone_else() {
+        // A claims a game vs B, but B's cell references C instead of A.
+        let grid = "\
+[Bad]
+Nr Name    Nat Elo  1   Pts
+1  [A] [a] FR  2000 [2+] 1
+2  [B] [b] FR  1000 [3-] 0
+3  [C] [c] FR  1500 [0+] 0
+";
+        assert!(matches!(
+            import_american_grid(grid),
+            Err(GridImportError::Asymmetric { round: 1, a: 1, b: 2 })
+        ));
+    }
 }
