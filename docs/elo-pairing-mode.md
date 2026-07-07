@@ -73,26 +73,29 @@ The log-likelihood is concave and every prior is a concave (Gaussian) log-densit
 so the objective is smooth and strongly concave and the maximiser is **unique and
 deterministic**.
 
-### 2.1 Prior for rated players — FIDE K × a single multiplier
+### 2.1 Prior for rated players — FESA K × a single multiplier
 
 We express trust in the registration rating as a Gaussian prior
 `θᵢ ~ Normal(μᵢ₀, σ₀ᵢ²)`, with `μᵢ₀` = the registration ELO. The one thing the
 referee sets is a **single multiplier `m`** (default `1.0`, expected range ~1–4)
-applied to FIDE's rating-dependent K table:
+applied to FESA's rating-dependent development coefficient K (section 1 of the
+[FESA ELO system](https://fesashogi.eu/elo-system/); its thresholds sit on grade
+boundaries):
 
-| Registration rating `μ₀` | FIDE K |
+| Registration rating `μ₀` | FESA K |
 | --- | --- |
-| `μ₀ ≥ 2000` | 20 |
-| `1600 ≤ μ₀ < 2000` | 24 |
-| `1200 ≤ μ₀ < 1600` | 28 |
-| `800 ≤ μ₀ < 1200` | 32 |
-| `400 ≤ μ₀ < 800` | 36 |
-| `μ₀ < 400` | 40 |
+| `μ₀ ≥ 2240` | 16 |
+| `1920 ≤ μ₀ < 2240` | 20 |
+| `1560 ≤ μ₀ < 1920` | 24 |
+| `1280 ≤ μ₀ < 1560` | 28 |
+| `1040 ≤ μ₀ < 1280` | 32 |
+| `720 ≤ μ₀ < 1040` | 36 |
+| `μ₀ < 720` | 40 |
 
 (Bounds are inclusive-lower/exclusive-upper, matching the MacMahon threshold
 convention in `settings.rs`.)
 
-The per-player effective K is `Kᵢ = m · K_FIDE(μᵢ₀)`, and the prior width is
+The per-player effective K is `Kᵢ = m · K_FESA(μᵢ₀)`, and the prior width is
 derived from it (derivation in Appendix A):
 
 ```
@@ -100,20 +103,19 @@ derived from it (derivation in Appendix A):
 ```
 
 `Kᵢ` is *literally the first-game K-factor* for player `i`: on the very first
-game, the MAP update reduces to a FIDE Elo update `Δθᵢ ≈ Kᵢ·(S − E)` (Appendix
-A). So round 1 behaves like a FIDE Elo step with the player's FIDE K scaled by
-`m`; later rounds automatically damp (§2.3). Stronger players get a smaller K and
-so a tighter prior — matching the fact that established high ratings are more
-reliable.
+game, the MAP update reduces to an Elo update `Δθᵢ ≈ Kᵢ·(S − E)` (Appendix A). So
+round 1 behaves like a FESA Elo step with the player's K scaled by `m`; later
+rounds automatically damp (§2.3). Stronger players get a smaller K and so a
+tighter prior — matching the fact that established high ratings are more reliable.
 
 Reference values (`σ₀` in ELO points):
 
-| multiplier `m` | K range (20–40 → …) | σ₀ range |
+| multiplier `m` | K range (16–40 → …) | σ₀ range |
 | --- | --- | --- |
-| 0.5 | 10–20 | 42–59 |
-| 1 | 20–40 | 59–83 |
-| 2 | 40–80 | 83–118 |
-| 4 | 80–160 | 118–167 |
+| 0.5 | 8–20 | 37–59 |
+| 1 | 16–40 | 53–83 |
+| 2 | 32–80 | 75–118 |
+| 4 | 64–160 | 106–167 |
 
 **This is the answer to "do we pick how fast the estimate drifts?":** No. The
 referee picks the single multiplier `m`; every player's per-game drift then falls
@@ -167,7 +169,7 @@ K, exactly like Elo.** The one-game posterior-mean shift is
 ```
 
 and since `|S − E| ≤ 1` the move can't exceed the current K. Worked example, with
-the winner a *rated* 1100 player (`K_FIDE = 32`, `m = 1` → `σ₀ ≈ 75`) beating a
+the winner a *rated* 1100 player (`K_FESA = 32`, `m = 1` → `σ₀ ≈ 75`) beating a
 1600: `E = σ((1100−1600)/s) ≈ 0.053`, so `Δθ ≈ +30 → 1130` — essentially identical
 to Elo's `K(S − E) = 32 · 0.947 ≈ +30`. One upset is genuinely weak evidence, and
 a rated player's prior encodes their past games, so the model rightly resists it;
@@ -246,7 +248,7 @@ for free.
 ## 5. Data & code layout
 
 - New module `crates/core/src/elo.rs`, sibling to `scoring.rs` / `standings.rs`:
-  the FIDE-K table, the MAP solver, and `estimate_elos(...) -> Map<Uuid, f64>`
+  the FESA-K table, the MAP solver, and `estimate_elos(...) -> Map<Uuid, f64>`
   (plus the raw `f64` and, optionally, variance).
 - Estimated ELO surfaced as `Standing.estimated_elo` (rounded to `i32` to keep
   `Standing` `Eq`), computed in `compute_standings` and already in the envelope's
@@ -304,7 +306,7 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   player is provisional when they aren't in the FESA list (`Player.fesa_games`
   is `None` — rating typed by hand) or their FESA game count is below
   `PROVISIONAL_GAMES_THRESHOLD` (18). It stacks on `m`
-  (`K = m · K_FIDE · provisional`), widening the prior so a shaky seed rating
+  (`K = m · K_FESA · provisional`), widening the prior so a shaky seed rating
   drifts faster. Unrated players are unaffected (they already get the wide
   `N(600, 350²)` prior). `Player.fesa_games` is captured at registration when the
   rating is picked from the FESA autocomplete (the parser now keeps the `#games`
@@ -313,7 +315,7 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   and cleared only when the *last name* is edited (a possibly different entry) or
   the rating is removed entirely.
 
-The unrated prior `N(600, 350²)`, the FIDE K table, `s`, and the reliability
+The unrated prior `N(600, 350²)`, the FESA K table, `s`, and the reliability
 threshold (18 games) are constants in `elo.rs`, not settings.
 
 ## Ranking
@@ -343,7 +345,7 @@ With `E = σ((θᵢ − θ_opp)/s)` the log-likelihood gradient in `θᵢ` is
 Δθᵢ ≈ σ₀² · g = (σ₀² / s)(S − E).
 ```
 
-Matching this to a FIDE Elo update `Δθᵢ = K(S − E)` gives the effective first-game
+Matching this to an Elo update `Δθᵢ = K(S − E)` gives the effective first-game
 K-factor `K = σ₀² / s`, i.e.
 
 ```
@@ -352,5 +354,5 @@ K-factor `K = σ₀² / s`, i.e.
 
 As games accumulate the `h` terms add up and shrink the posterior variance
 (`σₙ² ≈ 1/(1/σ₀² + Σ h)`), so the effective K decays — the auto-deceleration of
-§2.3. Setting `K = m · K_FIDE(μ₀)` per player yields the per-player `σ₀ᵢ` used in
+§2.3. Setting `K = m · K_FESA(μ₀)` per player yields the per-player `σ₀ᵢ` used in
 the solver.

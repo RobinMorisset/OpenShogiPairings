@@ -376,7 +376,7 @@
       </label>
       <p class="desc small-note">
         How fast an estimate may drift from the registration rating (applied to
-        each player's FIDE K factor). 1 keeps ratings close; higher reacts faster
+        each player's FESA K factor). 1 keeps ratings close; higher reacts faster
         to upsets. Usually 1–4.
       </p>
       <label class="check elo-k">

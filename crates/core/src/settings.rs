@@ -167,7 +167,7 @@ pub struct TournamentSettings {
     /// `docs/elo-pairing-mode.md`. Off by default.
     #[serde(default)]
     pub elo_pairing_enabled: bool,
-    /// The multiplier `m` on each player's FIDE K, as an integer percent
+    /// The multiplier `m` on each player's FESA K, as an integer percent
     /// (100 = ×1.0), controlling how far the ELO estimate is allowed to drift from
     /// the registration rating (bigger = faster drift). Stored as an integer so
     /// the settings stay `Eq`; read as a float via [`Self::elo_k_multiplier`].

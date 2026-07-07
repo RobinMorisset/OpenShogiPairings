@@ -128,15 +128,17 @@ fn handicap_offset(giver_rating: u32, handicap: Handicap) -> f64 {
     giver - shifted
 }
 
-/// FIDE's rating-dependent K factor, used only to seed each rated player's prior
-/// width (see [`prior`]).
-fn fide_k(rating: u32) -> f64 {
+/// FESA's rating-dependent development coefficient K (section 1 "Basic formula"
+/// of <https://fesashogi.eu/elo-system/>), used only to seed each rated player's
+/// prior width (see [`prior`]). The thresholds fall on grade boundaries.
+fn fesa_k(rating: u32) -> f64 {
     match rating {
-        r if r >= 2000 => 20.0,
-        r if r >= 1600 => 24.0,
-        r if r >= 1200 => 28.0,
-        r if r >= 800 => 32.0,
-        r if r >= 400 => 36.0,
+        r if r >= 2240 => 16.0,
+        r if r >= 1920 => 20.0,
+        r if r >= 1560 => 24.0,
+        r if r >= 1280 => 28.0,
+        r if r >= 1040 => 32.0,
+        r if r >= 720 => 36.0,
         _ => 40.0,
     }
 }
@@ -152,7 +154,7 @@ fn is_reliably_rated(player: &Player) -> bool {
 /// A player's Gaussian prior `(mean, standard deviation)` on the ELO scale.
 ///
 /// A rated player is centered on their registration rating with a width derived
-/// from `K = m · K_FIDE(rating)` via `σ₀ = √(K · s)` (so `K` is literally their
+/// from `K = m · K_FESA(rating)` via `σ₀ = √(K · s)` (so `K` is literally their
 /// first-game K factor). A **provisionally**-rated player (see
 /// [`is_reliably_rated`]) has that `K` further multiplied by `provisional_mult`,
 /// widening the prior so their estimate drifts faster. An unrated player gets the
@@ -162,7 +164,7 @@ fn prior(player: &Player, k_multiplier: f64, provisional_mult: f64) -> (f64, f64
         Some(rating) => {
             // Multipliers are clamped ≥ 1%/100% by settings normalization, so K > 0.
             let reliability = if is_reliably_rated(player) { 1.0 } else { provisional_mult };
-            let k = k_multiplier * fide_k(rating) * reliability;
+            let k = k_multiplier * fesa_k(rating) * reliability;
             (f64::from(rating), (k * S).sqrt())
         }
         None => (UNRATED_PRIOR_MEAN, UNRATED_PRIOR_STD),
@@ -175,7 +177,7 @@ fn expected(x: f64) -> f64 {
 }
 
 /// Estimate every player's current ELO (posterior mode) from the completed
-/// rounds, using the FIDE-K × multiplier prior from `settings`.
+/// rounds, using the FESA-K × multiplier prior from `settings`.
 ///
 /// Byes contribute nothing (they are not games), draws score ½ for each side, and
 /// handicap games are excluded for now (V1 — a handicap→ELO mapping is future
@@ -339,7 +341,7 @@ mod tests {
 
     #[test]
     fn single_game_shift_is_capped_near_k() {
-        // An *established* rated 1100 player (FIDE K = 32, m = 1) beating a 1600:
+        // An *established* rated 1100 player (FESA K = 32, m = 1) beating a 1600:
         // the first-game move is capped by K = 32 and, since the opponent is much
         // stronger (E ≈ 0.05), lands just under it — matching a plain Elo update.
         // (An established rating avoids the provisional multiplier widening it.)
