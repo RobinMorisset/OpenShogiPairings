@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::elo::estimate_elos;
 use crate::player::Player;
 use crate::round::Round;
 use crate::scoring::compute_scores;
@@ -62,6 +63,12 @@ pub struct Standing {
     pub cussm: u32,
     /// Cumulative sum of the running win total after each round.
     pub cussw: u32,
+    /// The player's current estimated ELO (rounded), from the Bayesian estimate
+    /// that drives the experimental ELO pairing mode (see [`crate::estimate_elos`]).
+    /// Computed regardless of mode; the Results tab only shows it when the ELO
+    /// mode is active. A player with no counted games sits at their prior mean
+    /// (their registration rating, or 600 if unrated).
+    pub estimated_elo: i32,
 }
 
 impl Standing {
@@ -108,6 +115,9 @@ pub fn compute_standings(
     let score_m = |o: &Uuid| scores.points(o);
     let score_w = |o: &Uuid| scores.victories(o);
 
+    // The live Bayesian ELO estimate (shown on the Results tab in ELO mode).
+    let elos = estimate_elos(players, settings, rounds);
+
     // SOSM and SOSW first — each needed on its own for the SOSOS metrics.
     let sosm: HashMap<Uuid, u32> = players
         .iter()
@@ -141,6 +151,7 @@ pub fn compute_standings(
                 sosw2: sum_dropping_lowest(opp_w, 2),
                 cussm: s.cuss_m,
                 cussw: s.cuss_w,
+                estimated_elo: elos.get(&p.id).copied().unwrap_or(0.0).round() as i32,
             }
         })
         .collect();
@@ -346,6 +357,25 @@ mod tests {
         assert_eq!(of(b.id).cussw, 2); // 0 + 1 + 1
         // No MacMahon here, so the M flavour matches the W flavour.
         assert_eq!(of(a.id).cussm, 4);
+    }
+
+    #[test]
+    fn estimated_elo_seeds_at_rating_and_tracks_upsets() {
+        // No games: each player's estimate is their registration rating. Then a
+        // lower-rated player beats a higher one, and their estimate rises above
+        // its seed while the loser's falls.
+        let a = player(1, Some(1400));
+        let b = player(2, Some(1800));
+
+        let none = compute_standings(&[a.clone(), b.clone()], &TournamentSettings::default(), &[]);
+        let of = |st: &[Standing], id| st.iter().find(|s| s.player_id == id).unwrap().estimated_elo;
+        assert_eq!(of(&none, a.id), 1400);
+        assert_eq!(of(&none, b.id), 1800);
+
+        let rounds = vec![round(1, vec![board(a.id, b.id, Winner::Player1)])]; // A upsets B
+        let after = compute_standings(&[a.clone(), b.clone()], &TournamentSettings::default(), &rounds);
+        assert!(of(&after, a.id) > 1400, "the winner's estimate rises");
+        assert!(of(&after, b.id) < 1800, "the loser's estimate falls");
     }
 
     #[test]

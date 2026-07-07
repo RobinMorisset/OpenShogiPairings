@@ -21,6 +21,12 @@
       .filter((t): t is (typeof TIEBREAKS)[number] => t != null),
   );
 
+  // The estimated-ELO column is only meaningful (and only shown) in the
+  // experimental ELO pairing mode.
+  const showEstimatedElo = $derived(
+    tournament.settings.elo_pairing_enabled ?? false,
+  );
+
   // Player id → medal, from the cup podium (the table order stays pure-Swiss).
   const medalOf = $derived.by(() => {
     const m = new Map<string, string>();
@@ -167,6 +173,9 @@
         <th>Last name</th>
         <th>First name</th>
         <th class="num">Rating</th>
+        {#if showEstimatedElo}
+          <th class="num" title="Live Bayesian estimate of the player's current strength">Est. ELO</th>
+        {/if}
         <th>Nat.</th>
         <th>Club</th>
         {#each completedRounds as round (round.number)}
@@ -185,6 +194,9 @@
           <td>{#if medalOf.has(player.id)}<span class="medal">{medalOf.get(player.id)}</span> {/if}{player.last_name}</td>
           <td>{player.first_name || "—"}</td>
           <td class="num">{player.rating ?? "—"}</td>
+          {#if showEstimatedElo}
+            <td class="num est-elo">{standing.estimated_elo}</td>
+          {/if}
           <td>{player.nationality ?? "—"}</td>
           <td>{player.club ?? "—"}</td>
           {#each completedRounds as round (round.number)}
@@ -288,6 +300,10 @@
     color: #9a9aa2;
     font-variant-numeric: tabular-nums;
   }
+  .est-elo {
+    color: #58a6ff;
+    font-variant-numeric: tabular-nums;
+  }
   .podium {
     display: flex;
     flex-wrap: wrap;
@@ -341,6 +357,7 @@
     .pending,
     .points,
     .tiebreak,
+    .est-elo,
     .muted,
     .note,
     .podium,

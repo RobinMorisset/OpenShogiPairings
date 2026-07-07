@@ -256,6 +256,7 @@ export interface Standing {
   sosw2: number; // SOSW dropping the two lowest opponents
   cussm: number; // cumulative running points total
   cussw: number; // cumulative running win total
+  estimated_elo: number; // live Bayesian ELO estimate (shown in ELO mode)
 }
 
 /** One automatic server-side backup's metadata — mirror of `osp_server`'s

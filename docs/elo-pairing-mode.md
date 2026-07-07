@@ -1,9 +1,10 @@
 # Experimental ELO-based (non-Swiss) pairing mode — design
 
 Status: **V1 implemented** — the estimator ([`crates/core/src/elo.rs`](../crates/core/src/elo.rs)),
-the ELO rule ladder in the pairing engine, and the settings toggle + multiplier
-(with the Swiss sections greyed out) are in. Still open: surfacing the live
-estimate as a Results-tab column, and the V2 items in §8. Tracks the TODO item
+the ELO rule ladder in the pairing engine, the settings toggle + multiplier
+(with the Swiss sections greyed out), and the Results-tab "Est. ELO" column
+(shown only in ELO mode; `Standing.estimated_elo`) are in. Still open: the V2
+items in §8. Tracks the TODO item
 "Experimental ELO-based, non-swiss system". This document pins down the Bayesian
 estimation math and how the mode plugs into the existing pairing engine
 ([`crates/core/src/pairing.rs`](../crates/core/src/pairing.rs)) and scoring
@@ -238,8 +239,9 @@ for free.
 - New module `crates/core/src/elo.rs`, sibling to `scoring.rs` / `standings.rs`:
   the FIDE-K table, the MAP solver, and `estimate_elos(...) -> Map<Uuid, f64>`
   (plus the raw `f64` and, optionally, variance).
-- Estimated ELO surfaced in the server's `TournamentView` envelope so the
-  Results tab can show a live "estimated ELO" column.
+- Estimated ELO surfaced as `Standing.estimated_elo` (rounded to `i32` to keep
+  `Standing` `Eq`), computed in `compute_standings` and already in the envelope's
+  `standings`; the Results tab shows it as an "Est. ELO" column, only in ELO mode.
 - New settings fields (§7).
 
 ## 6. Integration with the pairing engine
