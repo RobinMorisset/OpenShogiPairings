@@ -15,7 +15,7 @@ import { isTauri } from "./platform";
 const FILE_SUFFIX = ".osp.json";
 
 /** Filters offered in the native dialogs. */
-const DIALOG_FILTERS = [{ name: "Tournament", extensions: ["json"] }];
+const DIALOG_FILTERS = [{ name: "Tournament", extensions: ["json", "osp"] }];
 
 /** Turn a tournament name into a safe file-name stem. */
 function slugify(name: string): string {
