@@ -754,7 +754,7 @@
   }
   .section {
     margin-top: 1.75rem;
-    border-top: 1px solid #2a2a30;
+    border-top: 1px solid var(--border-divider);
     padding-top: 1rem;
   }
   /* Groups the Swiss-only sections so they can be greyed out as one in ELO mode.
@@ -781,7 +781,7 @@
     margin: 0.5rem 0 0;
   }
   .desc {
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font-size: 0.85rem;
     margin: 0 0 1rem;
     line-height: 1.4;
@@ -798,14 +798,14 @@
     align-items: center;
   }
   .prefix {
-    color: #c9c9d0;
+    color: var(--text-strong);
     font-size: 0.9rem;
   }
   .threshold {
     width: 6rem;
-    background: #1c1c22;
+    background: var(--bg-inset);
     color: inherit;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-soft);
     border-radius: 0.4rem;
     padding: 0.3rem 0.45rem;
     font: inherit;
@@ -818,7 +818,7 @@
     align-items: center;
     gap: 0.45rem;
     font-size: 0.9rem;
-    color: #c9c9d0;
+    color: var(--text-strong);
   }
   .check input[type="checkbox"] {
     width: 1rem;
@@ -837,7 +837,7 @@
     margin: 0;
   }
   .tb-rank {
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font-variant-numeric: tabular-nums;
     width: 1.4rem;
     text-align: right;
@@ -845,21 +845,21 @@
   .tb-label {
     min-width: 5.5rem;
     font-weight: 600;
-    color: #c9c9d0;
+    color: var(--text-strong);
   }
   .tb-select {
-    background: #1c1c22;
+    background: var(--bg-inset);
     color: inherit;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-soft);
     border-radius: 0.4rem;
     padding: 0.3rem 0.45rem;
     font: inherit;
   }
   .club-input {
     width: 12rem;
-    background: #1c1c22;
+    background: var(--bg-inset);
     color: inherit;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-soft);
     border-radius: 0.4rem;
     padding: 0.3rem 0.45rem;
     font: inherit;
@@ -867,18 +867,18 @@
   .remove {
     background: transparent;
     border: 1px solid transparent;
-    color: #9a9aa2;
+    color: var(--text-secondary);
     cursor: pointer;
     border-radius: 0.4rem;
     padding: 0.1rem 0.4rem;
   }
   .remove:hover:not(:disabled) {
-    color: #f85149;
-    border-color: #3a3a42;
+    color: var(--color-danger);
+    border-color: var(--border-soft);
   }
   .ghost {
     background: transparent;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-soft);
     color: inherit;
     border-radius: 0.4rem;
     padding: 0.3rem 0.6rem;
@@ -889,7 +889,7 @@
     font-size: 0.85rem;
   }
   .ghost:hover:not(:disabled) {
-    background: #26262c;
+    background: var(--bg-hover);
   }
   .ghost:disabled {
     opacity: 0.5;
@@ -900,7 +900,7 @@
   }
   .preview h4 {
     margin: 0 0 0.4rem;
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font-size: 0.8rem;
     font-weight: 600;
   }
@@ -914,15 +914,15 @@
     padding: 0.15rem 0;
   }
   .band {
-    color: #c9c9d0;
+    color: var(--text-strong);
     font-variant-numeric: tabular-nums;
   }
   .muted {
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font-size: 0.9rem;
   }
   .hint.warning {
-    color: #d29922;
+    color: var(--color-warning);
     font-size: 0.85rem;
     margin: 0 0 1rem;
   }

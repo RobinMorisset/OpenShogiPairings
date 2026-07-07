@@ -1,9 +1,100 @@
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
-  color-scheme: light dark;
-  color: #e6e6e6;
-  background-color: #1b1b1f;
+  color-scheme: dark;
+
+  /* Backgrounds, darkest (page) to lightest (raised/hover). */
+  --bg: #1b1b1f;
+  --bg-surface: #232329;
+  --bg-inset: #1c1c22;
+  --bg-hover: #26262c;
+  --bg-hover-strong: #34343e;
+  --bg-raised: #2d2d34;
+  --bg-stripe: #28282f;
+  --bg-chip: #2b2b31;
+  --bg-accent: #2b3a67;
+  --bg-danger: #3d1417;
+  --bg-warning: #2a2410;
+
+  /* Borders. */
+  --border: #34343b;
+  --border-soft: #3a3a42;
+  --border-hover: #4a4a52;
+  --border-divider: #2b2b31;
+  --border-accent: #4a4a8a;
+  --border-accent-strong: #3b5bdb;
+  --border-danger: #6e2329;
+  --border-danger-strong: #a13b3b;
+  --border-warning: #5a4711;
+
+  /* Text. */
+  --text: #e6e6e6;
+  --text-secondary: #9a9aa2;
+  --text-tertiary: #6a6a72;
+  --text-muted: #4a4a52;
+  --text-strong: #d0d0d6;
+  --text-on-accent: #cdd6f4;
+  --text-on-danger: #ffb4ab;
+
+  /* Semantic accent colors. */
+  --color-success: #3fb950;
+  --color-danger: #f85149;
+  --color-warning: #d29922;
+  --color-warning-strong: #e3b341;
+  --color-accent: #7aa2f7;
+  --color-accent-strong: #58a6ff;
+  --color-purple: #d2a8ff;
+  --color-neutral: #888;
+
+  --shadow-dropdown: rgba(0, 0, 0, 0.4);
+
+  color: var(--text);
+  background-color: var(--bg);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f6f6f8;
+  --bg-surface: #ffffff;
+  --bg-inset: #eef0f3;
+  --bg-hover: #e9eaee;
+  --bg-hover-strong: #dfe1e8;
+  --bg-raised: #ffffff;
+  --bg-stripe: #f2f3f6;
+  --bg-chip: #e9eaee;
+  --bg-accent: #0969da;
+  --bg-danger: #fdedee;
+  --bg-warning: #fdf3da;
+
+  --border: #d7d8dd;
+  --border-soft: #c9cbd1;
+  --border-hover: #b3b5bd;
+  --border-divider: #e3e4e8;
+  --border-accent: #a9bdf5;
+  --border-accent-strong: #0757ba;
+  --border-danger: #f2b8b5;
+  --border-danger-strong: #cf222e;
+  --border-warning: #eed48f;
+
+  --text: #1b1d23;
+  --text-secondary: #57606a;
+  --text-tertiary: #6e7781;
+  --text-muted: #8c919b;
+  --text-strong: #303540;
+  --text-on-accent: #ffffff;
+  --text-on-danger: #cf222e;
+
+  --color-success: #1a7f37;
+  --color-danger: #cf222e;
+  --color-warning: #9a6700;
+  --color-warning-strong: #7d5700;
+  --color-accent: #0969da;
+  --color-accent-strong: #218bff;
+  --color-purple: #8250df;
+  --color-neutral: #8c919b;
+
+  --shadow-dropdown: rgba(31, 35, 40, 0.15);
 }
 
 body {
@@ -18,22 +109,22 @@ code {
 
 .card {
   padding: 1.25rem 1.5rem;
-  border: 1px solid #34343b;
+  border: 1px solid var(--border);
   border-radius: 0.75rem;
-  background: #232329;
+  background: var(--bg-surface);
 }
 
 button {
   padding: 0.45rem 0.9rem;
-  border: 1px solid #34343b;
+  border: 1px solid var(--border);
   border-radius: 0.5rem;
-  background: #2d2d34;
+  background: var(--bg-raised);
   color: inherit;
   font: inherit;
   cursor: pointer;
 }
 button:hover:not(:disabled) {
-  border-color: #4a4a52;
+  border-color: var(--border-hover);
 }
 button:disabled {
   opacity: 0.5;

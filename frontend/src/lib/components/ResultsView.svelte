@@ -266,12 +266,12 @@
   th,
   td {
     padding: 0.3rem 0.55rem;
-    border-bottom: 1px solid #2b2b31;
+    border-bottom: 1px solid var(--border-divider);
     text-align: left;
     white-space: nowrap;
   }
   th {
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font-weight: 600;
     font-size: 0.8rem;
   }
@@ -283,34 +283,34 @@
     font-variant-numeric: tabular-nums;
   }
   .win {
-    color: #3fb950;
+    color: var(--color-success);
   }
   .loss {
-    color: #f85149;
+    color: var(--color-danger);
   }
   .absent {
-    color: #6a6a72;
+    color: var(--text-tertiary);
   }
   .pending {
-    color: #d29922;
+    color: var(--color-warning);
   }
   .victories {
     font-weight: 600;
   }
   .points {
     font-weight: 700;
-    color: #d2a8ff;
+    color: var(--color-purple);
   }
   .points.adjusted {
     text-decoration: underline dotted;
     text-underline-offset: 0.2rem;
   }
   .tiebreak {
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font-variant-numeric: tabular-nums;
   }
   .est-elo {
-    color: #58a6ff;
+    color: var(--color-accent-strong);
     font-variant-numeric: tabular-nums;
   }
   .podium {
@@ -320,14 +320,14 @@
     gap: 0.75rem;
     margin-bottom: 0.9rem;
     padding: 0.5rem 0.75rem;
-    border: 1px solid #5a4711;
-    background: #2a2410;
+    border: 1px solid var(--border-warning);
+    background: var(--bg-warning);
     border-radius: 0.5rem;
     font-size: 0.9rem;
   }
   .cup-title {
     font-weight: 700;
-    color: #e3b341;
+    color: var(--color-warning-strong);
     text-transform: uppercase;
     font-size: 0.75rem;
     letter-spacing: 0.05em;
@@ -336,7 +336,7 @@
     font-size: 0.85rem;
   }
   .muted {
-    color: #9a9aa2;
+    color: var(--text-secondary);
   }
   .note {
     font-size: 0.85rem;

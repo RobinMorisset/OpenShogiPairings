@@ -229,9 +229,9 @@
   }
   input {
     padding: 0.45rem 0.6rem;
-    border: 1px solid #34343b;
+    border: 1px solid var(--border);
     border-radius: 0.5rem;
-    background: #1b1b1f;
+    background: var(--bg-inset);
     color: inherit;
     font: inherit;
   }
@@ -271,10 +271,10 @@
     margin: 0;
     padding: 0.25rem;
     list-style: none;
-    background: #26262c;
-    border: 1px solid #3a3a42;
+    background: var(--bg-hover);
+    border: 1px solid var(--border-soft);
     border-radius: 0.5rem;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 8px 24px var(--shadow-dropdown);
     max-height: 16rem;
     overflow-y: auto;
   }
@@ -289,7 +289,7 @@
   }
   .suggestions li.highlighted,
   .suggestions li:hover {
-    background: #34343e;
+    background: var(--bg-hover-strong);
   }
   .s-name {
     white-space: nowrap;
@@ -297,7 +297,7 @@
     text-overflow: ellipsis;
   }
   .s-meta {
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font-size: 0.8rem;
     font-variant-numeric: tabular-nums;
     flex: none;

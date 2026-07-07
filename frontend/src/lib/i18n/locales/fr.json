@@ -49,6 +49,10 @@
   "localeSwitcher": {
     "label": "Langue"
   },
+  "themeSwitcher": {
+    "switchToLight": "Passer en mode clair",
+    "switchToDark": "Passer en mode sombre"
+  },
   "playerRegistration": {
     "lastName": "Nom",
     "firstName": "Prénom",

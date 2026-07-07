@@ -47,23 +47,23 @@
     align-items: center;
     gap: 0.5rem;
     font-size: 0.8rem;
-    color: #9a9aa2;
+    color: var(--text-secondary);
   }
   .dot {
     width: 0.55rem;
     height: 0.55rem;
     border-radius: 50%;
-    background: #888;
+    background: var(--color-neutral);
     flex: none;
   }
   .dot.ok {
-    background: #3fb950;
+    background: var(--color-success);
   }
   .dot.error {
-    background: #f85149;
+    background: var(--color-danger);
   }
   .dot.loading {
-    background: #d29922;
+    background: var(--color-warning);
   }
   button {
     font-size: 0.75rem;

@@ -454,7 +454,7 @@
 
 <style>
   .empty {
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font-size: 0.9rem;
   }
   table {
@@ -465,11 +465,11 @@
   th,
   td {
     padding: 0.25rem 0.4rem;
-    border-bottom: 1px solid #2b2b31;
+    border-bottom: 1px solid var(--border-divider);
     text-align: left;
   }
   th {
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font-weight: 600;
     font-size: 0.8rem;
     padding: 0.4rem;
@@ -495,14 +495,14 @@
     flex-direction: row-reverse;
   }
   .sort-btn:hover {
-    color: #d0d0d6;
+    color: var(--text-strong);
   }
   .sort-arrow {
     font-size: 0.7rem;
-    color: #4a4a52;
+    color: var(--text-muted);
   }
   .sort-arrow.active {
-    color: #7aa2f7;
+    color: var(--color-accent);
   }
   .actions {
     text-align: right;
@@ -521,11 +521,11 @@
     justify-content: center;
   }
   .elig-frozen {
-    color: #3fb950;
+    color: var(--color-success);
     font-weight: 700;
   }
   .elig-count {
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font-size: 0.82rem;
     margin: 0 0 0.5rem;
   }
@@ -535,19 +535,19 @@
     gap: 0.5rem;
     margin: 0 0 0.75rem;
     font-size: 0.85rem;
-    color: #c9c9d0;
+    color: var(--text-strong);
   }
   .elig-bulk select {
-    background: #1c1c22;
+    background: var(--bg-inset);
     color: inherit;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-soft);
     border-radius: 0.35rem;
     padding: 0.2rem 0.35rem;
     font: inherit;
   }
   .ghost {
     background: transparent;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-soft);
     color: inherit;
     border-radius: 0.35rem;
     padding: 0.2rem 0.55rem;
@@ -558,7 +558,7 @@
     font-size: 0.8rem;
   }
   .ghost:hover:not(:disabled) {
-    background: #26262c;
+    background: var(--bg-hover);
   }
   .ghost:disabled {
     opacity: 0.5;
@@ -578,8 +578,8 @@
     cursor: text;
   }
   .cell-btn:hover:not(:disabled) {
-    border-color: #3a3a42;
-    background: #26262c;
+    border-color: var(--border-soft);
+    background: var(--bg-hover);
   }
   .num .cell-btn {
     text-align: right;
@@ -588,9 +588,9 @@
     width: 100%;
     box-sizing: border-box;
     padding: 0.2rem 0.35rem;
-    border: 1px solid #4a4a8a;
+    border: 1px solid var(--border-accent);
     border-radius: 0.35rem;
-    background: #1b1b1f;
+    background: var(--bg-inset);
     color: inherit;
     font: inherit;
   }
@@ -601,25 +601,25 @@
   .remove {
     padding: 0.1rem 0.4rem;
     font-size: 0.8rem;
-    color: #f85149;
+    color: var(--color-danger);
     border-color: transparent;
     background: transparent;
   }
   .remove:hover:not(:disabled) {
-    border-color: #f85149;
+    border-color: var(--color-danger);
   }
 
   .adjust {
     padding: 0.1rem 0.4rem;
     font-size: 0.8rem;
-    color: #9a9aa2;
+    color: var(--text-secondary);
     border: 1px solid transparent;
     border-radius: 0.35rem;
     background: transparent;
   }
   .adjust:hover:not(:disabled) {
-    border-color: #3a3a42;
-    background: #26262c;
+    border-color: var(--border-soft);
+    background: var(--bg-hover);
   }
   .adj-badge {
     display: inline-block;
@@ -628,12 +628,12 @@
     border-radius: 0.6rem;
     font-size: 0.75rem;
     font-variant-numeric: tabular-nums;
-    background: #2b2b31;
-    color: #d0d0d6;
+    background: var(--bg-chip);
+    color: var(--text-strong);
   }
 
   .adjustments-row td {
-    background: #1b1b1f;
+    background: var(--bg-inset);
   }
   .adjustments-list {
     list-style: none;
@@ -648,19 +648,19 @@
     padding: 0.1rem 0;
   }
   .adjustments-list .bonus {
-    color: #3fb950;
+    color: var(--color-success);
   }
   .adjustments-list .malus {
-    color: #f85149;
+    color: var(--color-danger);
   }
   .adjustments-list .reason {
-    color: #d0d0d6;
+    color: var(--text-strong);
     flex: 1;
   }
   .remove-adj {
     padding: 0 0.3rem;
     font-size: 0.75rem;
-    color: #f85149;
+    color: var(--color-danger);
     border: none;
     background: transparent;
   }
@@ -677,21 +677,21 @@
   .adj-delta,
   .adj-reason {
     padding: 0.2rem 0.35rem;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-soft);
     border-radius: 0.35rem;
-    background: #1b1b1f;
+    background: var(--bg-inset);
     color: inherit;
     font: inherit;
   }
   .add-adj {
     padding: 0.2rem 0.6rem;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-soft);
     border-radius: 0.35rem;
     background: transparent;
     color: inherit;
     font: inherit;
   }
   .add-adj:hover:not(:disabled) {
-    border-color: #4a4a8a;
+    border-color: var(--border-accent);
   }
 </style>

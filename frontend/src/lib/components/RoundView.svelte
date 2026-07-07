@@ -230,16 +230,16 @@
   th,
   td {
     padding: 0.3rem 0.6rem;
-    border-bottom: 1px solid #2b2b31;
+    border-bottom: 1px solid var(--border-divider);
     text-align: left;
   }
   th {
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font-weight: 600;
     font-size: 0.8rem;
   }
   tbody tr:nth-child(even) {
-    background: #28282f;
+    background: var(--bg-stripe);
   }
   .num {
     text-align: right;
@@ -273,18 +273,18 @@
     cursor: pointer;
   }
   .player:hover:not(:disabled) {
-    border-color: #3a3a42;
-    background: #26262c;
+    border-color: var(--border-soft);
+    background: var(--bg-hover);
   }
   .player.winner {
-    color: #3fb950;
+    color: var(--color-success);
     font-weight: 600;
   }
   .player.winner::before {
     content: "✓ ";
   }
   .player.loser {
-    color: #6a6a72;
+    color: var(--text-tertiary);
   }
 
   .draw-col {
@@ -298,57 +298,57 @@
     width: 1.9rem;
     height: 1.9rem;
     padding: 0;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-soft);
     border-radius: 0.4rem;
     background: transparent;
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font: inherit;
     font-weight: 700;
     cursor: pointer;
   }
   .draw:hover:not(:disabled) {
-    background: #26262c;
+    background: var(--bg-hover);
   }
   .draw.active {
-    border-color: #d29922;
-    color: #d29922;
-    background: #2a2410;
+    border-color: var(--color-warning);
+    color: var(--color-warning);
+    background: var(--bg-warning);
   }
 
   .handicap {
     width: 4.5rem;
-    background: #1c1c22;
+    background: var(--bg-inset);
     color: inherit;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-soft);
     border-radius: 0.4rem;
     padding: 0.2rem 0.35rem;
     font: inherit;
   }
   .giver {
     margin-left: 0.5rem;
-    color: #6a6a72;
+    color: var(--text-tertiary);
     font-size: 0.8rem;
   }
   .suggested {
-    color: #c9c9d0;
+    color: var(--text-strong);
     font-size: 0.85rem;
   }
   .na {
-    color: #4a4a52;
+    color: var(--text-muted);
   }
 
   .hint,
   .empty {
-    color: #6a6a72;
+    color: var(--text-tertiary);
     font-size: 0.8rem;
     margin-top: 0.6rem;
   }
   .hint.warning {
-    color: #d29922;
+    color: var(--color-warning);
   }
   .bye {
     margin-top: 1rem;
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font-size: 0.9rem;
   }
 

@@ -14,9 +14,9 @@
 
 <style>
   .locale-switcher select {
-    background: #2d2d34;
+    background: var(--bg-raised);
     color: inherit;
-    border: 1px solid #34343b;
+    border: 1px solid var(--border);
     border-radius: 0.4rem;
     padding: 0.3rem 0.5rem;
     font: inherit;

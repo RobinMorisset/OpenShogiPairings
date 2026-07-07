@@ -57,6 +57,7 @@
   import ResultsView from "./lib/components/ResultsView.svelte";
   import TournamentSettingsView from "./lib/components/TournamentSettingsView.svelte";
   import LocaleSwitcher from "./lib/components/LocaleSwitcher.svelte";
+  import ThemeSwitcher from "./lib/components/ThemeSwitcher.svelte";
 
   let tournament = $state<Tournament | null>(null);
   let standings = $state<Standing[]>([]);
@@ -477,7 +478,10 @@
         {/if}
       </div>
       {#if i18nReady}
-        <LocaleSwitcher />
+        <div class="header-controls">
+          <ThemeSwitcher />
+          <LocaleSwitcher />
+        </div>
       {/if}
     </div>
   </header>
@@ -764,17 +768,20 @@
   .header-titles {
     text-align: center;
   }
-  .header-top :global(.locale-switcher) {
+  .header-controls {
     position: absolute;
     right: 0;
     top: 0.2rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
   }
   h1 {
     font-size: 1.8rem;
     margin: 0;
   }
   .subtitle {
-    color: #9a9aa2;
+    color: var(--text-secondary);
     margin: 0.25rem 0 0;
   }
   .toolbar {
@@ -794,7 +801,7 @@
     font-size: 1.25rem;
   }
   .unsaved-dot {
-    color: #d29922;
+    color: var(--color-warning);
     font-size: 0.6rem;
   }
   .toolbar-actions {
@@ -802,20 +809,20 @@
     gap: 0.5rem;
   }
   .toolbar-actions .ghost.active {
-    border-color: #4a4a8a;
-    color: #cdd6f4;
+    border-color: var(--border-accent);
+    color: var(--text-on-accent);
   }
 
   .backups-panel {
     margin-bottom: 1.25rem;
     padding: 0.6rem 0.9rem;
-    border: 1px solid #34343b;
+    border: 1px solid var(--border);
     border-radius: 0.5rem;
-    background: #1c1c22;
+    background: var(--bg-inset);
   }
   .backups-panel .small {
     font-size: 0.8rem;
-    color: #9a9aa2;
+    color: var(--text-secondary);
     margin: 0;
   }
   .backups-list {
@@ -829,13 +836,13 @@
     align-items: center;
     gap: 0.75rem;
     padding: 0.3rem 0;
-    border-bottom: 1px solid #2b2b31;
+    border-bottom: 1px solid var(--border-divider);
   }
   .backups-list li:last-child {
     border-bottom: none;
   }
   .backup-time {
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
@@ -851,7 +858,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.25rem;
-    border-bottom: 1px solid #34343b;
+    border-bottom: 1px solid var(--border);
     margin-bottom: 1.25rem;
   }
   .tab {
@@ -860,22 +867,22 @@
     border-bottom: none;
     border-radius: 0.4rem 0.4rem 0 0;
     background: transparent;
-    color: #9a9aa2;
+    color: var(--text-secondary);
     font: inherit;
     cursor: pointer;
     margin-bottom: -1px;
   }
   .tab:hover:not(:disabled):not(.active) {
-    color: #e6e6e6;
+    color: var(--text);
   }
   .tab.active {
-    color: #e6e6e6;
-    border-color: #34343b;
-    background: #232329;
+    color: var(--text);
+    border-color: var(--border);
+    background: var(--bg-surface);
   }
   .tab.draft-tab {
     font-style: italic;
-    color: #7aa2f7;
+    color: var(--color-accent);
   }
   .round-controls {
     margin-left: auto;
@@ -889,47 +896,47 @@
     align-items: center;
     gap: 0.35rem;
     font-size: 0.85rem;
-    color: #9a9aa2;
+    color: var(--text-secondary);
   }
   .cup-size select {
-    background: #2d2d34;
+    background: var(--bg-raised);
     color: inherit;
-    border: 1px solid #34343b;
+    border: 1px solid var(--border);
     border-radius: 0.4rem;
     padding: 0.3rem 0.4rem;
     font: inherit;
   }
   .cup-warn {
-    color: #d29922;
+    color: var(--color-warning);
   }
   .ctrl {
     padding: 0.35rem 0.75rem;
-    border: 1px solid #34343b;
+    border: 1px solid var(--border);
     border-radius: 0.5rem;
-    background: #2d2d34;
+    background: var(--bg-raised);
     color: inherit;
     font: inherit;
     cursor: pointer;
   }
   .ctrl:hover:not(:disabled) {
-    border-color: #4a4a52;
+    border-color: var(--border-hover);
   }
   .ctrl:disabled {
     opacity: 0.45;
     cursor: not-allowed;
   }
   .ctrl.primary:not(:disabled) {
-    border-color: #3b5bdb;
-    background: #2b3a67;
-    color: #cdd6f4;
+    border-color: var(--border-accent-strong);
+    background: var(--bg-accent);
+    color: var(--text-on-accent);
   }
   .ctrl.danger:not(:disabled) {
-    border-color: #6e2329;
-    color: #ffb4ab;
+    border-color: var(--border-danger);
+    color: var(--text-on-danger);
   }
   .ctrl.danger:hover:not(:disabled) {
-    border-color: #a13b3b;
-    background: #3d1417;
+    border-color: var(--border-danger-strong);
+    background: var(--bg-danger);
   }
   .ratings-status {
     display: flex;
@@ -938,7 +945,7 @@
     gap: 0.75rem;
     margin-top: 0.6rem;
     font-size: 0.8rem;
-    color: #9a9aa2;
+    color: var(--text-secondary);
   }
   .ratings-status button.small {
     padding: 0.25rem 0.6rem;
@@ -948,16 +955,16 @@
     margin-top: 1.25rem;
   }
   .error-banner {
-    background: #3d1417;
-    border: 1px solid #6e2329;
-    color: #ffb4ab;
+    background: var(--bg-danger);
+    border: 1px solid var(--border-danger);
+    color: var(--text-on-danger);
     padding: 0.6rem 0.9rem;
     border-radius: 0.5rem;
     font-size: 0.9rem;
     margin-bottom: 1rem;
   }
   .muted {
-    color: #9a9aa2;
+    color: var(--text-secondary);
     text-align: center;
   }
   footer {

@@ -67,7 +67,7 @@
     display: block;
     text-align: left;
     font-size: 0.85rem;
-    color: #9a9aa2;
+    color: var(--text-secondary);
   }
   input[type="text"] {
     display: block;
@@ -75,9 +75,9 @@
     box-sizing: border-box;
     margin-top: 0.3rem;
     padding: 0.5rem 0.6rem;
-    border: 1px solid #34343b;
+    border: 1px solid var(--border);
     border-radius: 0.5rem;
-    background: #1b1b1f;
+    background: var(--bg-inset);
     color: inherit;
     font: inherit;
   }
@@ -88,7 +88,7 @@
   }
   .or {
     margin: 1rem 0 0.75rem;
-    color: #6a6a72;
+    color: var(--text-tertiary);
     font-size: 0.8rem;
   }
 </style>
