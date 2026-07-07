@@ -53,7 +53,7 @@ Known limitations and future work, roughly ordered by area.
 ## Other
 
 - **Allow storing default properties** which apply to all new started tournament.
-  I'm not sure it is worthwhile, just a savec tournament with no players and just the properties set is equivalent.
+  I'm not sure it is worthwhile, just a saved tournament with no players and just the properties set is equivalent.
 
 - **Add authentication to the distributed instance** So that only referees with the right password can access it.
 

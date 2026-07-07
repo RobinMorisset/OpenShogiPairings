@@ -76,6 +76,12 @@
   let cupEnabled = $state(false);
   let handicapPolicy = $state<HandicapPolicy>("allowed");
   let tiebreaks = $state<Tiebreak[]>([]);
+  let eloEnabled = $state(false);
+  let eloKPercent = $state(100);
+
+  // In the experimental ELO mode the Swiss knobs (MacMahon, degressive, club
+  // protection, floater selection) don't apply, so they're greyed out.
+  const swissDisabled = $derived(eloEnabled);
 
   // Metrics not yet in the ranking order — the choices for the "add" dropdown.
   const availableTiebreaks = $derived(
@@ -102,6 +108,8 @@
     const sCup = settings.cup_enabled;
     const sHandicap = settings.handicap_policy;
     const sTiebreaks = settings.tiebreaks ?? [];
+    const sElo = settings.elo_pairing_enabled ?? false;
+    const sEloK = settings.elo_k_multiplier_percent ?? 100;
     untrack(() => {
       const matches =
         eq(cleanSorted(thresholds), sThresholds) &&
@@ -112,7 +120,9 @@
         floaterStyle === sFloater &&
         cupEnabled === sCup &&
         handicapPolicy === sHandicap &&
-        eqStr(tiebreaks, sTiebreaks);
+        eqStr(tiebreaks, sTiebreaks) &&
+        eloEnabled === sElo &&
+        eloKPercent === sEloK;
       if (!matches) {
         thresholds = [...sThresholds];
         removals = [...sRemovals];
@@ -123,6 +133,8 @@
         cupEnabled = sCup;
         handicapPolicy = sHandicap;
         tiebreaks = [...sTiebreaks];
+        eloEnabled = sElo;
+        eloKPercent = sEloK;
       }
     });
   });
@@ -146,7 +158,22 @@
       cup_enabled: cupEnabled,
       handicap_policy: handicapPolicy,
       tiebreaks: [...tiebreaks],
+      elo_pairing_enabled: eloEnabled,
+      elo_k_multiplier_percent: eloKPercent,
     });
+  }
+
+  function setEloEnabled(v: boolean) {
+    eloEnabled = v;
+    persist();
+  }
+
+  function editEloMultiplier(raw: string) {
+    // Presented as a decimal multiplier (×1.0), stored as an integer percent.
+    const m = Number(raw);
+    const pct = Math.round((Number.isFinite(m) ? m : 1) * 100);
+    eloKPercent = Math.max(1, pct);
+    persist();
   }
 
   function addTiebreak(code: Tiebreak) {
@@ -303,8 +330,46 @@
     </p>
   {/if}
 
-  <h3>MacMahon groups</h3>
-  <p class="desc">
+  <div class="section mode-section">
+    <h3>ELO-based pairing (experimental)</h3>
+    <p class="desc">
+      Ignore Swiss / MacMahon entirely and pair each round to minimise the ELO
+      difference of every game, using a live Bayesian estimate of each player's
+      strength that updates from the results.
+    </p>
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={eloEnabled}
+        disabled={busy}
+        onchange={(e) => setEloEnabled(e.currentTarget.checked)}
+      />
+      Pair by estimated ELO (disables MacMahon and the Swiss options below)
+    </label>
+    {#if eloEnabled}
+      <label class="check elo-k">
+        Drift multiplier ×
+        <input
+          type="number"
+          min="0.5"
+          step="0.5"
+          class="threshold narrow"
+          value={eloKPercent / 100}
+          disabled={busy}
+          onchange={(e) => editEloMultiplier(e.currentTarget.value)}
+        />
+      </label>
+      <p class="desc small-note">
+        How fast an estimate may drift from the registration rating (applied to
+        each player's FIDE K factor). 1 keeps ratings close; higher reacts faster
+        to upsets. Usually 1–4.
+      </p>
+    {/if}
+  </div>
+
+  <fieldset class="swiss-fieldset" disabled={swissDisabled}>
+    <h3>MacMahon groups</h3>
+    <p class="desc">
     Each player starts with one point per ELO threshold their rating reaches. For
     example, with thresholds 1200 and 1700 a player rated below 1200 starts at 0,
     from 1200 to 1699 at 1, and 1700 or above at 2. Unrated players start at 0.
@@ -535,6 +600,7 @@
       Median Swiss — the median of the lower group floats up
     </label>
   </div>
+  </fieldset>
 
   <div class="section">
     <h3>Hybrid cup</h3>
@@ -674,6 +740,29 @@
     margin-top: 1.75rem;
     border-top: 1px solid #2a2a30;
     padding-top: 1rem;
+  }
+  /* Groups the Swiss-only sections so they can be greyed out as one in ELO mode.
+     Reset the browser's default fieldset chrome; the inner `.section`s keep their
+     own separators. */
+  fieldset.swiss-fieldset {
+    border: none;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+  }
+  fieldset.swiss-fieldset:disabled {
+    opacity: 0.5;
+  }
+  .mode-section {
+    margin-top: 0.5rem;
+    border-top: none;
+    padding-top: 0;
+  }
+  .elo-k {
+    margin-top: 0.7rem;
+  }
+  .small-note {
+    margin: 0.5rem 0 0;
   }
   .desc {
     color: #9a9aa2;

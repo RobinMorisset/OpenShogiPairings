@@ -46,6 +46,7 @@ use std::collections::{HashMap, HashSet};
 
 use uuid::Uuid;
 
+use crate::elo::{estimate_elos, UNRATED_PRIOR_MEAN};
 use crate::matching::min_weight_perfect_matching;
 use crate::player::Player;
 use crate::round::{Board, PairingSource, Round};
@@ -115,9 +116,10 @@ pub fn pair_round_constrained(
 /// decay reads smoothly.
 const FLOAT_BASE: i128 = 720;
 
-/// The pairing rules, in priority order (highest first). This ordering is the
-/// single source of truth for priority; the scalar multipliers are derived from
-/// it (see [`scale_ladder`]).
+/// The pairing rules. The active subset and its priority order depend on the
+/// mode (see [`active_rules`]); that ordering is the single source of truth for
+/// priority, and the scalar multipliers are derived from it (see
+/// [`scale_ladder`]).
 #[derive(Clone, Copy)]
 enum Rule {
     /// Never play the same opponent twice / never take the bye twice.
@@ -134,11 +136,22 @@ enum Rule {
     Club,
     /// Fold within a score group (top half meets bottom half).
     Fold,
+    /// (ELO mode) Choose *who* takes the bye — the weakest present player by
+    /// estimated ELO. A bye-only rule, sitting above [`Rule::EloGap`] (which is
+    /// indifferent to the bye), so the sit-out is decided before the rest is
+    /// optimized.
+    ByeSelection,
+    /// (ELO mode) Prefer opponents of equal estimated ELO; penalty grows with the
+    /// square of the ELO gap. Replaces the whole Swiss score/float/fold family.
+    EloGap,
 }
 
-impl Rule {
-    /// The rules from highest to lowest priority.
-    const ORDER: [Rule; 6] = [
+/// The rules in effect, highest priority first, for the active mode. Swiss/
+/// MacMahon is the default; the experimental ELO mode swaps the whole
+/// score/float/fold/club family for a bye-selection rule and a squared-ELO-gap
+/// rule, keeping only no-rematch above them.
+fn active_rules(settings: &TournamentSettings) -> &'static [Rule] {
+    const SWISS: [Rule; 6] = [
         Rule::Rematch,
         Rule::ScoreGap,
         Rule::FloatRepeat,
@@ -146,8 +159,12 @@ impl Rule {
         Rule::Club,
         Rule::Fold,
     ];
-    /// How many rules there are (the multiplier ladder's length).
-    const COUNT: usize = Self::ORDER.len();
+    const ELO: [Rule; 3] = [Rule::Rematch, Rule::ByeSelection, Rule::EloGap];
+    if settings.elo_pairing_enabled {
+        &ELO
+    } else {
+        &SWISS
+    }
 }
 
 /// Everything the rules need to score an edge, plus the per-round quantities their
@@ -170,6 +187,16 @@ struct Ctx<'a> {
     max_gap: i128,
     /// Largest score-group size among the free players (bounds the fold rule).
     max_group: i128,
+    /// Number of free players (bounds the bye-selection rule).
+    free_count: i128,
+    /// (ELO mode) Rounded estimated ELO per free player; empty in Swiss mode.
+    elo: &'a HashMap<Uuid, i64>,
+    /// (ELO mode) Ascending ELO rank per free player, 0 = weakest; empty in Swiss
+    /// mode.
+    elo_rank: &'a HashMap<Uuid, i128>,
+    /// (ELO mode) Largest rounded-ELO gap among free players (bounds the ELO-gap
+    /// rule).
+    max_elo_gap: i128,
 }
 
 /// Float-repeat units for one player/direction: 0 if they never floated that way,
@@ -266,6 +293,15 @@ impl Rule {
                     _ => 0,
                 }
             }
+            // Bye selection acts only on the bye edge; a real board is neutral.
+            Rule::ByeSelection => 0,
+            // ELO mode: prefer equal estimated ELO; penalty is the squared gap.
+            Rule::EloGap => {
+                let ga = ctx.elo.get(&a).copied().unwrap_or(0);
+                let gb = ctx.elo.get(&b).copied().unwrap_or(0);
+                let gap = (ga - gb) as i128;
+                gap * gap
+            }
         }
     }
 
@@ -278,13 +314,20 @@ impl Rule {
             Rule::FloatRepeat => float_units(s.last_descended, ctx.round),
             // A bye is a downfloat, so prefer the weakest of the group to take it.
             Rule::FloaterSelection => floater_units(ctx, player, true),
-            Rule::ScoreGap | Rule::Club | Rule::Fold => 0,
+            // ELO mode: the weakest present player (lowest ELO rank) takes the bye.
+            Rule::ByeSelection => ctx.elo_rank.get(&player).copied().unwrap_or(0),
+            Rule::ScoreGap | Rule::Club | Rule::Fold | Rule::EloGap => 0,
         }
     }
 
     /// A safe upper bound on the total units this rule can emit across one round's
     /// matching: (largest units on any single edge or bye) × (number of edges).
     fn max_total_units(self, ctx: &Ctx) -> i128 {
+        // The bye-selection rule fires on a single bye per round, not on every
+        // edge, so its total is bounded by the largest rank (free_count − 1) once.
+        if let Rule::ByeSelection = self {
+            return (ctx.free_count - 1).max(0);
+        }
         let per_edge = match self {
             Rule::Rematch => 1,
             Rule::ScoreGap => ctx.max_gap * ctx.max_gap,
@@ -294,6 +337,9 @@ impl Rule {
             Rule::Club => i128::from(ctx.club_active), // 0 when off — no wasted tier
             // Two |·| terms, each ≤ group_size − 1.
             Rule::Fold => 2 * (ctx.max_group - 1).max(0),
+            // The squared gap between the widest-separated free players.
+            Rule::EloGap => ctx.max_elo_gap * ctx.max_elo_gap,
+            Rule::ByeSelection => unreachable!("handled above"),
         };
         per_edge * ctx.edges
     }
@@ -304,28 +350,29 @@ impl Rule {
 /// mult[j]·max_total[j]`, so one unit of rule `i` strictly exceeds the largest
 /// possible sum of all lower-priority rules combined — a correct lexicographic
 /// scalarization with no hand-tuned gaps.
-fn scale_ladder(max_total: [i128; Rule::COUNT]) -> [i128; Rule::COUNT] {
-    let mut mult = [0i128; Rule::COUNT];
+fn scale_ladder(max_total: &[i128]) -> Vec<i128> {
+    let mut mult = vec![0i128; max_total.len()];
     let mut lower = 0i128; // Σ over the already-assigned lower-priority rules
-    for i in (0..Rule::COUNT).rev() {
+    for i in (0..max_total.len()).rev() {
         mult[i] = 1 + lower;
         lower += mult[i] * max_total[i];
     }
     mult
 }
 
-/// Total edge weight for pairing `a` against `b`: `Σ mult[rule] · units`.
-fn edge_cost(ctx: &Ctx, mult: &[i128; Rule::COUNT], a: Uuid, b: Uuid) -> i128 {
-    Rule::ORDER
+/// Total edge weight for pairing `a` against `b`: `Σ mult[rule] · units`, over the
+/// active rules for this mode.
+fn edge_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], a: Uuid, b: Uuid) -> i128 {
+    rules
         .iter()
         .zip(mult)
         .map(|(rule, m)| m * rule.edge_units(ctx, a, b))
         .sum()
 }
 
-/// Total edge weight for giving `player` the bye.
-fn bye_cost(ctx: &Ctx, mult: &[i128; Rule::COUNT], player: Uuid) -> i128 {
-    Rule::ORDER
+/// Total edge weight for giving `player` the bye, over the active rules.
+fn bye_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], player: Uuid) -> i128 {
+    rules
         .iter()
         .zip(mult)
         .map(|(rule, m)| m * rule.bye_units(ctx, player))
@@ -444,6 +491,38 @@ pub fn pair_round_weighted(
             hi = hi.max(p);
         }
         let exempt_clubs = settings.exempt_clubs_normalized();
+
+        // ELO mode: a live estimate per free player (rounded), its ascending rank
+        // (0 = weakest, for the bye-selection rule), and the widest gap (for the
+        // ladder bound). All empty / zero in Swiss mode, where the ELO rules are
+        // not active.
+        let (elo, elo_rank, max_elo_gap) = if settings.elo_pairing_enabled {
+            let est = estimate_elos(players, settings, completed_rounds);
+            let elo: HashMap<Uuid, i64> = free
+                .iter()
+                .map(|&id| {
+                    let e = est.get(&id).copied().unwrap_or(UNRATED_PRIOR_MEAN);
+                    (id, e.round() as i64)
+                })
+                .collect();
+            // Rank ascending by ELO, ties broken by tournament number so the bye
+            // choice is deterministic.
+            let tnum = |id: &Uuid| by_player[id].tournament_id.unwrap_or(u32::MAX);
+            let mut order = free.clone();
+            order.sort_by(|x, y| elo[x].cmp(&elo[y]).then_with(|| tnum(x).cmp(&tnum(y))));
+            let elo_rank: HashMap<Uuid, i128> = order
+                .iter()
+                .enumerate()
+                .map(|(rank, id)| (*id, rank as i128))
+                .collect();
+            let (elo_lo, elo_hi) = elo
+                .values()
+                .fold((i64::MAX, i64::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+            (elo, elo_rank, (elo_hi - elo_lo).max(0) as i128)
+        } else {
+            (HashMap::new(), HashMap::new(), 0)
+        };
+
         let ctx = Ctx {
             scores: &scores,
             by_player: &by_player,
@@ -455,13 +534,19 @@ pub fn pair_round_weighted(
             edges: (vcount / 2) as i128,
             max_gap: hi.saturating_sub(lo) as i128,
             max_group: fold.values().map(|f| f.group_size).max().unwrap_or(0) as i128,
+            free_count: k as i128,
+            elo: &elo,
+            elo_rank: &elo_rank,
+            max_elo_gap,
         };
-        let mult = scale_ladder(Rule::ORDER.map(|r| r.max_total_units(&ctx)));
+        let rules = active_rules(settings);
+        let max_total: Vec<i128> = rules.iter().map(|r| r.max_total_units(&ctx)).collect();
+        let mult = scale_ladder(&max_total);
 
         let mut cost = vec![vec![0i128; vcount]; vcount];
         for i in 0..k {
             for j in (i + 1)..k {
-                let c = edge_cost(&ctx, &mult, free[i], free[j]);
+                let c = edge_cost(&ctx, rules, &mult, free[i], free[j]);
                 cost[i][j] = c;
                 cost[j][i] = c;
             }
@@ -469,7 +554,7 @@ pub fn pair_round_weighted(
         if need_phantom {
             let p = k;
             for i in 0..k {
-                let c = bye_cost(&ctx, &mult, free[i]);
+                let c = bye_cost(&ctx, rules, &mult, free[i]);
                 cost[i][p] = c;
                 cost[p][i] = c;
             }
@@ -825,6 +910,82 @@ mod tests {
         assert!(pairs.contains(&unord(p[1].id, p[3].id)), "past the window, fold pairs Y-Y");
     }
 
+    // --- ELO (non-Swiss) mode ---------------------------------------------
+
+    fn elo_settings() -> TournamentSettings {
+        TournamentSettings {
+            elo_pairing_enabled: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn elo_mode_pairs_adjacent_ratings_round_one() {
+        // Round 1 (no games yet): every estimate sits at its registration rating,
+        // so minimizing the squared ELO gap pairs neighbours: 2000-1950, 1500-1450.
+        let p = vec![
+            player(1, Some(2000), None),
+            player(2, Some(1950), None),
+            player(3, Some(1500), None),
+            player(4, Some(1450), None),
+        ];
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+
+        let round = pair_round_weighted(1, &p, &elo_settings(), &[], &present, &[], None);
+
+        let pairs = board_pairs(&round);
+        assert!(pairs.contains(&unord(p[0].id, p[1].id)), "closest pair 2000-1950");
+        assert!(pairs.contains(&unord(p[2].id, p[3].id)), "closest pair 1500-1450");
+    }
+
+    #[test]
+    fn elo_mode_gives_the_bye_to_the_weakest() {
+        // Five players, no forced bye: the lowest-rated (and, round 1, lowest
+        // estimate) should sit out, and the other four pair by adjacency.
+        let p: Vec<Player> = (1..=5).map(|i| player(i, Some(2000 - (i - 1) * 300), None)).collect();
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+
+        let round = pair_round_weighted(1, &p, &elo_settings(), &[], &present, &[], None);
+
+        assert_eq!(round.bye, Some(p[4].id), "the weakest player takes the bye");
+        assert_eq!(round.boards.len(), 2);
+    }
+
+    #[test]
+    fn elo_mode_reacts_to_results_and_avoids_rematch() {
+        // Round 1 paired 2000-1950 and 1500-1450. Say the two lower-rated players
+        // (1950, 1450) win. Their estimates rise; round 2 must not rematch, and the
+        // squared-ELO-gap rule now pairs the two round-1 winners together and the
+        // two losers together.
+        let p = vec![
+            player(1, Some(2000), None),
+            player(2, Some(1950), None),
+            player(3, Some(1500), None),
+            player(4, Some(1450), None),
+        ];
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let settings = elo_settings();
+
+        // 1950 (p1) beat 2000 (p0); 1450 (p3) beat 1500 (p2).
+        let r1 = completed_round(
+            1,
+            &[
+                (p[1].id, p[0].id, Winner::Player1),
+                (p[3].id, p[2].id, Winner::Player1),
+            ],
+            None,
+        );
+
+        let round = pair_round_weighted(2, &p, &settings, &[r1], &present, &[], None);
+        let pairs = board_pairs(&round);
+        // No rematch of the round-1 boards.
+        assert!(!pairs.contains(&unord(p[0].id, p[1].id)));
+        assert!(!pairs.contains(&unord(p[2].id, p[3].id)));
+        // Winners (raised estimates) meet, losers meet.
+        assert!(pairs.contains(&unord(p[1].id, p[3].id)), "the two winners are paired");
+        assert!(pairs.contains(&unord(p[0].id, p[2].id)), "the two losers are paired");
+    }
+
     #[test]
     fn floater_selection_floats_down_the_weakest() {
         // Upper group (1 MacMahon point): X0>X1>X2 by rating. Lower group (0): a
@@ -892,7 +1053,7 @@ mod tests {
     fn scale_ladder_tiers_are_disjoint() {
         // Arbitrary per-rule worst-case totals, in priority order (highest first).
         let max_total = [7i128, 40, 13, 21, 5, 9];
-        let mult = scale_ladder(max_total);
+        let mult = scale_ladder(&max_total);
         // Each rule's multiplier is exactly 1 plus the most every lower-priority
         // rule can contribute, so one of its units strictly dominates them all —
         // a correct lexicographic ordering.
@@ -903,7 +1064,7 @@ mod tests {
             assert_eq!(mult[i], 1 + lower_max);
             assert!(mult[i] > lower_max);
         }
-        assert_eq!(mult[Rule::COUNT - 1], 1); // the lowest-priority rule is the unit
+        assert_eq!(mult[max_total.len() - 1], 1); // the lowest-priority rule is the unit
     }
 
     #[test]
@@ -943,6 +1104,8 @@ mod tests {
         }
         let edges = 3i128; // 5 free + phantom bye = 6 vertices → 3 edges
         let exempt_clubs = HashSet::new();
+        let empty_elo: HashMap<Uuid, i64> = HashMap::new();
+        let empty_rank: HashMap<Uuid, i128> = HashMap::new();
         let ctx = Ctx {
             scores: &scores,
             by_player: &by_player,
@@ -954,9 +1117,14 @@ mod tests {
             edges,
             max_gap: (hi - lo) as i128,
             max_group: fold.values().map(|f| f.group_size).max().unwrap_or(0) as i128,
+            free_count: free.len() as i128,
+            elo: &empty_elo,
+            elo_rank: &empty_rank,
+            max_elo_gap: 0,
         };
 
-        for rule in Rule::ORDER {
+        // Check the Swiss rules (the ones active in the default mode).
+        for &rule in active_rules(&TournamentSettings::default()) {
             let bound = rule.max_total_units(&ctx);
             for i in 0..free.len() {
                 for j in (i + 1)..free.len() {

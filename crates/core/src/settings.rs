@@ -89,6 +89,13 @@ fn default_tiebreaks() -> Vec<Tiebreak> {
     Tiebreak::default_order()
 }
 
+/// The default ELO-estimate K multiplier, as an integer percent (100 = ×1.0).
+/// Named so `#[serde(default = …)]` can fill it in for tournaments saved before
+/// the field existed.
+fn default_elo_k_multiplier_percent() -> u32 {
+    100
+}
+
 /// Configuration that isn't tied to a single player or round.
 ///
 /// Kept as its own record so it can grow (time controls, tie-break choices, …)
@@ -143,6 +150,20 @@ pub struct TournamentSettings {
     /// Results tab. Defaults to the classic points → SOS → SODOS → SOSOS order.
     #[serde(default = "default_tiebreaks")]
     pub tiebreaks: Vec<Tiebreak>,
+    /// Experimental ELO-based (non-Swiss) pairing mode. When on, MacMahon, the
+    /// Swiss-specific rules (score gap, float repeat, floater selection, fold) and
+    /// club protection are all disabled; pairing instead minimizes the squared
+    /// difference of a live Bayesian ELO estimate. See
+    /// `docs/elo-pairing-mode.md`. Off by default.
+    #[serde(default)]
+    pub elo_pairing_enabled: bool,
+    /// The multiplier `m` on each player's FIDE K, as an integer percent
+    /// (100 = ×1.0), controlling how far the ELO estimate is allowed to drift from
+    /// the registration rating (bigger = faster drift). Stored as an integer so
+    /// the settings stay `Eq`; read as a float via [`Self::elo_k_multiplier`].
+    /// Only meaningful when `elo_pairing_enabled`; expected range ~100–400.
+    #[serde(default = "default_elo_k_multiplier_percent")]
+    pub elo_k_multiplier_percent: u32,
 }
 
 impl Default for TournamentSettings {
@@ -157,6 +178,8 @@ impl Default for TournamentSettings {
             cup_enabled: false,
             handicap_policy: HandicapPolicy::default(),
             tiebreaks: default_tiebreaks(),
+            elo_pairing_enabled: false,
+            elo_k_multiplier_percent: default_elo_k_multiplier_percent(),
         }
     }
 }
@@ -245,7 +268,17 @@ impl TournamentSettings {
         let mut seen_tb = HashSet::new();
         self.tiebreaks.retain(|&tb| seen_tb.insert(tb));
 
+        // A zero K multiplier would give a degenerate (zero-width) prior, freezing
+        // every estimate at its registration rating and dividing by zero in the
+        // solver — clamp it up to at least 1%.
+        self.elo_k_multiplier_percent = self.elo_k_multiplier_percent.max(1);
+
         self
+    }
+
+    /// The ELO-estimate K multiplier `m` as a float (percent / 100).
+    pub fn elo_k_multiplier(&self) -> f64 {
+        self.elo_k_multiplier_percent as f64 / 100.0
     }
 
     /// Sort thresholds ascending and drop duplicates — the canonical form kept in

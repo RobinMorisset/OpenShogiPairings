@@ -152,6 +152,18 @@ export interface TournamentSettings {
    * the classic SOSM → SODOSM → SOSOSM order.
    */
   tiebreaks: Tiebreak[];
+  /**
+   * Experimental ELO-based (non-Swiss) pairing mode. When on, MacMahon, the
+   * Swiss-specific rules and club protection are disabled; pairing minimizes the
+   * squared difference of a live Bayesian ELO estimate. Off by default.
+   */
+  elo_pairing_enabled: boolean;
+  /**
+   * The ELO-estimate K multiplier as an integer percent (100 = ×1.0): how far
+   * the estimate may drift from the registration rating. Only meaningful when
+   * `elo_pairing_enabled`; expected range ~100–400.
+   */
+  elo_k_multiplier_percent: number;
 }
 
 /** Mirror of `osp_core::HandicapPolicy`. */
