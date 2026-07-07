@@ -105,7 +105,23 @@
     "needsDifferentRatings": "Nécessite deux joueurs de classements différents",
     "alreadyCompletedWarning": "Ce round était déjà terminé — modifier un résultat ici met à jour le classement enregistré.",
     "clickToRecordWinner": "Cliquez sur un joueur pour l'enregistrer comme vainqueur.",
-    "byeLabel": "Exempt :"
+    "byeLabel": "Exempt :",
+    "explanation": {
+      "reportTitle": "Pourquoi ces appariements ?",
+      "compromiseOn": "Compromis sur : {rules}",
+      "ruleCount": "{count} × {rule}",
+      "boardsCount": "{count, plural, one {# table} other {# tables}}",
+      "rule": {
+        "rematch": "revanche",
+        "score_gap": "écart de points",
+        "float_repeat": "flottement répété",
+        "floater_selection": "choix du flotteur",
+        "club": "même club",
+        "fold": "pliage",
+        "bye_selection": "choix de l'exempt",
+        "elo_gap": "écart ELO"
+      }
+    }
   },
   "resultsView": {
     "noPlayers": "Aucun joueur inscrit pour l'instant.",

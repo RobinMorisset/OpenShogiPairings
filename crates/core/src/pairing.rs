@@ -44,6 +44,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::elo::{estimate_elos, UNRATED_PRIOR_MEAN};
@@ -146,6 +147,22 @@ enum Rule {
     EloGap,
 }
 
+/// A serializable identity for a [`Rule`], surfaced to clients so a pairing can be
+/// explained in the vocabulary of its rules. Mirrors [`Rule`] exactly (minus any
+/// explanation-internal tiebreakers, which carry no meaning to a referee).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleId {
+    Rematch,
+    ScoreGap,
+    FloatRepeat,
+    FloaterSelection,
+    Club,
+    Fold,
+    ByeSelection,
+    EloGap,
+}
+
 /// The rules in effect, highest priority first, for the active mode. Swiss/
 /// MacMahon is the default; the experimental ELO mode swaps the whole
 /// score/float/fold/club family for a bye-selection rule and a squared-ELO-gap
@@ -229,6 +246,20 @@ fn floater_units(ctx: &Ctx, id: Uuid, descending: bool) -> i128 {
 }
 
 impl Rule {
+    /// The serializable identity of this rule, for explanations.
+    fn id(self) -> RuleId {
+        match self {
+            Rule::Rematch => RuleId::Rematch,
+            Rule::ScoreGap => RuleId::ScoreGap,
+            Rule::FloatRepeat => RuleId::FloatRepeat,
+            Rule::FloaterSelection => RuleId::FloaterSelection,
+            Rule::Club => RuleId::Club,
+            Rule::Fold => RuleId::Fold,
+            Rule::ByeSelection => RuleId::ByeSelection,
+            Rule::EloGap => RuleId::EloGap,
+        }
+    }
+
     /// Penalty units for pairing `a` against `b` (before the priority multiplier).
     fn edge_units(self, ctx: &Ctx, a: Uuid, b: Uuid) -> i128 {
         let sa = ctx.scores.get(&a);
@@ -423,6 +454,300 @@ fn fold_ranks(
     info
 }
 
+// --- Pairing model (shared by pairing and explanation) --------------------
+
+/// One round's Swiss scoring context, built once from the pairing inputs and
+/// reused for both pairing and explanation. It owns the derived per-round data
+/// (scores, fold ranks, ELO estimates, the multiplier ladder) and lends a [`Ctx`]
+/// on demand, so an explanation is scored against the *identical* construction
+/// the pairing used — no risk of the two drifting apart.
+struct PairingModel<'a> {
+    scores: Scores,
+    by_player: HashMap<Uuid, &'a Player>,
+    fold: HashMap<Uuid, FoldInfo>,
+    exempt_clubs: HashSet<String>,
+    elo: HashMap<Uuid, i64>,
+    elo_rank: HashMap<Uuid, i128>,
+    round: u32,
+    floater_style: FloaterStyle,
+    club_active: bool,
+    edges: i128,
+    max_gap: i128,
+    max_group: i128,
+    free_count: i128,
+    max_elo_gap: i128,
+    rules: &'static [Rule],
+    mult: Vec<i128>,
+}
+
+impl<'a> PairingModel<'a> {
+    /// Build the model for the given `free` set (the players the matching will
+    /// pair). `need_phantom` is whether a bye vertex participates, so the edge
+    /// count — and hence the derived multipliers — match the matching that was or
+    /// will be solved.
+    fn build(
+        number: u32,
+        players: &'a [Player],
+        settings: &TournamentSettings,
+        completed_rounds: &[Round],
+        free: &[Uuid],
+        need_phantom: bool,
+    ) -> Self {
+        let scores = compute_scores(players, settings, completed_rounds);
+        let by_player: HashMap<Uuid, &Player> = players.iter().map(|p| (p.id, p)).collect();
+        let fold = fold_ranks(&scores, &by_player, free);
+
+        let (mut lo, mut hi) = (u32::MAX, 0u32);
+        for &id in free {
+            let p = scores.get(&id).points;
+            lo = lo.min(p);
+            hi = hi.max(p);
+        }
+        let exempt_clubs = settings.exempt_clubs_normalized();
+
+        // ELO mode: a live estimate per free player (rounded), its ascending rank
+        // (0 = weakest, for the bye-selection rule), and the widest gap (for the
+        // ladder bound). All empty / zero in Swiss mode.
+        let (elo, elo_rank, max_elo_gap) = if settings.elo_pairing_enabled {
+            let est = estimate_elos(players, settings, completed_rounds);
+            let elo: HashMap<Uuid, i64> = free
+                .iter()
+                .map(|&id| {
+                    let e = est.get(&id).copied().unwrap_or(UNRATED_PRIOR_MEAN);
+                    (id, e.round() as i64)
+                })
+                .collect();
+            let tnum = |id: &Uuid| by_player[id].tournament_id.unwrap_or(u32::MAX);
+            let mut order = free.to_vec();
+            order.sort_by(|x, y| elo[x].cmp(&elo[y]).then_with(|| tnum(x).cmp(&tnum(y))));
+            let elo_rank: HashMap<Uuid, i128> = order
+                .iter()
+                .enumerate()
+                .map(|(rank, id)| (*id, rank as i128))
+                .collect();
+            let (elo_lo, elo_hi) = elo
+                .values()
+                .fold((i64::MAX, i64::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+            (elo, elo_rank, (elo_hi - elo_lo).max(0) as i128)
+        } else {
+            (HashMap::new(), HashMap::new(), 0)
+        };
+
+        let k = free.len();
+        let vcount = k + usize::from(need_phantom);
+        let max_group = fold.values().map(|f| f.group_size).max().unwrap_or(0) as i128;
+        let rules = active_rules(settings);
+
+        let mut model = PairingModel {
+            scores,
+            by_player,
+            fold,
+            exempt_clubs,
+            elo,
+            elo_rank,
+            round: number,
+            floater_style: settings.floater_style,
+            club_active: settings.club_protection_active(number),
+            edges: (vcount / 2) as i128,
+            max_gap: hi.saturating_sub(lo) as i128,
+            max_group,
+            free_count: k as i128,
+            max_elo_gap,
+            rules,
+            mult: Vec::new(),
+        };
+        // The multipliers depend on the per-rule bounds, which need a Ctx — so
+        // build the ladder in a second pass, once the rest of the model exists.
+        let max_total: Vec<i128> = {
+            let ctx = model.ctx();
+            rules.iter().map(|r| r.max_total_units(&ctx)).collect()
+        };
+        model.mult = scale_ladder(&max_total);
+        model
+    }
+
+    /// A scoring context borrowing this model's owned data.
+    fn ctx(&self) -> Ctx<'_> {
+        Ctx {
+            scores: &self.scores,
+            by_player: &self.by_player,
+            fold: &self.fold,
+            round: self.round,
+            floater_style: self.floater_style,
+            club_active: self.club_active,
+            exempt_clubs: &self.exempt_clubs,
+            edges: self.edges,
+            max_gap: self.max_gap,
+            max_group: self.max_group,
+            free_count: self.free_count,
+            elo: &self.elo,
+            elo_rank: &self.elo_rank,
+            max_elo_gap: self.max_elo_gap,
+        }
+    }
+
+    /// Scalar edge weight for pairing `a` against `b`.
+    fn edge_cost(&self, a: Uuid, b: Uuid) -> i128 {
+        edge_cost(&self.ctx(), self.rules, &self.mult, a, b)
+    }
+
+    /// Scalar edge weight for giving `player` the bye.
+    fn bye_cost(&self, player: Uuid) -> i128 {
+        bye_cost(&self.ctx(), self.rules, &self.mult, player)
+    }
+
+    /// Per-rule penalty units (pre-multiplier) for pairing `a` against `b`, in
+    /// priority order (aligned with [`Self::rules`]).
+    fn edge_units(&self, a: Uuid, b: Uuid) -> Vec<i128> {
+        let ctx = self.ctx();
+        self.rules.iter().map(|r| r.edge_units(&ctx, a, b)).collect()
+    }
+
+    /// Per-rule penalty units (pre-multiplier) for giving `player` the bye.
+    fn bye_units(&self, player: Uuid) -> Vec<i128> {
+        let ctx = self.ctx();
+        self.rules.iter().map(|r| r.bye_units(&ctx, player)).collect()
+    }
+
+    fn rules(&self) -> &'static [Rule] {
+        self.rules
+    }
+}
+
+// --- Explanation ----------------------------------------------------------
+
+/// One rule's contribution to a single board (or the bye): the rule and the
+/// penalty *units* it emitted, before the priority multiplier.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleContribution {
+    pub rule: RuleId,
+    pub units: i64,
+}
+
+/// The rule ledger for one pairing: every rule that fired on it (units > 0), in
+/// priority order, plus the highest-priority one — the rule that "bound" the
+/// pairing. `player2` is `None` for the bye.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoardLedger {
+    pub player1: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub player2: Option<Uuid>,
+    pub contributions: Vec<RuleContribution>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding: Option<RuleId>,
+}
+
+/// How often one rule had to be relaxed across a whole round, and the total units.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleTotal {
+    pub rule: RuleId,
+    pub boards: u32,
+    pub units: i64,
+}
+
+/// A human-facing explanation of one round's Swiss pairings: a per-board ledger,
+/// the bye's ledger, and the per-rule round totals (in priority order).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoundExplanation {
+    pub round: u32,
+    pub boards: Vec<BoardLedger>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bye: Option<BoardLedger>,
+    pub report: Vec<RuleTotal>,
+}
+
+/// Turn a per-rule unit vector (aligned with `rules`, priority order) into a
+/// ledger: keep only the rules that fired, and note the highest-priority one.
+fn ledger(player1: Uuid, player2: Option<Uuid>, rules: &[Rule], units: &[i128]) -> BoardLedger {
+    let contributions: Vec<RuleContribution> = rules
+        .iter()
+        .zip(units)
+        .filter(|(_, &u)| u > 0)
+        .map(|(r, &u)| RuleContribution {
+            rule: r.id(),
+            units: u as i64,
+        })
+        .collect();
+    // `rules` is priority-ordered and the filter preserves order, so the first
+    // surviving contribution is the binding (highest-priority) rule.
+    let binding = contributions.first().map(|c| c.rule);
+    BoardLedger {
+        player1,
+        player2,
+        contributions,
+        binding,
+    }
+}
+
+/// Add one pairing's units into the running round totals.
+fn accumulate(totals: &mut HashMap<RuleId, (u32, i64)>, rules: &[Rule], units: &[i128]) {
+    for (r, &u) in rules.iter().zip(units) {
+        if u > 0 {
+            let entry = totals.entry(r.id()).or_insert((0, 0));
+            entry.0 += 1;
+            entry.1 += u as i64;
+        }
+    }
+}
+
+/// Explain the Swiss pairings of one round: score each `swiss_boards` pair (and
+/// the `bye`, if any) against the exact model the round was paired from, and roll
+/// the per-rule units up into a round report.
+///
+/// `swiss_boards` must be the engine-paired boards only (forced/cup boards aren't
+/// engine decisions and carry no explanation). The bye is treated as matched to
+/// the phantom vertex, exactly as during pairing.
+pub fn explain_pairing(
+    number: u32,
+    players: &[Player],
+    settings: &TournamentSettings,
+    completed_rounds: &[Round],
+    swiss_boards: &[(Uuid, Uuid)],
+    bye: Option<Uuid>,
+) -> RoundExplanation {
+    // The Swiss free set the round was paired from: both players of every Swiss
+    // board, plus the bye. With a bye the count is odd, so a phantom participates.
+    let mut free: Vec<Uuid> = swiss_boards.iter().flat_map(|&(a, b)| [a, b]).collect();
+    if let Some(b) = bye {
+        free.push(b);
+    }
+    let need_phantom = bye.is_some();
+    let model = PairingModel::build(number, players, settings, completed_rounds, &free, need_phantom);
+    let rules = model.rules();
+
+    let mut totals: HashMap<RuleId, (u32, i64)> = HashMap::new();
+    let mut boards = Vec::with_capacity(swiss_boards.len());
+    for &(a, b) in swiss_boards {
+        let units = model.edge_units(a, b);
+        accumulate(&mut totals, rules, &units);
+        boards.push(ledger(a, Some(b), rules, &units));
+    }
+    let bye_ledger = bye.map(|player| {
+        let units = model.bye_units(player);
+        accumulate(&mut totals, rules, &units);
+        ledger(player, None, rules, &units)
+    });
+
+    // Report in priority order, keeping only rules that actually fired.
+    let report: Vec<RuleTotal> = rules
+        .iter()
+        .filter_map(|r| {
+            totals.get(&r.id()).map(|&(boards, units)| RuleTotal {
+                rule: r.id(),
+                boards,
+                units,
+            })
+        })
+        .collect();
+
+    RoundExplanation {
+        round: number,
+        boards,
+        bye: bye_ledger,
+        report,
+    }
+}
+
 /// Pair the `present` players by minimizing the total rule penalty, honoring
 /// referee-forced boards and a forced bye. This is the real pairing path used by
 /// [`crate::Tournament::confirm_round`]; the rules and their priority are
@@ -440,7 +765,6 @@ pub fn pair_round_weighted(
     forced_bye: Option<Uuid>,
 ) -> Round {
     let scores = compute_scores(players, settings, completed_rounds);
-    let by_player: HashMap<Uuid, &Player> = players.iter().map(|p| (p.id, p)).collect();
     // The float frozen onto each board: points(player1) − points(player2) now.
     let diff = |p1: Uuid, p2: Uuid| scores.points(&p1) as i32 - scores.points(&p2) as i32;
 
@@ -457,8 +781,6 @@ pub fn pair_round_weighted(
         .copied()
         .filter(|id| !placed.contains(id))
         .collect();
-
-    let fold = fold_ranks(&scores, &by_player, &free);
 
     // A phantom vertex absorbs the bye when an odd number of players remain and
     // none was forced; whoever the matching pairs with it sits out.
@@ -480,73 +802,15 @@ pub fn pair_round_weighted(
     let mut bye = forced_bye;
 
     if vcount >= 2 {
-        // Per-round quantities the rule bounds (and hence multipliers) depend on:
-        // the number of matching edges, the widest points gap, and the largest
-        // score group. From these the multiplier ladder is derived so its tiers
-        // are guaranteed disjoint (see `scale_ladder`).
-        let (mut lo, mut hi) = (u32::MAX, 0u32);
-        for &id in &free {
-            let p = scores.get(&id).points;
-            lo = lo.min(p);
-            hi = hi.max(p);
-        }
-        let exempt_clubs = settings.exempt_clubs_normalized();
-
-        // ELO mode: a live estimate per free player (rounded), its ascending rank
-        // (0 = weakest, for the bye-selection rule), and the widest gap (for the
-        // ladder bound). All empty / zero in Swiss mode, where the ELO rules are
-        // not active.
-        let (elo, elo_rank, max_elo_gap) = if settings.elo_pairing_enabled {
-            let est = estimate_elos(players, settings, completed_rounds);
-            let elo: HashMap<Uuid, i64> = free
-                .iter()
-                .map(|&id| {
-                    let e = est.get(&id).copied().unwrap_or(UNRATED_PRIOR_MEAN);
-                    (id, e.round() as i64)
-                })
-                .collect();
-            // Rank ascending by ELO, ties broken by tournament number so the bye
-            // choice is deterministic.
-            let tnum = |id: &Uuid| by_player[id].tournament_id.unwrap_or(u32::MAX);
-            let mut order = free.clone();
-            order.sort_by(|x, y| elo[x].cmp(&elo[y]).then_with(|| tnum(x).cmp(&tnum(y))));
-            let elo_rank: HashMap<Uuid, i128> = order
-                .iter()
-                .enumerate()
-                .map(|(rank, id)| (*id, rank as i128))
-                .collect();
-            let (elo_lo, elo_hi) = elo
-                .values()
-                .fold((i64::MAX, i64::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
-            (elo, elo_rank, (elo_hi - elo_lo).max(0) as i128)
-        } else {
-            (HashMap::new(), HashMap::new(), 0)
-        };
-
-        let ctx = Ctx {
-            scores: &scores,
-            by_player: &by_player,
-            fold: &fold,
-            round: number,
-            floater_style: settings.floater_style,
-            club_active: settings.club_protection_active(number),
-            exempt_clubs: &exempt_clubs,
-            edges: (vcount / 2) as i128,
-            max_gap: hi.saturating_sub(lo) as i128,
-            max_group: fold.values().map(|f| f.group_size).max().unwrap_or(0) as i128,
-            free_count: k as i128,
-            elo: &elo,
-            elo_rank: &elo_rank,
-            max_elo_gap,
-        };
-        let rules = active_rules(settings);
-        let max_total: Vec<i128> = rules.iter().map(|r| r.max_total_units(&ctx)).collect();
-        let mult = scale_ladder(&max_total);
+        // The pairing model owns the per-round scoring context and the derived
+        // multiplier ladder; the same construction backs `explain_pairing`.
+        let model =
+            PairingModel::build(number, players, settings, completed_rounds, &free, need_phantom);
 
         let mut cost = vec![vec![0i128; vcount]; vcount];
         for i in 0..k {
             for j in (i + 1)..k {
-                let c = edge_cost(&ctx, rules, &mult, free[i], free[j]);
+                let c = model.edge_cost(free[i], free[j]);
                 cost[i][j] = c;
                 cost[j][i] = c;
             }
@@ -554,7 +818,7 @@ pub fn pair_round_weighted(
         if need_phantom {
             let p = k;
             for i in 0..k {
-                let c = bye_cost(&ctx, rules, &mult, free[i]);
+                let c = model.bye_cost(free[i]);
                 cost[i][p] = c;
                 cost[p][i] = c;
             }
@@ -1142,6 +1406,98 @@ mod tests {
                     "a bye exceeded the rule's total-units bound"
                 );
             }
+        }
+    }
+
+    // --- Explanation ------------------------------------------------------
+
+    fn contribution(ledger: &BoardLedger, rule: RuleId) -> Option<i64> {
+        ledger
+            .contributions
+            .iter()
+            .find(|c| c.rule == rule)
+            .map(|c| c.units)
+    }
+
+    #[test]
+    fn explain_flags_fold_deviation_as_binding() {
+        // Round 1, one score group of four by rating p0>p1>p2>p3. The fold ideal
+        // is p0-p2 / p1-p3; explaining the *non-ideal* p0-p1 / p2-p3 pairing shows
+        // Fold as the (only, hence binding) rule that fired on each board.
+        let p: Vec<Player> = (1..=4).map(|i| player(i, Some(2000 - i * 10), None)).collect();
+        let boards = [(p[0].id, p[1].id), (p[2].id, p[3].id)];
+
+        let ex = explain_pairing(1, &p, &TournamentSettings::default(), &[], &boards, None);
+
+        assert_eq!(ex.boards.len(), 2);
+        for board in &ex.boards {
+            assert_eq!(board.binding, Some(RuleId::Fold));
+            assert_eq!(contribution(board, RuleId::Fold), Some(4));
+            // Nothing higher-priority fired: same score, no clubs, no floats.
+            assert_eq!(board.contributions.len(), 1);
+        }
+        // The report rolls the two boards up: Fold, 2 boards, 8 units total.
+        assert_eq!(ex.report.len(), 1);
+        assert_eq!(ex.report[0].rule, RuleId::Fold);
+        assert_eq!(ex.report[0].boards, 2);
+        assert_eq!(ex.report[0].units, 8);
+    }
+
+    #[test]
+    fn explain_clean_pairing_has_no_contributions() {
+        // The fold-ideal pairing of the same group deviates from nothing, so every
+        // rule emits zero units: empty ledgers, no binding rule, empty report.
+        let p: Vec<Player> = (1..=4).map(|i| player(i, Some(2000 - i * 10), None)).collect();
+        let boards = [(p[0].id, p[2].id), (p[1].id, p[3].id)];
+
+        let ex = explain_pairing(1, &p, &TournamentSettings::default(), &[], &boards, None);
+
+        for board in &ex.boards {
+            assert!(board.contributions.is_empty());
+            assert_eq!(board.binding, None);
+        }
+        assert!(ex.report.is_empty());
+    }
+
+    #[test]
+    fn explain_ledger_matches_the_engine_units() {
+        // Cross-group board: p0 (1 pt) floats down to meet a lower-group player.
+        // Explaining the exact pairing the engine would produce, the per-board
+        // ledger must equal what `edge_units` reports for that board — the whole
+        // faithfulness guarantee of sharing the model.
+        let p = vec![
+            player(1, Some(2000), None), // 1 point after r1
+            player(2, Some(1900), None),
+            player(3, Some(1000), None),
+            player(4, Some(900), None),
+        ];
+        let settings = TournamentSettings {
+            macmahon_thresholds: vec![1500],
+            ..Default::default()
+        };
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);
+
+        let boards: Vec<(Uuid, Uuid)> =
+            round.boards.iter().map(|b| (b.player1, b.player2)).collect();
+        let ex = explain_pairing(1, &p, &settings, &[], &boards, round.bye);
+
+        // Re-derive the units independently through a fresh model and compare.
+        let mut free: Vec<Uuid> = boards.iter().flat_map(|&(a, b)| [a, b]).collect();
+        if let Some(b) = round.bye {
+            free.push(b);
+        }
+        let model = PairingModel::build(1, &p, &settings, &[], &free, round.bye.is_some());
+        for (ledger, &(a, b)) in ex.boards.iter().zip(&boards) {
+            let units = model.edge_units(a, b);
+            let expected: i64 = model
+                .rules()
+                .iter()
+                .zip(&units)
+                .filter(|(r, _)| r.id() == RuleId::Fold)
+                .map(|(_, &u)| u as i64)
+                .sum();
+            assert_eq!(contribution(ledger, RuleId::Fold).unwrap_or(0), expected);
         }
     }
 }

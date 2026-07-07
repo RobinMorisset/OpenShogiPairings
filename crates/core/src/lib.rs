@@ -28,7 +28,10 @@ pub use elo::{estimate_elos, PROVISIONAL_GAMES_THRESHOLD};
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
 pub use grid_import::{import_american_grid, GridImportError};
 pub use handicap::suggested_handicap;
-pub use pairing::{pair_round, pair_round_constrained, pair_round_weighted};
+pub use pairing::{
+    explain_pairing, pair_round, pair_round_constrained, pair_round_weighted, BoardLedger,
+    RoundExplanation, RuleContribution, RuleId, RuleTotal,
+};
 pub use player::{NewPlayer, Player, PointAdjustment};
 pub use round::{Board, CupStage, Handicap, HandicapGame, PairingSource, Round, RoundDraft, Winner};
 pub use settings::{FloaterStyle, HandicapPolicy, Tiebreak, TournamentSettings};

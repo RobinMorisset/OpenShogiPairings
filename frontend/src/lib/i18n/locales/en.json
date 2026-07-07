@@ -105,7 +105,23 @@
     "needsDifferentRatings": "Needs two players with different ratings",
     "alreadyCompletedWarning": "This round was already completed — changing a result here updates the recorded standings.",
     "clickToRecordWinner": "Click a player to record them as the winner.",
-    "byeLabel": "Bye:"
+    "byeLabel": "Bye:",
+    "explanation": {
+      "reportTitle": "Why these pairings?",
+      "compromiseOn": "Compromise on: {rules}",
+      "ruleCount": "{count} × {rule}",
+      "boardsCount": "{count, plural, one {# board} other {# boards}}",
+      "rule": {
+        "rematch": "rematch",
+        "score_gap": "score gap",
+        "float_repeat": "repeat float",
+        "floater_selection": "floater choice",
+        "club": "club clash",
+        "fold": "fold",
+        "bye_selection": "bye choice",
+        "elo_gap": "ELO gap"
+      }
+    }
   },
   "resultsView": {
     "noPlayers": "No players registered yet.",

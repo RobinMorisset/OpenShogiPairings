@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::cup::{Cup, CupPodium, CUP_SIZES};
-use crate::pairing::pair_round_weighted;
+use crate::pairing::{explain_pairing, pair_round_weighted, RoundExplanation};
 use crate::player::{NewPlayer, Player, PointAdjustment};
 use crate::round::{Board, Handicap, HandicapGame, PairingSource, Round, RoundDraft, Winner};
 use crate::settings::TournamentSettings;
@@ -721,6 +721,41 @@ impl Tournament {
         self.rounds.push(round);
         self.draft = None;
         Ok(self.rounds.last().expect("just pushed a round"))
+    }
+
+    /// Explain the Swiss pairings of the round numbered `round_number`: for each
+    /// engine-paired board (and the bye), which rules were relaxed and by how
+    /// much, plus a per-rule round report. Forced and cup boards are omitted —
+    /// they were not chosen by the engine.
+    ///
+    /// Reconstructs the exact inputs the round was paired from (the standings
+    /// entering it and the same free set), so the ledger matches what the engine
+    /// actually optimized.
+    pub fn explain_round(
+        &self,
+        round_number: u32,
+    ) -> Result<RoundExplanation, TournamentError> {
+        let idx = self
+            .rounds
+            .iter()
+            .position(|r| r.number == round_number)
+            .ok_or(TournamentError::RoundNotFound(round_number))?;
+        let round = &self.rounds[idx];
+        let completed = &self.rounds[..idx];
+        let swiss_boards: Vec<(Uuid, Uuid)> = round
+            .boards
+            .iter()
+            .filter(|b| matches!(b.source, PairingSource::Swiss))
+            .map(|b| (b.player1, b.player2))
+            .collect();
+        Ok(explain_pairing(
+            round.number,
+            &self.players,
+            &self.settings,
+            completed,
+            &swiss_boards,
+            round.bye,
+        ))
     }
 
     /// Toggle the winner of a board in response to a player being clicked.

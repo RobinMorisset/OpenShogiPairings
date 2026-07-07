@@ -6,7 +6,8 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{
-    Board, CupPodium, Handicap, NewPlayer, Standing, Tournament, TournamentSettings, Winner,
+    Board, CupPodium, Handicap, NewPlayer, RoundExplanation, Standing, Tournament,
+    TournamentSettings, Winner,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -30,6 +31,7 @@ use crate::state::{AppState, TournamentStore};
 /// - `POST   /api/tournament/rounds/prepare`         begin drafting the next round
 /// - `PUT    /api/tournament/draft`                  edit the draft
 /// - `POST   /api/tournament/rounds`                 confirm the draft (pair & start)
+/// - `GET    /api/tournament/rounds/{n}/explanation` explain a round's Swiss pairings
 /// - `POST   /api/tournament/rounds/{n}/boards/{i}/result`  toggle a board winner
 /// - `POST   /api/tournament/rounds/{n}/boards/{i}/drawn`   set the draw flag
 /// - `PUT    /api/tournament/rounds/{n}/boards/{i}/handicap` set/clear the handicap
@@ -68,6 +70,10 @@ pub fn routes() -> Router<AppState> {
         .route("/api/tournament/rounds/prepare", post(prepare_round))
         .route("/api/tournament/draft", put(update_draft))
         .route("/api/tournament/rounds", post(confirm_round))
+        .route(
+            "/api/tournament/rounds/{round_number}/explanation",
+            get(round_explanation),
+        )
         .route(
             "/api/tournament/rounds/{round_number}/boards/{board_index}/result",
             post(set_board_result),
@@ -376,6 +382,18 @@ async fn confirm_round(
     let label = round_label(&store, "round", "started");
     backup_after(&store, &label);
     Ok((StatusCode::CREATED, view(&store)?))
+}
+
+/// Explain a round's Swiss pairings: per-board rule ledger and round report.
+/// Read-only, so no backup is taken.
+async fn round_explanation(
+    State(state): State<AppState>,
+    Path(round_number): Path<u32>,
+) -> Result<Json<RoundExplanation>, ApiError> {
+    let store = state.store.read().expect("store lock poisoned");
+    let tournament = store.current().ok_or(ApiError::NoTournament)?;
+    let explanation = tournament.explain_round(round_number)?;
+    Ok(Json(explanation))
 }
 
 /// Body of the board-result endpoint: which player the referee clicked.

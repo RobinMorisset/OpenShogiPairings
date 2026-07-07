@@ -119,6 +119,51 @@ export interface Round {
   completed: boolean;
 }
 
+/** A pairing rule, mirror of `osp_core::RuleId` (serde snake_case). Priority
+ *  order, highest first: no-rematch, equal score, no repeat float, floater
+ *  selection, different clubs, fold; ELO mode swaps in bye-selection + ELO-gap. */
+export type RuleId =
+  | "rematch"
+  | "score_gap"
+  | "float_repeat"
+  | "floater_selection"
+  | "club"
+  | "fold"
+  | "bye_selection"
+  | "elo_gap";
+
+/** One rule's penalty units on a single board — mirror of `RuleContribution`. */
+export interface RuleContribution {
+  rule: RuleId;
+  units: number;
+}
+
+/** The rule ledger for one pairing — mirror of `osp_core::BoardLedger`.
+ *  `player2` is absent for the bye. `contributions` holds only the rules that
+ *  fired, priority order; `binding` is the highest-priority of them. */
+export interface BoardLedger {
+  player1: string;
+  player2?: string;
+  contributions: RuleContribution[];
+  binding?: RuleId;
+}
+
+/** How often one rule was relaxed across a round — mirror of `RuleTotal`. */
+export interface RuleTotal {
+  rule: RuleId;
+  boards: number;
+  units: number;
+}
+
+/** Explanation of a round's Swiss pairings — mirror of `osp_core::RoundExplanation`.
+ *  `boards` covers the engine-paired boards only (forced/cup boards are omitted). */
+export interface RoundExplanation {
+  round: number;
+  boards: BoardLedger[];
+  bye?: BoardLedger;
+  report: RuleTotal[];
+}
+
 /** Mirror of `osp_core::RoundDraft` — a round being set up but not yet started. */
 export interface RoundDraft {
   number: number;

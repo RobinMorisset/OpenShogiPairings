@@ -13,6 +13,7 @@
     fetchAmericanGrid,
     fetchBackups,
     fetchRatings,
+    fetchRoundExplanation,
     fetchTournament,
     finalizeRegistration,
     prepareRound,
@@ -36,6 +37,7 @@
     Handicap,
     NewPlayer,
     RatedPlayer,
+    RoundExplanation,
     Standing,
     Tournament,
     TournamentResponse,
@@ -115,6 +117,31 @@
     if (!tournament || !activeRound) return [];
     const idx = tournament.rounds.findIndex((r) => r.number === activeRound.number);
     return idx >= 0 ? (suggestedHandicaps[idx] ?? []) : [];
+  });
+
+  // Why the engine chose the active round's pairings — fetched lazily whenever a
+  // round tab is open (and refetched when the tournament changes, since editing
+  // an earlier result can shift a later round's ledger).
+  let roundExplanation = $state<RoundExplanation | null>(null);
+  $effect(() => {
+    const round = activeRound;
+    void tournament; // re-run on any tournament update
+    if (!round) {
+      roundExplanation = null;
+      return;
+    }
+    let cancelled = false;
+    roundExplanation = null;
+    fetchRoundExplanation(round.number)
+      .then((ex) => {
+        if (!cancelled) roundExplanation = ex;
+      })
+      .catch(() => {
+        if (!cancelled) roundExplanation = null;
+      });
+    return () => {
+      cancelled = true;
+    };
   });
 
   // Tournament phase, derived from the finalize flag, the draft, and the last
@@ -723,6 +750,7 @@
             players={tournament.players}
             handicapPolicy={tournament.settings.handicap_policy}
             suggestedHandicaps={activeRoundSuggested}
+            explanation={roundExplanation}
             onClickWinner={(boardIndex, clicked) =>
               handleSetResult(activeRound.number, boardIndex, clicked)}
             onToggleDrawn={(boardIndex, drawn) =>
