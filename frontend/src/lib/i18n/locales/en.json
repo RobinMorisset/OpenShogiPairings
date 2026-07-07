@@ -111,6 +111,8 @@
       "compromiseOn": "Compromise on: {rules}",
       "ruleCount": "{count} × {rule}",
       "boardsCount": "{count, plural, one {# board} other {# boards}}",
+      "board": "{a} vs {b}",
+      "byeBoard": "{name} (bye)",
       "rule": {
         "rematch": "rematch",
         "score_gap": "score gap",

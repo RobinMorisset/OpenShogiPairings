@@ -120,6 +120,29 @@
   const hasReport = $derived((explanation?.report.length ?? 0) > 0);
   let reportOpen = $state(false);
 
+  // A board ledger as readable text: "A vs B" or "X (bye)".
+  function ledgerLabel(b: BoardLedger): string {
+    if (!b.player2) {
+      return $_("roundView.explanation.byeBoard", { values: { name: name(b.player1) } });
+    }
+    return $_("roundView.explanation.board", {
+      values: { a: name(b.player1), b: name(b.player2) },
+    });
+  }
+
+  // The boards a given rule fired on, with that rule's units on each — so the
+  // expanded report shows *which* boards each rule affected, not just how many.
+  function boardsForRule(rule: RuleId): { label: string; units: number }[] {
+    const all: BoardLedger[] = [...(explanation?.boards ?? [])];
+    if (explanation?.bye) all.push(explanation.bye);
+    const out: { label: string; units: number }[] = [];
+    for (const b of all) {
+      const c = b.contributions.find((x) => x.rule === rule);
+      if (c) out.push({ label: ledgerLabel(b), units: c.units });
+    }
+    return out;
+  }
+
   // --- Counterfactual probe ("why not pair A and B?") ----------------------
 
   const NIL_UUID = "00000000-0000-0000-0000-000000000000";
@@ -327,10 +350,22 @@
         <ul class="report-list">
           {#each explanation?.report ?? [] as total (total.rule)}
             <li>
-              <span class="report-rule">{ruleLabel(total.rule)}</span>
-              <span class="report-boards"
-                >{$_("roundView.explanation.boardsCount", { values: { count: total.boards } })}</span
-              >
+              <div class="report-rule-head">
+                <span class="report-rule">{ruleLabel(total.rule)}</span>
+                <span class="report-boards"
+                  >{$_("roundView.explanation.boardsCount", {
+                    values: { count: total.boards },
+                  })}</span
+                >
+              </div>
+              <ul class="report-affected">
+                {#each boardsForRule(total.rule) as board (board.label)}
+                  <li>
+                    <span>{board.label}</span>
+                    <span class="report-units">{board.units}</span>
+                  </li>
+                {/each}
+              </ul>
             </li>
           {/each}
         </ul>
@@ -660,16 +695,37 @@
     padding: 0 0 0 0.5rem;
     list-style: none;
   }
-  .report-list li {
+  .report-list > li {
+    padding: 0.25rem 0;
+  }
+  .report-rule-head {
     display: flex;
     gap: 0.75rem;
-    padding: 0.15rem 0;
+    align-items: baseline;
   }
   .report-rule {
     min-width: 10rem;
+    font-weight: 600;
   }
   .report-boards {
     color: var(--text-secondary);
+  }
+  .report-affected {
+    margin: 0.2rem 0 0;
+    padding: 0 0 0 1rem;
+    list-style: none;
+    color: var(--text-secondary);
+  }
+  .report-affected li {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    max-width: 22rem;
+    padding: 0.05rem 0;
+  }
+  .report-units {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-tertiary);
   }
 
   .probe {
