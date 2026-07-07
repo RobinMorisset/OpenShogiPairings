@@ -36,6 +36,8 @@ use crate::state::{AppState, TournamentStore};
 /// - `PUT    /api/tournament/players/{id}`  edit a player
 /// - `DELETE /api/tournament/players/{id}`  remove a player
 /// - `POST   /api/tournament/players/{id}/eligible`  set cup eligibility
+/// - `POST   /api/tournament/players/{id}/adjustments`             add a manual point bonus/malus
+/// - `DELETE /api/tournament/players/{id}/adjustments/{adjustment_id}` remove one
 ///
 /// Every endpoint returns a [`TournamentView`] (the tournament plus whether an
 /// undo is available), so clients can refresh their view and the undo button
@@ -83,6 +85,14 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/tournament/players/{id}/eligible",
             post(set_player_eligible),
+        )
+        .route(
+            "/api/tournament/players/{id}/adjustments",
+            post(add_point_adjustment),
+        )
+        .route(
+            "/api/tournament/players/{id}/adjustments/{adjustment_id}",
+            axum::routing::delete(remove_point_adjustment),
         )
 }
 
@@ -396,5 +406,33 @@ async fn set_player_eligible(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = state.store.write().expect("store lock poisoned");
     store.mutate(|t| t.set_player_eligible(id, req.eligible).map(|_| ()))?;
+    view(&store)
+}
+
+/// Body of the point-adjustment endpoint: the delta and its mandatory reason.
+#[derive(Debug, Deserialize)]
+struct AddAdjustmentRequest {
+    delta: i32,
+    reason: String,
+}
+
+/// Apply a manual point bonus/malus to a player.
+async fn add_point_adjustment(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<AddAdjustmentRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.mutate(|t| t.add_point_adjustment(id, req.delta, req.reason).map(|_| ()))?;
+    view(&store)
+}
+
+/// Remove a previously applied point adjustment.
+async fn remove_point_adjustment(
+    State(state): State<AppState>,
+    Path((id, adjustment_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = state.store.write().expect("store lock poisoned");
+    store.mutate(|t| t.remove_point_adjustment(id, adjustment_id).map(|_| ()))?;
     view(&store)
 }

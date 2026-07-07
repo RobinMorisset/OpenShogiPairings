@@ -21,6 +21,14 @@ export interface Player {
   nationality?: string; // country code, e.g. "JP"
   club?: string;
   eligible?: boolean; // eligible for the direct-elimination cup
+  adjustments?: PointAdjustment[]; // manual point bonuses/maluses
+}
+
+/** Mirror of `osp_core::PointAdjustment`. */
+export interface PointAdjustment {
+  id: string; // UUID
+  delta: number; // positive = bonus, negative = malus
+  reason: string;
 }
 
 /** Registration payload — mirror of `osp_core::NewPlayer`. */

@@ -25,7 +25,7 @@ pub use cup::{Cup, CupPodium, CUP_SIZES};
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
 pub use grid_import::{import_american_grid, GridImportError};
 pub use pairing::{pair_round, pair_round_constrained, pair_round_weighted};
-pub use player::{NewPlayer, Player};
+pub use player::{NewPlayer, Player, PointAdjustment};
 pub use round::{Board, CupStage, Handicap, HandicapGame, PairingSource, Round, RoundDraft, Winner};
 pub use settings::{FloaterStyle, TournamentSettings};
 pub use standings::{compute_standings, Standing};

@@ -579,6 +579,7 @@ mod tests {
             nationality: None,
             club: club.map(|c| c.to_string()),
             eligible: false,
+            adjustments: Vec::new(),
         }
     }
 

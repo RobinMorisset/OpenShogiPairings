@@ -19,9 +19,6 @@ Known limitations and future work, roughly ordered by area.
   table. This needs a way to mark a board as a no-show (a new board-result state,
   giving the opponent the win); not handled yet. Byes (`0+`, win) and absences
   (`0-`, loss) are already handled.
-- **Manual point bonuses/maluses** should be available to referees from the players list,
-  and the Points column's cell for that player should be underlined in the results tab, with a tooltip
-  showing how many points were added/removed.
 - **Experimental ELO-based, non-swiss system** When that mode is active, all MacMahon and swiss option should
   be disabled/greyed out. In it, OSP keeps track of an estimated ELO for each player along the tournament based on
   Bayesian reasoning, and the constraints related to victories, floaters, fold, etc.. (everything but rematch and club)
@@ -49,6 +46,8 @@ Known limitations and future work, roughly ordered by area.
 - **Add a button to load a CSV of player names in the players tab**
 
 - **Allow sorting the players list by any column**
+
+- **Grey out the forced bye button when irrelevant** meaning when there is an even number of players to be paired.
 
 
 ## Simulations
@@ -81,7 +80,7 @@ Known limitations and future work, roughly ordered by area.
   of the round state machine (coarser than the undo stack). Should be parameterized how many are kept (rotating).
   There should be an option to load a backup tournament instead.
 
-- **Load tournament protection** Loading a tournament loses the current one. So there should be a flag (non-undoable) on the tournament
+- **New tournament protection** Starting a tournament loses the current one. So there should be a flag (non-undoable) on the tournament
   when saving it manually, and there should be a confirmation dialog when the user tries to overwrite an unsaved tournament.
 
 - **Webhook for pushing results and pulling players** See https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification

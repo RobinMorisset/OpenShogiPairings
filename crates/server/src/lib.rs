@@ -139,7 +139,7 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::CREATED);
         assert_eq!(body["tournament"]["name"], "Paris Open");
-        assert_eq!(body["tournament"]["format_version"], 3);
+        assert_eq!(body["tournament"]["format_version"], 4);
         assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
         assert_eq!(body["can_undo"], false); // nothing to undo on a fresh tournament
 
@@ -174,6 +174,90 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn add_and_remove_point_adjustment_over_http() {
+        let state = AppState::default();
+        send(
+            router(state.clone()),
+            json_req("POST", "/api/tournament", json!({ "name": "Cup" })),
+        )
+        .await;
+        let (_, body) = send(
+            router(state.clone()),
+            json_req(
+                "POST",
+                "/api/tournament/players",
+                json!({ "last_name": "Alice" }),
+            ),
+        )
+        .await;
+        let id = body["tournament"]["players"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // Apply a bonus.
+        let (status, body) = send(
+            router(state.clone()),
+            json_req(
+                "POST",
+                &format!("/api/tournament/players/{id}/adjustments"),
+                json!({ "delta": 2, "reason": "Fair-play bonus" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let adjustments = body["tournament"]["players"][0]["adjustments"]
+            .as_array()
+            .unwrap();
+        assert_eq!(adjustments.len(), 1);
+        assert_eq!(adjustments[0]["delta"], 2);
+        assert_eq!(adjustments[0]["reason"], "Fair-play bonus");
+        let adjustment_id = adjustments[0]["id"].as_str().unwrap().to_string();
+
+        // A blank reason is rejected.
+        let (status, _) = send(
+            router(state.clone()),
+            json_req(
+                "POST",
+                &format!("/api/tournament/players/{id}/adjustments"),
+                json!({ "delta": 1, "reason": "  " }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // Remove the bonus.
+        let (status, body) = send(
+            router(state.clone()),
+            Request::builder()
+                .method("DELETE")
+                .uri(format!(
+                    "/api/tournament/players/{id}/adjustments/{adjustment_id}"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        // Empty adjustments are omitted from the JSON entirely (skip_serializing_if).
+        assert!(body["tournament"]["players"][0]["adjustments"].is_null());
+
+        // Removing it again is a 404.
+        let (status, _) = send(
+            router(state.clone()),
+            Request::builder()
+                .method("DELETE")
+                .uri(format!(
+                    "/api/tournament/players/{id}/adjustments/{adjustment_id}"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

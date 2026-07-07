@@ -51,10 +51,13 @@ impl From<TournamentError> for ApiError {
             | TournamentError::InvalidCupSize { .. }
             | TournamentError::NotEnoughEligiblePlayers { .. }
             | TournamentError::CannotRemoveCupPlayer
-            | TournamentError::CupBracketInconsistent => ApiError::BadRequest(err.to_string()),
+            | TournamentError::CupBracketInconsistent
+            | TournamentError::EmptyAdjustmentReason
+            | TournamentError::ZeroPointAdjustment => ApiError::BadRequest(err.to_string()),
             TournamentError::PlayerNotFound(_)
             | TournamentError::RoundNotFound(_)
-            | TournamentError::BoardNotFound { .. } => ApiError::NotFound(err.to_string()),
+            | TournamentError::BoardNotFound { .. }
+            | TournamentError::AdjustmentNotFound { .. } => ApiError::NotFound(err.to_string()),
         }
     }
 }

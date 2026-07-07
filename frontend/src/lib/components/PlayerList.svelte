@@ -10,6 +10,10 @@
     onRemove: (id: string) => void;
     /** Toggle a player's cup eligibility. */
     onToggleEligible?: (id: string, eligible: boolean) => void;
+    /** Apply a manual point bonus (positive delta) or malus (negative) to a player. */
+    onAddAdjustment?: (id: string, delta: number, reason: string) => void;
+    /** Remove a previously applied point adjustment. */
+    onRemoveAdjustment?: (id: string, adjustmentId: string) => void;
     busy?: boolean;
   }
 
@@ -19,10 +23,15 @@
     onEdit,
     onRemove,
     onToggleEligible,
+    onAddAdjustment,
+    onRemoveAdjustment,
     busy = false,
   }: Props = $props();
 
   const eligibleCount = $derived(players.filter((p) => p.eligible).length);
+
+  // #, last name, first name, rating, nat., club, [cup], actions.
+  const colCount = $derived(6 + (showEligible ? 1 : 0) + 1);
 
   type Field = "last_name" | "first_name" | "rating" | "nationality" | "club";
 
@@ -128,6 +137,41 @@
     node.focus();
     node.select();
   }
+
+  // Which player's adjustments panel (if any) is expanded, and the working
+  // values for the "add adjustment" mini-form within it.
+  let adjustingId = $state<string | null>(null);
+  let adjustmentDelta = $state("");
+  let adjustmentReason = $state("");
+
+  function toggleAdjustments(id: string) {
+    if (adjustingId === id) {
+      adjustingId = null;
+      return;
+    }
+    adjustingId = id;
+    adjustmentDelta = "";
+    adjustmentReason = "";
+  }
+
+  function adjustmentTotal(p: Player): number {
+    return (p.adjustments ?? []).reduce((sum, a) => sum + a.delta, 0);
+  }
+
+  function adjustmentTitle(p: Player): string {
+    return (p.adjustments ?? [])
+      .map((a) => `${a.delta > 0 ? "+" : ""}${a.delta} — ${a.reason}`)
+      .join("\n");
+  }
+
+  function submitAdjustment(id: string) {
+    const delta = Number(adjustmentDelta);
+    const reason = adjustmentReason.trim();
+    if (!Number.isInteger(delta) || delta === 0 || reason === "") return;
+    onAddAdjustment?.(id, delta, reason);
+    adjustmentDelta = "";
+    adjustmentReason = "";
+  }
 </script>
 
 {#snippet cell(player: Player, field: Field, numeric: boolean)}
@@ -195,6 +239,20 @@
             </td>
           {/if}
           <td class="actions">
+            {#if adjustmentTotal(player) !== 0}
+              <span class="adj-badge" title={adjustmentTitle(player)}>
+                {adjustmentTotal(player) > 0 ? "+" : ""}{adjustmentTotal(player)}
+              </span>
+            {/if}
+            <button
+              type="button"
+              class="adjust"
+              title="Manual point bonus/malus"
+              disabled={busy}
+              onclick={() => toggleAdjustments(player.id)}
+            >
+              ±
+            </button>
             <button
               type="button"
               class="remove"
@@ -206,6 +264,58 @@
             </button>
           </td>
         </tr>
+        {#if adjustingId === player.id}
+          <tr class="adjustments-row">
+            <td colspan={colCount}>
+              {#if (player.adjustments ?? []).length > 0}
+                <ul class="adjustments-list">
+                  {#each player.adjustments ?? [] as adj (adj.id)}
+                    <li>
+                      <span class:bonus={adj.delta > 0} class:malus={adj.delta < 0}>
+                        {adj.delta > 0 ? "+" : ""}{adj.delta}
+                      </span>
+                      <span class="reason">{adj.reason}</span>
+                      <button
+                        type="button"
+                        class="remove-adj"
+                        title="Remove this adjustment"
+                        disabled={busy}
+                        onclick={() => onRemoveAdjustment?.(player.id, adj.id)}
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+              <div class="adjustment-form">
+                <input
+                  class="adj-delta"
+                  type="number"
+                  placeholder="±pts"
+                  value={adjustmentDelta}
+                  oninput={(e) => (adjustmentDelta = e.currentTarget.value)}
+                />
+                <input
+                  class="adj-reason"
+                  type="text"
+                  placeholder="Reason"
+                  value={adjustmentReason}
+                  oninput={(e) => (adjustmentReason = e.currentTarget.value)}
+                  onkeydown={(e) => e.key === "Enter" && submitAdjustment(player.id)}
+                />
+                <button
+                  type="button"
+                  class="add-adj"
+                  disabled={busy}
+                  onclick={() => submitAdjustment(player.id)}
+                >
+                  Add
+                </button>
+              </div>
+            </td>
+          </tr>
+        {/if}
       {/each}
     </tbody>
   </table>
@@ -239,7 +349,8 @@
   }
   .actions {
     text-align: right;
-    width: 2rem;
+    width: 5rem;
+    white-space: nowrap;
   }
   .elig {
     text-align: center;
@@ -293,5 +404,91 @@
   }
   .remove:hover:not(:disabled) {
     border-color: #f85149;
+  }
+
+  .adjust {
+    padding: 0.1rem 0.4rem;
+    font-size: 0.8rem;
+    color: #9a9aa2;
+    border: 1px solid transparent;
+    border-radius: 0.35rem;
+    background: transparent;
+  }
+  .adjust:hover:not(:disabled) {
+    border-color: #3a3a42;
+    background: #26262c;
+  }
+  .adj-badge {
+    display: inline-block;
+    margin-right: 0.25rem;
+    padding: 0 0.3rem;
+    border-radius: 0.6rem;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    background: #2b2b31;
+    color: #d0d0d6;
+  }
+
+  .adjustments-row td {
+    background: #1b1b1f;
+  }
+  .adjustments-list {
+    list-style: none;
+    margin: 0 0 0.4rem;
+    padding: 0;
+    font-size: 0.85rem;
+  }
+  .adjustments-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.1rem 0;
+  }
+  .adjustments-list .bonus {
+    color: #3fb950;
+  }
+  .adjustments-list .malus {
+    color: #f85149;
+  }
+  .adjustments-list .reason {
+    color: #d0d0d6;
+    flex: 1;
+  }
+  .remove-adj {
+    padding: 0 0.3rem;
+    font-size: 0.75rem;
+    color: #f85149;
+    border: none;
+    background: transparent;
+  }
+  .adjustment-form {
+    display: flex;
+    gap: 0.4rem;
+  }
+  .adj-delta {
+    width: 4.5rem;
+  }
+  .adj-reason {
+    flex: 1;
+  }
+  .adj-delta,
+  .adj-reason {
+    padding: 0.2rem 0.35rem;
+    border: 1px solid #3a3a42;
+    border-radius: 0.35rem;
+    background: #1b1b1f;
+    color: inherit;
+    font: inherit;
+  }
+  .add-adj {
+    padding: 0.2rem 0.6rem;
+    border: 1px solid #3a3a42;
+    border-radius: 0.35rem;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+  }
+  .add-adj:hover:not(:disabled) {
+    border-color: #4a4a8a;
   }
 </style>

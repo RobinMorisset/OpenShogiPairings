@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::cup::{Cup, CupPodium, CUP_SIZES};
 use crate::pairing::pair_round_weighted;
-use crate::player::{NewPlayer, Player};
+use crate::player::{NewPlayer, Player, PointAdjustment};
 use crate::round::{Board, Handicap, HandicapGame, PairingSource, Round, RoundDraft, Winner};
 use crate::settings::TournamentSettings;
 use crate::standings::{compute_standings, Standing};
@@ -26,7 +26,8 @@ use crate::standings::{compute_standings, Standing};
 /// v2: players carry `last_name` + `first_name` + `nationality` instead of a
 /// single `name`.
 /// v3: tournaments carry a list of `rounds`.
-pub const TOURNAMENT_FORMAT_VERSION: u32 = 3;
+/// v4: players carry a list of manual point `adjustments`.
+pub const TOURNAMENT_FORMAT_VERSION: u32 = 4;
 
 fn default_format_version() -> u32 {
     TOURNAMENT_FORMAT_VERSION
@@ -139,6 +140,15 @@ pub enum TournamentError {
     /// inconsistency — should not happen for a properly gated round).
     #[error("the cup bracket is missing an earlier result")]
     CupBracketInconsistent,
+    /// A manual point adjustment was requested with a blank reason.
+    #[error("a point adjustment needs a reason")]
+    EmptyAdjustmentReason,
+    /// A manual point adjustment of zero was requested (it would have no effect).
+    #[error("a point adjustment must not be zero")]
+    ZeroPointAdjustment,
+    /// No point adjustment with the given id exists for that player.
+    #[error("no point adjustment {adjustment} for player {player}")]
+    AdjustmentNotFound { player: Uuid, adjustment: Uuid },
 }
 
 impl Tournament {
@@ -349,6 +359,64 @@ impl Tournament {
             .find(|p| p.id == id)
             .ok_or(TournamentError::PlayerNotFound(id))?;
         player.eligible = eligible;
+        Ok(player)
+    }
+
+    /// Apply a manual point bonus (positive `delta`) or malus (negative `delta`)
+    /// to a player, with a mandatory `reason` shown to referees.
+    ///
+    /// Returns [`TournamentError::PlayerNotFound`] if no such player exists,
+    /// [`TournamentError::EmptyAdjustmentReason`] if `reason` is blank, or
+    /// [`TournamentError::ZeroPointAdjustment`] if `delta` is zero.
+    pub fn add_point_adjustment(
+        &mut self,
+        player_id: Uuid,
+        delta: i32,
+        reason: String,
+    ) -> Result<&Player, TournamentError> {
+        let reason = reason.trim().to_string();
+        if reason.is_empty() {
+            return Err(TournamentError::EmptyAdjustmentReason);
+        }
+        if delta == 0 {
+            return Err(TournamentError::ZeroPointAdjustment);
+        }
+        let player = self
+            .players
+            .iter_mut()
+            .find(|p| p.id == player_id)
+            .ok_or(TournamentError::PlayerNotFound(player_id))?;
+        player.adjustments.push(PointAdjustment {
+            id: Uuid::new_v4(),
+            delta,
+            reason,
+        });
+        Ok(player)
+    }
+
+    /// Remove a previously applied point adjustment.
+    ///
+    /// Returns [`TournamentError::PlayerNotFound`] if no such player exists, or
+    /// [`TournamentError::AdjustmentNotFound`] if the player has no adjustment
+    /// with that id.
+    pub fn remove_point_adjustment(
+        &mut self,
+        player_id: Uuid,
+        adjustment_id: Uuid,
+    ) -> Result<&Player, TournamentError> {
+        let player = self
+            .players
+            .iter_mut()
+            .find(|p| p.id == player_id)
+            .ok_or(TournamentError::PlayerNotFound(player_id))?;
+        let before = player.adjustments.len();
+        player.adjustments.retain(|a| a.id != adjustment_id);
+        if player.adjustments.len() == before {
+            return Err(TournamentError::AdjustmentNotFound {
+                player: player_id,
+                adjustment: adjustment_id,
+            });
+        }
         Ok(player)
     }
 
@@ -847,6 +915,49 @@ mod tests {
         let missing = uuid::Uuid::new_v4();
         assert_eq!(
             t.edit_player(missing, named("Bob")),
+            Err(TournamentError::PlayerNotFound(missing))
+        );
+    }
+
+    #[test]
+    fn point_adjustment_add_and_remove_round_trip() {
+        let mut t = Tournament::new("Paris Open").unwrap();
+        let id = t.add_player(named("Alice")).unwrap().id;
+
+        let player = t
+            .add_point_adjustment(id, 2, "fair-play bonus".into())
+            .unwrap();
+        assert_eq!(player.adjustments.len(), 1);
+        assert_eq!(player.adjustments[0].delta, 2);
+        assert_eq!(player.adjustments[0].reason, "fair-play bonus");
+        let adjustment_id = player.adjustments[0].id;
+
+        let player = t.remove_point_adjustment(id, adjustment_id).unwrap();
+        assert!(player.adjustments.is_empty());
+        assert_eq!(
+            t.remove_point_adjustment(id, adjustment_id),
+            Err(TournamentError::AdjustmentNotFound {
+                player: id,
+                adjustment: adjustment_id
+            })
+        );
+    }
+
+    #[test]
+    fn point_adjustment_rejects_blank_reason_and_zero_delta() {
+        let mut t = Tournament::new("Paris Open").unwrap();
+        let id = t.add_player(named("Alice")).unwrap().id;
+        assert_eq!(
+            t.add_point_adjustment(id, 1, "  ".into()),
+            Err(TournamentError::EmptyAdjustmentReason)
+        );
+        assert_eq!(
+            t.add_point_adjustment(id, 0, "typo".into()),
+            Err(TournamentError::ZeroPointAdjustment)
+        );
+        let missing = uuid::Uuid::new_v4();
+        assert_eq!(
+            t.add_point_adjustment(missing, 1, "reason".into()),
             Err(TournamentError::PlayerNotFound(missing))
         );
     }

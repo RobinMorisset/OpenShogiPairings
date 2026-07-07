@@ -10,6 +10,12 @@
       "env": {
         "PATH": "C:\\Program Files\\nodejs;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\Users\\robin\\AppData\\Roaming\\npm"
       }
+    },
+    {
+      "name": "server",
+      "runtimeExecutable": "cargo",
+      "runtimeArgs": ["run", "-p", "osp-server"],
+      "port": 3000
     }
   ]
 }

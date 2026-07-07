@@ -283,3 +283,26 @@ export function setPlayerEligible(
     body: JSON.stringify({ eligible }),
   });
 }
+
+/** Apply a manual point bonus (positive delta) or malus (negative) to a player. */
+export function addPointAdjustment(
+  id: string,
+  delta: number,
+  reason: string,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(`/api/tournament/players/${id}/adjustments`, {
+    method: "POST",
+    body: JSON.stringify({ delta, reason }),
+  });
+}
+
+/** Remove a previously applied point adjustment. */
+export function removePointAdjustment(
+  id: string,
+  adjustmentId: string,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    `/api/tournament/players/${id}/adjustments/${adjustmentId}`,
+    { method: "DELETE" },
+  );
+}

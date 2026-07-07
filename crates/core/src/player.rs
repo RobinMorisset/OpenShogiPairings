@@ -37,6 +37,25 @@ pub struct Player {
     /// registration; frozen into the bracket at finalization.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub eligible: bool,
+    /// Manual point bonuses/maluses a referee has applied to this player (e.g. a
+    /// fair-play bonus, or a correction). Each entry's `delta` is folded into the
+    /// player's points alongside MacMahon starting points and victories (see
+    /// [`crate::scoring::compute_scores`]), so it affects both standings and
+    /// future pairing weight from the moment it is added.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adjustments: Vec<PointAdjustment>,
+}
+
+/// A single manual point bonus (positive `delta`) or malus (negative `delta`)
+/// applied to a player by a referee, with a mandatory human-readable reason.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PointAdjustment {
+    /// Stable id, so a specific entry can be removed later.
+    pub id: Uuid,
+    /// Points added (positive) or removed (negative). Never zero.
+    pub delta: i32,
+    /// Why the adjustment was made; shown to referees, required and non-blank.
+    pub reason: String,
 }
 
 /// Data supplied when registering a player, before an id exists.
@@ -82,6 +101,7 @@ impl Player {
             nationality: non_empty(new.nationality.unwrap_or_default()).map(|c| c.to_uppercase()),
             club: non_empty(new.club.unwrap_or_default()),
             eligible: false,
+            adjustments: Vec::new(),
         }
     }
 }

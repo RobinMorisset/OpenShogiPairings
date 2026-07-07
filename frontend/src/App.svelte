@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import {
     addPlayer,
+    addPointAdjustment,
     ApiError,
     cancelRound,
     completeRound,
@@ -15,6 +16,7 @@
     prepareRound,
     refreshRatings,
     removePlayer,
+    removePointAdjustment,
     replaceTournament,
     setBoardDrawn,
     setBoardHandicap,
@@ -277,6 +279,18 @@
   function handleToggleEligible(id: string, eligible: boolean) {
     run(async () => {
       apply(await setPlayerEligible(id, eligible));
+    });
+  }
+
+  function handleAddPointAdjustment(id: string, delta: number, reason: string) {
+    run(async () => {
+      apply(await addPointAdjustment(id, delta, reason));
+    });
+  }
+
+  function handleRemovePointAdjustment(id: string, adjustmentId: string) {
+    run(async () => {
+      apply(await removePointAdjustment(id, adjustmentId));
     });
   }
 
@@ -555,6 +569,8 @@
               onEdit={handleEditPlayer}
               onRemove={handleRemovePlayer}
               onToggleEligible={handleToggleEligible}
+              onAddAdjustment={handleAddPointAdjustment}
+              onRemoveAdjustment={handleRemovePointAdjustment}
               {busy}
             />
           </div>

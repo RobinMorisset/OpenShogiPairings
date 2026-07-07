@@ -112,6 +112,7 @@ mod tests {
             nationality: None,
             club: None,
             eligible: false,
+            adjustments: Vec::new(),
         }
     }
 

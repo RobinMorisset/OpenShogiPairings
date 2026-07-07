@@ -119,6 +119,16 @@
       : "";
     return `${cell.opponent}${draw}${sign}${hc}${floatMarkers(cell)}`;
   }
+
+  /** Tooltip for the Points cell: the breakdown of any manual adjustments, or
+   * the default explanation when the player has none. */
+  function pointsTitle(player: Player): string {
+    const adjustments = player.adjustments ?? [];
+    if (adjustments.length === 0) return "Victories + MacMahon points";
+    return adjustments
+      .map((a) => `${a.delta > 0 ? "+" : ""}${a.delta} — ${a.reason}`)
+      .join("\n");
+  }
 </script>
 
 {#if tournament.players.length === 0}
@@ -184,7 +194,11 @@
             </td>
           {/each}
           <td class="num victories">{standing.victories}</td>
-          <td class="num points" title="Victories + MacMahon points">{standing.points}</td>
+          <td
+            class="num points"
+            class:adjusted={(player.adjustments ?? []).length > 0}
+            title={pointsTitle(player)}>{standing.points}</td
+          >
           <td class="num tiebreak">{standing.sos}</td>
           <td class="num tiebreak">{standing.sodos}</td>
           <td class="num tiebreak">{standing.sosos}</td>
@@ -240,6 +254,10 @@
   .points {
     font-weight: 700;
     color: #d2a8ff;
+  }
+  .points.adjusted {
+    text-decoration: underline dotted;
+    text-underline-offset: 0.2rem;
   }
   .tiebreak {
     color: #9a9aa2;

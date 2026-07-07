@@ -79,10 +79,16 @@ pub(crate) fn compute_scores(
         .iter()
         .map(|p| {
             let macmahon = settings.macmahon_points_at(p.rating, rounds_played);
+            // Manual bonuses/maluses are folded in alongside MacMahon starting
+            // points, before any round is replayed, so they shape both the
+            // standings and the score-gap pairing weight from here on. The
+            // effective score can't go below zero.
+            let adjustment: i32 = p.adjustments.iter().map(|a| a.delta).sum();
+            let points = (macmahon as i32 + adjustment).max(0) as u32;
             (
                 p.id,
                 PlayerScore {
-                    points: macmahon,
+                    points,
                     victories: 0,
                     macmahon,
                     opponents: Vec::new(),
@@ -176,6 +182,7 @@ mod tests {
             nationality: None,
             club: None,
             eligible: false,
+            adjustments: Vec::new(),
         }
     }
 
@@ -225,6 +232,28 @@ mod tests {
         let scores = compute_scores(&[a.clone(), b.clone()], &settings, &[round]);
         assert_eq!(scores.get(&a.id).last_descended, Some(1));
         assert_eq!(scores.get(&b.id).last_ascended, Some(1));
+    }
+
+    #[test]
+    fn manual_adjustments_feed_into_points_and_floor_at_zero() {
+        use crate::player::PointAdjustment;
+
+        let mut a = player(1, None);
+        a.adjustments.push(PointAdjustment {
+            id: Uuid::new_v4(),
+            delta: 2,
+            reason: "fair-play bonus".into(),
+        });
+        let mut b = player(2, None);
+        b.adjustments.push(PointAdjustment {
+            id: Uuid::new_v4(),
+            delta: -5,
+            reason: "penalty".into(),
+        });
+
+        let scores = compute_scores(&[a.clone(), b.clone()], &TournamentSettings::default(), &[]);
+        assert_eq!(scores.points(&a.id), 2);
+        assert_eq!(scores.points(&b.id), 0); // floored, not negative
     }
 
     #[test]
