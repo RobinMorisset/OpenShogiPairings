@@ -164,6 +164,31 @@ export interface RoundExplanation {
   report: RuleTotal[];
 }
 
+/** Why a probed player is out of the engine's hands — mirror of `ScopeReason`. */
+export type ScopeReason = "forced" | "cup" | "absent";
+
+/** One rule's net change under a counterfactual — mirror of `RuleDelta`.
+ *  `units` is signed: positive means the alternative is worse on this rule. */
+export interface RuleDelta {
+  rule: RuleId;
+  units: number;
+}
+
+/** A ring of players who reshuffle to honour a probe — mirror of `AffectedCycle`.
+ *  The bye appears as the nil UUID. */
+export interface AffectedCycle {
+  players: string[];
+}
+
+/** The consequence of forcing a pairing — mirror of `osp_core::Counterfactual`.
+ *  When `scoped_out` is set the other fields are empty. */
+export interface Counterfactual {
+  scoped_out?: ScopeReason;
+  cost_delta: RuleDelta[];
+  cycles: AffectedCycle[];
+  changed: BoardLedger[];
+}
+
 /** Mirror of `osp_core::RoundDraft` — a round being set up but not yet started. */
 export interface RoundDraft {
   number: number;

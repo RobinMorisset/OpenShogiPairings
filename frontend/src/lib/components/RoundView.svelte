@@ -4,6 +4,7 @@
     HANDICAPS,
     type Board,
     type BoardLedger,
+    type Counterfactual,
     type Handicap,
     type HandicapPolicy,
     type Player,
@@ -24,6 +25,8 @@
     /** Why the engine chose these pairings (per-board rule ledger + report).
      *  `null` while loading or unavailable. */
     explanation?: RoundExplanation | null;
+    /** Ask what forcing the pairing `a`–`b` would cost. Absent = probe disabled. */
+    onProbe?: (a: string, b: string) => Promise<Counterfactual>;
     /** Register a click on a board's player (toggles the winner). */
     onClickWinner: (boardIndex: number, clicked: Winner) => void;
     /** Set/clear the "a draw occurred" flag on a board. */
@@ -39,6 +42,7 @@
     handicapPolicy,
     suggestedHandicaps,
     explanation = null,
+    onProbe,
     onClickWinner,
     onToggleDrawn,
     onSetHandicap,
@@ -106,6 +110,80 @@
   // Report line: rules relaxed this round, with counts, in priority order.
   const hasReport = $derived((explanation?.report.length ?? 0) > 0);
   let reportOpen = $state(false);
+
+  // --- Counterfactual probe ("why not pair A and B?") ----------------------
+
+  const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+
+  // The engine-paired players of this round (Swiss boards + the bye), the only
+  // ones a counterfactual can reason about, sorted by name for the pickers.
+  const swissPlayers = $derived.by(() => {
+    const ids = new Set<string>();
+    for (const b of round.boards) {
+      if (!b.source || b.source.kind === "swiss") {
+        ids.add(b.player1);
+        ids.add(b.player2);
+      }
+    }
+    if (round.bye) ids.add(round.bye);
+    return [...ids].sort((x, y) => name(x).localeCompare(name(y)));
+  });
+
+  let probeOpen = $state(false);
+  let probeA = $state("");
+  let probeB = $state("");
+  let probeBusy = $state(false);
+  let probeResult = $state<Counterfactual | null>(null);
+  let probeError = $state("");
+
+  // Reset the probe whenever the round changes.
+  $effect(() => {
+    void round.number;
+    probeA = "";
+    probeB = "";
+    probeResult = null;
+    probeError = "";
+  });
+
+  const canProbe = $derived(
+    !!onProbe && !!probeA && !!probeB && probeA !== probeB && !probeBusy,
+  );
+
+  async function runProbe() {
+    if (!onProbe || !canProbe) return;
+    probeBusy = true;
+    probeError = "";
+    probeResult = null;
+    try {
+      probeResult = await onProbe(probeA, probeB);
+    } catch (err) {
+      probeError = err instanceof Error ? err.message : String(err);
+    } finally {
+      probeBusy = false;
+    }
+  }
+
+  function probeName(id: string): string {
+    return id === NIL_UUID ? $_("roundView.probe.bye") : name(id);
+  }
+
+  // A changed board as readable text: "X vs Y" or "X takes the bye".
+  function changedBoardText(board: BoardLedger): string {
+    if (!board.player2) {
+      return $_("roundView.probe.newBye", { values: { name: probeName(board.player1) } });
+    }
+    return $_("roundView.probe.newBoard", {
+      values: { a: probeName(board.player1), b: probeName(board.player2) },
+    });
+  }
+
+  // Rules that got worse / better under the probe, as label lists.
+  const worseRules = $derived(
+    (probeResult?.cost_delta ?? []).filter((d) => d.units > 0).map((d) => ruleLabel(d.rule)),
+  );
+  const betterRules = $derived(
+    (probeResult?.cost_delta ?? []).filter((d) => d.units < 0).map((d) => ruleLabel(d.rule)),
+  );
 
   function name(id: string): string {
     const p = byId.get(id);
@@ -323,6 +401,78 @@
       {/if}
     </p>
   {/if}
+
+  {#if onProbe && swissPlayers.length >= 4}
+    <div class="probe print-hide">
+      <button
+        type="button"
+        class="probe-toggle"
+        aria-expanded={probeOpen}
+        onclick={() => (probeOpen = !probeOpen)}
+      >
+        <span class="probe-title">{$_("roundView.probe.title")}</span>
+        <span class="report-caret">{probeOpen ? "▾" : "▸"}</span>
+      </button>
+      {#if probeOpen}
+        <div class="probe-body">
+          <p class="probe-hint">{$_("roundView.probe.hint")}</p>
+          <div class="probe-controls">
+            <select bind:value={probeA} disabled={probeBusy}>
+              <option value="">{$_("roundView.probe.pick")}</option>
+              {#each swissPlayers as id (id)}
+                <option value={id}>{name(id)}</option>
+              {/each}
+            </select>
+            <span class="probe-vs">{$_("roundView.probe.and")}</span>
+            <select bind:value={probeB} disabled={probeBusy}>
+              <option value="">{$_("roundView.probe.pick")}</option>
+              {#each swissPlayers as id (id)}
+                <option value={id}>{name(id)}</option>
+              {/each}
+            </select>
+            <button type="button" class="ghost" disabled={!canProbe} onclick={runProbe}>
+              {$_("roundView.probe.submit")}
+            </button>
+          </div>
+
+          {#if probeBusy}
+            <p class="probe-status">{$_("roundView.probe.working")}</p>
+          {:else if probeError}
+            <p class="probe-status error">{probeError}</p>
+          {:else if probeResult}
+            {#if probeResult.scoped_out}
+              <p class="probe-status">
+                {$_(`roundView.probe.scopedOut.${probeResult.scoped_out}`)}
+              </p>
+            {:else if probeResult.changed.length === 0}
+              <p class="probe-status">{$_("roundView.probe.noChange")}</p>
+            {:else}
+              <div class="probe-result">
+                {#if worseRules.length}
+                  <p class="probe-cost">
+                    <strong>{$_("roundView.probe.worseOn")}</strong>
+                    {worseRules.join(", ")}
+                  </p>
+                {/if}
+                {#if betterRules.length}
+                  <p class="probe-cost">
+                    <strong>{$_("roundView.probe.betterOn")}</strong>
+                    {betterRules.join(", ")}
+                  </p>
+                {/if}
+                <p class="probe-boards-label">{$_("roundView.probe.newBoardsLabel")}</p>
+                <ul class="probe-boards">
+                  {#each probeResult.changed as board, i (i)}
+                    <li>{changedBoardText(board)}</li>
+                  {/each}
+                </ul>
+              </div>
+            {/if}
+          {/if}
+        </div>
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -413,6 +563,80 @@
   }
   .report-boards {
     color: var(--text-secondary);
+  }
+
+  .probe {
+    margin-top: 1rem;
+    font-size: 0.85rem;
+  }
+  .probe-toggle {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border-divider);
+    border-radius: 0.4rem;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .probe-toggle:hover {
+    background: var(--bg-hover);
+  }
+  .probe-title {
+    font-weight: 600;
+  }
+  .probe-body {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    border: 1px solid var(--border-divider);
+    border-radius: 0.4rem;
+  }
+  .probe-hint {
+    margin: 0 0 0.5rem;
+    color: var(--text-secondary);
+  }
+  .probe-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .probe-controls select {
+    padding: 0.25rem 0.4rem;
+    border: 1px solid var(--border-soft);
+    border-radius: 0.4rem;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+  }
+  .probe-vs {
+    color: var(--text-secondary);
+  }
+  .probe-status {
+    margin: 0.6rem 0 0;
+    color: var(--text-secondary);
+  }
+  .probe-status.error {
+    color: var(--color-warning);
+  }
+  .probe-result {
+    margin-top: 0.6rem;
+  }
+  .probe-cost {
+    margin: 0.2rem 0;
+  }
+  .probe-boards-label {
+    margin: 0.5rem 0 0.2rem;
+    color: var(--text-secondary);
+  }
+  .probe-boards {
+    margin: 0;
+    padding-left: 1.1rem;
+  }
+  .probe-boards li {
+    padding: 0.1rem 0;
   }
 
   .p1-col {

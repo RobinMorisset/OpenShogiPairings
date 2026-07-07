@@ -1,5 +1,6 @@
 import type {
   BackupInfo,
+  Counterfactual,
   Handicap,
   HealthStatus,
   NewPlayer,
@@ -219,6 +220,18 @@ export function fetchRoundExplanation(
 ): Promise<RoundExplanation> {
   return request<RoundExplanation>(
     `/api/tournament/rounds/${roundNumber}/explanation`,
+  );
+}
+
+/** Explain what forcing the pairing `a`–`b` in a round would cost. */
+export function fetchCounterfactual(
+  roundNumber: number,
+  a: string,
+  b: string,
+): Promise<Counterfactual> {
+  return request<Counterfactual>(
+    `/api/tournament/rounds/${roundNumber}/counterfactual`,
+    { method: "POST", body: JSON.stringify({ mode: "force", a, b }) },
   );
 }
 

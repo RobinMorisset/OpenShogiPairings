@@ -748,6 +748,257 @@ pub fn explain_pairing(
     }
 }
 
+// --- Counterfactual ("why not pair A and B?") -----------------------------
+
+/// Sentinel vertex standing in for the bye in a matching. Real player ids are v4
+/// UUIDs, never the nil UUID, so this can't collide with a player.
+const PHANTOM: Uuid = Uuid::nil();
+
+/// Normalized (order-independent) edge, so `(a, b)` and `(b, a)` are one key.
+fn unord_pair(a: Uuid, b: Uuid) -> (Uuid, Uuid) {
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+/// Why a probed player is out of the engine's hands — its board wasn't chosen by
+/// the Swiss matching, so the counterfactual has nothing to reason about.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScopeReason {
+    /// The player's board was fixed by the referee.
+    Forced,
+    /// The player's board comes from the cup bracket.
+    Cup,
+    /// The player sat this round out (absent or the bye is not being probed).
+    Absent,
+}
+
+/// One rule's net change between the confirmed pairing and the counterfactual:
+/// signed penalty units, where a positive value means the alternative is *worse*
+/// on this rule.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleDelta {
+    pub rule: RuleId,
+    pub units: i64,
+}
+
+/// A ring of players who must reshuffle to honour the probe — a vertex-disjoint
+/// alternating cycle of (baseline △ counterfactual), ordered for storytelling.
+/// The bye appears as the nil sentinel so clients can render it as "(bye)".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AffectedCycle {
+    pub players: Vec<Uuid>,
+}
+
+/// The consequence of forcing a pairing the engine didn't choose: which boards
+/// change, the rings of affected players, and the net per-rule cost.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Counterfactual {
+    /// Set when the probe can't be reasoned about (a probed player isn't an
+    /// engine-paired Swiss player); the other fields are then empty.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scoped_out: Option<ScopeReason>,
+    /// Per-rule net change (priority order), only rules that actually moved.
+    pub cost_delta: Vec<RuleDelta>,
+    /// The affected player rings.
+    pub cycles: Vec<AffectedCycle>,
+    /// The new boards (those that differ from the confirmed pairing), each with
+    /// its rule ledger. A board with no `player2` is a new bye.
+    pub changed: Vec<BoardLedger>,
+}
+
+/// Minimum-cost perfect matching over `verts` (real players, plus a trailing
+/// [`PHANTOM`] when a bye participates), tie-broken toward `baseline` so among
+/// equal-cost solutions the one closest to the baseline wins (fewest boards
+/// changed). Returned as normalized pairs.
+///
+/// The stability tier is folded in arithmetically rather than as an extra
+/// [`Rule`]: each edge costs `real_cost · (edges + 1) + (edge not in baseline)`.
+/// Since `real_cost` is already the correct lexicographic scalar for the real
+/// rules and the stability term is at most `edges < edges + 1`, this is exactly
+/// the lexicographic order `(real rules, then boards changed)` — the same
+/// ordering appending a lowest-priority rule to [`scale_ladder`] would give.
+fn solve_stable(
+    model: &PairingModel,
+    verts: &[Uuid],
+    baseline: &HashSet<(Uuid, Uuid)>,
+) -> Vec<(Uuid, Uuid)> {
+    let n = verts.len();
+    if n < 2 {
+        return Vec::new();
+    }
+    let stab = (n / 2) as i128 + 1; // strictly above the largest stability total
+    let base = |a: Uuid, b: Uuid| -> i128 {
+        if a == PHANTOM {
+            model.bye_cost(b)
+        } else if b == PHANTOM {
+            model.bye_cost(a)
+        } else {
+            model.edge_cost(a, b)
+        }
+    };
+    let mut cost = vec![vec![0i128; n]; n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let stray = i128::from(!baseline.contains(&unord_pair(verts[i], verts[j])));
+            let c = base(verts[i], verts[j]) * stab + stray;
+            cost[i][j] = c;
+            cost[j][i] = c;
+        }
+    }
+    let mate = min_weight_perfect_matching(&cost);
+    let mut seen = vec![false; n];
+    let mut pairs = Vec::new();
+    for i in 0..n {
+        if seen[i] {
+            continue;
+        }
+        let j = mate[i];
+        seen[i] = true;
+        seen[j] = true;
+        pairs.push(unord_pair(verts[i], verts[j]));
+    }
+    pairs
+}
+
+/// Decompose the symmetric difference of two perfect matchings into its
+/// alternating cycles — the disjoint rings of players whose partners differ.
+fn alternating_cycles(
+    m0: &HashSet<(Uuid, Uuid)>,
+    m1: &HashSet<(Uuid, Uuid)>,
+) -> Vec<AffectedCycle> {
+    // Adjacency over the changed edges. Every vertex in the symmetric difference
+    // has exactly one edge from each matching, so its degree here is exactly 2.
+    let mut adj: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    for &(a, b) in m0.symmetric_difference(m1) {
+        adj.entry(a).or_default().push(b);
+        adj.entry(b).or_default().push(a);
+    }
+
+    let mut visited: HashSet<Uuid> = HashSet::new();
+    let mut cycles = Vec::new();
+    let mut starts: Vec<Uuid> = adj.keys().copied().collect();
+    starts.sort(); // deterministic cycle order
+    for start in starts {
+        if visited.contains(&start) {
+            continue;
+        }
+        let mut order = Vec::new();
+        let mut cur = start;
+        let mut prev: Option<Uuid> = None;
+        loop {
+            visited.insert(cur);
+            order.push(cur);
+            let nbrs = &adj[&cur];
+            let next = if Some(nbrs[0]) != prev { nbrs[0] } else { nbrs[1] };
+            if next == start {
+                break;
+            }
+            prev = Some(cur);
+            cur = next;
+        }
+        cycles.push(AffectedCycle { players: order });
+    }
+    cycles
+}
+
+/// Explain what forcing the pairing `a`–`b` would cost, relative to the round's
+/// confirmed Swiss pairing. Both must be engine-paired players of this round (the
+/// caller checks scope). Re-solves the rest with the forced edge pre-placed and a
+/// stability tie-break toward the confirmed pairing, then diffs the two.
+pub fn counterfactual_force(
+    number: u32,
+    players: &[Player],
+    settings: &TournamentSettings,
+    completed_rounds: &[Round],
+    swiss_boards: &[(Uuid, Uuid)],
+    bye: Option<Uuid>,
+    a: Uuid,
+    b: Uuid,
+) -> Counterfactual {
+    // The Swiss free set and the confirmed matching M0 (bye ↔ phantom).
+    let mut free: Vec<Uuid> = swiss_boards.iter().flat_map(|&(x, y)| [x, y]).collect();
+    if let Some(p) = bye {
+        free.push(p);
+    }
+    let need_phantom = bye.is_some();
+    let model =
+        PairingModel::build(number, players, settings, completed_rounds, &free, need_phantom);
+    let rules = model.rules();
+
+    let mut m0: HashSet<(Uuid, Uuid)> =
+        swiss_boards.iter().map(|&(x, y)| unord_pair(x, y)).collect();
+    if let Some(p) = bye {
+        m0.insert(unord_pair(p, PHANTOM));
+    }
+
+    // Re-solve everyone but the forced pair (phantom still in play if there is a
+    // bye), then add the forced edge back for the full counterfactual matching.
+    let mut verts: Vec<Uuid> = free.iter().copied().filter(|&v| v != a && v != b).collect();
+    if need_phantom {
+        verts.push(PHANTOM);
+    }
+    let mut m1: HashSet<(Uuid, Uuid)> = solve_stable(&model, &verts, &m0).into_iter().collect();
+    m1.insert(unord_pair(a, b));
+
+    let units_of = |e: &(Uuid, Uuid)| -> Vec<i128> {
+        let (x, y) = *e;
+        if x == PHANTOM {
+            model.bye_units(y)
+        } else if y == PHANTOM {
+            model.bye_units(x)
+        } else {
+            model.edge_units(x, y)
+        }
+    };
+    let ledger_of = |e: &(Uuid, Uuid)| -> BoardLedger {
+        let (x, y) = *e;
+        if x == PHANTOM {
+            ledger(y, None, rules, &model.bye_units(y))
+        } else if y == PHANTOM {
+            ledger(x, None, rules, &model.bye_units(x))
+        } else {
+            ledger(x, Some(y), rules, &model.edge_units(x, y))
+        }
+    };
+
+    // Net per-rule delta: added boards contribute +units, removed boards −units;
+    // boards common to both matchings cancel.
+    let mut delta: HashMap<RuleId, i64> = HashMap::new();
+    for e in m1.difference(&m0) {
+        for (r, &u) in rules.iter().zip(&units_of(e)) {
+            *delta.entry(r.id()).or_insert(0) += u as i64;
+        }
+    }
+    for e in m0.difference(&m1) {
+        for (r, &u) in rules.iter().zip(&units_of(e)) {
+            *delta.entry(r.id()).or_insert(0) -= u as i64;
+        }
+    }
+    let cost_delta: Vec<RuleDelta> = rules
+        .iter()
+        .filter_map(|r| {
+            let u = delta.get(&r.id()).copied().unwrap_or(0);
+            (u != 0).then_some(RuleDelta { rule: r.id(), units: u })
+        })
+        .collect();
+
+    // The new boards (added edges), sorted for a stable order, as ledgers.
+    let mut added: Vec<(Uuid, Uuid)> = m1.difference(&m0).copied().collect();
+    added.sort();
+    let changed: Vec<BoardLedger> = added.iter().map(ledger_of).collect();
+
+    Counterfactual {
+        scoped_out: None,
+        cost_delta,
+        cycles: alternating_cycles(&m0, &m1),
+        changed,
+    }
+}
+
 /// Pair the `present` players by minimizing the total rule penalty, honoring
 /// referee-forced boards and a forced bye. This is the real pairing path used by
 /// [`crate::Tournament::confirm_round`]; the rules and their priority are
@@ -1499,5 +1750,125 @@ mod tests {
                 .sum();
             assert_eq!(contribution(ledger, RuleId::Fold).unwrap_or(0), expected);
         }
+    }
+
+    // --- Counterfactual ---------------------------------------------------
+
+    fn changed_pairs(cf: &Counterfactual) -> HashSet<(Uuid, Uuid)> {
+        cf.changed
+            .iter()
+            .map(|b| unord(b.player1, b.player2.unwrap_or(PHANTOM)))
+            .collect()
+    }
+
+    #[test]
+    fn forcing_a_pairing_swaps_a_minimal_ring() {
+        // Round 1, one group of four by rating p0>p1>p2>p3. The fold pairs
+        // p0-p2 / p1-p3. Force p0-p1: the only consistent completion is p2-p3, so
+        // exactly those two boards change and the affected ring is all four.
+        let p: Vec<Player> = (1..=4).map(|i| player(i, Some(2000 - i * 10), None)).collect();
+        let boards = [(p[0].id, p[2].id), (p[1].id, p[3].id)];
+
+        let cf = counterfactual_force(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &[],
+            &boards,
+            None,
+            p[0].id,
+            p[1].id,
+        );
+
+        assert!(cf.scoped_out.is_none());
+        let changed = changed_pairs(&cf);
+        assert!(changed.contains(&unord(p[0].id, p[1].id)), "the forced board appears");
+        assert!(changed.contains(&unord(p[2].id, p[3].id)), "its forced completion appears");
+        assert_eq!(changed.len(), 2);
+        assert_eq!(cf.cycles.len(), 1);
+        assert_eq!(cf.cycles[0].players.len(), 4);
+    }
+
+    #[test]
+    fn forcing_the_status_quo_changes_nothing() {
+        // Probing a pairing the engine already made yields an empty diff.
+        let p: Vec<Player> = (1..=4).map(|i| player(i, Some(2000 - i * 10), None)).collect();
+        let boards = [(p[0].id, p[2].id), (p[1].id, p[3].id)];
+
+        let cf = counterfactual_force(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &[],
+            &boards,
+            None,
+            p[0].id,
+            p[2].id,
+        );
+
+        assert!(cf.changed.is_empty());
+        assert!(cf.cycles.is_empty());
+        assert!(cf.cost_delta.is_empty());
+    }
+
+    #[test]
+    fn forcing_a_worse_pairing_reports_the_cost() {
+        // Force the non-fold pairing p0-p1: the deviation from the fold ideal is
+        // strictly worse, so the net delta on the fold rule is positive.
+        let p: Vec<Player> = (1..=4).map(|i| player(i, Some(2000 - i * 10), None)).collect();
+        let boards = [(p[0].id, p[2].id), (p[1].id, p[3].id)];
+
+        let cf = counterfactual_force(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &[],
+            &boards,
+            None,
+            p[0].id,
+            p[1].id,
+        );
+
+        let fold = cf.cost_delta.iter().find(|d| d.rule == RuleId::Fold);
+        assert!(matches!(fold, Some(d) if d.units > 0), "forcing the worse fold costs units");
+    }
+
+    #[test]
+    fn forcing_across_a_bye_reassigns_the_sit_out() {
+        // Three equal players: one byes. Force the current bye-taker to play the
+        // player they'd otherwise sit behind, and someone else must take the bye —
+        // surfaced as a changed board with no player2.
+        let p: Vec<Player> = (1..=3).map(|i| player(i, Some(1500), None)).collect();
+        // Engine round: p0-p1 play, p2 byes (deterministic by tournament number).
+        let round = pair_round_weighted(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &[],
+            &p.iter().map(|x| x.id).collect::<Vec<_>>(),
+            &[],
+            None,
+        );
+        let boards: Vec<(Uuid, Uuid)> =
+            round.boards.iter().map(|b| (b.player1, b.player2)).collect();
+        let bye = round.bye.expect("odd count byes someone");
+        let opponent = boards[0].0;
+
+        let cf = counterfactual_force(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &[],
+            &boards,
+            Some(bye),
+            bye,
+            opponent,
+        );
+
+        assert!(cf.scoped_out.is_none());
+        assert!(
+            cf.changed.iter().any(|b| b.player2.is_none()),
+            "someone new takes the bye"
+        );
     }
 }

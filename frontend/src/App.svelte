@@ -12,6 +12,7 @@
     editPlayer,
     fetchAmericanGrid,
     fetchBackups,
+    fetchCounterfactual,
     fetchRatings,
     fetchRoundExplanation,
     fetchTournament,
@@ -751,6 +752,7 @@
             handicapPolicy={tournament.settings.handicap_policy}
             suggestedHandicaps={activeRoundSuggested}
             explanation={roundExplanation}
+            onProbe={(a, b) => fetchCounterfactual(activeRound.number, a, b)}
             onClickWinner={(boardIndex, clicked) =>
               handleSetResult(activeRound.number, boardIndex, clicked)}
             onToggleDrawn={(boardIndex, drawn) =>

@@ -121,6 +121,26 @@
         "bye_selection": "bye choice",
         "elo_gap": "ELO gap"
       }
+    },
+    "probe": {
+      "title": "Question a pairing",
+      "hint": "Pick two players to see what pairing them together would cost.",
+      "pick": "Choose a player…",
+      "and": "with",
+      "submit": "Explain",
+      "working": "Working…",
+      "bye": "(bye)",
+      "noChange": "These two are already paired — nothing would change.",
+      "worseOn": "Worse on:",
+      "betterOn": "Better on:",
+      "newBoardsLabel": "The boards that would change:",
+      "newBoard": "{a} vs {b}",
+      "newBye": "{name} takes the bye",
+      "scopedOut": {
+        "forced": "That board was fixed by the referee, not chosen by the engine.",
+        "cup": "That board comes from the cup bracket, not the Swiss engine.",
+        "absent": "That player sat this round out, so the engine didn't pair them."
+      }
     }
   },
   "resultsView": {

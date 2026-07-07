@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::cup::{Cup, CupPodium, CUP_SIZES};
-use crate::pairing::{explain_pairing, pair_round_weighted, RoundExplanation};
+use crate::pairing::{
+    counterfactual_force, explain_pairing, pair_round_weighted, Counterfactual, RoundExplanation,
+    ScopeReason,
+};
 use crate::player::{NewPlayer, Player, PointAdjustment};
 use crate::round::{Board, Handicap, HandicapGame, PairingSource, Round, RoundDraft, Winner};
 use crate::settings::TournamentSettings;
@@ -756,6 +759,83 @@ impl Tournament {
             &swiss_boards,
             round.bye,
         ))
+    }
+
+    /// Explain what forcing the pairing `a`–`b` in round `round_number` would
+    /// cost, relative to the round's confirmed Swiss pairing: which boards would
+    /// change, the rings of affected players, and the net per-rule cost.
+    ///
+    /// If either player isn't an engine-paired Swiss player of that round (they
+    /// were forced, are a cup player, or sat out), the result is `scoped_out`
+    /// with the reason and no diff — the engine didn't choose their board.
+    pub fn explain_counterfactual(
+        &self,
+        round_number: u32,
+        a: Uuid,
+        b: Uuid,
+    ) -> Result<Counterfactual, TournamentError> {
+        let idx = self
+            .rounds
+            .iter()
+            .position(|r| r.number == round_number)
+            .ok_or(TournamentError::RoundNotFound(round_number))?;
+        let round = &self.rounds[idx];
+        let completed = &self.rounds[..idx];
+        let swiss_boards: Vec<(Uuid, Uuid)> = round
+            .boards
+            .iter()
+            .filter(|bd| matches!(bd.source, PairingSource::Swiss))
+            .map(|bd| (bd.player1, bd.player2))
+            .collect();
+
+        // Both probed players must be engine-paired (in a Swiss board or the bye).
+        let in_swiss = |id: Uuid| {
+            round.bye == Some(id) || swiss_boards.iter().any(|&(x, y)| x == id || y == id)
+        };
+        for id in [a, b] {
+            if !in_swiss(id) {
+                return Ok(Counterfactual {
+                    scoped_out: Some(self.scope_reason(round, id)?),
+                    cost_delta: Vec::new(),
+                    cycles: Vec::new(),
+                    changed: Vec::new(),
+                });
+            }
+        }
+
+        Ok(counterfactual_force(
+            round.number,
+            &self.players,
+            &self.settings,
+            completed,
+            &swiss_boards,
+            round.bye,
+            a,
+            b,
+        ))
+    }
+
+    /// Why `id` is out of the engine's hands for `round`: forced, a cup player,
+    /// or sitting out. Errors only if `id` isn't a player at all.
+    fn scope_reason(&self, round: &Round, id: Uuid) -> Result<ScopeReason, TournamentError> {
+        if round.absent.contains(&id) {
+            return Ok(ScopeReason::Absent);
+        }
+        for bd in &round.boards {
+            if bd.player1 == id || bd.player2 == id {
+                return Ok(match bd.source {
+                    PairingSource::Forced => ScopeReason::Forced,
+                    PairingSource::Cup { .. } => ScopeReason::Cup,
+                    // A Swiss board would have passed the in_swiss check.
+                    PairingSource::Swiss => ScopeReason::Absent,
+                });
+            }
+        }
+        if self.players.iter().any(|p| p.id == id) {
+            Ok(ScopeReason::Absent)
+        } else {
+            Err(TournamentError::PlayerNotFound(id))
+        }
     }
 
     /// Toggle the winner of a board in response to a player being clicked.

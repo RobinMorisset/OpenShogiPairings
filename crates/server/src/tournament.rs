@@ -6,7 +6,7 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{
-    Board, CupPodium, Handicap, NewPlayer, RoundExplanation, Standing, Tournament,
+    Board, Counterfactual, CupPodium, Handicap, NewPlayer, RoundExplanation, Standing, Tournament,
     TournamentSettings, Winner,
 };
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,7 @@ use crate::state::{AppState, TournamentStore};
 /// - `PUT    /api/tournament/draft`                  edit the draft
 /// - `POST   /api/tournament/rounds`                 confirm the draft (pair & start)
 /// - `GET    /api/tournament/rounds/{n}/explanation` explain a round's Swiss pairings
+/// - `POST   /api/tournament/rounds/{n}/counterfactual` explain forcing a pairing
 /// - `POST   /api/tournament/rounds/{n}/boards/{i}/result`  toggle a board winner
 /// - `POST   /api/tournament/rounds/{n}/boards/{i}/drawn`   set the draw flag
 /// - `PUT    /api/tournament/rounds/{n}/boards/{i}/handicap` set/clear the handicap
@@ -73,6 +74,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/tournament/rounds/{round_number}/explanation",
             get(round_explanation),
+        )
+        .route(
+            "/api/tournament/rounds/{round_number}/counterfactual",
+            post(round_counterfactual),
         )
         .route(
             "/api/tournament/rounds/{round_number}/boards/{board_index}/result",
@@ -394,6 +399,43 @@ async fn round_explanation(
     let tournament = store.current().ok_or(ApiError::NoTournament)?;
     let explanation = tournament.explain_round(round_number)?;
     Ok(Json(explanation))
+}
+
+/// Body of the counterfactual endpoint: the two players to probe and the mode.
+/// Only `"force"` ("why aren't these two paired?") is supported today.
+#[derive(Debug, Deserialize)]
+struct CounterfactualRequest {
+    #[serde(default = "default_mode")]
+    mode: String,
+    a: Uuid,
+    b: Uuid,
+}
+
+fn default_mode() -> String {
+    "force".to_string()
+}
+
+/// Explain what forcing the pairing `a`–`b` in this round would cost. Read-only.
+async fn round_counterfactual(
+    State(state): State<AppState>,
+    Path(round_number): Path<u32>,
+    Json(req): Json<CounterfactualRequest>,
+) -> Result<Json<Counterfactual>, ApiError> {
+    if req.a == req.b {
+        return Err(ApiError::BadRequest(
+            "a counterfactual needs two different players".into(),
+        ));
+    }
+    if req.mode != "force" {
+        return Err(ApiError::BadRequest(format!(
+            "unsupported counterfactual mode '{}' (only 'force')",
+            req.mode
+        )));
+    }
+    let store = state.store.read().expect("store lock poisoned");
+    let tournament = store.current().ok_or(ApiError::NoTournament)?;
+    let result = tournament.explain_counterfactual(round_number, req.a, req.b)?;
+    Ok(Json(result))
 }
 
 /// Body of the board-result endpoint: which player the referee clicked.

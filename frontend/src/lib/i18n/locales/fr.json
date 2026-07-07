@@ -121,6 +121,26 @@
         "bye_selection": "choix de l'exempt",
         "elo_gap": "écart ELO"
       }
+    },
+    "probe": {
+      "title": "Interroger un appariement",
+      "hint": "Choisissez deux joueurs pour voir ce que coûterait de les apparier.",
+      "pick": "Choisir un joueur…",
+      "and": "avec",
+      "submit": "Expliquer",
+      "working": "Calcul…",
+      "bye": "(exempt)",
+      "noChange": "Ces deux joueurs sont déjà appariés — rien ne changerait.",
+      "worseOn": "Moins bon sur :",
+      "betterOn": "Meilleur sur :",
+      "newBoardsLabel": "Les tables qui changeraient :",
+      "newBoard": "{a} contre {b}",
+      "newBye": "{name} devient exempt",
+      "scopedOut": {
+        "forced": "Cette table a été fixée par l'arbitre, pas choisie par le moteur.",
+        "cup": "Cette table vient du tableau de la coupe, pas du moteur suisse.",
+        "absent": "Ce joueur était absent ce round, le moteur ne l'a pas apparié."
+      }
     }
   },
   "resultsView": {

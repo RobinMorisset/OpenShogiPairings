@@ -190,78 +190,71 @@ impl Tournament {
 `explain_round` builds the `PairingModel`, and for each Swiss board/bye asks for
 its unit vector. `report` is the column-sum of the board ledgers.
 
-### 4. The counterfactual
+### 4. The counterfactual (force — shipped)
+
+Phase 2 ships the **force** direction only ("why aren't A and B paired?");
+forbid is phase 3. What actually shipped:
 
 ```rust
-pub enum Probe {
-    /// "Why aren't A and B paired?" — force the edge, re-solve the rest.
-    Force { a: Uuid, b: Uuid },
-    /// "Why did you pair A and B?" — forbid the edge, re-solve.
-    Forbid { a: Uuid, b: Uuid },
-}
+/// Why a probed player is out of the engine's hands.
+pub enum ScopeReason { Forced, Cup, Absent }
 
-/// One board that differs between the baseline and the counterfactual solve.
-pub struct ChangedBoard {
-    pub before: BoardLedger, // the pairing in the confirmed round
-    pub after: BoardLedger,  // the pairing after the probe
-    pub flipped: Option<RuleId>, // highest-priority rule whose units changed
-}
+/// One rule's net change: signed units, positive = the alternative is worse.
+pub struct RuleDelta { pub rule: RuleId, pub units: i64 }
 
 /// A vertex-disjoint alternating cycle in baseline Δ counterfactual: the ring of
-/// players who must reshuffle to honour the probe. Ordered for storytelling.
-pub struct AffectedCycle {
-    pub players: Vec<Uuid>,   // in cycle order; a bye appears as the sentinel
-}
+/// players who reshuffle to honour the probe. The bye appears as the nil UUID.
+pub struct AffectedCycle { pub players: Vec<Uuid> }
 
 pub struct Counterfactual {
-    pub probe: Probe,
-    pub scoped_out: Option<ScopeReason>, // A or B is a forced/cup/absent player
-    pub cost_delta: Vec<RuleTotal>, // per-rule (after − before) totals, priority order
-    pub cycles: Vec<AffectedCycle>,
-    pub changed: Vec<ChangedBoard>, // the full changed set; the UI decides what to fold
+    pub scoped_out: Option<ScopeReason>, // A or B not an engine-paired Swiss player
+    pub cost_delta: Vec<RuleDelta>,      // signed per-rule net change, priority order
+    pub cycles: Vec<AffectedCycle>,      // the affected rings (structure/story)
+    pub changed: Vec<BoardLedger>,       // the new boards (added edges), each a ledger
 }
 
 impl Tournament {
-    pub fn explain_counterfactual(&self, round_number: u32, probe: Probe)
+    pub fn explain_counterfactual(&self, round_number: u32, a: Uuid, b: Uuid)
         -> Result<Counterfactual, TournamentError>;
 }
 ```
 
+Two refinements from the original sketch above:
+
+- **`changed` is the set of *new* boards** (the added M1 edges), each carrying
+  its own ledger — not `before`/`after` pairs. The before-state is recoverable
+  from the `cycles`, and the net rule movement lives in `cost_delta` (signed
+  `M1 − M0` totals). Simpler payload, same information.
+- **The stability tier is folded in arithmetically**, not as a `Rule::Stability`
+  variant: `solve_stable` costs each edge `real_cost · (edges + 1) + (edge not in
+  baseline)`. Since `real_cost` is already the correct lexicographic scalar and
+  the stability term is `≤ edges < edges + 1`, this *is* the lexicographic order
+  `(real rules, then boards changed)` — identical argmin to appending a
+  lowest-priority rule to `scale_ladder`, but localized to the re-solve and with
+  no new `RuleId` to thread through serialization.
+
 Mechanics:
 
-1. Build the `PairingModel` for the round (§2). Baseline matching `M0` = the
-   round's Swiss boards + bye as an `UnorderedPair` set.
-2. **Force**: pre-place `A`/`B` (drop them from the free set, exactly like a
-   forced board), then `solve(Stability + baseline = M0)`. **Forbid**: keep the
-   full free set, set `cost[A][B]` to a prohibitive weight (above the entire
-   ladder sum, so never chosen), then `solve(Stability + baseline = M0)`. Call
-   the result `M1`.
-3. `M0 Δ M1` (symmetric difference) is a set of vertex-disjoint even alternating
-   cycles — the affected rings. The probed edge sits on one of them. Order each
-   cycle by walking alternating baseline/counterfactual edges.
-4. For each vertex in `M0 Δ M1`, its board changed: emit a `ChangedBoard` with
-   before/after ledgers and the flipped rule.
-5. `cost_delta` is the per-rule sum over changed boards of (after − before).
-6. Scope guard: if `A` or `B` is a cup/forced/absent player, return early with
-   `scoped_out` set (the frontend shows "A's board was fixed by the referee /
-   cup, not chosen by the engine"). There is no feasibility guard — forcing a
-   rematch is a perfectly valid (just expensive) matching, and its cost shows up
-   honestly as a `Rematch` contribution in the changed board's ledger, which is
-   exactly the answer the referee wants ("to pair them you'd have to replay").
+1. Build the `PairingModel` for the round (§2). Baseline `M0` = the round's Swiss
+   boards + `(bye, PHANTOM)` as normalized pairs (`PHANTOM` = nil UUID).
+2. Pre-place the forced edge `A–B` (drop both from the vertex set; the phantom
+   stays if there was a bye), then `solve_stable(rest, baseline = M0)`. Add the
+   forced edge back → `M1`.
+3. `M0 Δ M1` decomposes into vertex-disjoint alternating cycles (`alternating_
+   cycles`) — the affected rings; the probed edge sits on one.
+4. `cost_delta` = per-rule `Σ(added units) − Σ(removed units)` (unchanged boards
+   cancel), keeping only rules that moved.
+5. `changed` = the added edges as ledgers (a board with no `player2` is a new
+   bye).
+6. Scope guard: if `A` or `B` isn't an engine-paired Swiss player (or the bye),
+   return early with `scoped_out`. No feasibility guard — forcing a rematch is a
+   valid, just costly matching whose price shows up as a `Rematch` delta.
 
-**How much to report.** The `cycles` carry the *structure* — the whole ring has
-to be listed or the "A now plays B, so X plays Y…" story breaks — but the
-per-board rule deltas can get verbose, and (per the fold observation below) most
-of the shuffled boards may differ only on low-priority rules. The API returns
-the **full** `changed` set; the frontend decides what to fold. The likely
-default: surface the boards whose `flipped` rule is the highest-priority change,
-collapse the rest behind a count ("+3 more boards shuffled, all on fold"). The
-exact threshold is a UI tuning question to settle by testing against real
-fields, which is why the split lives on the frontend, not in the core payload.
+Because the picker only offers this round's Swiss players, the UI never triggers
+`scoped_out` itself; it's a safety net for direct API callers.
 
-The bye is modeled as a phantom vertex throughout (as in `pair_round_weighted`),
-so "player X now takes the bye" falls out of the cycle naturally; the sentinel
-id renders as "(bye)" on the frontend.
+The bye is the phantom vertex throughout, so "player X now takes the bye" falls
+out of the diff naturally and renders as "(bye)" on the frontend.
 
 ### 5. Rule identity for serialization
 
@@ -388,38 +381,35 @@ float", "club clash", "fold"), not the internal enum names.
 **Core**
 
 - `explain_round` ledger equals `edge_units` for each board (round-trip against
-  the same `PairingModel` the pairing used).
-- `report` totals equal the column-sum of the board ledgers.
-- Extend `scale_ladder_tiers_are_disjoint` to include `Stability` and assert it
-  sits strictly below `Fold`/`EloGap`.
-- A hand-built **tie** field (e.g. two unrated ELO-mode players, or a symmetric
-  fold group): the counterfactual's affected set is minimal — the stability tier
-  keeps every unrelated board fixed. Without `Stability`, more boards move; with
-  it, only the forced ring does.
-- `Force`/`Forbid` on the round-2 fixtures already in `pairing.rs`: the forced
-  edge appears in `M1`, the changed set is the expected ring, and `flipped`
-  names the right rule.
-- Forcing a rematch produces a valid `M1` whose changed board carries a
-  `Rematch` contribution (no feasibility special-case).
-- The glyph trigger ignores fold: a board that differs from its fold ideal but
-  is otherwise clean produces no noteworthy contribution.
-- Scope guard: probing a `Forced`/`Cup`/absent player returns `scoped_out`.
+  the same `PairingModel` the pairing used). *(shipped:
+  `explain_ledger_matches_the_engine_units`)*
+- A fold-only board produces no *noteworthy* contribution but does report a Fold
+  total. *(shipped: `explain_flags_fold_deviation_as_binding`,
+  `explain_clean_pairing_has_no_contributions`)*
+- Force swaps a **minimal ring**: forcing a non-fold pairing changes exactly the
+  forced board and its forced completion, a single 4-player cycle. *(shipped:
+  `forcing_a_pairing_swaps_a_minimal_ring` — the stability tie-break keeps
+  everything else fixed.)*
+- Forcing the status quo changes nothing; forcing a worse pairing reports a
+  positive `cost_delta`; forcing across a bye reassigns the sit-out (a changed
+  board with no `player2`). *(shipped as three more tests.)*
 
 **Server**: the two endpoints return 200 with the expected shape; 404 for a
-missing round; 400 for `a == b` / unknown ids.
+missing round; 400 for `a == b` or a non-`force` mode.
 
-**Frontend**: glyph appears iff a ledger is non-empty; tooltip lists the right
-rules; the counterfactual panel renders a scoped-out / infeasible / normal
-result. (Light — the logic lives in core.)
+**Frontend** (verified in-browser against the American-Grid fixture): the glyph
+appears only on boards relaxed above fold; the report line and expander render;
+the probe panel returns a normal diff (cost summary + changed boards) and the
+"already paired" no-change case.
 
 ---
 
 ## Phasing
 
-1. **Ledger + report** (core §1–3, `GET …/explanation`, frontend surfaces 1–2).
-   High value, no re-solve, low risk. Ships the always-on layer.
-2. **Counterfactual force** (core §4 force path + `Stability`, `POST …
-   /counterfactual`, frontend surface 3). The centrepiece.
+1. **Ledger + report** — *shipped.* Core §1–3, `GET …/explanation`, frontend
+   surfaces 1–2. The always-on layer.
+2. **Counterfactual force** — *shipped.* Core §4 force path (arithmetic stability
+   tie-break), `POST …/counterfactual`, frontend surface 3. The centrepiece.
 3. **Forbid direction** and a "force this pairing" action that cancels the round
    and re-drafts with the probed edge as a `Forced` board — closing the loop
    from *"why not?"* to *"then do it."*
