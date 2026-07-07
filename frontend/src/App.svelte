@@ -637,7 +637,7 @@
 
 <style>
   .app {
-    width: min(46rem, 92vw);
+    width: min(90rem, 95vw);
     margin: 0 auto;
     padding: 2rem 0 3rem;
   }
