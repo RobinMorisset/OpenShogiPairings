@@ -94,9 +94,9 @@
     <table>
       <thead>
         <tr>
-          <th class="num">Board</th>
-          <th>Player 1</th>
           <th class="src-col"></th>
+          <th class="num">Board</th>
+          <th class="p1-col">Player 1</th>
           <th>Player 2</th>
           <th class="draw-col">Draw</th>
           {#if handicapPolicy !== "none"}
@@ -110,8 +110,9 @@
       <tbody>
         {#each round.boards as board, index (index)}
           <tr>
+            <td class="src-col" title={sourceBadge(board.source).text}>{sourceEmoji(board)}</td>
             <td class="num">{index + 1}</td>
-            <td>
+            <td class="p1-col">
               <button
                 type="button"
                 class="player"
@@ -124,7 +125,6 @@
                 {name(board.player1)}
               </button>
             </td>
-            <td class="src-col" title={sourceBadge(board.source).text}>{sourceEmoji(board)}</td>
             <td>
               <button
                 type="button"
@@ -228,6 +228,9 @@
     font-weight: 600;
     font-size: 0.8rem;
   }
+  tbody tr:nth-child(even) {
+    background: #28282f;
+  }
   .num {
     text-align: right;
     width: 3.5rem;
@@ -239,6 +242,13 @@
     padding-left: 0.2rem;
     padding-right: 0.2rem;
     font-size: 0.95rem;
+  }
+
+  .p1-col {
+    text-align: right;
+  }
+  .p1-col .player {
+    text-align: right;
   }
 
   .player {
@@ -296,6 +306,7 @@
   }
 
   .handicap {
+    width: 4.5rem;
     background: #1c1c22;
     color: inherit;
     border: 1px solid #3a3a42;
