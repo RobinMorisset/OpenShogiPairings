@@ -68,16 +68,60 @@
 
   type Field = "last_name" | "first_name" | "rating" | "nationality" | "club";
 
-  // Display order: highest ELO first, players without a rating at the bottom.
-  // `sort` is stable, so equal ratings (and the no-rating group) keep their
-  // registration order. This is display only — the underlying order is
-  // untouched, and edits key off `player.id`.
+  // Sortable columns, including ones that aren't inline-editable ("#" and the
+  // cup checkbox). This is display only, purely client-side — it never touches
+  // the server, and edits still key off `player.id`.
+  type SortKey = "tournament_id" | Field | "eligible";
+
+  let sortKey = $state<SortKey>("rating");
+  // -1 = descending, 1 = ascending. Rating-descending is the default, matching
+  // the previous fixed order.
+  let sortDir = $state<-1 | 1>(-1);
+
+  function sortValue(p: Player, key: SortKey): string | number | null {
+    switch (key) {
+      case "tournament_id":
+        return p.tournament_id ?? null;
+      case "last_name":
+        return p.last_name.toLowerCase();
+      case "first_name":
+        return p.first_name.toLowerCase() || null;
+      case "rating":
+        return p.rating ?? null;
+      case "nationality":
+        return p.nationality?.trim().toLowerCase() || null;
+      case "club":
+        return p.club?.trim().toLowerCase() || null;
+      case "eligible":
+        return p.eligible ? 1 : 0;
+    }
+  }
+
+  // Click a header to sort by that column; click again to flip direction.
+  // Numeric-ish columns default to descending (strongest/most-recent first),
+  // text columns to ascending (A→Z).
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      sortDir = sortDir === 1 ? -1 : 1;
+      return;
+    }
+    sortKey = key;
+    sortDir = key === "rating" || key === "tournament_id" || key === "eligible" ? -1 : 1;
+  }
+
+  // Missing values (no rating, no tournament number, blank nationality/club)
+  // always sort to the bottom, regardless of direction — a null isn't "low"
+  // or "high", it's just absent. `sort` is stable, so ties keep registration
+  // order.
   const sorted = $derived(
     [...players].sort((a, b) => {
-      if (a.rating == null && b.rating == null) return 0;
-      if (a.rating == null) return 1;
-      if (b.rating == null) return -1;
-      return b.rating - a.rating;
+      const av = sortValue(a, sortKey);
+      const bv = sortValue(b, sortKey);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      const cmp = typeof av === "string" && typeof bv === "string" ? av.localeCompare(bv) : av < bv ? -1 : av > bv ? 1 : 0;
+      return sortDir === 1 ? cmp : -cmp;
     }),
   );
 
@@ -207,6 +251,17 @@
   }
 </script>
 
+{#snippet sortHeader(key: SortKey, label: string, numeric: boolean, title?: string)}
+  <th class:num={numeric} {title}>
+    <button type="button" class="sort-btn" onclick={() => toggleSort(key)}>
+      {label}
+      <span class="sort-arrow" class:active={sortKey === key}>
+        {sortKey === key ? (sortDir === 1 ? "▲" : "▼") : "⇅"}
+      </span>
+    </button>
+  </th>
+{/snippet}
+
 {#snippet cell(player: Player, field: Field, numeric: boolean)}
   {#if editing?.id === player.id && editing.field === field}
     <input
@@ -268,20 +323,29 @@
   <table>
     <thead>
       <tr>
-        <th class="num">#</th>
-        <th>Last name</th>
-        <th>First name</th>
-        <th class="num">Rating</th>
-        <th>Nat.</th>
-        <th>Club</th>
-        {#if showEligible}<th class="elig" title="Eligible for the cup">Cup</th>{/if}
+        {@render sortHeader("tournament_id", "#", true, "Tournament number, assigned at finalization")}
+        {@render sortHeader("last_name", "Last name", false)}
+        {@render sortHeader("first_name", "First name", false)}
+        {@render sortHeader("rating", "Rating", true)}
+        {@render sortHeader("nationality", "Nat.", false)}
+        {@render sortHeader("club", "Club", false)}
+        {#if showEligible}
+          <th class="elig">
+            <button type="button" class="sort-btn" title="Eligible for the cup" onclick={() => toggleSort("eligible")}>
+              Cup
+              <span class="sort-arrow" class:active={sortKey === "eligible"}>
+                {sortKey === "eligible" ? (sortDir === 1 ? "▲" : "▼") : "⇅"}
+              </span>
+            </button>
+          </th>
+        {/if}
         <th aria-label="Actions"></th>
       </tr>
     </thead>
     <tbody>
-      {#each sorted as player, i (player.id)}
+      {#each sorted as player (player.id)}
         <tr>
-          <td class="num">{i + 1}</td>
+          <td class="num">{player.tournament_id ?? "—"}</td>
           <td>{@render cell(player, "last_name", false)}</td>
           <td>{@render cell(player, "first_name", false)}</td>
           <td class="num">{@render cell(player, "rating", true)}</td>
@@ -413,6 +477,32 @@
     text-align: right;
     font-variant-numeric: tabular-nums;
   }
+  .sort-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  th.num .sort-btn {
+    flex-direction: row-reverse;
+  }
+  .sort-btn:hover {
+    color: #d0d0d6;
+  }
+  .sort-arrow {
+    font-size: 0.7rem;
+    color: #4a4a52;
+  }
+  .sort-arrow.active {
+    color: #7aa2f7;
+  }
   .actions {
     text-align: right;
     width: 5rem;
@@ -421,6 +511,13 @@
   .elig {
     text-align: center;
     width: 2.5rem;
+  }
+  th.elig {
+    width: auto;
+    white-space: nowrap;
+  }
+  th.elig .sort-btn {
+    justify-content: center;
   }
   .elig-frozen {
     color: #3fb950;
