@@ -357,8 +357,7 @@
       display: none;
     }
     .draw-col,
-    .handicap-col,
-    .suggested-col {
+    .handicap-col {
       display: none;
     }
     /* Only the forced-pairing lock is dropped from print — the cup trophy stays. */
@@ -372,7 +371,8 @@
     .giver,
     .na,
     .hint,
-    .bye {
+    .bye,
+    .suggested {
       color: #000 !important;
       background: transparent !important;
       border-color: #000 !important;
