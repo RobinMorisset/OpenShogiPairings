@@ -41,6 +41,10 @@ pub struct RatedPlayer {
     pub last_name: String,
     pub first_name: String,
     pub rating: u32,
+    /// Number of rated games behind this rating. Used to judge how established a
+    /// rating is (the ELO estimator widens the prior for provisional ratings);
+    /// 0 when the column was missing or unparseable.
+    pub games: u32,
     /// Country code, uppercased (e.g. `JP`, `FR`).
     pub nationality: String,
 }
@@ -95,7 +99,9 @@ fn parse_row(line: &str) -> Option<RatedPlayer> {
 
     // The last three tokens are always nationality, #games, Elo (right to left).
     let nationality = tokens.pop()?.to_uppercase();
-    let _games = tokens.pop()?;
+    // #games must be present, but tolerate a non-numeric value (→ 0) rather than
+    // dropping the whole row, matching the parser's graceful-degradation policy.
+    let games: u32 = tokens.pop()?.parse().unwrap_or(0);
     let rating: u32 = tokens.pop()?.parse().ok()?;
 
     // Whatever grades remain sit at the end of the given-name region; drop them.
@@ -106,6 +112,7 @@ fn parse_row(line: &str) -> Option<RatedPlayer> {
         last_name,
         first_name,
         rating,
+        games,
         nationality,
     })
 }
@@ -182,7 +189,15 @@ mod tests {
         assert_eq!(p.last_name, "Kobayashi");
         assert_eq!(p.first_name, "Taichi");
         assert_eq!(p.rating, 2556);
+        assert_eq!(p.games, 55);
         assert_eq!(p.nationality, "JP");
+    }
+
+    #[test]
+    fn parses_the_number_of_games() {
+        // A provisional rating (few games) vs an established one.
+        assert_eq!(parse_one(&row(3, "Takita", "Hirotaka 2462 7 JP")).games, 7);
+        assert_eq!(parse_one(&row(1000, "Tkachenko", "Vladimir 17 Kyu 326 18 BY")).games, 18);
     }
 
     #[test]

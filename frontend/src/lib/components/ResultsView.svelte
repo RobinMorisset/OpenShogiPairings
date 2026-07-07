@@ -21,10 +21,13 @@
       .filter((t): t is (typeof TIEBREAKS)[number] => t != null),
   );
 
-  // The estimated-ELO column is only meaningful (and only shown) in the
-  // experimental ELO pairing mode.
+  // The estimated-ELO column is only meaningful in the experimental ELO pairing
+  // mode. Show it as a dedicated column there — unless the referee already added
+  // it to the ranking criteria, in which case it appears as a tie-break column
+  // (with its ranking position) and this one would duplicate it.
   const showEstimatedElo = $derived(
-    tournament.settings.elo_pairing_enabled ?? false,
+    (tournament.settings.elo_pairing_enabled ?? false) &&
+      !(tournament.settings.tiebreaks ?? []).includes("est_elo"),
   );
 
   // Player id → medal, from the cup podium (the table order stays pure-Swiss).

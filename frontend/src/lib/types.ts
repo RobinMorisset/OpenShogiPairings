@@ -18,6 +18,7 @@ export interface Player {
   last_name: string;
   first_name: string;
   rating?: number;
+  fesa_games?: number; // FESA #games behind the rating (reliability), if from the list
   nationality?: string; // country code, e.g. "JP"
   club?: string;
   eligible?: boolean; // eligible for the direct-elimination cup
@@ -36,6 +37,7 @@ export interface NewPlayer {
   last_name: string;
   first_name?: string;
   rating?: number;
+  fesa_games?: number; // FESA #games, set when the rating was picked from the list
   nationality?: string;
   club?: string;
 }
@@ -45,6 +47,7 @@ export interface RatedPlayer {
   last_name: string;
   first_name: string;
   rating: number;
+  games: number; // number of rated games behind the rating
   nationality: string;
 }
 
@@ -164,6 +167,13 @@ export interface TournamentSettings {
    * `elo_pairing_enabled`; expected range ~100–400.
    */
   elo_k_multiplier_percent: number;
+  /**
+   * Extra K multiplier (integer percent, 200 = ×2.0) for a provisionally-rated
+   * player — not in the FESA list, or fewer than 18 FESA games — widening their
+   * prior so their estimate drifts faster. Only meaningful when
+   * `elo_pairing_enabled`.
+   */
+  elo_provisional_multiplier_percent: number;
 }
 
 /** Mirror of `osp_core::HandicapPolicy`. */
@@ -185,7 +195,8 @@ export type Tiebreak =
   | "sos_w1"
   | "sos_w2"
   | "cuss_m"
-  | "cuss_w";
+  | "cuss_w"
+  | "est_elo";
 
 /** Column label, tooltip, and the `Standing` field for each tie-break metric —
  *  the single source shared by the Settings picker and the Results headers. */
@@ -208,6 +219,7 @@ export const TIEBREAKS: {
   { code: "sos_w2", label: "SOSW-2", field: "sosw2", title: "SOSW dropping the two lowest-scoring opponents" },
   { code: "cuss_m", label: "CUSSM", field: "cussm", title: "Cumulative sum of the running points total each round" },
   { code: "cuss_w", label: "CUSSW", field: "cussw", title: "Cumulative sum of the running win total each round" },
+  { code: "est_elo", label: "Est. ELO", field: "estimated_elo", title: "Live Bayesian estimate of the player's current strength" },
 ];
 
 /** Mirror of `osp_core::Cup` — the seeded direct-elimination bracket. */

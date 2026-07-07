@@ -26,6 +26,13 @@ pub struct Player {
     /// Optional playing strength / rating.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rating: Option<u32>,
+    /// Number of rated games behind `rating` in the FESA list, when the rating was
+    /// picked from it. `None` means the rating was entered by hand or the player
+    /// isn't in the list — in either case the ELO estimator treats the rating as
+    /// provisional (see [`crate::estimate_elos`]). A `Some` below the reliability
+    /// threshold is likewise provisional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fesa_games: Option<u32>,
     /// Optional country code (uppercase, e.g. `JP`, `FR`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nationality: Option<String>,
@@ -69,6 +76,10 @@ pub struct NewPlayer {
     pub first_name: String,
     #[serde(default)]
     pub rating: Option<u32>,
+    /// FESA #games behind the rating, when it was picked from the list (see
+    /// [`Player::fesa_games`]).
+    #[serde(default)]
+    pub fesa_games: Option<u32>,
     #[serde(default)]
     pub nationality: Option<String>,
     #[serde(default)]
@@ -98,6 +109,8 @@ impl Player {
             last_name: new.last_name.trim().to_string(),
             first_name: new.first_name.trim().to_string(),
             rating: new.rating,
+            // Only meaningful alongside a rating; drop it if the rating was cleared.
+            fesa_games: new.rating.and(new.fesa_games),
             nationality: non_empty(new.nationality.unwrap_or_default()).map(|c| c.to_uppercase()),
             club: non_empty(new.club.unwrap_or_default()),
             eligible: false,

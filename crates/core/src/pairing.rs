@@ -661,6 +661,7 @@ mod tests {
             last_name: format!("P{tid}"),
             first_name: String::new(),
             rating,
+            fesa_games: None,
             nationality: None,
             club: club.map(|c| c.to_string()),
             eligible: false,
@@ -915,6 +916,9 @@ mod tests {
     fn elo_settings() -> TournamentSettings {
         TournamentSettings {
             elo_pairing_enabled: true,
+            // Neutralize the provisional-rating widening so these pairing tests
+            // exercise the base drift; reliability is covered in elo.rs tests.
+            elo_provisional_multiplier_percent: 100,
             ..Default::default()
         }
     }

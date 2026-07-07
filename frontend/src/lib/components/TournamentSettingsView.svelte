@@ -78,6 +78,7 @@
   let tiebreaks = $state<Tiebreak[]>([]);
   let eloEnabled = $state(false);
   let eloKPercent = $state(100);
+  let eloProvisionalPercent = $state(200);
 
   // In the experimental ELO mode the Swiss knobs (MacMahon, degressive, club
   // protection, floater selection) don't apply, so they're greyed out.
@@ -110,6 +111,7 @@
     const sTiebreaks = settings.tiebreaks ?? [];
     const sElo = settings.elo_pairing_enabled ?? false;
     const sEloK = settings.elo_k_multiplier_percent ?? 100;
+    const sEloProv = settings.elo_provisional_multiplier_percent ?? 200;
     untrack(() => {
       const matches =
         eq(cleanSorted(thresholds), sThresholds) &&
@@ -122,7 +124,8 @@
         handicapPolicy === sHandicap &&
         eqStr(tiebreaks, sTiebreaks) &&
         eloEnabled === sElo &&
-        eloKPercent === sEloK;
+        eloKPercent === sEloK &&
+        eloProvisionalPercent === sEloProv;
       if (!matches) {
         thresholds = [...sThresholds];
         removals = [...sRemovals];
@@ -135,6 +138,7 @@
         tiebreaks = [...sTiebreaks];
         eloEnabled = sElo;
         eloKPercent = sEloK;
+        eloProvisionalPercent = sEloProv;
       }
     });
   });
@@ -160,6 +164,7 @@
       tiebreaks: [...tiebreaks],
       elo_pairing_enabled: eloEnabled,
       elo_k_multiplier_percent: eloKPercent,
+      elo_provisional_multiplier_percent: eloProvisionalPercent,
     });
   }
 
@@ -173,6 +178,16 @@
     const m = Number(raw);
     const pct = Math.round((Number.isFinite(m) ? m : 1) * 100);
     eloKPercent = Math.max(1, pct);
+    persist();
+  }
+
+  function editEloProvisionalMultiplier(raw: string) {
+    // Decimal multiplier stored as an integer percent; never below ×1 (a
+    // provisional rating shouldn't be treated as more reliable than an established
+    // one — the server clamps this too).
+    const m = Number(raw);
+    const pct = Math.round((Number.isFinite(m) ? m : 2) * 100);
+    eloProvisionalPercent = Math.max(100, pct);
     persist();
   }
 
@@ -363,6 +378,23 @@
         How fast an estimate may drift from the registration rating (applied to
         each player's FIDE K factor). 1 keeps ratings close; higher reacts faster
         to upsets. Usually 1–4.
+      </p>
+      <label class="check elo-k">
+        Provisional rating ×
+        <input
+          type="number"
+          min="1"
+          step="0.5"
+          class="threshold narrow"
+          value={eloProvisionalPercent / 100}
+          disabled={busy}
+          onchange={(e) => editEloProvisionalMultiplier(e.currentTarget.value)}
+        />
+      </label>
+      <p class="desc small-note">
+        Extra drift for players whose rating is less trustworthy — not found in the
+        FESA list (rating typed by hand) or with fewer than 18 FESA games. Applied
+        on top of the multiplier above; 1 disables it.
       </p>
     {/if}
   </div>

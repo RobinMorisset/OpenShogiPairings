@@ -1,10 +1,10 @@
 # Experimental ELO-based (non-Swiss) pairing mode — design
 
 Status: **V1 implemented** — the estimator ([`crates/core/src/elo.rs`](../crates/core/src/elo.rs)),
-the ELO rule ladder in the pairing engine, the settings toggle + multiplier
-(with the Swiss sections greyed out), and the Results-tab "Est. ELO" column
-(shown only in ELO mode; `Standing.estimated_elo`) are in. Still open: the V2
-items in §8. Tracks the TODO item
+the ELO rule ladder in the pairing engine, the settings toggle + K multiplier +
+provisional-rating multiplier (with the Swiss sections greyed out), the Results-tab
+"Est. ELO" column, and estimated ELO as a selectable ranking criterion
+(`Tiebreak::EstElo`) are in. Still open: the V2 items in §8. Tracks the TODO item
 "Experimental ELO-based, non-swiss system". This document pins down the Bayesian
 estimation math and how the mode plugs into the existing pairing engine
 ([`crates/core/src/pairing.rs`](../crates/core/src/pairing.rs)) and scoring
@@ -290,21 +290,38 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   on). Read as a float via `settings.elo_k_multiplier()`. Default `100`, expected
   100–400; the UI presents it as a decimal multiplier. Normalization clamps it to
   ≥ 1 (a zero-width prior would be degenerate).
+- `elo_provisional_multiplier_percent: u32` — an **extra** K multiplier for a
+  *provisionally*-rated player (default `200` = ×2.0, clamped ≥ 100). A rated
+  player is provisional when they aren't in the FESA list (`Player.fesa_games`
+  is `None` — rating typed by hand) or their FESA game count is below
+  `PROVISIONAL_GAMES_THRESHOLD` (18). It stacks on `m`
+  (`K = m · K_FIDE · provisional`), widening the prior so a shaky seed rating
+  drifts faster. Unrated players are unaffected (they already get the wide
+  `N(600, 350²)` prior). `Player.fesa_games` is captured at registration when the
+  rating is picked from the FESA autocomplete (the parser now keeps the `#games`
+  column). It's kept even if the referee then edits the *rating* by hand — the
+  FESA list is often stale and referees routinely bump a known player's rating —
+  and cleared only when the *last name* is edited (a possibly different entry) or
+  the rating is removed entirely.
 
-The unrated prior `N(600, 350²)`, the FIDE K table, and `s` are constants in
-`elo.rs`, not settings (change only with code).
+The unrated prior `N(600, 350²)`, the FIDE K table, `s`, and the reliability
+threshold (18 games) are constants in `elo.rs`, not settings.
+
+## Ranking
+
+Estimated ELO is a selectable ranking criterion: `Tiebreak::EstElo`
+(`Standing.tiebreak` returns `estimated_elo.max(0) as u32`), so the referee can
+place it in the ranking order via the Settings tab like any other metric. When
+it isn't in the ranking order, ELO mode still shows a dedicated informational
+"Est. ELO" column; once added as a ranking criterion it appears as that
+tie-break column instead (no duplicate).
 
 ## 8. V2 / deferred
 
-- **Standings & ranking in this mode.** Left deliberately unspecified here — the
-  standings code is about to change. **TODO(V2):** decide the ranking column
-  (victories, or estimated ELO, or victories → estimated-ELO tiebreak) once that
-  work lands.
-- **`#games` reliability-weighted prior.** The FESA list already carries a
-  `#games` column that the parser reads and discards
-  (`let _games` in [`fesa.rs`](../crates/core/src/fesa.rs)). Persisting it would
-  let `σ₀ᵢ` widen for provisional ratings — the Bayesian-correct version of
-  "trust established ratings more." Smooths the unrated/low-games volatility.
+- **Default ranking order in this mode.** EstElo is *available* as a ranking
+  criterion but the default order is still the classic Swiss one; a mode-aware
+  default (e.g. seed the order with EstElo when ELO mode is enabled) is left for
+  when the standings work settles.
 - **Handicap → ELO mapping** in the likelihood (§4), using the table to be
   provided.
 

@@ -32,6 +32,11 @@ pub const UNRATED_PRIOR_MEAN: f64 = 600.0;
 /// `[1, 1200]` is `1199/√12 ≈ 346`, rounded to 350.
 const UNRATED_PRIOR_STD: f64 = 350.0;
 
+/// A rated player with at least this many FESA games is treated as reliably
+/// rated; fewer (or a rating not from the FESA list) makes it *provisional*, and
+/// the referee's provisional multiplier widens its prior.
+pub const PROVISIONAL_GAMES_THRESHOLD: u32 = 18;
+
 /// Solver limits: coordinate-ascent sweeps and the per-sweep convergence
 /// tolerance (in ELO points). The objective is strongly concave, so this
 /// converges quickly and deterministically.
@@ -56,16 +61,28 @@ fn fide_k(rating: u32) -> f64 {
     }
 }
 
+/// Whether a rated player's registration rating is reliable enough to trust
+/// tightly — in the FESA list with at least [`PROVISIONAL_GAMES_THRESHOLD`]
+/// games. A hand-typed rating (no `fesa_games`) or a low game count is
+/// provisional.
+fn is_reliably_rated(player: &Player) -> bool {
+    matches!(player.fesa_games, Some(games) if games >= PROVISIONAL_GAMES_THRESHOLD)
+}
+
 /// A player's Gaussian prior `(mean, standard deviation)` on the ELO scale.
 ///
 /// A rated player is centered on their registration rating with a width derived
-/// from `m · K_FIDE(rating)` via `σ₀ = √(K · s)` (so `K` is literally their
-/// first-game K factor). An unrated player gets the wide `N(600, 350²)` prior.
-fn prior(player: &Player, k_multiplier: f64) -> (f64, f64) {
+/// from `K = m · K_FIDE(rating)` via `σ₀ = √(K · s)` (so `K` is literally their
+/// first-game K factor). A **provisionally**-rated player (see
+/// [`is_reliably_rated`]) has that `K` further multiplied by `provisional_mult`,
+/// widening the prior so their estimate drifts faster. An unrated player gets the
+/// wide `N(600, 350²)` prior.
+fn prior(player: &Player, k_multiplier: f64, provisional_mult: f64) -> (f64, f64) {
     match player.rating {
         Some(rating) => {
-            // `k_multiplier` is clamped ≥ 1% by settings normalization, so K > 0.
-            let k = k_multiplier * fide_k(rating);
+            // Multipliers are clamped ≥ 1%/100% by settings normalization, so K > 0.
+            let reliability = if is_reliably_rated(player) { 1.0 } else { provisional_mult };
+            let k = k_multiplier * fide_k(rating) * reliability;
             (f64::from(rating), (k * S).sqrt())
         }
         None => (UNRATED_PRIOR_MEAN, UNRATED_PRIOR_STD),
@@ -90,6 +107,7 @@ pub fn estimate_elos(
     rounds: &[Round],
 ) -> HashMap<Uuid, f64> {
     let m = settings.elo_k_multiplier();
+    let provisional = settings.elo_provisional_multiplier();
     let n = players.len();
 
     let index: HashMap<Uuid, usize> = players.iter().enumerate().map(|(i, p)| (p.id, i)).collect();
@@ -97,7 +115,7 @@ pub fn estimate_elos(
     let mut mean = vec![0.0_f64; n];
     let mut precision = vec![0.0_f64; n]; // 1/σ₀² — the prior's weight
     for (i, p) in players.iter().enumerate() {
-        let (mu0, sigma0) = prior(p, m);
+        let (mu0, sigma0) = prior(p, m, provisional);
         mean[i] = mu0;
         theta[i] = mu0; // seed at the prior mean
         precision[i] = 1.0 / (sigma0 * sigma0);
@@ -167,6 +185,7 @@ mod tests {
             last_name: "P".into(),
             first_name: String::new(),
             rating,
+            fesa_games: None,
             nationality: None,
             club: None,
             eligible: false,
@@ -218,10 +237,12 @@ mod tests {
 
     #[test]
     fn single_game_shift_is_capped_near_k() {
-        // A rated 1100 player (FIDE K = 32, m = 1) beating a 1600: the first-game
-        // move is capped by K = 32 and, since the opponent is much stronger
-        // (E ≈ 0.05), lands just under it — matching a plain Elo update.
-        let winner = player(Some(1100));
+        // An *established* rated 1100 player (FIDE K = 32, m = 1) beating a 1600:
+        // the first-game move is capped by K = 32 and, since the opponent is much
+        // stronger (E ≈ 0.05), lands just under it — matching a plain Elo update.
+        // (An established rating avoids the provisional multiplier widening it.)
+        let mut winner = player(Some(1100));
+        winner.fesa_games = Some(50);
         let loser = player(Some(1600));
         let r = decided(1, vec![win(winner.id, loser.id)]);
         let elos = estimate_elos(
@@ -261,6 +282,56 @@ mod tests {
             &[r],
         );
         assert!(elos[&newcomer.id] > 1100.0, "unrated upset should swing far, got {}", elos[&newcomer.id]);
+    }
+
+    #[test]
+    fn provisional_ratings_drift_faster_than_established_ones() {
+        // Two equally-rated (1500) winners of an identical game, differing only in
+        // rating reliability: one established (50 FESA games), one provisional
+        // (hand-typed rating, no games). With the default ×2 provisional
+        // multiplier, the provisional player's estimate should move further.
+        let mut established = player(Some(1500));
+        established.fesa_games = Some(50);
+        let mut provisional = player(Some(1500));
+        provisional.fesa_games = None; // not from FESA → provisional
+        let o1 = player(Some(1500));
+        let o2 = player(Some(1500));
+
+        let players = vec![established.clone(), provisional.clone(), o1.clone(), o2.clone()];
+        let r = decided(
+            1,
+            vec![win(established.id, o1.id), win(provisional.id, o2.id)],
+        );
+        let elos = estimate_elos(&players, &TournamentSettings::default(), &[r]);
+
+        let est_shift = elos[&established.id] - 1500.0;
+        let prov_shift = elos[&provisional.id] - 1500.0;
+        assert!(est_shift > 0.0 && prov_shift > 0.0);
+        assert!(
+            prov_shift > est_shift * 1.4,
+            "provisional shift {prov_shift} should clearly exceed established {est_shift}"
+        );
+    }
+
+    #[test]
+    fn few_games_is_provisional_but_enough_is_established() {
+        // Same rating; the only difference is the FESA game count straddling the
+        // reliability threshold. Below it drifts like the provisional case, at/above
+        // it drifts like the established case.
+        let mut few = player(Some(1500));
+        few.fesa_games = Some(PROVISIONAL_GAMES_THRESHOLD - 1);
+        let mut enough = player(Some(1500));
+        enough.fesa_games = Some(PROVISIONAL_GAMES_THRESHOLD);
+        let o1 = player(Some(1500));
+        let o2 = player(Some(1500));
+
+        let players = vec![few.clone(), enough.clone(), o1.clone(), o2.clone()];
+        let r = decided(1, vec![win(few.id, o1.id), win(enough.id, o2.id)]);
+        let elos = estimate_elos(&players, &TournamentSettings::default(), &[r]);
+        assert!(
+            elos[&few.id] - 1500.0 > elos[&enough.id] - 1500.0,
+            "a sub-threshold game count should be treated as provisional"
+        );
     }
 
     #[test]

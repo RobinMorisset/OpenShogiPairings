@@ -88,6 +88,9 @@ impl Standing {
             Tiebreak::SosW2 => self.sosw2,
             Tiebreak::CussM => self.cussm,
             Tiebreak::CussW => self.cussw,
+            // Ranking metrics are u32; a (non-negative) estimated ELO fits, and a
+            // stray negative estimate floors at 0 for ordering.
+            Tiebreak::EstElo => self.estimated_elo.max(0) as u32,
         }
     }
 }
@@ -185,6 +188,7 @@ mod tests {
             last_name: format!("P{tid}"),
             first_name: String::new(),
             rating,
+            fesa_games: None,
             nationality: None,
             club: None,
             eligible: false,

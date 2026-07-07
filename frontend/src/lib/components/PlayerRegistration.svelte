@@ -29,6 +29,12 @@
   let rating = $state<number | null>(null);
   let nationality = $state("");
   let club = $state("");
+  // The FESA #games behind a picked suggestion, so we can tell the server the
+  // rating is FESA-backed (and how reliable). Kept even if the referee edits the
+  // rating by hand — the FESA list is often stale and referees routinely bump a
+  // known player's rating, so it's still the same (established) player. Cleared
+  // only when the last name is edited, since that may point at a different entry.
+  let fesaGames = $state<number | null>(null);
 
   let showSuggestions = $state(false);
   let highlighted = $state(-1);
@@ -62,6 +68,7 @@
     lastName = r.last_name;
     firstName = r.first_name;
     rating = r.rating;
+    fesaGames = r.games; // rating is now FESA-backed
     nationality = r.nationality;
     showSuggestions = false;
     highlighted = -1;
@@ -70,6 +77,7 @@
   function onLastNameInput() {
     showSuggestions = true;
     highlighted = -1;
+    fesaGames = null; // editing the name breaks the link to the picked entry
   }
 
   function onLastNameKeydown(event: KeyboardEvent) {
@@ -104,7 +112,11 @@
     const player: NewPlayer = { last_name: ln };
     const fn = firstName.trim();
     if (fn) player.first_name = fn;
-    if (rating !== null && Number.isInteger(rating) && rating >= 0) player.rating = rating;
+    if (rating !== null && Number.isInteger(rating) && rating >= 0) {
+      player.rating = rating;
+      // Only forward the games count if the rating is still the FESA-picked one.
+      if (fesaGames !== null) player.fesa_games = fesaGames;
+    }
     const nat = nationality.trim();
     if (nat) player.nationality = nat;
     const cl = club.trim();
@@ -117,6 +129,7 @@
     lastName = "";
     firstName = "";
     rating = null;
+    fesaGames = null;
     nationality = "";
     club = "";
     showSuggestions = false;

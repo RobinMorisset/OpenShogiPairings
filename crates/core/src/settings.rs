@@ -71,6 +71,9 @@ pub enum Tiebreak {
     CussM,
     /// Cumulative sum of the running win total after each round.
     CussW,
+    /// The live Bayesian ELO estimate (experimental ELO pairing mode). Ranks
+    /// higher estimate first, like the other metrics.
+    EstElo,
 }
 
 impl Tiebreak {
@@ -94,6 +97,13 @@ fn default_tiebreaks() -> Vec<Tiebreak> {
 /// the field existed.
 fn default_elo_k_multiplier_percent() -> u32 {
     100
+}
+
+/// The default extra K multiplier for a provisionally-rated player, as an integer
+/// percent (200 = ×2.0). Named so `#[serde(default = …)]` can fill it in for
+/// tournaments saved before the field existed.
+fn default_elo_provisional_multiplier_percent() -> u32 {
+    200
 }
 
 /// Configuration that isn't tied to a single player or round.
@@ -164,6 +174,15 @@ pub struct TournamentSettings {
     /// Only meaningful when `elo_pairing_enabled`; expected range ~100–400.
     #[serde(default = "default_elo_k_multiplier_percent")]
     pub elo_k_multiplier_percent: u32,
+    /// Extra K multiplier applied to a **provisionally-rated** player — one who is
+    /// not in the FESA list (rating typed by hand) or whose FESA `#games` is below
+    /// [`crate::PROVISIONAL_GAMES_THRESHOLD`] — as an integer percent (200 = ×2.0).
+    /// Widens their prior so their estimate drifts faster, since their seed rating
+    /// is less trustworthy. Stacks on top of `elo_k_multiplier_percent`. Clamped to
+    /// ≥ 100 so a provisional rating is never treated as *more* reliable than an
+    /// established one. Only meaningful when `elo_pairing_enabled`.
+    #[serde(default = "default_elo_provisional_multiplier_percent")]
+    pub elo_provisional_multiplier_percent: u32,
 }
 
 impl Default for TournamentSettings {
@@ -180,6 +199,7 @@ impl Default for TournamentSettings {
             tiebreaks: default_tiebreaks(),
             elo_pairing_enabled: false,
             elo_k_multiplier_percent: default_elo_k_multiplier_percent(),
+            elo_provisional_multiplier_percent: default_elo_provisional_multiplier_percent(),
         }
     }
 }
@@ -272,6 +292,9 @@ impl TournamentSettings {
         // every estimate at its registration rating and dividing by zero in the
         // solver — clamp it up to at least 1%.
         self.elo_k_multiplier_percent = self.elo_k_multiplier_percent.max(1);
+        // A provisional rating should never be treated as more reliable than an
+        // established one, so the extra multiplier is at least ×1.
+        self.elo_provisional_multiplier_percent = self.elo_provisional_multiplier_percent.max(100);
 
         self
     }
@@ -279,6 +302,12 @@ impl TournamentSettings {
     /// The ELO-estimate K multiplier `m` as a float (percent / 100).
     pub fn elo_k_multiplier(&self) -> f64 {
         self.elo_k_multiplier_percent as f64 / 100.0
+    }
+
+    /// The extra K multiplier for a provisionally-rated player, as a float
+    /// (percent / 100).
+    pub fn elo_provisional_multiplier(&self) -> f64 {
+        self.elo_provisional_multiplier_percent as f64 / 100.0
     }
 
     /// Sort thresholds ascending and drop duplicates — the canonical form kept in

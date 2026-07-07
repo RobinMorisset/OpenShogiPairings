@@ -201,6 +201,7 @@ mod tests {
             last_name: format!("P{tid}"),
             first_name: String::new(),
             rating,
+            fesa_games: None,
             nationality: None,
             club: None,
             eligible: false,
