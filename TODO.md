@@ -47,8 +47,7 @@ Known limitations and future work, roughly ordered by area.
 
 - **Allow sorting the players list by any column**
 
-- **Grey out the forced bye button when irrelevant** meaning when there is an even number of players to be paired.
-
+- **Exempt club selection** should show the number of players of each club next to that club name, and sort the clubs by decreasing number of players.
 
 ## Simulations
 
