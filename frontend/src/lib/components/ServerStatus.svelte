@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { _ } from "svelte-i18n";
   import { fetchHealth } from "../api";
   import type { HealthStatus } from "../types";
 
@@ -28,14 +29,15 @@
 <div class="server-status">
   <span class="dot {state.phase}"></span>
   {#if state.phase === "loading"}
-    <span>Contacting server…</span>
+    <span>{$_("serverStatus.contacting")}</span>
   {:else if state.phase === "ok"}
     <span
-      >Server <code>{state.health.service}</code> v{state.health.version}</span
+      >{$_("serverStatus.serverPrefix")} <code>{state.health.service}</code> v{state.health
+        .version}</span
     >
   {:else}
-    <span>Server unreachable — <code>cargo run -p osp-server</code></span>
-    <button onclick={check}>Retry</button>
+    <span>{$_("serverStatus.unreachable")} <code>cargo run -p osp-server</code></span>
+    <button onclick={check}>{$_("serverStatus.retry")}</button>
   {/if}
 </div>
 

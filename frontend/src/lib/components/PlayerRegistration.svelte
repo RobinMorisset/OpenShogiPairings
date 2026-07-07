@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { _ } from "svelte-i18n";
   import type { NewPlayer, RatedPlayer } from "../types";
 
   interface Props {
@@ -146,10 +147,10 @@
       oninput={onLastNameInput}
       onkeydown={onLastNameKeydown}
       onblur={() => (showSuggestions = false)}
-      placeholder="Last name"
+      placeholder={$_("playerRegistration.lastName")}
       autocomplete="off"
       disabled={busy}
-      aria-label="Last name"
+      aria-label={$_("playerRegistration.lastName")}
       role="combobox"
       aria-expanded={showSuggestions && suggestions.length > 0}
       aria-controls="fesa-suggestions"
@@ -181,40 +182,42 @@
   <input
     type="text"
     bind:value={firstName}
-    placeholder="First name"
+    placeholder={$_("playerRegistration.firstName")}
     autocomplete="off"
     disabled={busy}
-    aria-label="First name"
+    aria-label={$_("playerRegistration.firstName")}
   />
   <input
     type="number"
     bind:value={rating}
-    placeholder="ELO"
+    placeholder={$_("playerRegistration.ratingPlaceholder")}
     min="0"
     disabled={busy}
-    aria-label="Rating (optional)"
+    aria-label={$_("playerRegistration.rating")}
     class="rating"
   />
   <input
     type="text"
     bind:value={nationality}
-    placeholder="Nat."
+    placeholder={$_("playerRegistration.natPlaceholder")}
     autocomplete="off"
     disabled={busy}
-    aria-label="Nationality (optional)"
+    aria-label={$_("playerRegistration.nationality")}
     class="nat"
     maxlength="3"
   />
   <input
     type="text"
     bind:value={club}
-    placeholder="Club (optional)"
+    placeholder={$_("playerRegistration.club")}
     autocomplete="off"
     disabled={busy}
-    aria-label="Club (optional)"
+    aria-label={$_("playerRegistration.club")}
     class="club"
   />
-  <button type="submit" disabled={busy || lastName.trim() === ""}>Add player</button>
+  <button type="submit" disabled={busy || lastName.trim() === ""}
+    >{$_("playerRegistration.addPlayer")}</button
+  >
 </form>
 
 <style>

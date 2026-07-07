@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { _ } from "svelte-i18n";
+
   interface Props {
     /** Create a new tournament with the given name. */
     onCreate: (name: string) => void;
@@ -22,34 +24,34 @@
 </script>
 
 <section class="create card">
-  <h2>New tournament</h2>
+  <h2>{$_("createTournament.title")}</h2>
   <form onsubmit={submit}>
     <label>
-      Name
+      {$_("createTournament.name")}
       <input
         type="text"
         bind:value={name}
-        placeholder="e.g. Paris Open 2026"
+        placeholder={$_("createTournament.namePlaceholder")}
         autocomplete="off"
         disabled={busy}
       />
     </label>
     <div class="actions">
       <button type="submit" disabled={busy || name.trim() === ""}>
-        Create
+        {$_("createTournament.create")}
       </button>
       {#if onCancel}
         <button type="button" class="ghost" onclick={onCancel} disabled={busy}>
-          Cancel
+          {$_("createTournament.cancel")}
         </button>
       {/if}
     </div>
   </form>
 
-  <div class="or">or</div>
+  <div class="or">{$_("createTournament.or")}</div>
 
   <button type="button" class="ghost" disabled={busy} onclick={onLoad}>
-    Load from file…
+    {$_("createTournament.loadFromFile")}
   </button>
 </section>
 

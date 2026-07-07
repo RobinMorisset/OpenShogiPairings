@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { _ } from "svelte-i18n";
   import type { DraftUpdate } from "../api";
   import type { Player, RoundDraft } from "../types";
 
@@ -124,12 +125,12 @@
   // Client-side validation (the server validates authoritatively too).
   const problem = $derived.by<string | null>(() => {
     if (cupPlayers.length === 0 && present.length < 2)
-      return "Need at least 2 present players.";
+      return $_("roundDraftView.needAtLeastTwoPresent");
     if (draft.forced_bye) {
       if (present.length % 2 === 0)
-        return "A forced bye needs an odd number of present players.";
+        return $_("roundDraftView.needOddPresentForBye");
       if ((present.length - 2 * draft.forced_boards.length - 1) % 2 !== 0)
-        return "The forced pairings and bye leave a player unpairable.";
+        return $_("roundDraftView.forcedPairingsLeaveUnpairable");
     }
     return null;
   });
@@ -137,31 +138,33 @@
 
 <div class="draft">
   <p class="summary">
-    Preparing <strong>round {draft.number}</strong> — {present.length} in the Swiss
-    pool{#if cupPlayers.length > 0}, {cupPlayers.length} in the cup bracket{/if},
-    {draft.absent.length} absent. Players you don't pair by hand are matched
-    automatically.
+    {#if cupPlayers.length > 0}
+      {$_("roundDraftView.summaryWithCup", { values: { number: draft.number, present: present.length, cup: cupPlayers.length, absent: draft.absent.length } })}
+    {:else}
+      {$_("roundDraftView.summary", { values: { number: draft.number, present: present.length, absent: draft.absent.length } })}
+    {/if}
   </p>
 
   {#if cupPlayers.length > 0}
     <p class="cup-note">
-      The {cupPlayers.length} cup players are paired by the bracket (shown once the
-      round starts) and can't be customized here.
+      {$_("roundDraftView.cupNote", { values: { count: cupPlayers.length } })}
     </p>
   {/if}
 
   {#if absentCupPlayers.length > 0}
     <p class="hint warning">
-      ⚠ {absentCupPlayers.map((p) => label(p.id)).join(", ")}
-      {absentCupPlayers.length === 1 ? "is" : "are"} in the cup but marked absent —
-      the bracket game is still created; record the forfeit result when the round
-      starts.
+      ⚠ {$_(
+        absentCupPlayers.length === 1
+          ? "roundDraftView.absentCupWarningSingular"
+          : "roundDraftView.absentCupWarningPlural",
+        { values: { names: absentCupPlayers.map((p) => label(p.id)).join(", ") } },
+      )}
     </p>
   {/if}
 
   <section>
-    <h3>Absent this round</h3>
-    <p class="muted small">Defaults to those absent last round.</p>
+    <h3>{$_("roundDraftView.absentThisRound")}</h3>
+    <p class="muted small">{$_("roundDraftView.absentDefaultHint")}</p>
     <div class="players-grid">
       {#each allSorted as p (p.id)}
         <label class="chk">
@@ -171,14 +174,14 @@
             disabled={busy}
             onchange={() => toggleAbsent(p.id)}
           />
-          {label(p.id)}{#if cupSet.has(p.id)}<span class="cup-tag">cup</span>{/if}
+          {label(p.id)}{#if cupSet.has(p.id)}<span class="cup-tag">{$_("roundDraftView.cupTag")}</span>{/if}
         </label>
       {/each}
     </div>
   </section>
 
   <section>
-    <h3>Forced pairings</h3>
+    <h3>{$_("roundDraftView.forcedPairings")}</h3>
     {#if draft.forced_boards.length > 0}
       <ul class="forced-list">
         {#each draft.forced_boards as board, i (i)}
@@ -189,7 +192,7 @@
               class="remove"
               disabled={busy}
               onclick={() => removeForcedPair(i)}
-              title="Remove this forced pairing">✕</button
+              title={$_("roundDraftView.removeForcedPairing")}>✕</button
             >
           </li>
         {/each}
@@ -201,18 +204,18 @@
         disabled={busy}
         onchange={(e) => selectPairA(e.currentTarget.value)}
       >
-        <option value="">Player…</option>
+        <option value="">{$_("roundDraftView.playerEllipsis")}</option>
         {#each forceable as p (p.id)}
           <option value={p.id}>{label(p.id)}</option>
         {/each}
       </select>
-      <span class="vs">vs</span>
+      <span class="vs">{$_("roundDraftView.vs")}</span>
       <select
         value={pairB}
         disabled={busy}
         onchange={(e) => selectPairB(e.currentTarget.value)}
       >
-        <option value="">Player…</option>
+        <option value="">{$_("roundDraftView.playerEllipsis")}</option>
         {#each forceable as p (p.id)}
           {#if p.id !== pairA}
             <option value={p.id}>{label(p.id)}</option>
@@ -223,14 +226,14 @@
   </section>
 
   <section class:disabled={present.length % 2 === 0}>
-    <h3>Forced bye</h3>
-    <p class="muted small">Only applies with an odd number of present players.</p>
+    <h3>{$_("roundDraftView.forcedBye")}</h3>
+    <p class="muted small">{$_("roundDraftView.forcedByeHint")}</p>
     <select
       value={draft.forced_bye ?? ""}
       disabled={busy || present.length % 2 === 0}
       onchange={(e) => setForcedBye(e.currentTarget.value)}
     >
-      <option value="">Automatic (lowest of remaining)</option>
+      <option value="">{$_("roundDraftView.automaticBye")}</option>
       {#each present as p (p.id)}
         {#if !forcedIds.has(p.id) || draft.forced_bye === p.id}
           <option value={p.id}>{label(p.id)}</option>
@@ -249,10 +252,14 @@
       disabled={busy || problem !== null}
       onclick={onConfirm}
     >
-      Start round {draft.number}
+      {$_("roundDraftView.startRound", { values: { number: draft.number } })}
     </button>
   </div>
-  <p class="muted small">Use <strong>Undo</strong> to discard this draft.</p>
+  <p class="muted small">
+    {$_("roundDraftView.useUndoHintPrefix")} <strong>{$_("app.undo")}</strong>{$_(
+      "roundDraftView.useUndoHintSuffix",
+    )}
+  </p>
 </div>
 
 <style>

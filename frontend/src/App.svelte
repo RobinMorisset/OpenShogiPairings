@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { _ } from "svelte-i18n";
+  import { waitLocale } from "./lib/i18n";
   import {
     addPlayer,
     addPointAdjustment,
@@ -54,6 +56,7 @@
   import RoundDraftView from "./lib/components/RoundDraftView.svelte";
   import ResultsView from "./lib/components/ResultsView.svelte";
   import TournamentSettingsView from "./lib/components/TournamentSettingsView.svelte";
+  import LocaleSwitcher from "./lib/components/LocaleSwitcher.svelte";
 
   let tournament = $state<Tournament | null>(null);
   let standings = $state<Standing[]>([]);
@@ -62,6 +65,8 @@
   let suggestedHandicaps = $state<(Handicap | null)[][]>([]);
   let canUndo = $state(false);
   let initialLoad = $state<"loading" | "done">("loading");
+  let i18nReady = $state(false);
+  waitLocale().then(() => (i18nReady = true));
   let creatingNew = $state(false);
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -91,7 +96,7 @@
   function confirmDiscard(): boolean {
     if (!hasUnsavedChanges || !tournament) return true;
     return window.confirm(
-      `"${tournament.name}" has unsaved changes that will be lost. Continue anyway?`,
+      $_("app.confirmDiscard", { values: { name: tournament.name } }),
     );
   }
 
@@ -153,12 +158,12 @@
   // "Advance" button (finalize registration / complete current round).
   const advanceLabel = $derived(
     phase === "registration"
-      ? "Finalize registration"
+      ? $_("app.advanceRegistration")
       : phase === "in_progress"
-        ? `Complete round ${currentRound?.number}`
+        ? $_("app.advanceInProgress", { values: { number: currentRound?.number } })
         : (tournament?.rounds.length ?? 0) > 0
-          ? `Round ${tournament?.rounds.length} complete`
-          : "Registration finalized",
+          ? $_("app.advanceRoundComplete", { values: { number: tournament?.rounds.length } })
+          : $_("app.advanceRegistrationFinalized"),
   );
   const advanceEnabled = $derived(
     !busy &&
@@ -167,11 +172,11 @@
   );
   const advanceTitle = $derived(
     phase === "registration" && !enoughPlayers
-      ? "Register at least 2 players first"
+      ? $_("app.advanceTitleNeedPlayers")
       : phase === "registration" && !cupReady
-        ? "Mark at least 8 players eligible for the cup, or turn the cup off in Settings"
+        ? $_("app.advanceTitleNeedCup")
         : phase === "in_progress" && !currentRoundAllPlayed
-          ? "All games in the round must be played first"
+          ? $_("app.advanceTitleNeedResults")
           : "",
   );
 
@@ -180,9 +185,9 @@
   const startEnabled = $derived(!busy && phase === "ready" && enoughPlayers);
   const startTitle = $derived(
     phase !== "ready"
-      ? "Finalize registration / complete the current round first"
+      ? $_("app.startTitleNotReady")
       : !enoughPlayers
-        ? "Need at least 2 players"
+        ? $_("app.startTitleNeedPlayers")
         : "",
   );
 
@@ -196,10 +201,10 @@
   );
   const exportTitle = $derived(
     completedRoundCount === 0
-      ? "Complete a round first"
+      ? $_("app.exportTitleNoRounds")
       : phase !== "ready"
-        ? "Finish the current round before exporting"
-        : "Download the American Grid (cross-table) for ELO",
+        ? $_("app.exportTitleNotReady")
+        : $_("app.exportTitleReady"),
   );
 
   // "Cancel last round" button: peels back one stage — discards the open draft,
@@ -209,10 +214,10 @@
   );
   const cancelTitle = $derived(
     tournament?.draft
-      ? "Discard the round being prepared"
+      ? $_("app.cancelTitleDraft")
       : (tournament?.rounds.length ?? 0) > 0
-        ? "Remove the last round and return to the previous state (undoable)"
-        : "No round to cancel",
+        ? $_("app.cancelTitleRound")
+        : $_("app.cancelTitleNothing"),
   );
 
   // Keep the selected tab valid (e.g. after undo or cancel-round removes a
@@ -260,7 +265,7 @@
 
   function describe(err: unknown): string {
     if (err instanceof ApiError && err.status === 0) {
-      return "Cannot reach the server. Is it running (cargo run -p osp-server)?";
+      return $_("app.cannotReachServer");
     }
     return err instanceof Error ? err.message : String(err);
   }
@@ -464,16 +469,27 @@
 
 <div class="app">
   <header>
-    <h1>OpenShogiPairings</h1>
-    <p class="subtitle">Tournament management for shogi</p>
+    <div class="header-top">
+      <div class="header-titles">
+        <h1>OpenShogiPairings</h1>
+        {#if i18nReady}
+          <p class="subtitle">{$_("app.subtitle")}</p>
+        {/if}
+      </div>
+      {#if i18nReady}
+        <LocaleSwitcher />
+      {/if}
+    </div>
   </header>
 
   {#if error}
     <p class="error-banner" role="alert">{error}</p>
   {/if}
 
-  {#if initialLoad === "loading"}
+  {#if !i18nReady}
     <p class="muted">Loading…</p>
+  {:else if initialLoad === "loading"}
+    <p class="muted">{$_("app.loading")}</p>
   {:else if showCreate}
     <CreateTournament
       onCreate={handleCreate}
@@ -487,7 +503,7 @@
         <div class="title">
           <h2>{tournament.name}</h2>
           {#if hasUnsavedChanges}
-            <span class="unsaved-dot" title="Unsaved changes">●</span>
+            <span class="unsaved-dot" title={$_("app.unsavedChanges")}>●</span>
           {/if}
         </div>
         <div class="toolbar-actions">
@@ -496,12 +512,12 @@
             class="ghost"
             onclick={handleUndo}
             disabled={busy || !canUndo}
-            title="Undo the last change"
+            title={$_("app.undoTitle")}
           >
-            Undo
+            {$_("app.undo")}
           </button>
           <button type="button" class="ghost" onclick={handleSave} disabled={busy}>
-            Save
+            {$_("app.save")}
           </button>
           <button
             type="button"
@@ -509,9 +525,9 @@
             class:active={showBackups}
             onclick={handleToggleBackups}
             disabled={busy}
-            title="Automatic backups taken at each round transition"
+            title={$_("app.backupsTitle")}
           >
-            Backups…
+            {$_("app.backups")}
           </button>
           <button
             type="button"
@@ -519,7 +535,7 @@
             onclick={() => (creatingNew = true)}
             disabled={busy}
           >
-            New…
+            {$_("app.new")}
           </button>
         </div>
       </div>
@@ -528,8 +544,7 @@
         <div class="backups-panel">
           {#if backups.length === 0}
             <p class="small">
-              No backups yet — taken automatically as the round moves through
-              finalize/prepare/start/complete/cancel.
+              {$_("app.noBackupsYet")}
             </p>
           {:else}
             <ul class="backups-list">
@@ -543,7 +558,7 @@
                     disabled={busy}
                     onclick={() => handleRestoreBackup(b.id)}
                   >
-                    Restore
+                    {$_("app.restore")}
                   </button>
                 </li>
               {/each}
@@ -559,7 +574,7 @@
           class:active={activeTab === "settings"}
           onclick={() => (activeTab = "settings")}
         >
-          Settings
+          {$_("app.tabSettings")}
         </button>
         <button
           type="button"
@@ -567,7 +582,7 @@
           class:active={activeTab === "players"}
           onclick={() => (activeTab = "players")}
         >
-          Players ({tournament.players.length})
+          {$_("app.tabPlayers", { values: { count: tournament.players.length } })}
         </button>
         <button
           type="button"
@@ -575,7 +590,7 @@
           class:active={activeTab === "results"}
           onclick={() => (activeTab = "results")}
         >
-          Results
+          {$_("app.tabResults")}
         </button>
         {#each tournament.rounds as round (round.number)}
           <button
@@ -584,7 +599,9 @@
             class:active={activeTab === `round-${round.number}`}
             onclick={() => (activeTab = `round-${round.number}`)}
           >
-            Round {round.number}{round.completed ? " ✓" : ""}
+            {round.completed
+              ? $_("app.tabRoundCompleted", { values: { number: round.number } })
+              : $_("app.tabRound", { values: { number: round.number } })}
           </button>
         {/each}
         {#if tournament.draft}
@@ -594,21 +611,21 @@
             class:active={activeTab === "draft"}
             onclick={() => (activeTab = "draft")}
           >
-            Round {tournament.draft.number} (draft)
+            {$_("app.tabRoundDraft", { values: { number: tournament.draft.number } })}
           </button>
         {/if}
         <div class="round-controls">
           {#if phase === "registration" && cupEnabled}
-            <label class="cup-size" title="Bracket size for the direct-elimination cup">
-              Cup:
+            <label class="cup-size" title={$_("app.cupTitle")}>
+              {$_("app.cupLabel")}
               {#if validCupSizes.length > 0}
                 <select bind:value={cupSizeChoice} disabled={busy}>
                   {#each validCupSizes as s (s)}
-                    <option value={s}>Top {s}</option>
+                    <option value={s}>{$_("app.cupSizeOption", { values: { size: s } })}</option>
                   {/each}
                 </select>
               {:else}
-                <span class="cup-warn">need ≥8 eligible</span>
+                <span class="cup-warn">{$_("app.cupNeedMoreEligible")}</span>
               {/if}
             </label>
           {/if}
@@ -628,7 +645,7 @@
             disabled={!startEnabled}
             title={startTitle}
           >
-            Prepare round {nextRoundNumber}
+            {$_("app.prepareRound", { values: { number: nextRoundNumber } })}
           </button>
           <button
             type="button"
@@ -637,7 +654,7 @@
             disabled={!exportEnabled}
             title={exportTitle}
           >
-            Export grid
+            {$_("app.exportGrid")}
           </button>
           <button
             type="button"
@@ -646,7 +663,7 @@
             disabled={!canCancel}
             title={cancelTitle}
           >
-            Cancel last round
+            {$_("app.cancelLastRound")}
           </button>
         </div>
       </div>
@@ -665,9 +682,9 @@
           <div class="ratings-status">
             <span>
               {#if ratings.length > 0}
-                {ratings.length} players in the FESA rating list
+                {$_("app.ratingsLoaded", { values: { count: ratings.length } })}
               {:else}
-                FESA rating list not loaded
+                {$_("app.ratingsNotLoaded")}
               {/if}
             </span>
             <button
@@ -675,9 +692,9 @@
               class="ghost small"
               onclick={handleRefreshRatings}
               disabled={busy}
-              title="Re-download the rating list from the FESA website"
+              title={$_("app.refreshRatingsTitle")}
             >
-              Refresh FESA list
+              {$_("app.refreshRatings")}
             </button>
           </div>
           <div class="players">
@@ -736,8 +753,21 @@
     padding: 2rem 0 3rem;
   }
   header {
-    text-align: center;
     margin-bottom: 1.5rem;
+  }
+  .header-top {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    position: relative;
+  }
+  .header-titles {
+    text-align: center;
+  }
+  .header-top :global(.locale-switcher) {
+    position: absolute;
+    right: 0;
+    top: 0.2rem;
   }
   h1 {
     font-size: 1.8rem;

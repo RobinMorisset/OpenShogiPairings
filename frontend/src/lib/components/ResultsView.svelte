@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { _ } from "svelte-i18n";
   import { TIEBREAKS } from "../types";
   import type { CupPodium, Player, Round, Standing, Tournament } from "../types";
+  import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
 
   interface Props {
     tournament: Tournament;
@@ -143,7 +145,7 @@
    * the default explanation when the player has none. */
   function pointsTitle(player: Player): string {
     const adjustments = player.adjustments ?? [];
-    if (adjustments.length === 0) return "Victories + MacMahon points";
+    if (adjustments.length === 0) return $_("resultsView.victoriesPlusMacmahon");
     return adjustments
       .map((a) => `${a.delta > 0 ? "+" : ""}${a.delta} — ${a.reason}`)
       .join("\n");
@@ -151,11 +153,11 @@
 </script>
 
 {#if tournament.players.length === 0}
-  <p class="muted">No players registered yet.</p>
+  <p class="muted">{$_("resultsView.noPlayers")}</p>
 {:else}
   <div class="results">
   <div class="results-toolbar print-hide">
-    <button type="button" class="ghost" onclick={() => window.print()}>🖨 Print</button>
+    <button type="button" class="ghost" onclick={() => window.print()}>🖨 {$_("roundView.print")}</button>
   </div>
   {#if cupPodium}
     {@const nameOf = (id: string) => {
@@ -163,7 +165,7 @@
       return p ? `${p.last_name} ${p.first_name}`.trim() : "—";
     }}
     <div class="podium">
-      <span class="cup-title">Cup</span>
+      <span class="cup-title">{$_("resultsView.cup")}</span>
       <span>🥇 <strong>{nameOf(cupPodium.champion)}</strong></span>
       <span>🥈 {nameOf(cupPodium.runner_up)}</span>
       <span>🥉 {nameOf(cupPodium.third)}</span>
@@ -172,21 +174,21 @@
   <table>
     <thead>
       <tr>
-        <th class="num">ID</th>
-        <th>Last name</th>
-        <th>First name</th>
-        <th class="num">Rating</th>
+        <th class="num">{$_("resultsView.id")}</th>
+        <th>{$_("resultsView.lastName")}</th>
+        <th>{$_("resultsView.firstName")}</th>
+        <th class="num">{$_("resultsView.rating")}</th>
         {#if showEstimatedElo}
-          <th class="num" title="Live Bayesian estimate of the player's current strength">Est. ELO</th>
+          <th class="num" title={tiebreakTitle("est_elo", $_)}>{tiebreakLabel("est_elo", $_)}</th>
         {/if}
-        <th>Nat.</th>
-        <th>Club</th>
+        <th>{$_("resultsView.nationality")}</th>
+        <th>{$_("resultsView.club")}</th>
         {#each completedRounds as round (round.number)}
-          <th class="num">R{round.number}</th>
+          <th class="num">{$_("resultsView.roundColumn", { values: { number: round.number } })}</th>
         {/each}
-        <th class="num">Victories</th>
+        <th class="num">{$_("resultsView.victories")}</th>
         {#each tiebreakColumns as col (col.code)}
-          <th class="num" title={col.title}>{col.label}</th>
+          <th class="num" title={tiebreakTitle(col.code, $_)}>{tiebreakLabel(col.code, $_)}</th>
         {/each}
       </tr>
     </thead>
@@ -206,16 +208,20 @@
             {@const cell = cellFor(player, round)}
             <td class="num result">
               {#if cell.kind === "bye"}
-                <span class="win" title="Bye (counts as a win)">0+</span>
+                <span class="win" title={$_("resultsView.byeTitle")}>0+</span>
               {:else if cell.kind === "absent"}
-                <span class="absent" title="Absent (counts as a loss)">0−</span>
+                <span class="absent" title={$_("resultsView.absentTitle")}>0−</span>
               {:else if cell.kind === "pending"}
                 <span class="pending">{cell.opponent}?</span>
               {:else}
                 <span
                   class={cell.actualWon ? "win" : "loss"}
                   title={cell.handicap
-                    ? `Handicap game — counts as a ${cell.effectiveWon ? "win" : "loss"} in the standings`
+                    ? $_(
+                        cell.effectiveWon
+                          ? "resultsView.handicapGameWin"
+                          : "resultsView.handicapGameLoss",
+                      )
                     : undefined}>{playedLabel(cell)}</span
                 >
               {/if}
@@ -240,7 +246,7 @@
 
   {#if completedRounds.length === 0}
     <p class="muted note">
-      No rounds completed yet — results appear here as rounds are completed.
+      {$_("resultsView.noRoundsCompleted")}
     </p>
   {/if}
   </div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { _ } from "svelte-i18n";
   import type { NewPlayer, Player } from "../types";
 
   interface Props {
@@ -279,7 +280,7 @@
       type="button"
       class="cell-btn"
       disabled={busy}
-      title="Click to edit"
+      title={$_("playerList.clickToEdit")}
       onclick={() => startEdit(player, field)}
     >
       {displayValue(player, field) || "—"}
@@ -288,12 +289,12 @@
 {/snippet}
 
 {#if showEligible}
-  <p class="elig-count">{eligibleCount} eligible for the cup</p>
+  <p class="elig-count">{$_("playerList.eligibleCount", { values: { count: eligibleCount } })}</p>
   {#if !finalized && nationalities.length > 0}
     <div class="elig-bulk">
-      <span>Cup eligibility by nationality:</span>
+      <span>{$_("playerList.eligibilityByNationality")}</span>
       <select bind:value={bulkNationality} disabled={busy}>
-        <option value="">Choose a nationality…</option>
+        <option value="">{$_("playerList.chooseNationality")}</option>
         {#each nationalities as [nat, count] (nat)}
           <option value={nat}>{nat} ({count})</option>
         {/each}
@@ -304,7 +305,7 @@
         disabled={busy || !bulkNationality}
         onclick={() => applyBulkEligible(true)}
       >
-        Mark eligible
+        {$_("playerList.markEligible")}
       </button>
       <button
         type="button"
@@ -312,34 +313,34 @@
         disabled={busy || !bulkNationality}
         onclick={() => applyBulkEligible(false)}
       >
-        Clear
+        {$_("playerList.clear")}
       </button>
     </div>
   {/if}
 {/if}
 {#if players.length === 0}
-  <p class="empty">No players registered yet.</p>
+  <p class="empty">{$_("playerList.noPlayers")}</p>
 {:else}
   <table>
     <thead>
       <tr>
-        {@render sortHeader("tournament_id", "#", true, "Tournament number, assigned at finalization")}
-        {@render sortHeader("last_name", "Last name", false)}
-        {@render sortHeader("first_name", "First name", false)}
-        {@render sortHeader("rating", "Rating", true)}
-        {@render sortHeader("nationality", "Nat.", false)}
-        {@render sortHeader("club", "Club", false)}
+        {@render sortHeader("tournament_id", "#", true, $_("playerList.tournamentNumberTitle"))}
+        {@render sortHeader("last_name", $_("playerList.lastName"), false)}
+        {@render sortHeader("first_name", $_("playerList.firstName"), false)}
+        {@render sortHeader("rating", $_("playerList.rating"), true)}
+        {@render sortHeader("nationality", $_("playerList.nationality"), false)}
+        {@render sortHeader("club", $_("playerList.club"), false)}
         {#if showEligible}
           <th class="elig">
-            <button type="button" class="sort-btn" title="Eligible for the cup" onclick={() => toggleSort("eligible")}>
-              Cup
+            <button type="button" class="sort-btn" title={$_("playerList.eligibleForCup")} onclick={() => toggleSort("eligible")}>
+              {$_("playerList.cup")}
               <span class="sort-arrow" class:active={sortKey === "eligible"}>
                 {sortKey === "eligible" ? (sortDir === 1 ? "▲" : "▼") : "⇅"}
               </span>
             </button>
           </th>
         {/if}
-        <th aria-label="Actions"></th>
+        <th aria-label={$_("playerList.actions")}></th>
       </tr>
     </thead>
     <tbody>
@@ -354,7 +355,7 @@
           {#if showEligible}
             <td class="elig">
               {#if finalized}
-                <span title="Eligible for the direct-elimination cup" class="elig-frozen">
+                <span title={$_("playerList.eligibleForCupFull")} class="elig-frozen">
                   {player.eligible ? "✓" : ""}
                 </span>
               {:else}
@@ -362,7 +363,7 @@
                   type="checkbox"
                   checked={player.eligible ?? false}
                   disabled={busy}
-                  title="Eligible for the direct-elimination cup"
+                  title={$_("playerList.eligibleForCupFull")}
                   onchange={(e) => onToggleEligible?.(player.id, e.currentTarget.checked)}
                 />
               {/if}
@@ -377,7 +378,7 @@
             <button
               type="button"
               class="adjust"
-              title="Manual point bonus/malus"
+              title={$_("playerList.manualAdjustmentTitle")}
               disabled={busy}
               onclick={() => toggleAdjustments(player.id)}
             >
@@ -386,7 +387,7 @@
             <button
               type="button"
               class="remove"
-              title="Remove player"
+              title={$_("playerList.removePlayer")}
               disabled={busy}
               onclick={() => onRemove(player.id)}
             >
@@ -408,7 +409,7 @@
                       <button
                         type="button"
                         class="remove-adj"
-                        title="Remove this adjustment"
+                        title={$_("playerList.removeAdjustment")}
                         disabled={busy}
                         onclick={() => onRemoveAdjustment?.(player.id, adj.id)}
                       >
@@ -422,14 +423,14 @@
                 <input
                   class="adj-delta"
                   type="number"
-                  placeholder="±pts"
+                  placeholder={$_("playerList.adjustmentPointsPlaceholder")}
                   value={adjustmentDelta}
                   oninput={(e) => (adjustmentDelta = e.currentTarget.value)}
                 />
                 <input
                   class="adj-reason"
                   type="text"
-                  placeholder="Reason"
+                  placeholder={$_("playerList.adjustmentReasonPlaceholder")}
                   value={adjustmentReason}
                   oninput={(e) => (adjustmentReason = e.currentTarget.value)}
                   onkeydown={(e) => e.key === "Enter" && submitAdjustment(player.id)}
@@ -440,7 +441,7 @@
                   disabled={busy}
                   onclick={() => submitAdjustment(player.id)}
                 >
-                  Add
+                  {$_("playerList.add")}
                 </button>
               </div>
             </td>

@@ -1,7 +1,9 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { _ } from "svelte-i18n";
   import { TIEBREAKS } from "../types";
   import type { HandicapPolicy, Player, Tiebreak, TournamentSettings } from "../types";
+  import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
 
   interface Props {
     settings: TournamentSettings;
@@ -88,10 +90,8 @@
   const availableTiebreaks = $derived(
     TIEBREAKS.filter((t) => !tiebreaks.includes(t.code)),
   );
-  const labelOf = (code: Tiebreak) =>
-    TIEBREAKS.find((t) => t.code === code)?.label ?? code;
-  const titleOf = (code: Tiebreak) =>
-    TIEBREAKS.find((t) => t.code === code)?.title ?? "";
+  const labelOf = (code: Tiebreak) => tiebreakLabel(code, $_);
+  const titleOf = (code: Tiebreak) => tiebreakTitle(code, $_);
 
   // Adopt the persisted settings only on a genuine external change — a load, an
   // undo, or the server normalizing our input. When our own edit merely
@@ -304,11 +304,14 @@
     const t = normThresholds;
     const rows: { label: string; points: number }[] = [];
     if (t.length === 0) return rows;
-    rows.push({ label: `below ${t[0]}`, points: 0 });
+    rows.push({ label: $_("settings.bandBelow", { values: { value: t[0] } }), points: 0 });
     for (let i = 0; i < t.length; i++) {
       const hi = t[i + 1];
       rows.push({
-        label: hi != null ? `${t[i]}–${hi - 1}` : `${t[i]} and above`,
+        label:
+          hi != null
+            ? $_("settings.bandRange", { values: { lo: t[i], hi: hi - 1 } })
+            : $_("settings.bandAndAbove", { values: { value: t[i] } }),
         points: i + 1,
       });
     }
@@ -328,11 +331,17 @@
     let active = total;
     let start = 1;
     for (const r of rounds) {
-      rows.push({ label: start === r ? `round ${r}` : `rounds ${start}–${r}`, max: active });
+      rows.push({
+        label:
+          start === r
+            ? $_("settings.roundLabel", { values: { n: r } })
+            : $_("settings.roundsRangeLabel", { values: { from: start, to: r } }),
+        max: active,
+      });
       active = Math.max(0, active - (counts.get(r) ?? 0));
       start = r + 1;
     }
-    rows.push({ label: `round ${start}+`, max: active });
+    rows.push({ label: $_("settings.roundPlus", { values: { n: start } }), max: active });
     return rows;
   });
 </script>
@@ -340,17 +349,14 @@
 <div class="settings">
   {#if finalized}
     <p class="hint warning">
-      ⚠ Registration is finalized — changing the MacMahon groups will change
-      everyone's points and future pairings.
+      ⚠ {$_("settings.finalizedWarning")}
     </p>
   {/if}
 
   <div class="section mode-section">
-    <h3>ELO-based pairing (experimental)</h3>
+    <h3>{$_("settings.eloModeTitle")}</h3>
     <p class="desc">
-      Ignore Swiss / MacMahon entirely and pair each round to minimise the ELO
-      difference of every game, using a live Bayesian estimate of each player's
-      strength that updates from the results.
+      {$_("settings.eloModeDesc")}
     </p>
     <label class="check">
       <input
@@ -359,11 +365,11 @@
         disabled={busy}
         onchange={(e) => setEloEnabled(e.currentTarget.checked)}
       />
-      Pair by estimated ELO (disables MacMahon and the Swiss options below)
+      {$_("settings.eloModeCheckbox")}
     </label>
     {#if eloEnabled}
       <label class="check elo-k">
-        Drift multiplier ×
+        {$_("settings.eloDriftMultiplier")}
         <input
           type="number"
           min="0.5"
@@ -375,12 +381,10 @@
         />
       </label>
       <p class="desc small-note">
-        How fast an estimate may drift from the registration rating (applied to
-        each player's FESA K factor). 1 keeps ratings close; higher reacts faster
-        to upsets. Usually 1–4.
+        {$_("settings.eloDriftDesc")}
       </p>
       <label class="check elo-k">
-        Provisional rating ×
+        {$_("settings.eloProvisionalMultiplier")}
         <input
           type="number"
           min="1"
@@ -392,20 +396,15 @@
         />
       </label>
       <p class="desc small-note">
-        Extra drift for players whose rating is less trustworthy — not found in the
-        FESA list (rating typed by hand) or with fewer than 18 FESA games. Applied
-        on top of the multiplier above; 1 disables it.
+        {$_("settings.eloProvisionalDesc")}
       </p>
     {/if}
   </div>
 
   <fieldset class="swiss-fieldset" disabled={swissDisabled}>
-    <h3>MacMahon groups</h3>
+    <h3>{$_("settings.macmahonTitle")}</h3>
     <p class="desc">
-    Each player starts with one point per ELO threshold their rating reaches. For
-    example, with thresholds 1200 and 1700 a player rated below 1200 starts at 0,
-    from 1200 to 1699 at 1, and 1700 or above at 2. Unrated players start at 0.
-    Leave the list empty to disable MacMahon.
+    {$_("settings.macmahonDesc")}
   </p>
 
   <div class="thresholds">
@@ -424,25 +423,25 @@
           type="button"
           class="remove"
           disabled={busy}
-          title="Remove this threshold"
+          title={$_("settings.removeThreshold")}
           onclick={() => removeThreshold(i)}>✕</button
         >
       </div>
     {/each}
     {#if thresholds.length === 0}
-      <p class="muted">No thresholds — every player starts at 0 MacMahon points.</p>
+      <p class="muted">{$_("settings.noThresholds")}</p>
     {/if}
     <button
       type="button"
       class="ghost small"
       disabled={busy}
-      onclick={addThreshold}>Add threshold</button
+      onclick={addThreshold}>{$_("settings.addThreshold")}</button
     >
   </div>
 
   {#if bands.length > 0}
     <div class="preview">
-      <h4>Starting points</h4>
+      <h4>{$_("settings.startingPoints")}</h4>
       <ul>
         {#each bands as b (b.points)}
           <li><span class="band">{b.label}</span> → <strong>{b.points}</strong></li>
@@ -453,19 +452,15 @@
 
   {#if thresholds.length > 0}
     <div class="section">
-      <h3>Degressive MacMahon</h3>
+      <h3>{$_("settings.degressiveTitle")}</h3>
       <p class="desc">
-        Also called <em>accelerated Swiss</em>: drop the lowest MacMahon group at
-        the end of a round, so the starting-point head start fades as the field
-        converges. Schedule one entry per group to drop; two entries on the same
-        round drop two groups at once. A drop scheduled after round N takes effect
-        from round N+1.
+        {$_("settings.degressiveDesc")}
       </p>
 
       <div class="thresholds">
         {#each removals as r, i (i)}
           <div class="threshold-row">
-            <span class="prefix">Drop one group after round</span>
+            <span class="prefix">{$_("settings.dropPrefix")}</span>
             <input
               type="number"
               min="1"
@@ -479,32 +474,32 @@
               type="button"
               class="remove"
               disabled={busy}
-              title="Remove this drop"
+              title={$_("settings.removeDrop")}
               onclick={() => removeRemoval(i)}>✕</button
             >
           </div>
         {/each}
         {#if removals.length === 0}
-          <p class="muted">No drops — MacMahon groups stay fixed all tournament.</p>
+          <p class="muted">{$_("settings.noDrops")}</p>
         {/if}
         <button
           type="button"
           class="ghost small"
           disabled={busy || !canAddRemoval}
-          title={canAddRemoval ? "" : "Can't drop more groups than there are thresholds"}
-          onclick={addRemoval}>Add drop</button
+          title={canAddRemoval ? "" : $_("settings.cantDropMore")}
+          onclick={addRemoval}>{$_("settings.addDrop")}</button
         >
       </div>
 
       {#if schedule.length > 0}
         <div class="preview">
-          <h4>Spread over rounds</h4>
+          <h4>{$_("settings.spreadOverRounds")}</h4>
           <ul>
             {#each schedule as s (s.label)}
               <li>
-                <span class="band">{s.label}</span> → up to
+                <span class="band">{s.label}</span> → {$_("settings.upTo")}
                 <strong>{s.max}</strong>
-                starting {s.max === 1 ? "point" : "points"}
+                {$_(s.max === 1 ? "settings.startingPointSingular" : "settings.startingPointsPlural")}
               </li>
             {/each}
           </ul>
@@ -514,10 +509,9 @@
   {/if}
 
   <div class="section">
-    <h3>Club protection</h3>
+    <h3>{$_("settings.clubProtectionTitle")}</h3>
     <p class="desc">
-      Avoid pairing players from the same club. Off by default. Club names are
-      matched case-insensitively; players with no club set are never protected.
+      {$_("settings.clubProtectionDesc")}
     </p>
 
     <label class="check">
@@ -527,7 +521,7 @@
         disabled={busy}
         onchange={(e) => setClubEnabled(e.currentTarget.checked)}
       />
-      Avoid pairing players from the same club
+      {$_("settings.clubProtectionCheckbox")}
     </label>
 
     {#if clubEnabled}
@@ -539,7 +533,7 @@
             disabled={busy}
             onchange={(e) => setRoundLimit(e.currentTarget.checked)}
           />
-          Only for the first
+          {$_("settings.onlyFirstRoundsPrefix")}
           <input
             type="number"
             min="1"
@@ -549,12 +543,11 @@
             disabled={busy || clubRounds == null}
             onchange={(e) => editClubRounds(e.currentTarget.value)}
           />
-          round(s)
+          {$_("settings.onlyFirstRoundsSuffix")}
         </label>
 
         <p class="desc exempt-desc">
-          Clubs exempt from protection — their members may still be paired (e.g.
-          the host club, whose entrants are expected to meet):
+          {$_("settings.exemptDesc")}
         </p>
         <div class="thresholds">
           {#each exemptClubs as c, i (i)}
@@ -563,7 +556,7 @@
                 type="text"
                 class="club-input"
                 list="known-clubs"
-                placeholder="club name"
+                placeholder={$_("settings.clubNamePlaceholder")}
                 value={c}
                 disabled={busy}
                 onchange={(e) => editExempt(i, e.currentTarget.value)}
@@ -572,19 +565,19 @@
                 type="button"
                 class="remove"
                 disabled={busy}
-                title="Remove this exemption"
+                title={$_("settings.removeExemption")}
                 onclick={() => removeExempt(i)}>✕</button
               >
             </div>
           {/each}
           {#if exemptClubs.length === 0}
-            <p class="muted">No exemptions — every club is protected.</p>
+            <p class="muted">{$_("settings.noExemptions")}</p>
           {/if}
           <button
             type="button"
             class="ghost small"
             disabled={busy}
-            onclick={addExempt}>Add exempt club</button
+            onclick={addExempt}>{$_("settings.addExemptClub")}</button
           >
         </div>
         {#if knownClubs.length > 0}
@@ -604,10 +597,9 @@
   </div>
 
   <div class="section">
-    <h3>Floater selection</h3>
+    <h3>{$_("settings.floaterTitle")}</h3>
     <p class="desc">
-      When a score group has to pair across groups, who floats? The weakest of the
-      upper group always drops down; this chooses who the lower group sends up.
+      {$_("settings.floaterDesc")}
     </p>
     <label class="check">
       <input
@@ -618,7 +610,7 @@
         disabled={busy}
         onchange={() => setFloaterStyle("classic")}
       />
-      Classic Swiss — the strongest of the lower group floats up
+      {$_("settings.floaterClassic")}
     </label>
     <label class="check">
       <input
@@ -629,18 +621,15 @@
         disabled={busy}
         onchange={() => setFloaterStyle("median")}
       />
-      Median Swiss — the median of the lower group floats up
+      {$_("settings.floaterMedian")}
     </label>
   </div>
   </fieldset>
 
   <div class="section">
-    <h3>Hybrid cup</h3>
+    <h3>{$_("settings.hybridCupTitle")}</h3>
     <p class="desc">
-      Run a direct-elimination cup among the top eligible players alongside the
-      Swiss (the French / European Championship format). Enabling this adds an
-      eligibility column to registration; you pick the bracket size (top 8/16/32/
-      64) when you finalize registration.
+      {$_("settings.hybridCupDesc")}
     </p>
     <label class="check">
       <input
@@ -649,17 +638,14 @@
         disabled={busy}
         onchange={(e) => setCupEnabled(e.currentTarget.checked)}
       />
-      Hybrid tournament with a direct-elimination cup
+      {$_("settings.hybridCupCheckbox")}
     </label>
   </div>
 
   <div class="section">
-    <h3>Handicap games</h3>
+    <h3>{$_("settings.handicapTitle")}</h3>
     <p class="desc">
-      Controls the handicap column(s) in the pairings view. A recommended
-      handicap (FFS Annexe 7, from the rating gap) is highlighted in the picker
-      whenever it's shown, whichever option is chosen below. Cup games never
-      have a handicap.
+      {$_("settings.handicapDesc")}
     </p>
     <label class="check">
       <input
@@ -670,7 +656,7 @@
         disabled={busy}
         onchange={() => setHandicapPolicy("none")}
       />
-      No handicap games — hide the column
+      {$_("settings.handicapNone")}
     </label>
     <label class="check">
       <input
@@ -681,7 +667,7 @@
         disabled={busy}
         onchange={() => setHandicapPolicy("allowed")}
       />
-      Handicap games allowed — show the picker
+      {$_("settings.handicapAllowed")}
     </label>
     <label class="check">
       <input
@@ -692,18 +678,14 @@
         disabled={busy}
         onchange={() => setHandicapPolicy("suggested")}
       />
-      Handicap games suggested — also show a suggested-handicap column
+      {$_("settings.handicapSuggested")}
     </label>
   </div>
 
   <div class="section">
-    <h3>Ranking criteria</h3>
+    <h3>{$_("settings.rankingTitle")}</h3>
     <p class="desc">
-      Players are ranked by these criteria in order (the tournament number breaks
-      anything still level), and only these columns appear on the Results tab.
-      Points is one of them — normally first, but you can reorder it like the
-      rest. Each opponent-sum metric comes in a MacMahon-inclusive (M) and a
-      wins-only (W) flavour.
+      {$_("settings.rankingDesc")}
     </p>
 
     <div class="thresholds">
@@ -715,28 +697,28 @@
             type="button"
             class="remove"
             disabled={busy || i === 0}
-            title="Move up"
+            title={$_("settings.moveUp")}
             onclick={() => moveTiebreak(i, -1)}>▲</button
           >
           <button
             type="button"
             class="remove"
             disabled={busy || i === tiebreaks.length - 1}
-            title="Move down"
+            title={$_("settings.moveDown")}
             onclick={() => moveTiebreak(i, 1)}>▼</button
           >
           <button
             type="button"
             class="remove"
             disabled={busy}
-            title="Remove this tie-break"
+            title={$_("settings.removeTiebreak")}
             onclick={() => removeTiebreak(i)}>✕</button
           >
         </div>
       {/each}
       {#if tiebreaks.length === 0}
         <p class="muted">
-          No tie-breaks — players level on points are ordered by tournament number.
+          {$_("settings.noTiebreaks")}
         </p>
       {/if}
       {#if availableTiebreaks.length > 0}
@@ -750,9 +732,11 @@
               e.currentTarget.value = "";
             }}
           >
-            <option value="" disabled>Add a tie-break…</option>
+            <option value="" disabled>{$_("settings.addTiebreakPlaceholder")}</option>
             {#each availableTiebreaks as t (t.code)}
-              <option value={t.code} title={t.title}>{t.label} — {t.title}</option>
+              <option value={t.code} title={tiebreakTitle(t.code, $_)}
+                >{tiebreakLabel(t.code, $_)} — {tiebreakTitle(t.code, $_)}</option
+              >
             {/each}
           </select>
         </div>
