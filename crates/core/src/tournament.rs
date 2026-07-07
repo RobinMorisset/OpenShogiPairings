@@ -397,9 +397,13 @@ impl Tournament {
     /// Cancel the most recent round, stepping the tournament back one stage.
     ///
     /// Peels off exactly one step: if a round is currently being drafted, the
-    /// draft is discarded; otherwise the last round is removed. Either way the
-    /// tournament returns to the state right after the previous round completed —
-    /// or to just-finalized registration if the removed round was the first one.
+    /// draft is discarded; otherwise the last round is removed, and the
+    /// action that gated it is undone too, so the tournament lands just
+    /// *before* that gate rather than right after it:
+    /// - removing round 1 also undoes `finalize_registration` (tournament
+    ///   numbers and any cup bracket are cleared) — back to open registration;
+    /// - removing round N (N>1) also un-completes round N-1 — back to round
+    ///   N-1 in progress, before it was locked in.
     ///
     /// This makes it easy to re-pair and replay a round in simulations, and lets
     /// a referee undo a round in the rare cases that call for it. It is undoable
@@ -413,6 +417,16 @@ impl Tournament {
         }
         if self.rounds.pop().is_none() {
             return Err(TournamentError::NoRoundToCancel);
+        }
+        match self.rounds.last_mut() {
+            Some(previous) => previous.completed = false,
+            None => {
+                self.registration_finalized = false;
+                self.cup = None;
+                for player in &mut self.players {
+                    player.tournament_id = None;
+                }
+            }
         }
         Ok(())
     }
@@ -969,11 +983,38 @@ mod tests {
         assert_eq!(t.rounds.len(), 1);
         assert!(t.rounds[0].completed);
 
-        // No draft now: cancel removes round 1, back to just-finalized registration.
+        // No draft now: cancel removes round 1, all the way back to registration
+        // (finalize is undone too: tournament numbers are cleared).
         t.cancel_last_round().unwrap();
         assert!(t.rounds.is_empty());
-        assert!(t.registration_finalized);
+        assert!(!t.registration_finalized);
+        assert!(t.players.iter().all(|p| p.tournament_id.is_none()));
         assert_eq!(t.cancel_last_round(), Err(TournamentError::NoRoundToCancel));
+    }
+
+    #[test]
+    fn cancel_last_round_uncompletes_the_previous_round() {
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+
+        // Play and complete rounds 1 and 2.
+        start_next_round(&mut t);
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        t.complete_current_round().unwrap();
+        start_next_round(&mut t);
+        t.toggle_board_winner(2, 0, Winner::Player1).unwrap();
+        t.complete_current_round().unwrap();
+        assert_eq!(t.rounds.len(), 2);
+
+        // Cancelling round 2 lands back on round 1, in progress (not completed) —
+        // just before it was locked in, not right after.
+        t.cancel_last_round().unwrap();
+        assert_eq!(t.rounds.len(), 1);
+        assert!(!t.rounds[0].completed);
+        assert!(t.registration_finalized);
     }
 
     #[test]

@@ -182,7 +182,10 @@
         : "No round to cancel",
   );
 
-  // Keep the selected tab valid (e.g. after undo removes a round).
+  // Keep the selected tab valid (e.g. after undo or cancel-round removes a
+  // round). Falls back to the last remaining round rather than the players
+  // list, since that's still the state the referee cares about; only drops
+  // to "players" when no round is left at all.
   $effect(() => {
     if (!tournament) return;
     const valid = new Set([
@@ -192,7 +195,10 @@
       ...tournament.rounds.map((r) => `round-${r.number}`),
       ...(tournament.draft ? ["draft"] : []),
     ]);
-    if (!valid.has(activeTab)) activeTab = "players";
+    if (!valid.has(activeTab)) {
+      const lastRound = tournament.rounds.at(-1);
+      activeTab = lastRound ? `round-${lastRound.number}` : "players";
+    }
   });
 
   onMount(async () => {
