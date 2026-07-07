@@ -6,7 +6,7 @@
 //! all share exactly one implementation.
 
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -690,6 +690,27 @@ impl Tournament {
         );
         let mut boards = cup_boards;
         boards.extend(swiss_round.boards);
+
+        // Display order: cup boards first, then by the rank (from the standings
+        // entering this round) of the board's best-placed player — the same
+        // criteria the pairings view sorts by, so the "Board" numbers it shows
+        // match this stored order instead of drifting from a client-only sort.
+        let rank_of: HashMap<Uuid, usize> = self
+            .standings()
+            .into_iter()
+            .enumerate()
+            .map(|(rank, s)| (s.player_id, rank))
+            .collect();
+        boards.sort_by_key(|b| {
+            let is_cup = matches!(b.source, PairingSource::Cup { .. });
+            let best_rank = rank_of
+                .get(&b.player1)
+                .copied()
+                .unwrap_or(usize::MAX)
+                .min(rank_of.get(&b.player2).copied().unwrap_or(usize::MAX));
+            (if is_cup { 0 } else { 1 }, best_rank)
+        });
+
         let round = Round {
             number: draft.number,
             boards,
@@ -1270,6 +1291,41 @@ mod tests {
             rating: Some(rating),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn confirm_round_orders_boards_by_rank_not_engine_emission_order() {
+        // Registered out of rating order, so the matching engine's internal
+        // (registration-order-derived) emission order doesn't already happen to
+        // match the rank order — a real test of the sort, not a coincidence.
+        let mut t = Tournament::new("Cup").unwrap();
+        for rating in [1000, 8000, 3000, 6000, 2000, 7000, 4000, 5000] {
+            t.add_player(rated(&format!("P{rating}"), rating)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        let round = t.confirm_round().unwrap();
+        assert_eq!(round.boards.len(), 4);
+
+        // Rank is by the standings entering this round (no completed rounds yet,
+        // so purely tournament number, which was assigned by ELO descending).
+        let rank_of: HashMap<Uuid, usize> = t
+            .standings()
+            .into_iter()
+            .enumerate()
+            .map(|(rank, s)| (s.player_id, rank))
+            .collect();
+        let ranks: Vec<usize> = t
+            .rounds
+            .last()
+            .unwrap()
+            .boards
+            .iter()
+            .map(|b| rank_of[&b.player1].min(rank_of[&b.player2]))
+            .collect();
+        let mut sorted = ranks.clone();
+        sorted.sort_unstable();
+        assert_eq!(ranks, sorted, "boards should already be in rank order: {ranks:?}");
     }
 
     #[test]

@@ -615,7 +615,6 @@
           <RoundView
             round={activeRound}
             players={tournament.players}
-            {standings}
             handicapPolicy={tournament.settings.handicap_policy}
             suggestedHandicaps={activeRoundSuggested}
             onClickWinner={(boardIndex, clicked) =>

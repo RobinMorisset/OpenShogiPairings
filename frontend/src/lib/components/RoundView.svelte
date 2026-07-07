@@ -6,7 +6,6 @@
     type HandicapPolicy,
     type Player,
     type Round,
-    type Standing,
     type Winner,
   } from "../types";
   import { sourceBadge } from "../pairingSource";
@@ -14,8 +13,6 @@
   interface Props {
     round: Round;
     players: Player[];
-    /** Ranked standings (canonical order), used to sort boards by top player. */
-    standings: Standing[];
     /** Whether/how handicap games are shown: none, allowed, or suggested. */
     handicapPolicy: HandicapPolicy;
     /** Suggested handicap per board, indexed like `round.boards`. */
@@ -32,7 +29,6 @@
   let {
     round,
     players,
-    standings,
     handicapPolicy,
     suggestedHandicaps,
     onClickWinner,
@@ -43,29 +39,6 @@
 
   // Resolve player ids to display names.
   const byId = $derived(new Map(players.map((p) => [p.id, p])));
-
-  // Rank of each player per the results tab's canonical ordering (0 = first
-  // place). Missing from standings (e.g. not yet part of the tournament)
-  // sorts last.
-  const rankById = $derived(new Map(standings.map((s, i) => [s.player_id, i])));
-  function rank(id: string): number {
-    return rankById.get(id) ?? Infinity;
-  }
-
-  // Smart sort: cup games before non-cup, then by the rank of the game's
-  // best-placed player (per the results tab's criteria).
-  const orderedBoards = $derived(
-    round.boards
-      .map((board, index) => ({ board, index }))
-      .sort((a, b) => {
-        const aCup = sourceBadge(a.board.source).kind === "cup" ? 0 : 1;
-        const bCup = sourceBadge(b.board.source).kind === "cup" ? 0 : 1;
-        if (aCup !== bCup) return aCup - bCup;
-        const aRank = Math.min(rank(a.board.player1), rank(a.board.player2));
-        const bRank = Math.min(rank(b.board.player1), rank(b.board.player2));
-        return aRank - bRank;
-      }),
-  );
 
   function name(id: string): string {
     const p = byId.get(id);
@@ -135,7 +108,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each orderedBoards as { board, index } (index)}
+        {#each round.boards as board, index (index)}
           <tr>
             <td class="num">{index + 1}</td>
             <td>
