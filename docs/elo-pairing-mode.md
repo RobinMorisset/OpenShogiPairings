@@ -3,8 +3,9 @@
 Status: **V1 implemented** — the estimator ([`crates/core/src/elo.rs`](../crates/core/src/elo.rs)),
 the ELO rule ladder in the pairing engine, the settings toggle + K multiplier +
 provisional-rating multiplier (with the Swiss sections greyed out), the Results-tab
-"Est. ELO" column, and estimated ELO as a selectable ranking criterion
-(`Tiebreak::EstElo`) are in. Still open: the V2 items in §8. Tracks the TODO item
+"Est. ELO" column, estimated ELO as a selectable ranking criterion
+(`Tiebreak::EstElo`), and FESA-style handicap-game rating (§4) are in. Still open:
+the V2 items in §8. Tracks the TODO item
 "Experimental ELO-based, non-swiss system". This document pins down the Bayesian
 estimation math and how the mode plugs into the existing pairing engine
 ([`crates/core/src/pairing.rs`](../crates/core/src/pairing.rs)) and scoring
@@ -226,10 +227,18 @@ for free.
 - **Draws** (`Board.drawn`): scored `S = ½` for each side — the standard
   Elo/Glicko pseudo-likelihood treatment. (A principled Davidson draw model would
   add another parameter; rejected for V1.)
-- **Handicap games** (`Board.handicap`): **excluded from the likelihood in V1**
-  (they still count as "played" for no-rematch). **V2:** incorporate them via a
-  known handicap→ELO-adjustment mapping (to be provided) as an offset in the
-  logistic, `P(giver wins) = σ((θ_giver − θ_recv − h)/s)`.
+- **Handicap games** (`Board.handicap`): rated using the **actual** result (who
+  really won — not the standings' effective winner, which is always the giver) via
+  the [FESA treatment](https://fesashogi.eu/elo-system/) (sections 7–8). The
+  giver's registration rating is turned into a fractional **grade** number by
+  interpolating the grades' lower-bound ratings (`GRADE_LB`), the handicap's
+  grade value (Sente 0.2 … 6-piece 8.0) is subtracted, and converting back gives
+  a rating-point drop `h`. That enters the logistic as a fixed offset:
+  `P(giver wins) = σ((θ_giver − θ_recv − h)/s)` — `−h` on the giver, `+h` on the
+  receiver. Using the *fixed* registration rating (like FESA) keeps `h` constant,
+  so the likelihood stays log-concave and the solver is unchanged. Because the
+  handicap shrinks the effective gap, a favourite who gives odds and still wins
+  gains more than from an even win (and is punished more for losing).
 - **Byes:** not a game — contribute nothing to the likelihood. "No repeat bye"
   stays in the rematch tier; *who* takes the bye is decided by a dedicated tier
   (§6).
@@ -322,8 +331,6 @@ tie-break column instead (no duplicate).
   criterion but the default order is still the classic Swiss one; a mode-aware
   default (e.g. seed the order with EstElo when ELO mode is enabled) is left for
   when the standings work settles.
-- **Handicap → ELO mapping** in the likelihood (§4), using the table to be
-  provided.
 
 ## Appendix A — from the multiplier to `σ₀`, and the drift
 

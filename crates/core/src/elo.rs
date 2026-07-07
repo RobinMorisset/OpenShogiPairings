@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::player::Player;
-use crate::round::{Round, Winner};
+use crate::round::{Handicap, Round, Winner};
 use crate::settings::TournamentSettings;
 
 /// ELO scale factor `s = 400 / ln 10`: a 400-point gap is 10:1 odds.
@@ -47,6 +47,86 @@ const CONVERGENCE_TOL: f64 = 1e-4;
 /// overshoot when a wide-prior player is far from the optimum; repeated sweeps
 /// then close the remaining distance.
 const MAX_STEP: f64 = 800.0;
+
+// --- FESA handicap treatment ----------------------------------------------
+//
+// FESA rates a handicap game as if the giver were weaker: their rating is turned
+// into a fractional *grade* number (interpolated on the grades' lower-bound
+// ratings), the handicap's grade value is subtracted, and the result is turned
+// back into a rating. The drop is a fixed rating-point offset `h` applied to the
+// giver's effective strength — so the game contributes a logistic term
+// `P(giver wins) = σ((θ_giver − θ_recv − h)/s)`. See
+// <https://fesashogi.eu/elo-system/> sections 7 (grades) and 8 (handicap).
+//
+// `h` is derived from the giver's fixed **registration** rating (like FESA),
+// which keeps the offset constant and the likelihood log-concave.
+
+/// Lower-bound rating of each FESA grade, from 20 Kyu (weakest) to 5 Dan
+/// (strongest). The array index is the grade's integer coordinate, so a handicap
+/// worth *v* grades shifts the coordinate by `v`.
+const GRADE_LB: [f64; 25] = [
+    1.0, // 20 Kyu
+    80.0, 160.0, 240.0, 320.0, 400.0, 480.0, 560.0, 640.0, 720.0, 800.0, // 19..11 Kyu
+    880.0, 960.0, 1040.0, 1120.0, 1200.0, 1280.0, 1360.0, 1460.0, 1560.0, // 10..1 Kyu
+    1680.0, 1800.0, 1920.0, 2080.0, 2240.0, // 1..5 Dan
+];
+
+/// The handicap's value expressed as a number of grades (FESA section 8).
+fn handicap_grade_value(handicap: Handicap) -> f64 {
+    match handicap {
+        Handicap::Sente => 0.2,
+        Handicap::Lance => 0.6,
+        Handicap::Bishop => 1.5,
+        Handicap::Rook => 2.1,
+        Handicap::RookLance => 2.7,
+        Handicap::TwoPiece => 3.6,
+        Handicap::FourPiece => 5.0,
+        Handicap::FivePiece => 6.5,
+        Handicap::SixPiece => 8.0,
+    }
+}
+
+/// A rating as a fractional grade coordinate, piecewise-linear on [`GRADE_LB`]
+/// and linearly extrapolated with the nearest segment's slope past either end.
+fn grade_number(rating: f64) -> f64 {
+    let n = GRADE_LB.len();
+    if rating <= GRADE_LB[0] {
+        let slope = GRADE_LB[1] - GRADE_LB[0];
+        return (rating - GRADE_LB[0]) / slope;
+    }
+    for i in 0..n - 1 {
+        if rating < GRADE_LB[i + 1] {
+            return i as f64 + (rating - GRADE_LB[i]) / (GRADE_LB[i + 1] - GRADE_LB[i]);
+        }
+    }
+    let slope = GRADE_LB[n - 1] - GRADE_LB[n - 2];
+    (n - 1) as f64 + (rating - GRADE_LB[n - 1]) / slope
+}
+
+/// The inverse of [`grade_number`]: the rating at a fractional grade coordinate.
+fn rating_at_grade(grade: f64) -> f64 {
+    let n = GRADE_LB.len();
+    if grade <= 0.0 {
+        let slope = GRADE_LB[1] - GRADE_LB[0];
+        return GRADE_LB[0] + grade * slope;
+    }
+    let i = grade.floor() as usize;
+    if i >= n - 1 {
+        let slope = GRADE_LB[n - 1] - GRADE_LB[n - 2];
+        return GRADE_LB[n - 1] + (grade - (n - 1) as f64) * slope;
+    }
+    GRADE_LB[i] + (grade - i as f64) * (GRADE_LB[i + 1] - GRADE_LB[i])
+}
+
+/// The rating-point handicap effect `h > 0` for a giver of the given (fixed)
+/// rating conceding `handicap`: how much weaker the giver plays. Computed by
+/// dropping `handicap_grade_value` grades from the giver's grade and measuring
+/// the rating difference.
+fn handicap_offset(giver_rating: u32, handicap: Handicap) -> f64 {
+    let giver = f64::from(giver_rating);
+    let shifted = rating_at_grade(grade_number(giver) - handicap_grade_value(handicap));
+    giver - shifted
+}
 
 /// FIDE's rating-dependent K factor, used only to seed each rated player's prior
 /// width (see [`prior`]).
@@ -121,17 +201,18 @@ pub fn estimate_elos(
         precision[i] = 1.0 / (sigma0 * sigma0);
     }
 
-    // Per-player incident games: (opponent index, this player's score in {0, ½, 1}).
-    let mut games: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n];
+    // Per-player incident games: (opponent index, this player's score in {0, ½, 1},
+    // handicap offset added to this player's effective strength). The offset is 0
+    // for an even game; for a handicap it is −h on the giver and +h on the receiver
+    // (`h` from [`handicap_offset`]), so the giver plays as if weaker.
+    let mut games: Vec<Vec<(usize, f64, f64)>> = vec![Vec::new(); n];
     for round in rounds.iter().filter(|r| r.completed) {
         for board in &round.boards {
-            // V1: handicap games don't inform the even-game strength estimate.
-            if board.handicap.is_some() {
-                continue;
-            }
             let (Some(&a), Some(&b)) = (index.get(&board.player1), index.get(&board.player2)) else {
                 continue; // an opponent no longer in the tournament
             };
+            // Handicaps use the *actual* result (who really won), so score player1
+            // straight off `result` (and a draw as ½), not the effective winner.
             let score_a = if board.drawn {
                 0.5
             } else {
@@ -141,8 +222,21 @@ pub fn estimate_elos(
                     None => continue, // unplayed
                 }
             };
-            games[a].push((b, score_a));
-            games[b].push((a, 1.0 - score_a));
+            // player1's handicap offset: −h if player1 conceded the odds, +h if it
+            // received them, 0 for an even game. Needs the giver's fixed rating.
+            let offset_a = match &board.handicap {
+                Some(hg) => {
+                    let giver = if hg.giver == Winner::Player1 { &players[a] } else { &players[b] };
+                    let Some(giver_rating) = giver.rating else {
+                        continue; // giver must be rated to size the handicap (always is)
+                    };
+                    let h = handicap_offset(giver_rating, hg.handicap);
+                    if hg.giver == Winner::Player1 { -h } else { h }
+                }
+                None => 0.0,
+            };
+            games[a].push((b, score_a, offset_a));
+            games[b].push((a, 1.0 - score_a, -offset_a));
         }
     }
 
@@ -155,8 +249,8 @@ pub fn estimate_elos(
             // Prior term first, then each game's likelihood contribution.
             let mut gradient = -(theta[i] - mean[i]) * precision[i];
             let mut hessian = -precision[i];
-            for &(j, score) in &games[i] {
-                let e = expected((theta[i] - theta[j]) / S);
+            for &(j, score, offset) in &games[i] {
+                let e = expected((theta[i] - theta[j] + offset) / S);
                 gradient += (score - e) / S;
                 hessian -= e * (1.0 - e) / (S * S);
             }
@@ -176,7 +270,7 @@ pub fn estimate_elos(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::{Board, PairingSource};
+    use crate::round::{Board, HandicapGame, PairingSource};
 
     fn player(rating: Option<u32>) -> Player {
         Player {
@@ -206,6 +300,14 @@ mod tests {
     fn win(a: Uuid, b: Uuid) -> Board {
         Board {
             result: Some(Winner::Player1),
+            ..Board::pending(a, b, None, PairingSource::Swiss)
+        }
+    }
+
+    fn handicap_board(a: Uuid, b: Uuid, result: Winner, handicap: Handicap, giver: Winner) -> Board {
+        Board {
+            result: Some(result),
+            handicap: Some(HandicapGame { handicap, giver }),
             ..Board::pending(a, b, None, PairingSource::Swiss)
         }
     }
@@ -353,26 +455,57 @@ mod tests {
     }
 
     #[test]
-    fn handicap_games_are_excluded_v1() {
-        use crate::round::{Handicap, HandicapGame};
-        let a = player(Some(1500));
-        let b = player(Some(1500));
-        let handicap_board = Board {
-            result: Some(Winner::Player1),
-            handicap: Some(HandicapGame {
-                handicap: Handicap::Rook,
-                giver: Winner::Player1,
-            }),
-            ..Board::pending(a.id, b.id, None, PairingSource::Swiss)
-        };
+    fn grade_number_and_rating_are_inverse_and_handicap_offset_matches_fesa() {
+        // Round-trips at a lower bound, a midpoint, and below/above the table.
+        for &r in &[1680.0, 1740.0, 2000.0, 300.0, 2400.0] {
+            assert!((rating_at_grade(grade_number(r)) - r).abs() < 1e-6, "round-trip {r}");
+        }
+        // Worked FESA example: a 1740 (1 Dan) giver conceding Rook odds (2.1 grades)
+        // drops to grade 18.4 → rating 1500, a 240-point effect.
+        assert!((handicap_offset(1740, Handicap::Rook) - 240.0).abs() < 1.0);
+        // Bigger handicaps are worth more; Sente is almost nothing.
+        assert!(handicap_offset(1740, Handicap::SixPiece) > handicap_offset(1740, Handicap::Rook));
+        assert!(handicap_offset(1740, Handicap::Sente) < 40.0);
+    }
+
+    #[test]
+    fn handicap_games_now_update_estimates() {
+        // A 1800 giver beats a 1500 receiver at Rook odds — no longer excluded.
+        let giver = player(Some(1800));
+        let receiver = player(Some(1500));
+        let board = handicap_board(giver.id, receiver.id, Winner::Player1, Handicap::Rook, Winner::Player1);
         let elos = estimate_elos(
-            &[a.clone(), b.clone()],
+            &[giver.clone(), receiver.clone()],
             &TournamentSettings::default(),
-            &[decided(1, vec![handicap_board])],
+            &[decided(1, vec![board])],
         );
-        // Excluded from the likelihood → both stay at their prior mean.
-        assert!((elos[&a.id] - 1500.0).abs() < 1e-6);
-        assert!((elos[&b.id] - 1500.0).abs() < 1e-6);
+        assert!(elos[&giver.id] > 1800.0, "the handicap game is rated now");
+        assert!(elos[&receiver.id] < 1500.0);
+    }
+
+    #[test]
+    fn conceding_odds_shrinks_the_gap_so_a_win_counts_for_more() {
+        // A 1800 favourite beating a 1500: winning an even game is nearly expected
+        // (small gain), but winning *after giving Rook odds* — which shrinks the
+        // effective gap — is more of an achievement, so it moves the estimate more.
+        let giver = player(Some(1800));
+        let receiver = player(Some(1500));
+        let players = vec![giver.clone(), receiver.clone()];
+        let settings = TournamentSettings::default();
+
+        let even = estimate_elos(&players, &settings, &[decided(1, vec![win(giver.id, receiver.id)])]);
+        let handi = estimate_elos(
+            &players,
+            &settings,
+            &[decided(1, vec![handicap_board(giver.id, receiver.id, Winner::Player1, Handicap::Rook, Winner::Player1)])],
+        );
+        assert!(
+            handi[&giver.id] > even[&giver.id],
+            "winning after giving odds should raise the estimate more than an even win"
+        );
+        // Symmetrically, the receiver — expected to do better with odds — is
+        // punished more for losing them.
+        assert!(handi[&receiver.id] < even[&receiver.id]);
     }
 
     #[test]
