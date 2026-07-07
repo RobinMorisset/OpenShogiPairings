@@ -213,3 +213,18 @@ Dev helpers (Windows/PowerShell) in [`scripts/`](scripts):
 - `scripts/check.ps1` — runs both of the above.
 - `scripts/restart-server.ps1` — restart `osp-server` and wait until it responds
   (the running server doesn't hot-reload, so restart it after backend changes).
+
+### Coverage
+
+Rust coverage uses [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov)
+(`cargo install cargo-llvm-cov`, plus `rustup component add llvm-tools-preview`):
+
+```sh
+cargo llvm-cov -p osp-core --summary-only      # core only
+cargo llvm-cov -p osp-server --summary-only    # server only
+cargo llvm-cov --workspace --summary-only      # both combined
+cargo llvm-cov --workspace --html              # HTML report in target/llvm-cov/html/index.html
+```
+
+The frontend has no test framework set up yet (no vitest/jest), so there is
+nothing to measure coverage on there — see [TODO.md](TODO.md).
