@@ -5,11 +5,16 @@
     players: Player[];
     /** Show the cup-eligibility column (when the hybrid cup is enabled). */
     showEligible?: boolean;
+    /** Registration already finalized — the cup bracket is frozen, so bulk
+     * eligibility edits (only meaningful pre-finalization) are hidden. */
+    finalized?: boolean;
     /** Commit an in-place edit of a player's fields. */
     onEdit: (id: string, player: NewPlayer) => void;
     onRemove: (id: string) => void;
     /** Toggle a player's cup eligibility. */
     onToggleEligible?: (id: string, eligible: boolean) => void;
+    /** Set cup eligibility for every player of the given nationality. */
+    onSetEligibleByNationality?: (nationality: string, eligible: boolean) => void;
     /** Apply a manual point bonus (positive delta) or malus (negative) to a player. */
     onAddAdjustment?: (id: string, delta: number, reason: string) => void;
     /** Remove a previously applied point adjustment. */
@@ -20,15 +25,43 @@
   let {
     players,
     showEligible = false,
+    finalized = false,
     onEdit,
     onRemove,
     onToggleEligible,
+    onSetEligibleByNationality,
     onAddAdjustment,
     onRemoveAdjustment,
     busy = false,
   }: Props = $props();
 
   const eligibleCount = $derived(players.filter((p) => p.eligible).length);
+
+  // Distinct nationalities present (non-empty), with a per-nationality count,
+  // for the bulk "mark eligible" control. Sorted alphabetically.
+  const nationalities = $derived.by(() => {
+    const counts = new Map<string, number>();
+    for (const p of players) {
+      const nat = p.nationality?.trim();
+      if (nat) counts.set(nat, (counts.get(nat) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  });
+
+  let bulkNationality = $state("");
+
+  // Keep the selection valid as the roster changes (e.g. the last player of a
+  // nationality is removed).
+  $effect(() => {
+    if (bulkNationality && !nationalities.some(([nat]) => nat === bulkNationality)) {
+      bulkNationality = "";
+    }
+  });
+
+  function applyBulkEligible(eligible: boolean) {
+    if (!bulkNationality) return;
+    onSetEligibleByNationality?.(bulkNationality, eligible);
+  }
 
   // #, last name, first name, rating, nat., club, [cup], actions.
   const colCount = $derived(6 + (showEligible ? 1 : 0) + 1);
@@ -201,6 +234,33 @@
 
 {#if showEligible}
   <p class="elig-count">{eligibleCount} eligible for the cup</p>
+  {#if !finalized && nationalities.length > 0}
+    <div class="elig-bulk">
+      <span>Cup eligibility by nationality:</span>
+      <select bind:value={bulkNationality} disabled={busy}>
+        <option value="">Choose a nationality…</option>
+        {#each nationalities as [nat, count] (nat)}
+          <option value={nat}>{nat} ({count})</option>
+        {/each}
+      </select>
+      <button
+        type="button"
+        class="ghost small"
+        disabled={busy || !bulkNationality}
+        onclick={() => applyBulkEligible(true)}
+      >
+        Mark eligible
+      </button>
+      <button
+        type="button"
+        class="ghost small"
+        disabled={busy || !bulkNationality}
+        onclick={() => applyBulkEligible(false)}
+      >
+        Clear
+      </button>
+    </div>
+  {/if}
 {/if}
 {#if players.length === 0}
   <p class="empty">No players registered yet.</p>
@@ -360,6 +420,41 @@
     color: #9a9aa2;
     font-size: 0.82rem;
     margin: 0 0 0.5rem;
+  }
+  .elig-bulk {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 0.75rem;
+    font-size: 0.85rem;
+    color: #c9c9d0;
+  }
+  .elig-bulk select {
+    background: #1c1c22;
+    color: inherit;
+    border: 1px solid #3a3a42;
+    border-radius: 0.35rem;
+    padding: 0.2rem 0.35rem;
+    font: inherit;
+  }
+  .ghost {
+    background: transparent;
+    border: 1px solid #3a3a42;
+    color: inherit;
+    border-radius: 0.35rem;
+    padding: 0.2rem 0.55rem;
+    cursor: pointer;
+    font: inherit;
+  }
+  .ghost.small {
+    font-size: 0.8rem;
+  }
+  .ghost:hover:not(:disabled) {
+    background: #26262c;
+  }
+  .ghost:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* Editable cells: a plain-looking, full-width button that reveals an input. */

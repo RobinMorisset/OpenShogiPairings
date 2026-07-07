@@ -292,6 +292,20 @@
     });
   }
 
+  // Bulk cup-eligibility toggle: every player of the given nationality, one
+  // request at a time so each response's tournament state is applied before
+  // the next request goes out.
+  function handleSetEligibleByNationality(nationality: string, eligible: boolean) {
+    run(async () => {
+      const ids = (tournament?.players ?? [])
+        .filter((p) => (p.nationality ?? "") === nationality)
+        .map((p) => p.id);
+      for (const id of ids) {
+        apply(await setPlayerEligible(id, eligible));
+      }
+    });
+  }
+
   function handleAddPointAdjustment(id: string, delta: number, reason: string) {
     run(async () => {
       apply(await addPointAdjustment(id, delta, reason));
@@ -576,9 +590,11 @@
             <PlayerList
               players={tournament.players}
               showEligible={cupEnabled}
+              finalized={tournament.registration_finalized}
               onEdit={handleEditPlayer}
               onRemove={handleRemovePlayer}
               onToggleEligible={handleToggleEligible}
+              onSetEligibleByNationality={handleSetEligibleByNationality}
               onAddAdjustment={handleAddPointAdjustment}
               onRemoveAdjustment={handleRemovePointAdjustment}
               {busy}
