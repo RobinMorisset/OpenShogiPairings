@@ -1,0 +1,9 @@
+# Keep the Docker build context small and reproducible.
+target/
+frontend/node_modules/
+frontend/dist/
+frontend/src-tauri/target/
+.git/
+# Local tournament data / scratch files that must never enter an image.
+*.osp
+CdF2026*.json

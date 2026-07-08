@@ -1,0 +1,15 @@
+# Caddy reverse proxy for the OpenShogiPairings server.
+#
+# Caddy terminates TLS (automatic Let's Encrypt certificate for the domain) and
+# forwards to the osp-server listening on loopback. Replace the domain with your
+# own and point its DNS A/AAAA record at this host first, so Caddy can complete
+# the ACME challenge.
+#
+#   caddy run --config deploy/Caddyfile
+#
+# This is the whole "add TLS" step from docs/multi-referee-internet.md §1.3: the
+# server itself speaks plain HTTP on loopback and never needs a certificate.
+
+tournament.example.com {
+	reverse_proxy 127.0.0.1:3000
+}

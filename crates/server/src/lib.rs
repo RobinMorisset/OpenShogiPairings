@@ -21,6 +21,9 @@ mod tournament;
 pub use auth::AuthConfig;
 pub use state::AppState;
 
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
+
 use axum::{
     middleware,
     routing::{get, post},
@@ -28,19 +31,35 @@ use axum::{
 };
 use osp_core::HealthStatus;
 use tower_http::cors::CorsLayer;
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
-/// Build the application router around the given state.
+use crate::state::TournamentStore;
+
+/// Build the API-only router around the given state.
 ///
 /// `/api/health` and `/api/login` are always open; every other route sits
 /// behind the [`auth::require_auth`] middleware, which is a no-op unless the
 /// state carries an [`AuthConfig`] (remote mode).
 pub fn router(state: AppState) -> Router {
-    // Permissive CORS: clients are served from a different origin than this API
-    // — the Vite dev server (:5173) in the browser, and the `tauri://` /
-    // `http://tauri.localhost` webview origin in the desktop app. Fine for a
-    // localhost-only API; the hosted remote server (Phase 2) serves the SPA
-    // same-origin and drops this.
+    router_inner(state, None)
+}
+
+/// Like [`router`], but also serves a built SPA from `static_dir` as the
+/// fallback for every non-API request (the hosted remote server, §2.1).
+///
+/// The static assets are **public** — the app shell has to load before the
+/// login overlay can appear — while the API stays gated. Unknown paths fall back
+/// to `index.html` so deep links / refreshes work.
+pub fn router_with_static(state: AppState, static_dir: PathBuf) -> Router {
+    router_inner(state, Some(static_dir))
+}
+
+fn router_inner(state: AppState, static_dir: Option<PathBuf>) -> Router {
+    // Permissive CORS: in dev the SPA is served cross-origin from the Vite dev
+    // server (:5173), and the desktop app talks from the `tauri://` /
+    // `http://tauri.localhost` webview origin. The hosted server serves the SPA
+    // same-origin (see `router_with_static`), so this only matters for those.
     let cors = CorsLayer::permissive();
 
     // Everything except health/login requires a valid session token when auth
@@ -54,17 +73,24 @@ pub fn router(state: AppState) -> Router {
             auth::require_auth,
         ));
 
-    Router::new()
+    let mut app = Router::new()
         .route("/api/health", get(health))
         .route("/api/login", post(auth::login))
         .merge(protected)
-        .with_state(state)
-        .layer(cors)
-        .layer(TraceLayer::new_for_http())
+        .with_state(state);
+
+    if let Some(dir) = static_dir {
+        // Serve files from `dir`; anything not found (e.g. a client-side route)
+        // returns `index.html`.
+        let index = dir.join("index.html");
+        app = app.fallback_service(ServeDir::new(dir).not_found_service(ServeFile::new(index)));
+    }
+
+    app.layer(cors).layer(TraceLayer::new_for_http())
 }
 
 /// Serve the API on an already-bound listener until the process ends, without
-/// authentication (embedded/local mode).
+/// authentication or persistence (embedded/local mode).
 ///
 /// Taking a bound [`TcpListener`](tokio::net::TcpListener) (rather than an
 /// address) lets the caller bind first and read back the chosen port — which the
@@ -73,19 +99,38 @@ pub async fn serve(listener: tokio::net::TcpListener) -> std::io::Result<()> {
     axum::serve(listener, router(AppState::default())).await
 }
 
-/// Serve the API with an optional shared password (remote mode).
-///
-/// `Some(password)` gates the whole API behind that password; `None` behaves
-/// exactly like [`serve`]. Used by the standalone binary.
-pub async fn serve_with_auth(
+/// How the standalone (remote) server is configured. All fields default to the
+/// open, in-memory, API-only behaviour of [`serve`].
+#[derive(Default)]
+pub struct ServerConfig {
+    /// Shared password gating the whole API; `None` runs open (trusted machine).
+    pub password: Option<String>,
+    /// Directory of the built SPA to serve same-origin; `None` = API only.
+    pub static_dir: Option<PathBuf>,
+    /// File the current tournament is loaded from and written through to; `None`
+    /// = in-memory only (lost on restart).
+    pub data_file: Option<PathBuf>,
+}
+
+/// Serve the standalone server with the given [`ServerConfig`] (remote mode).
+pub async fn serve_with_config(
     listener: tokio::net::TcpListener,
-    password: Option<String>,
+    config: ServerConfig,
 ) -> std::io::Result<()> {
+    let store = match config.data_file {
+        Some(path) => TournamentStore::with_persistence(path),
+        None => TournamentStore::default(),
+    };
     let state = AppState {
-        auth: password.map(AuthConfig::new),
+        store: Arc::new(RwLock::new(store)),
+        auth: config.password.map(AuthConfig::new),
         ..Default::default()
     };
-    axum::serve(listener, router(state)).await
+    let app = match config.static_dir {
+        Some(dir) => router_with_static(state, dir),
+        None => router(state),
+    };
+    axum::serve(listener, app).await
 }
 
 /// Report that the server is up. Returns the shared [`HealthStatus`] shape.
@@ -115,6 +160,17 @@ mod tests {
             serde_json::from_slice(&bytes).unwrap()
         };
         (status, value)
+    }
+
+    /// Send one request and return (status, body as text) — for non-JSON
+    /// responses such as served static files.
+    async fn send_text(app: Router, req: Request<Body>) -> (StatusCode, String) {
+        let response = app.oneshot(req).await.unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, String::from_utf8_lossy(&bytes).into_owned())
     }
 
     fn get(uri: &str) -> Request<Body> {
@@ -806,5 +862,40 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn serves_spa_assets_and_falls_back_to_index() {
+        // A throwaway "built SPA" directory.
+        let dir = std::env::temp_dir().join(format!("osp-spa-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("index.html"), "<!doctype html><title>app</title>").unwrap();
+        std::fs::write(dir.join("app.js"), "console.log('hi')").unwrap();
+
+        let app = router_with_static(AppState::default(), dir.clone());
+
+        // A real asset is served as-is.
+        let (status, body) = send_text(app.clone(), get("/app.js")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("console.log"));
+
+        // The root serves the app shell (ServeDir's directory index).
+        let (status, body) = send_text(app.clone(), get("/")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("<title>app</title>"));
+
+        // An unknown path still returns the app shell as a safety net (a stray
+        // refresh loads the SPA rather than a blank page). tower-http keeps the
+        // 404 status here, which is harmless since the app has no URL routing.
+        let (status, body) = send_text(app.clone(), get("/players")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(body.contains("<title>app</title>"));
+
+        // The API still works alongside the static fallback.
+        let (status, body) = send(app, get("/api/health")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["status"], "ok");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
