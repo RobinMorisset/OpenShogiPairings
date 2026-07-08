@@ -17,3 +17,4 @@ rand = { workspace = true }
 rand_chacha = { workspace = true }
 rayon = "1"
 clap = { version = "4", features = ["derive"] }
+ureq = "2"

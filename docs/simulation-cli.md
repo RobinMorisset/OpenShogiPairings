@@ -177,10 +177,25 @@ osp-sim \
   --rounds 7                    # N (default: the base's configured/observed count)
   --seed 42                     # master seed → per-run seeds (seed + run index)
   --strength elos.json          # optional override map (treated as known truth)
+  --strength-fesa-after DATE    # true strength = first FESA list after this tournament date
+  --strength-fesa-list URL|PATH # true strength = a specific FESA list (matched by name)
   --jitter 0                    # multiplier on each player's prior σ₀ (0 = truth == rating)
   --threshold 400               # |diff| cut for P(|diff|>T); repeatable; default 400
   --out report/                 # JSON + human table + per-config CSV histograms
 ```
+
+**True strength from the post-tournament FESA list.** For a historical grid, the
+first FESA rating list *after* the event already reflects its results, so it is a
+good ground-truth strength. `--strength-fesa-after 2025-12-01` resolves the first
+list published after that date (FESA publishes on 1 Jan and 1 Jun), fetches
+`…/ratinglists/YYYY-MM-DD.txt`, and matches players by name; `--strength-fesa-list`
+points at a specific list (URL or local file) instead. Matched players become
+known-truth overrides (un-jittered); unmatched players (unrated, or a name the
+list spells differently) keep their grid rating. Note the grid has no date field,
+so the tournament date is supplied on the command line. These flags and
+`--strength` are mutually exclusive, and none of them changes the ratings the
+engine *pairs* on — those always come from the grid (§0-style: pairing uses the
+tournament's own ratings; strength only drives outcomes and the mismatch metric).
 
 Each `--configs` file is a complete [`TournamentSettings`](../crates/core/src/settings.rs)
 JSON object (not a patch) — the same shape the server's

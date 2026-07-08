@@ -6,6 +6,7 @@
 //! who tends to win / how faithfully the final ranking tracks true strength. See
 //! `docs/simulation-cli.md` for the design.
 
+mod fesa;
 mod stats;
 
 use std::collections::HashMap;
@@ -59,6 +60,17 @@ struct Args {
     #[arg(long, value_name = "FILE")]
     strength: Option<PathBuf>,
 
+    /// Use the first FESA rating list published after this tournament date
+    /// (YYYY-MM-DD) as each player's true strength — matched by name, fetched from
+    /// fesashogi.eu. The post-tournament list already reflects the results.
+    #[arg(long, value_name = "YYYY-MM-DD", conflicts_with_all = ["strength", "strength_fesa_list"])]
+    strength_fesa_after: Option<String>,
+
+    /// Use a specific FESA rating list (https URL or local file path) as true
+    /// strength, matched by name.
+    #[arg(long, value_name = "URL|PATH", conflicts_with = "strength")]
+    strength_fesa_list: Option<String>,
+
     /// Multiplier on each (non-overridden) player's prior width: 0 pins true
     /// strength to the rating, 1 samples from the estimator's own prior.
     #[arg(long, default_value_t = 0.0)]
@@ -87,9 +99,24 @@ fn run(args: Args) -> Result<(), String> {
         return Err("no rounds to simulate: pass --rounds (the base has none)".into());
     }
 
-    let overrides = match &args.strength {
-        Some(path) => load_overrides(path, &base)?,
-        None => StrengthMap::new(),
+    let overrides = if let Some(date) = &args.strength_fesa_after {
+        let (map, url, matched) = fesa::overrides_after(date, &base)?;
+        eprintln!(
+            "true strength from FESA list {url} — matched {matched}/{} players (unmatched keep their grid rating)",
+            base.players.len()
+        );
+        map
+    } else if let Some(source) = &args.strength_fesa_list {
+        let (map, matched) = fesa::overrides_from_list(source, &base)?;
+        eprintln!(
+            "true strength from FESA list {source} — matched {matched}/{} players (unmatched keep their grid rating)",
+            base.players.len()
+        );
+        map
+    } else if let Some(path) = &args.strength {
+        load_overrides(path, &base)?
+    } else {
+        StrengthMap::new()
     };
 
     // Resolve the variants: named settings files, or the base's own settings.
