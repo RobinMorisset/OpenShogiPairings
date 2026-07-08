@@ -17,7 +17,7 @@
 //!   and return the finishing order plus the per-game strength gaps.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rand::Rng;
 use uuid::Uuid;
@@ -41,9 +41,44 @@ pub enum SimError {
     /// The base tournament has too few players to pair a round.
     #[error("need at least {MIN_PLAYERS_PER_ROUND} players to simulate (have {have})")]
     NotEnoughPlayers { have: usize },
-    /// The direct-elimination cup isn't modelled by the simulator yet (V1).
-    #[error("simulation does not support the direct-elimination cup yet")]
-    CupNotSupported,
+}
+
+/// Cup-format setup for a simulation: the players eligible for the bracket (the
+/// caller has already applied whatever eligibility rule it wants — nationality,
+/// attendance, …) and the bracket size (a power of two, 8..=64). Passing this to
+/// [`simulate_run`] runs the hybrid direct-elimination cup alongside the Swiss.
+#[derive(Debug, Clone)]
+pub struct CupConfig {
+    pub eligible: HashSet<Uuid>,
+    pub size: u32,
+}
+
+/// The usual cup eligibility for a **historical** base: players whose nationality
+/// is in `nations` and who were **not absent** in any of the first
+/// `attendance_rounds` real rounds. `nations` must already be upper-cased (player
+/// nationalities are stored upper-cased). This is a convenience for the CLI;
+/// `simulate_run` itself just takes the resulting id set in a [`CupConfig`].
+pub fn cup_eligibility(
+    base: &Tournament,
+    nations: &HashSet<String>,
+    attendance_rounds: usize,
+) -> HashSet<Uuid> {
+    let absent_early: HashSet<Uuid> = base
+        .rounds
+        .iter()
+        .take(attendance_rounds)
+        .flat_map(|r| r.absent.iter().copied())
+        .collect();
+    base.players
+        .iter()
+        .filter(|p| {
+            p.nationality
+                .as_deref()
+                .is_some_and(|n| nations.contains(n))
+        })
+        .filter(|p| !absent_early.contains(&p.id))
+        .map(|p| p.id)
+        .collect()
 }
 
 /// Logistic win probability `P(self beats opp)` on the ELO scale: a 400-point
@@ -147,17 +182,22 @@ impl RunOutcome {
 /// A clone of `base` reset to *registration-finalized, zero rounds* under
 /// `settings`, ready to pair round 1. Tournament numbers and any prior rounds are
 /// cleared and re-derived, so a different settings variant finalizes cleanly.
-fn fresh_state(base: &Tournament, settings: &TournamentSettings) -> Result<Tournament, SimError> {
-    let settings = settings.clone().normalized();
-    if settings.cup_enabled {
-        return Err(SimError::CupNotSupported);
-    }
+///
+/// The cup is controlled entirely by `cup`, not by the config's `cup_enabled`
+/// flag (the config can't carry a bracket size or an eligibility set): `Some`
+/// enables the hybrid cup with that eligibility/size, `None` runs pure Swiss.
+fn fresh_state(
+    base: &Tournament,
+    settings: &TournamentSettings,
+    cup: Option<&CupConfig>,
+) -> Result<Tournament, SimError> {
     if base.players.len() < MIN_PLAYERS_PER_ROUND {
         return Err(SimError::NotEnoughPlayers {
             have: base.players.len(),
         });
     }
 
+    let mut settings = settings.clone().normalized();
     let mut t = base.clone();
     t.rounds.clear();
     t.draft = None;
@@ -165,9 +205,24 @@ fn fresh_state(base: &Tournament, settings: &TournamentSettings) -> Result<Tourn
     t.registration_finalized = false;
     for p in &mut t.players {
         p.tournament_id = None;
+        p.eligible = false;
     }
-    t.settings = settings;
-    t.finalize_registration()?;
+
+    match cup {
+        Some(cup) => {
+            settings.cup_enabled = true;
+            for p in &mut t.players {
+                p.eligible = cup.eligible.contains(&p.id);
+            }
+            t.settings = settings;
+            t.finalize_registration_with(Some(cup.size))?;
+        }
+        None => {
+            settings.cup_enabled = false;
+            t.settings = settings;
+            t.finalize_registration()?;
+        }
+    }
     Ok(t)
 }
 
@@ -229,17 +284,19 @@ fn order_by_estimate(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<U
 /// each paired by the real engine and auto-filled from the result model.
 ///
 /// `overrides` fixes specific players' true strength (see [`sample_strengths`]);
-/// `jitter` scales the prior width for the rest. `rng` drives both the strength
-/// draws and the game outcomes, so the run is reproducible from its seed.
+/// `jitter` scales the prior width for the rest. `cup` runs the hybrid
+/// direct-elimination cup when `Some` (see [`CupConfig`]). `rng` drives both the
+/// strength draws and the game outcomes, so the run is reproducible from its seed.
 pub fn simulate_run(
     base: &Tournament,
     settings: &TournamentSettings,
     overrides: &StrengthMap,
     jitter: f64,
     rounds: u32,
+    cup: Option<&CupConfig>,
     rng: &mut impl Rng,
 ) -> Result<RunOutcome, SimError> {
-    let mut tournament = fresh_state(base, settings)?;
+    let mut tournament = fresh_state(base, settings, cup)?;
     let strengths = sample_strengths(
         &tournament.players,
         &tournament.settings,
@@ -369,8 +426,16 @@ mod tests {
     fn a_run_decides_every_board_and_ranks_all_players() {
         let base = tournament_with(&[("A", 1600), ("B", 1500), ("C", 1400), ("D", 1300)]);
         let mut rng = ChaCha8Rng::seed_from_u64(42);
-        let out =
-            simulate_run(&base, &base.settings, &StrengthMap::new(), 0.0, 3, &mut rng).unwrap();
+        let out = simulate_run(
+            &base,
+            &base.settings,
+            &StrengthMap::new(),
+            0.0,
+            3,
+            None,
+            &mut rng,
+        )
+        .unwrap();
         assert_eq!(out.final_order.len(), 4);
         assert_eq!(out.estimated_order.len(), 4);
         // 4 players × 3 rounds = 2 boards/round × 3 = 6 played games, no byes.
@@ -383,7 +448,16 @@ mod tests {
         let base = tournament_with(&[("A", 1600), ("B", 1500), ("C", 1400), ("D", 1300)]);
         let run = |seed| {
             let mut rng = ChaCha8Rng::seed_from_u64(seed);
-            simulate_run(&base, &base.settings, &StrengthMap::new(), 0.5, 3, &mut rng).unwrap()
+            simulate_run(
+                &base,
+                &base.settings,
+                &StrengthMap::new(),
+                0.5,
+                3,
+                None,
+                &mut rng,
+            )
+            .unwrap()
         };
         let a = run(99);
         let b = run(99);
@@ -404,8 +478,16 @@ mod tests {
         let mut wins = 0;
         let runs = 200;
         for _ in 0..runs {
-            let out =
-                simulate_run(&base, &base.settings, &StrengthMap::new(), 0.0, 3, &mut rng).unwrap();
+            let out = simulate_run(
+                &base,
+                &base.settings,
+                &StrengthMap::new(),
+                0.0,
+                3,
+                None,
+                &mut rng,
+            )
+            .unwrap();
             if out.winner() == Some(star) {
                 wins += 1;
             }
@@ -417,19 +499,102 @@ mod tests {
     }
 
     #[test]
-    fn cup_enabled_is_rejected() {
-        let mut base = tournament_with(&[("A", 1600), ("B", 1500)]);
-        base.settings.cup_enabled = true;
+    fn a_cup_config_runs_the_bracket() {
+        // Eight players, all eligible for a size-8 cup: the first log2(8)=3 rounds
+        // are the bracket, and the run completes with a decided podium.
+        let base = tournament_with(&[
+            ("A", 2000),
+            ("B", 1900),
+            ("C", 1800),
+            ("D", 1700),
+            ("E", 1600),
+            ("F", 1500),
+            ("G", 1400),
+            ("H", 1300),
+        ]);
+        let eligible: HashSet<Uuid> = base.players.iter().map(|p| p.id).collect();
+        let cup = CupConfig { eligible, size: 8 };
         let mut rng = ChaCha8Rng::seed_from_u64(1);
-        let err = simulate_run(&base, &base.settings, &StrengthMap::new(), 0.0, 1, &mut rng);
-        assert!(matches!(err, Err(SimError::CupNotSupported)));
+        let out = simulate_run(
+            &base,
+            &base.settings,
+            &StrengthMap::new(),
+            0.0,
+            3,
+            Some(&cup),
+            &mut rng,
+        )
+        .unwrap();
+        assert_eq!(out.final_order.len(), 8);
+        // The cup's three rounds each have 4 boards → 12 decided cup games.
+        assert!(out.game_diffs.len() >= 12);
+    }
+
+    #[test]
+    fn cup_eligibility_filters_by_nationality_and_attendance() {
+        use crate::player::NewPlayer;
+        let mut t = Tournament::new("T").unwrap();
+        let mk = |t: &mut Tournament, last: &str, nat: &str| {
+            t.add_player(NewPlayer {
+                last_name: last.into(),
+                rating: Some(1500),
+                nationality: Some(nat.into()),
+                ..Default::default()
+            })
+            .unwrap()
+            .id
+        };
+        let fr_present = mk(&mut t, "A", "fr"); // lower-case → stored FR
+        let fr_absent = mk(&mut t, "B", "FR");
+        let jp = mk(&mut t, "C", "JP");
+        // Round 1 with fr_absent sitting out.
+        t.rounds.push(crate::round::Round {
+            number: 1,
+            boards: Vec::new(),
+            bye: None,
+            absent: vec![fr_absent],
+            completed: true,
+        });
+
+        let nations: HashSet<String> = ["FR".to_string()].into_iter().collect();
+        let elig = cup_eligibility(&t, &nations, 5);
+        assert!(elig.contains(&fr_present));
+        assert!(!elig.contains(&fr_absent)); // right nation, but absent in the window
+        assert!(!elig.contains(&jp)); // wrong nation
+    }
+
+    #[test]
+    fn too_few_eligible_for_the_cup_is_rejected() {
+        // Cup size 8 but only 2 players → finalization refuses.
+        let base = tournament_with(&[("A", 1600), ("B", 1500)]);
+        let eligible: HashSet<Uuid> = base.players.iter().map(|p| p.id).collect();
+        let cup = CupConfig { eligible, size: 8 };
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        let err = simulate_run(
+            &base,
+            &base.settings,
+            &StrengthMap::new(),
+            0.0,
+            1,
+            Some(&cup),
+            &mut rng,
+        );
+        assert!(matches!(err, Err(SimError::Tournament(_))));
     }
 
     #[test]
     fn too_few_players_is_rejected() {
         let base = tournament_with(&[("Solo", 1500)]);
         let mut rng = ChaCha8Rng::seed_from_u64(1);
-        let err = simulate_run(&base, &base.settings, &StrengthMap::new(), 0.0, 1, &mut rng);
+        let err = simulate_run(
+            &base,
+            &base.settings,
+            &StrengthMap::new(),
+            0.0,
+            1,
+            None,
+            &mut rng,
+        );
         assert!(matches!(err, Err(SimError::NotEnoughPlayers { have: 1 })));
     }
 
@@ -439,8 +604,16 @@ mod tests {
         // no diff. Run one round and check we get exactly one gap, matching the map.
         let base = tournament_with(&[("A", 1700), ("B", 1500), ("C", 1300)]);
         let mut rng = ChaCha8Rng::seed_from_u64(3);
-        let out =
-            simulate_run(&base, &base.settings, &StrengthMap::new(), 0.0, 1, &mut rng).unwrap();
+        let out = simulate_run(
+            &base,
+            &base.settings,
+            &StrengthMap::new(),
+            0.0,
+            1,
+            None,
+            &mut rng,
+        )
+        .unwrap();
         assert_eq!(out.game_diffs.len(), 1); // one board, one bye
                                              // The single gap equals the strength difference of whichever two met.
         assert!(out.game_diffs[0] > 0.0);

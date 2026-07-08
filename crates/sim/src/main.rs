@@ -9,7 +9,7 @@
 mod fesa;
 mod stats;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
@@ -19,7 +19,10 @@ use rayon::prelude::*;
 use serde::Serialize;
 use uuid::Uuid;
 
-use osp_core::sim::{game_elo_diffs, sample_strengths, simulate_run, RunOutcome, StrengthMap};
+use osp_core::sim::{
+    cup_eligibility, game_elo_diffs, sample_strengths, simulate_run, CupConfig, RunOutcome,
+    StrengthMap,
+};
 use osp_core::{
     decode_latin1, estimate_elos, import_fesa_results, Player, Tournament, TournamentSettings,
 };
@@ -84,6 +87,22 @@ struct Args {
     #[arg(long, default_value_t = 0.0)]
     jitter: f64,
 
+    /// Run the hybrid direct-elimination cup with this bracket size (8/16/32/64).
+    /// Requires --cup-nations.
+    #[arg(long, value_name = "N", requires = "cup_nations")]
+    cup_size: Option<u32>,
+
+    /// Comma-separated nationalities eligible for the cup (e.g. FR,BE,CH). A player
+    /// absent in any of the cup rounds (the first log2(size) real rounds) is
+    /// excluded.
+    #[arg(
+        long,
+        value_name = "CODES",
+        value_delimiter = ',',
+        requires = "cup_size"
+    )]
+    cup_nations: Vec<String>,
+
     /// One or more |ELO diff| thresholds T for reporting P(|diff| > T).
     #[arg(long = "threshold", value_name = "T", default_values_t = [400.0_f64])]
     thresholds: Vec<f64>,
@@ -134,6 +153,34 @@ fn run(args: Args) -> Result<(), String> {
         StrengthMap::new()
     };
 
+    // Cup format: compute eligibility (nationality + attendance) from the base's
+    // real rounds, once, and apply it across all variants.
+    let cup = if let Some(size) = args.cup_size {
+        if !osp_core::CUP_SIZES.contains(&size) {
+            return Err(format!(
+                "--cup-size must be one of {:?}",
+                osp_core::CUP_SIZES
+            ));
+        }
+        let nations: HashSet<String> = args
+            .cup_nations
+            .iter()
+            .map(|n| n.trim().to_uppercase())
+            .filter(|n| !n.is_empty())
+            .collect();
+        // A cup player must have played every cup round — the first log2(size).
+        let cup_rounds = size.trailing_zeros() as usize;
+        let eligible = cup_eligibility(&base, &nations, cup_rounds);
+        eprintln!(
+            "cup: size {size}, {} eligible ({} nationalities, present through round {cup_rounds})",
+            eligible.len(),
+            nations.len(),
+        );
+        Some(CupConfig { eligible, size })
+    } else {
+        None
+    };
+
     // Resolve the variants: named settings files, or the base's own settings.
     let variants: Vec<(String, TournamentSettings)> = if args.configs.is_empty() {
         vec![("base".to_string(), base.settings.clone())]
@@ -148,9 +195,16 @@ fn run(args: Args) -> Result<(), String> {
     let observed = observed_report(&base, &overrides, &args.thresholds);
     let mut reports = Vec::new();
     for (name, settings) in &variants {
-        let outcomes =
-            simulate_variant(&base, settings, &overrides, args.jitter, rounds, args.runs)
-                .map_err(|e| format!("variant '{name}': {e}"))?;
+        let outcomes = simulate_variant(
+            &base,
+            settings,
+            &overrides,
+            args.jitter,
+            rounds,
+            cup.as_ref(),
+            args.runs,
+        )
+        .map_err(|e| format!("variant '{name}': {e}"))?;
         reports.push(aggregate(name.clone(), &outcomes, &args.thresholds));
     }
 
@@ -252,19 +306,21 @@ fn load_overrides(path: &Path, base: &Tournament) -> Result<StrengthMap, String>
 
 // --- simulation ------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn simulate_variant(
     base: &Tournament,
     settings: &TournamentSettings,
     overrides: &StrengthMap,
     jitter: f64,
     rounds: u32,
+    cup: Option<&CupConfig>,
     runs: u64,
 ) -> Result<Vec<RunOutcome>, String> {
     (0..runs)
         .into_par_iter()
         .map(|i| {
             let mut rng = ChaCha8Rng::seed_from_u64(i);
-            simulate_run(base, settings, overrides, jitter, rounds, &mut rng)
+            simulate_run(base, settings, overrides, jitter, rounds, cup, &mut rng)
                 .map_err(|e| e.to_string())
         })
         .collect()

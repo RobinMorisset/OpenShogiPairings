@@ -54,6 +54,23 @@ with one of (mutually exclusive; not needed with `--results`):
 | `--threshold <T>` | report `P(\|diff\| > T)`; repeatable | `400` |
 | `--out <DIR>` | also write `report.json` and per-variant CSV histograms | — |
 
+## Cup format (hybrid direct-elimination bracket)
+
+To simulate the hybrid format — a seeded knock-out cup among the top eligible
+players running alongside the Swiss — pass `--cup-size`. Eligibility is derived
+from the base's real rounds:
+
+| Flag | Meaning | Default |
+|------|---------|---------|
+| `--cup-size <N>` | bracket size (8/16/32/64); enables the cup for every variant | off |
+| `--cup-nations <CODES>` | comma-separated eligible nationalities, e.g. `FR,BE,CH` (required with `--cup-size`) | — |
+
+A player is eligible if their nationality is listed **and** they were not absent
+in any of the cup rounds — the first `log2(size)` real rounds (e.g. 5 for a
+size-32 cup). The top `--cup-size` eligible players (by rating) are seeded.
+Eligibility needs the base's real rounds, so this is meant for a `--grid` /
+`--results` base.
+
 ## What it prints
 
 - a **mismatch** table (mean / median / p90 / p95 of `|ELO diff|`, and
@@ -83,7 +100,12 @@ cargo run --release -p osp-sim -- \
 
 # 4. Robustness sweep: rating noise, custom thresholds, machine-readable output.
 cargo run --release -p osp-sim -- \
-  --base cup.osp --configs a.json b.json \
+  --base tournament.osp --configs a.json b.json \
   --runs 5000 --jitter 1 --threshold 300 --threshold 500 \
   --out report/
+
+# 5. Hybrid cup: a size-16 bracket among FR/BE/CH players who played the first 5 rounds.
+cargo run --release -p osp-sim -- \
+  --results results_CdF_2025.txt \
+  --cup-size 16 --cup-nations FR,BE,CH
 ```
