@@ -1,5 +1,6 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
+  import { isTauri } from "../platform";
 
   interface Props {
     /** Create a new tournament with the given name and optional password. */
@@ -35,16 +36,18 @@
         disabled={busy}
       />
     </label>
-    <label>
-      {$_("createTournament.password")}
-      <input
-        type="password"
-        bind:value={password}
-        placeholder={$_("createTournament.passwordPlaceholder")}
-        autocomplete="new-password"
-        disabled={busy}
-      />
-    </label>
+    {#if !isTauri()}
+      <label>
+        {$_("createTournament.password")}
+        <input
+          type="password"
+          bind:value={password}
+          placeholder={$_("createTournament.passwordPlaceholder")}
+          autocomplete="new-password"
+          disabled={busy}
+        />
+      </label>
+    {/if}
     <div class="actions">
       <button type="submit" disabled={busy || name.trim() === ""}>
         {$_("createTournament.create")}

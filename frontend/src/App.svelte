@@ -557,7 +557,9 @@
         <p class="subtitle">{$_("app.subtitle")}</p>
       </div>
       <div class="header-controls">
-        <ConnectionStatus />
+        {#if $currentTournamentId !== null}
+          <ConnectionStatus />
+        {/if}
         <ThemeSwitcher />
         <LocaleSwitcher />
       </div>
