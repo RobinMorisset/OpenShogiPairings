@@ -70,6 +70,18 @@ pub enum GridImportError {
 /// with every round completed.
 pub fn import_american_grid(text: &str) -> Result<Tournament, GridImportError> {
     let (name, rows) = parse(text)?;
+    Ok(build_tournament(name.as_deref(), rows)?.0)
+}
+
+/// Register `rows` as players (in Nr order) and replay every round from their
+/// cells, returning the finished tournament and the `Nr -> id` map. Shared by the
+/// American-grid parser and the FESA-results parser
+/// ([`crate::fesa_results`]), which both produce [`RawRow`]s and differ only in
+/// how they get there.
+pub(crate) fn build_tournament(
+    name: Option<&str>,
+    rows: Vec<RawRow>,
+) -> Result<(Tournament, HashMap<u32, uuid::Uuid>), GridImportError> {
     if rows.is_empty() {
         return Err(GridImportError::NoPlayers);
     }
@@ -86,7 +98,7 @@ pub fn import_american_grid(text: &str) -> Result<Tournament, GridImportError> {
     }
 
     // Register the players (in Nr order) and remember Nr -> id.
-    let mut tournament = Tournament::new(name.as_deref().unwrap_or("Imported tournament"))?;
+    let mut tournament = Tournament::new(name.unwrap_or("Imported tournament"))?;
     let mut id_of: HashMap<u32, uuid::Uuid> = HashMap::new();
     let mut ordered = rows.clone();
     ordered.sort_by_key(|r| r.number);
@@ -113,7 +125,7 @@ pub fn import_american_grid(text: &str) -> Result<Tournament, GridImportError> {
     for r in 0..round_count {
         rebuild_round(&mut tournament, r, &rows, &by_number, &id_of)?;
     }
-    Ok(tournament)
+    Ok((tournament, id_of))
 }
 
 /// Force one round's pairings from the parsed cells, then record every result.
@@ -230,20 +242,22 @@ fn rebuild_round(
 
 // --- Parsing --------------------------------------------------------------
 
-/// A parsed player row: its number and fields, plus one cell per round.
+/// A parsed player row: its number and fields, plus one cell per round. Produced
+/// by either the American-grid parser or the FESA-results parser and consumed by
+/// [`build_tournament`].
 #[derive(Debug, Clone)]
-struct RawRow {
-    number: u32,
-    last_name: String,
-    first_name: String,
-    nationality: Option<String>,
-    rating: Option<u32>,
-    cells: Vec<Cell>,
+pub(crate) struct RawRow {
+    pub(crate) number: u32,
+    pub(crate) last_name: String,
+    pub(crate) first_name: String,
+    pub(crate) nationality: Option<String>,
+    pub(crate) rating: Option<u32>,
+    pub(crate) cells: Vec<Cell>,
 }
 
 /// A parsed round cell.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Cell {
+pub(crate) enum Cell {
     Bye,
     Absent,
     Game {
@@ -255,7 +269,7 @@ enum Cell {
 
 /// The result of a game from one player's point of view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Outcome {
+pub(crate) enum Outcome {
     Win,
     Loss,
     Draw,
@@ -394,7 +408,7 @@ fn parse_row(
 
 /// Parse a single round cell (`0+`, `0-`, `0#`, or `<opp><+/-/=>` plus an
 /// optional `(<±><code>)` handicap). A trailing floater mark is tolerated.
-fn parse_cell(cell: &str, line_no: usize) -> Result<Cell, GridImportError> {
+pub(crate) fn parse_cell(cell: &str, line_no: usize) -> Result<Cell, GridImportError> {
     let bad = || GridImportError::BadCell {
         line: line_no,
         cell: cell.to_string(),

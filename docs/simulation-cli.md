@@ -171,7 +171,7 @@ A new binary crate linking `osp_core`. It is the actual analysis tool.
 
 ```
 osp-sim \
-  --base CdF2026.osp            # or --grid AmericanGrid.txt (import_american_grid)
+  --base CdF2026.osp            # or --grid AmericanGrid.txt, or --results results_WOSC.txt
   --configs base.json a.json b.json   # each: a full TournamentSettings JSON (see §3.4)
   --runs 1000                   # K
   --rounds 7                    # N (default: the base's configured/observed count)
@@ -184,9 +184,21 @@ osp-sim \
   --out report/                 # JSON + human table + per-config CSV histograms
 ```
 
-**True strength from the post-tournament FESA list.** For a historical grid, the
-first FESA rating list *after* the event already reflects its results, so it is a
-good ground-truth strength. `--strength-fesa-after 2025-12-01` resolves the first
+**Base sources.** `--base` loads an `.osp` save; `--grid` an American Grid; and
+`--results` a **FESA post-tournament result table** (the artefact tournaments
+usually publish instead of the raw grid — see
+[`fesa_results`](../crates/core/src/fesa_results.rs)). `--results` is special: it
+reconstructs the rounds *and*, from each row's pre-ELO + points gained (or the
+assigned rating for a pre-unrated player), supplies every player's true strength
+directly — so it needs no `--strength*` flag and covers 100% of players (no
+name-matching gaps). It reuses the American-grid round-rebuild machinery; because
+that model holds one bye per round, extra `0+` walkover wins in a round are
+demoted to absences, a tail-only rounding in the *observed* standings that leaves
+the real games and the simulation untouched.
+
+**True strength from the post-tournament FESA list.** When you only have a grid
+(not a result table), the first FESA rating list *after* the event also reflects
+its results. `--strength-fesa-after 2025-12-01` resolves the first
 list published after that date (FESA publishes on 1 Jan and 1 Jun), fetches
 `…/ratinglists/YYYY-MM-DD.txt`, and matches players by name; `--strength-fesa-list`
 points at a specific list (URL or local file) instead. Matched players become

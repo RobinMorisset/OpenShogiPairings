@@ -11,6 +11,7 @@ mod american_grid;
 mod cup;
 mod elo;
 mod fesa;
+mod fesa_results;
 mod grid_import;
 mod handicap;
 mod matching;
@@ -27,6 +28,7 @@ pub use american_grid::to_grid as american_grid;
 pub use cup::{Cup, CupPodium, CUP_SIZES};
 pub use elo::{estimate_elos, PROVISIONAL_GAMES_THRESHOLD};
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
+pub use fesa_results::import_fesa_results;
 pub use grid_import::{import_american_grid, GridImportError};
 pub use handicap::suggested_handicap;
 pub use pairing::{

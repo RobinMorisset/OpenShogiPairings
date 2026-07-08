@@ -20,7 +20,9 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use osp_core::sim::{game_elo_diffs, sample_strengths, simulate_run, RunOutcome, StrengthMap};
-use osp_core::{estimate_elos, Player, Tournament, TournamentSettings};
+use osp_core::{
+    decode_latin1, estimate_elos, import_fesa_results, Player, Tournament, TournamentSettings,
+};
 
 use stats::{diff_stats, mean, spearman, wilson, DiffStats, Proportion};
 
@@ -28,13 +30,19 @@ use stats::{diff_stats, mean, spearman, wilson, DiffStats, Proportion};
 #[derive(Debug, Parser)]
 #[command(name = "osp-sim", version)]
 struct Args {
-    /// Base tournament as an `.osp` save file (JSON). Mutually exclusive with --grid.
-    #[arg(long, value_name = "FILE", conflicts_with = "grid")]
+    /// Base tournament as an `.osp` save file (JSON). One base source is required.
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["grid", "results"])]
     base: Option<PathBuf>,
 
-    /// Base tournament as an American Grid text export. Mutually exclusive with --base.
-    #[arg(long, value_name = "FILE")]
+    /// Base tournament as an American Grid text export.
+    #[arg(long, value_name = "FILE", conflicts_with = "results")]
     grid: Option<PathBuf>,
+
+    /// Base tournament as a FESA post-tournament result table. Also supplies each
+    /// player's true strength (pre-ELO + points gained, or the assigned rating for
+    /// a pre-unrated player), so no separate --strength* is needed.
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["strength", "strength_fesa_after", "strength_fesa_list"])]
+    results: Option<PathBuf>,
 
     /// One or more settings variants (each a full TournamentSettings JSON). If
     /// omitted, the base tournament's own settings are the single variant.
@@ -93,13 +101,20 @@ fn main() {
 }
 
 fn run(args: Args) -> Result<(), String> {
-    let base = load_base(&args)?;
+    let (base, results_strengths) = load_base(&args)?;
     let rounds = args.rounds.unwrap_or(base.rounds.len() as u32);
     if rounds == 0 {
         return Err("no rounds to simulate: pass --rounds (the base has none)".into());
     }
 
-    let overrides = if let Some(date) = &args.strength_fesa_after {
+    let overrides = if let Some(strengths) = results_strengths {
+        eprintln!(
+            "true strength from the results table — {}/{} players (elo + points won)",
+            strengths.len(),
+            base.players.len()
+        );
+        strengths
+    } else if let Some(date) = &args.strength_fesa_after {
         let (map, url, matched) = fesa::overrides_after(date, &base)?;
         eprintln!(
             "true strength from FESA list {url} — matched {matched}/{} players (unmatched keep their grid rating)",
@@ -171,21 +186,33 @@ fn run(args: Args) -> Result<(), String> {
 
 // --- loading ---------------------------------------------------------------
 
-fn load_base(args: &Args) -> Result<Tournament, String> {
-    match (&args.base, &args.grid) {
-        (Some(path), None) => {
+/// Load the base tournament. A `--results` table also yields each player's true
+/// strength (the second element); the other sources return `None` for it.
+fn load_base(args: &Args) -> Result<(Tournament, Option<StrengthMap>), String> {
+    match (&args.base, &args.grid, &args.results) {
+        (Some(path), None, None) => {
             let text = std::fs::read_to_string(path)
                 .map_err(|e| format!("reading {}: {e}", path.display()))?;
-            serde_json::from_str(&text)
-                .map_err(|e| format!("parsing {} as a tournament: {e}", path.display()))
+            let t = serde_json::from_str(&text)
+                .map_err(|e| format!("parsing {} as a tournament: {e}", path.display()))?;
+            Ok((t, None))
         }
-        (None, Some(path)) => {
+        (None, Some(path), None) => {
             let text = std::fs::read_to_string(path)
                 .map_err(|e| format!("reading {}: {e}", path.display()))?;
-            osp_core::import_american_grid(&text)
-                .map_err(|e| format!("parsing {} as an American Grid: {e}", path.display()))
+            let t = osp_core::import_american_grid(&text)
+                .map_err(|e| format!("parsing {} as an American Grid: {e}", path.display()))?;
+            Ok((t, None))
         }
-        _ => Err("provide exactly one of --base or --grid".into()),
+        (None, None, Some(path)) => {
+            // FESA result tables are Latin-1, like the rating lists.
+            let bytes =
+                std::fs::read(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+            let (t, strengths) = import_fesa_results(&decode_latin1(&bytes))
+                .map_err(|e| format!("parsing {} as a FESA result table: {e}", path.display()))?;
+            Ok((t, Some(strengths)))
+        }
+        _ => Err("provide exactly one of --base, --grid, or --results".into()),
     }
 }
 
