@@ -214,6 +214,21 @@ Dev helpers (Windows/PowerShell) in [`scripts/`](scripts):
 - `scripts/restart-server.ps1` — restart `osp-server` and wait until it responds
   (the running server doesn't hot-reload, so restart it after backend changes).
 
+### Git hooks
+
+Versioned hooks live in [`scripts/git-hooks/`](scripts/git-hooks) (not
+`.git/hooks/`, which isn't checked in). Point git at them once per clone:
+
+```sh
+git config core.hooksPath scripts/git-hooks
+```
+
+- `pre-commit` — `cargo fmt --check`, `cargo clippy --workspace --all-targets
+  -- -D warnings`, and `svelte-check`. Fast; keeps the tree clean commit by
+  commit.
+- `pre-push` — `cargo test --workspace`. Slower, so it only runs before
+  sharing work.
+
 ### Coverage
 
 Rust coverage uses [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov)

@@ -1,0 +1,14 @@
+#!/bin/sh
+# Fast local gate: formatting + lint (Rust) and type-check (frontend).
+# Full test suite runs in pre-push instead, to keep commits snappy.
+set -e
+
+echo "== cargo fmt --check =="
+cargo fmt --check
+
+echo "== cargo clippy =="
+cargo clippy --workspace --all-targets -- -D warnings
+
+echo "== svelte-check =="
+export PATH="/c/Program Files/nodejs:$PATH"
+( cd frontend && npm run check )

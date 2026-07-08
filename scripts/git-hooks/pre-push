@@ -1,0 +1,6 @@
+#!/bin/sh
+# Slower gate that only needs to run before sharing work: the full test suite.
+set -e
+
+echo "== cargo test --workspace =="
+cargo test --workspace
