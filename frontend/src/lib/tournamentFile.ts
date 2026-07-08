@@ -8,7 +8,7 @@
 // Callers use `saveTournament` / `loadTournament` and never branch on platform.
 // Both return a "was it done?" signal so the UI can ignore a cancelled dialog.
 
-import type { Tournament } from "./types";
+import type { Tournament, TournamentSettings } from "./types";
 import { isTauri } from "./platform";
 
 /** File extension used for saved tournaments. */
@@ -95,15 +95,41 @@ const GRID_FILTERS = [{ name: "American Grid", extensions: ["txt"] }];
 export function saveAmericanGrid(name: string, contents: string): Promise<boolean> {
   const fileName = `${slugify(name)}${GRID_SUFFIX}`;
   return isTauri()
-    ? saveTextViaTauri(fileName, contents)
+    ? saveTextViaTauri(fileName, contents, GRID_FILTERS)
     : saveTextViaBrowser(fileName, contents);
 }
 
-async function saveTextViaTauri(fileName: string, contents: string): Promise<boolean> {
+/** Suffix used for exported settings files. */
+const SETTINGS_SUFFIX = "-settings.json";
+
+/** Filters offered when saving settings. */
+const SETTINGS_FILTERS = [{ name: "Settings", extensions: ["json"] }];
+
+/**
+ * Save the tournament settings as a pretty-printed JSON file — the shape the
+ * server's settings endpoint accepts and the simulation CLI's `--configs` reads.
+ * `name` seeds the default file name only.
+ *
+ * Returns `true` if written, `false` if the user cancelled (browser downloads
+ * always return `true`).
+ */
+export function saveSettings(name: string, settings: TournamentSettings): Promise<boolean> {
+  const fileName = `${slugify(name)}${SETTINGS_SUFFIX}`;
+  const contents = JSON.stringify(settings, null, 2);
+  return isTauri()
+    ? saveTextViaTauri(fileName, contents, SETTINGS_FILTERS)
+    : saveTextViaBrowser(fileName, contents);
+}
+
+async function saveTextViaTauri(
+  fileName: string,
+  contents: string,
+  filters: { name: string; extensions: string[] }[],
+): Promise<boolean> {
   const { save } = await import("@tauri-apps/plugin-dialog");
   const { invoke } = await import("@tauri-apps/api/core");
 
-  const path = await save({ defaultPath: fileName, filters: GRID_FILTERS });
+  const path = await save({ defaultPath: fileName, filters });
   if (!path) return false; // cancelled
 
   await invoke("write_text_file", { path, contents });

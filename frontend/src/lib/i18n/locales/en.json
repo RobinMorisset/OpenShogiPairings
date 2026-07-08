@@ -218,6 +218,8 @@
   },
   "settings": {
     "finalizedWarning": "Registration is finalized — changing the MacMahon groups will change everyone's points and future pairings.",
+    "exportSettings": "Export settings",
+    "exportSettingsDesc": "Download these settings as a JSON file — e.g. to compare pairing variants with the simulation tool.",
     "eloModeTitle": "ELO-based pairing (experimental)",
     "eloModeDesc": "Ignore Swiss / MacMahon entirely and pair each round to minimise the ELO difference of every game, using a live Bayesian estimate of each player's strength that updates from the results.",
     "eloModeCheckbox": "Pair by estimated ELO (disables MacMahon and the Swiss options below)",

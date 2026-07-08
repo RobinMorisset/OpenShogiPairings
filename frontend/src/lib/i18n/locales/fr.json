@@ -218,6 +218,8 @@
   },
   "settings": {
     "finalizedWarning": "Les inscriptions sont finalisées — modifier les groupes MacMahon changera les points de tous les joueurs et les appariements futurs.",
+    "exportSettings": "Exporter les réglages",
+    "exportSettingsDesc": "Télécharger ces réglages en JSON — par exemple pour comparer des variantes d'appariement avec l'outil de simulation.",
     "eloModeTitle": "Appariement par ELO (expérimental)",
     "eloModeDesc": "Ignore complètement le système suisse / MacMahon et apparie chaque round pour minimiser l'écart d'ELO de chaque partie, à partir d'une estimation bayésienne en temps réel du niveau de chaque joueur, mise à jour d'après les résultats.",
     "eloModeCheckbox": "Apparier par ELO estimé (désactive MacMahon et les options suisses ci-dessous)",

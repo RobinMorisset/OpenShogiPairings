@@ -4,6 +4,7 @@
   import { TIEBREAKS } from "../types";
   import type { HandicapPolicy, Player, Tiebreak, TournamentSettings } from "../types";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
+  import { saveSettings } from "../tournamentFile";
 
   interface Props {
     settings: TournamentSettings;
@@ -16,6 +17,12 @@
   }
 
   let { settings, finalized, players, onUpdate, busy = false }: Props = $props();
+
+  // Download the current settings as JSON (for the simulation CLI's --configs,
+  // or to share a configuration). Fire-and-forget: a cancelled dialog is a no-op.
+  function exportSettings() {
+    void saveSettings("tournament", settings);
+  }
 
   // Distinct club names among the players (first spelling kept) with their
   // player count, for the exempt datalist — sorted by decreasing count (ties
@@ -822,6 +829,14 @@
         </div>
       {/if}
     </div>
+  </div>
+
+  <div class="section">
+    <h3>{$_("settings.exportSettings")}</h3>
+    <p class="desc">{$_("settings.exportSettingsDesc")}</p>
+    <button type="button" class="ghost small" onclick={exportSettings}>
+      {$_("settings.exportSettings")}
+    </button>
   </div>
 </div>
 
