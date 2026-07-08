@@ -1,15 +1,24 @@
-//! Shared-password authentication for the remote (standalone) server.
+//! Password authentication (see `docs/multi-tournament.md`).
 //!
-//! Remote mode (see `docs/multi-referee-internet.md`) gates the whole API behind
-//! a single shared password so only referees can reach a hosted tournament. The
-//! embedded desktop server runs *without* auth — it is loopback-only and
-//! in-process — so everything here is inert when [`AppState::auth`] is `None`.
+//! Two independent uses of the same [`AuthConfig`] shape:
 //!
-//! Model: the server boots with one password and one random per-boot bearer
-//! token. `POST /api/login` trades the password for that token; every protected
-//! route then requires `Authorization: Bearer <token>`. All clients share the
-//! same token — this is a shared-password model, not per-user accounts — and a
-//! restart rotates it. Password and token are compared in constant time.
+//! - **Per-tournament**: each tournament may have its own password, checked at
+//!   `POST /api/tournaments/{id}/login`. The hash is what gets persisted to
+//!   disk (`{id}.auth.json`, see [`crate::state`]) — never the plaintext.
+//! - **Admin** (`AppState::admin_auth`): one process-wide password gating
+//!   `POST /api/tournaments` (creating new tournaments) and the FESA ratings
+//!   proxy (`/api/ratings*`) — both are instance-wide resources/capabilities
+//!   rather than something scoped to one tournament, and both are worth
+//!   protecting from a stranger who's found the URL: unbounded tournament
+//!   creation fills disk, and an open ratings proxy lets anyone use this
+//!   server as a free relay to FESA. Never persisted (comes from an env var
+//!   each boot), just hashed in memory like everything else here.
+//!
+//! Model: a per-boot random bearer token is exchanged for the password via
+//! login (`POST /api/tournaments/{id}/login` or `POST /api/admin/login`);
+//! every protected route then requires `Authorization: Bearer <token>`. All
+//! clients sharing one password share its token — this is a shared-password
+//! model, not per-user accounts — and a restart rotates it.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,6 +34,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::ApiError;
+use crate::scope::TournamentCtx;
 use crate::state::AppState;
 
 /// How long a failed login is delayed, as light brute-force friction. With a
@@ -32,38 +42,55 @@ use crate::state::AppState;
 /// password half a second per attempt is hopeless — but it costs nothing.
 const FAILED_LOGIN_DELAY: Duration = Duration::from_millis(500);
 
-/// Server-side authentication state, shared cheaply via `Arc`.
-///
-/// Present only when the server is started with a password (remote mode). Holds
-/// the shared password and the random per-boot token handed out on login.
+/// A password (hashed, never held in plaintext) plus the per-boot bearer token
+/// exchanged for it, shared cheaply via `Arc`.
 #[derive(Clone)]
 pub struct AuthConfig {
     inner: Arc<AuthInner>,
 }
 
 struct AuthInner {
-    password: String,
+    password_hash: String,
     token: String,
 }
 
 impl AuthConfig {
-    /// Build auth around a shared `password`, minting a fresh random bearer
-    /// token for this server run.
-    pub fn new(password: impl Into<String>) -> Self {
+    /// Hash `password` and mint a fresh random bearer token for this server run.
+    pub fn new(password: impl AsRef<str>) -> Self {
+        let password_hash =
+            bcrypt::hash(password.as_ref(), bcrypt::DEFAULT_COST).expect("bcrypt hashing failed");
+        Self::from_hash(password_hash)
+    }
+
+    /// Rebuild from an already-computed hash (e.g. loaded from
+    /// `{id}.auth.json` on boot) — no re-hashing, since the plaintext isn't
+    /// available. Still mints a fresh per-boot token.
+    pub fn from_hash(password_hash: String) -> Self {
         // Two v4 UUIDs ≈ 244 bits of entropy — far more than a session token
         // needs — concatenated as hex into one opaque string.
         let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
         Self {
             inner: Arc::new(AuthInner {
-                password: password.into(),
+                password_hash,
                 token,
             }),
         }
     }
 
-    /// Whether `presented` matches the shared password (constant-time).
-    fn password_matches(&self, presented: &str) -> bool {
-        constant_time_eq(presented.as_bytes(), self.inner.password.as_bytes())
+    /// The password hash, for persisting alongside the tournament.
+    pub fn password_hash(&self) -> &str {
+        &self.inner.password_hash
+    }
+
+    /// Whether `presented` matches the password this hash was built from.
+    pub fn password_matches(&self, presented: &str) -> bool {
+        bcrypt::verify(presented, &self.inner.password_hash).unwrap_or(false)
+    }
+
+    /// The current bearer token, e.g. to hand back immediately on creation so
+    /// the creator doesn't have to log in to their own tournament.
+    pub fn token(&self) -> &str {
+        &self.inner.token
     }
 
     /// Whether `presented` matches the current bearer token (constant-time).
@@ -72,32 +99,27 @@ impl AuthConfig {
     }
 }
 
-/// `POST /api/login` request body.
+/// `POST /api/tournaments/{id}/login` request body.
 #[derive(Deserialize)]
 pub struct LoginRequest {
     password: String,
 }
 
-/// `POST /api/login` success body.
+/// `POST /api/tournaments/{id}/login` success body.
 #[derive(Serialize)]
 struct LoginResponse {
     token: String,
 }
 
-/// Exchange the shared password for the session bearer token.
-///
-/// - No auth configured (embedded mode) → 404, the endpoint is effectively off.
-/// - Wrong password → 401 after a short delay.
-/// - Right password → 200 `{ token }`.
-pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>) -> Response {
-    let Some(auth) = state.auth.as_ref() else {
-        return ApiError::NotFound("authentication is not enabled".into()).into_response();
-    };
-    if auth.password_matches(&body.password) {
+/// Check `presented` against `auth` and return the login response: the token
+/// on a match, 401 (after [`FAILED_LOGIN_DELAY`]) otherwise. Shared by
+/// [`tournament_login`] and [`admin_login`].
+async fn login_response(auth: &AuthConfig, presented: &str) -> Response {
+    if auth.password_matches(presented) {
         (
             StatusCode::OK,
             Json(LoginResponse {
-                token: auth.inner.token.clone(),
+                token: auth.token().to_string(),
             }),
         )
             .into_response()
@@ -107,22 +129,80 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
     }
 }
 
-/// Middleware gating the protected routes.
-///
-/// A no-op when auth is disabled (embedded/local mode); otherwise it requires a
-/// valid `Authorization: Bearer <token>` header and answers 401 without one.
-pub async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    let Some(auth) = state.auth.as_ref() else {
-        // No auth configured: let everything through.
-        return next.run(req).await;
-    };
-    let presented = req
-        .headers()
+/// Whether `req` carries a valid `Authorization: Bearer <token>` for `auth`.
+fn has_valid_bearer(auth: &AuthConfig, req: &Request) -> bool {
+    req.headers()
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "));
-    match presented {
-        Some(token) if auth.token_matches(token) => next.run(req).await,
-        _ => ApiError::Unauthorized.into_response(),
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .is_some_and(|token| auth.token_matches(token))
+}
+
+/// Exchange a tournament's password for its session bearer token.
+///
+/// - The tournament has no password (open) → 404, the endpoint is effectively
+///   off for it, same as embedded/no-auth mode.
+/// - Wrong password → 401 after a short delay.
+/// - Right password → 200 `{ token }`.
+pub async fn tournament_login(
+    TournamentCtx(instance): TournamentCtx,
+    Json(body): Json<LoginRequest>,
+) -> Response {
+    let Some(auth) = instance.auth.as_ref() else {
+        return ApiError::NotFound("this tournament has no password".into()).into_response();
+    };
+    login_response(auth, &body.password).await
+}
+
+/// Middleware gating the protected per-tournament routes.
+///
+/// A no-op when the tournament has no password (local/embedded mode, or a
+/// referee chose not to set one); otherwise it requires a valid
+/// `Authorization: Bearer <token>` header for *that* tournament and answers
+/// 401 without one. 404s first if the id in the path doesn't resolve to any
+/// tournament at all (via [`TournamentCtx`]'s own rejection).
+pub async fn require_tournament_auth(
+    TournamentCtx(instance): TournamentCtx,
+    req: Request,
+    next: Next,
+) -> Response {
+    match &instance.auth {
+        // No password on this tournament: let everything through.
+        None => next.run(req).await,
+        Some(auth) if has_valid_bearer(auth, &req) => next.run(req).await,
+        Some(_) => ApiError::Unauthorized.into_response(),
+    }
+}
+
+/// Exchange the admin password for its session bearer token.
+///
+/// - No admin password configured → 404, the endpoint is effectively off
+///   (local/embedded/dev, or a hosted server that deliberately runs open).
+/// - Wrong password → 401 after a short delay.
+/// - Right password → 200 `{ token }`.
+pub async fn admin_login(
+    State(state): State<AppState>,
+    Json(body): Json<LoginRequest>,
+) -> Response {
+    let Some(auth) = state.admin_auth.as_ref() else {
+        return ApiError::NotFound("admin authentication is not enabled".into()).into_response();
+    };
+    login_response(auth, &body.password).await
+}
+
+/// Middleware gating the admin-only routes (`POST /api/tournaments`,
+/// `/api/ratings*`).
+///
+/// A no-op when no admin password is configured; otherwise requires a valid
+/// `Authorization: Bearer <token>` obtained from [`admin_login`].
+pub async fn require_admin_auth(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    match &state.admin_auth {
+        None => next.run(req).await,
+        Some(auth) if has_valid_bearer(auth, &req) => next.run(req).await,
+        Some(_) => ApiError::Unauthorized.into_response(),
     }
 }

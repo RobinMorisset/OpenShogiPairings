@@ -163,6 +163,14 @@ pub fn list(tournament_id: Uuid) -> Vec<BackupInfo> {
     infos.into_iter().map(|(_, _, info)| info).collect()
 }
 
+/// Delete every backup for `tournament_id` (its whole backups directory), when
+/// the tournament itself is deleted. Best-effort, like every other write here.
+pub fn delete_all(tournament_id: Uuid) {
+    if let Some(dir) = backups_dir(tournament_id) {
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
 /// Load a specific backup by id (its file stem), if it exists for this
 /// tournament. Rejects anything that isn't a plain `<secs>-<seq>-<slug>`
 /// token (alphanumerics and dashes only), so this can never escape the

@@ -1,7 +1,9 @@
-//! Tournament API: create, fetch, replace (load), player CRUD, and undo.
+//! Per-tournament API: fetch, replace (load), delete, player CRUD, rounds, and
+//! undo — everything nested under `/api/tournaments/{id}`.
 
 use axum::extract::{Path, State};
 use axum::http::{header, StatusCode};
+use axum::middleware;
 use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
@@ -14,104 +16,123 @@ use uuid::Uuid;
 
 use crate::backup;
 use crate::error::ApiError;
+use crate::scope::TournamentCtx;
 use crate::state::{AppState, TournamentStore};
+use crate::{auth, live};
 
-/// Register the tournament routes onto a router.
+/// Build the router nested at `/api/tournaments/{id}`.
 ///
-/// - `POST   /api/tournament`               create a new (empty) tournament
-/// - `GET    /api/tournament`               fetch the current tournament
-/// - `PUT    /api/tournament`               replace the current tournament (load)
-/// - `POST   /api/tournament/undo`          revert the last player change
-/// - `GET    /api/tournament/american-grid` export the cross-table for ELO (text)
-/// - `PUT    /api/tournament/american-grid` import a cross-table, rebuilding it (text)
-/// - `PUT    /api/tournament/settings`      update tournament settings (MacMahon, …)
-/// - `POST   /api/tournament/finalize-registration`  finalize registration
-/// - `POST   /api/tournament/complete-round`         complete the current round
-/// - `POST   /api/tournament/cancel-round`           cancel the last round (or draft)
-/// - `POST   /api/tournament/rounds/prepare`         begin drafting the next round
-/// - `PUT    /api/tournament/draft`                  edit the draft
-/// - `POST   /api/tournament/rounds`                 confirm the draft (pair & start)
-/// - `GET    /api/tournament/rounds/{n}/explanation` explain a round's Swiss pairings
-/// - `POST   /api/tournament/rounds/{n}/counterfactual` explain forcing/forbidding a pairing
-/// - `POST   /api/tournament/rounds/force-pairing`      re-pair the round with a forced board
-/// - `POST   /api/tournament/rounds/{n}/boards/{i}/result`  toggle a board winner
-/// - `POST   /api/tournament/rounds/{n}/boards/{i}/drawn`   set the draw flag
-/// - `PUT    /api/tournament/rounds/{n}/boards/{i}/handicap` set/clear the handicap
-/// - `POST   /api/tournament/players`       register a player
-/// - `PUT    /api/tournament/players/{id}`  edit a player
-/// - `DELETE /api/tournament/players/{id}`  remove a player
-/// - `POST   /api/tournament/players/{id}/eligible`  set cup eligibility
-/// - `POST   /api/tournament/players/{id}/adjustments`             add a manual point bonus/malus
-/// - `DELETE /api/tournament/players/{id}/adjustments/{adjustment_id}` remove one
-/// - `GET    /api/tournament/backups`         list automatic backups, newest first
-/// - `POST   /api/tournament/backups/{id}/restore` restore a backup as the current tournament
+/// Split into a public group (login, the SSE stream — both need to resolve the
+/// tournament but must work without a token already) and a protected group
+/// (everything else): the protected group's `route_layer`s run auth before the
+/// version check, and both need [`Path`]-param access to the `{id}` segment,
+/// which requires `route_layer` (not `layer`) — see axum's docs on the
+/// difference.
 ///
-/// Every endpoint returns a [`TournamentView`] (the tournament plus whether an
-/// undo is available), so clients can refresh their view and the undo button
-/// from a single response.
-pub fn routes() -> Router<AppState> {
-    Router::new()
+/// - `GET    /`               fetch the tournament
+/// - `PUT    /`               replace it wholesale (load a save file)
+/// - `DELETE /`               delete the tournament
+/// - `POST   /undo`           revert the last player change
+/// - `GET    /american-grid` export the cross-table for ELO (text)
+/// - `PUT    /american-grid` import a cross-table, rebuilding the tournament (text)
+/// - `PUT    /settings`      update tournament settings (MacMahon, …)
+/// - `POST   /finalize-registration`  finalize registration
+/// - `POST   /complete-round`         complete the current round
+/// - `POST   /cancel-round`           cancel the last round (or draft)
+/// - `POST   /rounds/prepare`         begin drafting the next round
+/// - `PUT    /draft`                  edit the draft
+/// - `POST   /rounds`                 confirm the draft (pair & start)
+/// - `GET    /rounds/{n}/explanation` explain a round's Swiss pairings
+/// - `POST   /rounds/{n}/counterfactual` explain forcing/forbidding a pairing
+/// - `POST   /rounds/force-pairing`      re-pair the round with a forced board
+/// - `POST   /rounds/{n}/boards/{i}/result`  toggle a board winner
+/// - `POST   /rounds/{n}/boards/{i}/drawn`   set the draw flag
+/// - `PUT    /rounds/{n}/boards/{i}/handicap` set/clear the handicap
+/// - `POST   /players`       register a player
+/// - `PUT    /players/{player_id}`  edit a player
+/// - `DELETE /players/{player_id}`  remove a player
+/// - `POST   /players/{player_id}/eligible`  set cup eligibility
+/// - `POST   /players/{player_id}/adjustments`             add a manual point bonus/malus
+/// - `DELETE /players/{player_id}/adjustments/{adjustment_id}` remove one
+/// - `GET    /backups`         list automatic backups, newest first
+/// - `POST   /backups/{backup_id}/restore` restore a backup as the current tournament
+/// - `POST   /login`  exchange this tournament's password for a session token
+/// - `GET    /events` SSE stream of this tournament's change version
+///
+/// Every endpoint (except login/events/the text exports) returns a
+/// [`TournamentView`] (the tournament plus whether an undo is available), so
+/// clients can refresh their view and the undo button from a single response.
+pub fn scope(state: AppState) -> Router<AppState> {
+    let public = Router::new()
+        .route("/login", post(auth::tournament_login))
+        .route("/events", get(live::events));
+
+    let protected = Router::new()
         .route(
-            "/api/tournament",
-            post(create_tournament)
-                .get(get_tournament)
-                .put(replace_tournament),
+            "/",
+            get(get_tournament)
+                .put(replace_tournament)
+                .delete(delete_tournament),
         )
-        .route("/api/tournament/undo", post(undo))
+        .route("/undo", post(undo))
         .route(
-            "/api/tournament/american-grid",
+            "/american-grid",
             get(american_grid).put(import_american_grid),
         )
-        .route("/api/tournament/settings", put(update_settings))
+        .route("/settings", put(update_settings))
+        .route("/finalize-registration", post(finalize_registration))
+        .route("/complete-round", post(complete_round))
+        .route("/cancel-round", post(cancel_round))
+        .route("/rounds/prepare", post(prepare_round))
+        .route("/draft", put(update_draft))
+        .route("/rounds", post(confirm_round))
+        .route("/rounds/{round_number}/explanation", get(round_explanation))
         .route(
-            "/api/tournament/finalize-registration",
-            post(finalize_registration),
-        )
-        .route("/api/tournament/complete-round", post(complete_round))
-        .route("/api/tournament/cancel-round", post(cancel_round))
-        .route("/api/tournament/rounds/prepare", post(prepare_round))
-        .route("/api/tournament/draft", put(update_draft))
-        .route("/api/tournament/rounds", post(confirm_round))
-        .route(
-            "/api/tournament/rounds/{round_number}/explanation",
-            get(round_explanation),
-        )
-        .route(
-            "/api/tournament/rounds/{round_number}/counterfactual",
+            "/rounds/{round_number}/counterfactual",
             post(round_counterfactual),
         )
-        .route("/api/tournament/rounds/force-pairing", post(force_pairing))
+        .route("/rounds/force-pairing", post(force_pairing))
         .route(
-            "/api/tournament/rounds/{round_number}/boards/{board_index}/result",
+            "/rounds/{round_number}/boards/{board_index}/result",
             post(set_board_result),
         )
         .route(
-            "/api/tournament/rounds/{round_number}/boards/{board_index}/drawn",
+            "/rounds/{round_number}/boards/{board_index}/drawn",
             post(set_board_drawn),
         )
         .route(
-            "/api/tournament/rounds/{round_number}/boards/{board_index}/handicap",
+            "/rounds/{round_number}/boards/{board_index}/handicap",
             put(set_board_handicap),
         )
-        .route("/api/tournament/players", post(add_player))
+        .route("/players", post(add_player))
         .route(
-            "/api/tournament/players/{id}",
+            "/players/{player_id}",
             axum::routing::put(edit_player).delete(remove_player),
         )
+        .route("/players/{player_id}/eligible", post(set_player_eligible))
         .route(
-            "/api/tournament/players/{id}/eligible",
-            post(set_player_eligible),
-        )
-        .route(
-            "/api/tournament/players/{id}/adjustments",
+            "/players/{player_id}/adjustments",
             post(add_point_adjustment),
         )
         .route(
-            "/api/tournament/players/{id}/adjustments/{adjustment_id}",
+            "/players/{player_id}/adjustments/{adjustment_id}",
             axum::routing::delete(remove_point_adjustment),
         )
-        .route("/api/tournament/backups", get(list_backups))
-        .route("/api/tournament/backups/{id}/restore", post(restore_backup))
+        .route("/backups", get(list_backups))
+        .route("/backups/{backup_id}/restore", post(restore_backup))
+        // `route_layer` (not `layer`): needed so the `{id}` path param is
+        // available to these middlewares' own `TournamentCtx` extraction.
+        // Layers wrap outermost-last, so auth runs before the version check.
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            live::check_version,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state,
+            auth::require_tournament_auth,
+        ));
+
+    public.merge(protected)
 }
 
 /// API response: the current tournament, undo availability, and the derived
@@ -178,43 +199,44 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
     }))
 }
 
-/// Body of `POST /api/tournament`.
-#[derive(Debug, Deserialize)]
-struct CreateTournamentRequest {
-    name: String,
-}
-
-/// Create a new, empty tournament, replacing any existing one.
-async fn create_tournament(
-    State(state): State<AppState>,
-    Json(req): Json<CreateTournamentRequest>,
-) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
-    let tournament = Tournament::new(&req.name)?;
-    let mut store = state.store.write().expect("store lock poisoned");
-    store.set_current(tournament);
-    Ok((StatusCode::CREATED, view(&store)?))
-}
-
-/// Fetch the current tournament, or 404 if none exists.
-async fn get_tournament(State(state): State<AppState>) -> Result<Json<TournamentView>, ApiError> {
-    let store = state.store.read().expect("store lock poisoned");
+/// Fetch the tournament.
+async fn get_tournament(
+    TournamentCtx(instance): TournamentCtx,
+) -> Result<Json<TournamentView>, ApiError> {
+    let store = instance.store.read().expect("store lock poisoned");
     view(&store)
 }
 
-/// Replace the current tournament wholesale (used by "load"). Resets undo history.
+/// Replace the tournament wholesale (used by "load"). The uploaded JSON's own
+/// `id` is overwritten with this instance's id, since the registry (and its
+/// persisted filename, backups, …) are keyed by it. Resets undo history.
 async fn replace_tournament(
-    State(state): State<AppState>,
-    Json(tournament): Json<Tournament>,
+    TournamentCtx(instance): TournamentCtx,
+    Path(id): Path<Uuid>,
+    Json(mut tournament): Json<Tournament>,
 ) -> Result<Json<TournamentView>, ApiError> {
     tournament.validate_loaded()?;
-    let mut store = state.store.write().expect("store lock poisoned");
+    tournament.id = id;
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.set_current(tournament);
     view(&store)
+}
+
+/// Delete the tournament: its registry entry, persisted file, and backups.
+async fn delete_tournament(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    if state.registry.remove(id) {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::NotFound(format!("no tournament {id}")))
+    }
 }
 
 /// Revert the last player change.
-async fn undo(State(state): State<AppState>) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
+async fn undo(TournamentCtx(instance): TournamentCtx) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.store.write().expect("store lock poisoned");
     if store.current().is_none() {
         return Err(ApiError::NoTournament);
     }
@@ -222,28 +244,34 @@ async fn undo(State(state): State<AppState>) -> Result<Json<TournamentView>, Api
     view(&store)
 }
 
-/// List automatic backups for the current tournament, newest first (see
-/// [`backup`]). 404 if there is no current tournament (there is nothing to
-/// scope the list to).
+/// List automatic backups for the tournament, newest first (see [`backup`]).
 async fn list_backups(
-    State(state): State<AppState>,
+    TournamentCtx(instance): TournamentCtx,
 ) -> Result<Json<Vec<backup::BackupInfo>>, ApiError> {
-    let store = state.store.read().expect("store lock poisoned");
+    let store = instance.store.read().expect("store lock poisoned");
     let tournament = store.current().ok_or(ApiError::NoTournament)?;
     Ok(Json(backup::list(tournament.id)))
+}
+
+/// The backup's own id from the path. Named (not positional/tuple) so this
+/// tolerates the outer `{id}` (tournament) segment also present in the
+/// matched route — [`Path`]'s struct form ignores fields it doesn't declare.
+#[derive(Deserialize)]
+struct BackupParams {
+    backup_id: String,
 }
 
 /// Restore a backup as the current tournament — like "load", but from the
 /// server's own backup store rather than an uploaded file. Resets undo
 /// history.
 async fn restore_backup(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
+    TournamentCtx(instance): TournamentCtx,
+    Path(params): Path<BackupParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
+    let mut store = instance.store.write().expect("store lock poisoned");
     let tournament_id = store.current().ok_or(ApiError::NoTournament)?.id;
-    let restored = backup::load(tournament_id, &id)
-        .ok_or_else(|| ApiError::NotFound(format!("no backup {id}")))?;
+    let restored = backup::load(tournament_id, &params.backup_id)
+        .ok_or_else(|| ApiError::NotFound(format!("no backup {}", params.backup_id)))?;
     store.set_current(restored);
     view(&store)
 }
@@ -253,24 +281,28 @@ async fn restore_backup(
 /// Built from the same server-computed standings as [`view`], so the grid's
 /// final-rank ordering matches the Results tab. Unlike the other endpoints this
 /// returns the raw grid text rather than a [`TournamentView`].
-async fn american_grid(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
-    let store = state.store.read().expect("store lock poisoned");
+async fn american_grid(
+    TournamentCtx(instance): TournamentCtx,
+) -> Result<impl IntoResponse, ApiError> {
+    let store = instance.store.read().expect("store lock poisoned");
     let tournament = store.current().ok_or(ApiError::NoTournament)?;
     let grid = osp_core::american_grid(tournament, &tournament.standings());
     Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], grid))
 }
 
 /// Import an American Grid document (raw text body), rebuilding it into the
-/// current tournament — replacing whatever was there. Meant for quickly seeding a
-/// non-trivial tournament state in tests and simulations. Returns the rebuilt
-/// [`TournamentView`].
+/// tournament — replacing whatever was there (keeping this instance's id).
+/// Meant for quickly seeding a non-trivial tournament state in tests and
+/// simulations. Returns the rebuilt [`TournamentView`].
 async fn import_american_grid(
-    State(state): State<AppState>,
+    TournamentCtx(instance): TournamentCtx,
+    Path(id): Path<Uuid>,
     body: String,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let tournament =
+    let mut tournament =
         osp_core::import_american_grid(&body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
-    let mut store = state.store.write().expect("store lock poisoned");
+    tournament.id = id;
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.set_current(tournament);
     view(&store)
 }
@@ -279,10 +311,10 @@ async fn import_american_grid(
 /// (MacMahon thresholds, degressive schedule, …) and stores it normalized so the
 /// surface grows without changing the endpoint shape.
 async fn update_settings(
-    State(state): State<AppState>,
+    TournamentCtx(instance): TournamentCtx,
     Json(settings): Json<TournamentSettings>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(move |t| {
         t.update_settings(settings);
         Ok(())
@@ -300,19 +332,21 @@ struct FinalizeRequest {
 /// Finalize registration (prerequisite for starting the first round). When the
 /// cup is enabled the body carries the chosen size; otherwise the body is empty.
 async fn finalize_registration(
-    State(state): State<AppState>,
+    TournamentCtx(instance): TournamentCtx,
     body: Option<Json<FinalizeRequest>>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let cup_size = body.and_then(|Json(b)| b.cup_size);
-    let mut store = state.store.write().expect("store lock poisoned");
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(|t| t.finalize_registration_with(cup_size))?;
     backup_after(&store, "registration finalized");
     view(&store)
 }
 
 /// Complete the current (in-progress) round.
-async fn complete_round(State(state): State<AppState>) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
+async fn complete_round(
+    TournamentCtx(instance): TournamentCtx,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(|t| t.complete_current_round())?;
     let label = round_label(&store, "round", "completed");
     backup_after(&store, &label);
@@ -321,16 +355,20 @@ async fn complete_round(State(state): State<AppState>) -> Result<Json<Tournament
 
 /// Cancel the last round (or the open draft), stepping the tournament back one
 /// stage. Undoable like any other mutation.
-async fn cancel_round(State(state): State<AppState>) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
+async fn cancel_round(
+    TournamentCtx(instance): TournamentCtx,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(|t| t.cancel_last_round())?;
     backup_after(&store, "round cancelled");
     view(&store)
 }
 
 /// Begin drafting the next round (enters the round-draft state).
-async fn prepare_round(State(state): State<AppState>) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
+async fn prepare_round(
+    TournamentCtx(instance): TournamentCtx,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(|t| t.prepare_round().map(|_| ()))?;
     let label = store
         .current()
@@ -359,7 +397,7 @@ fn backup_after(store: &TournamentStore, label: &str) {
     }
 }
 
-/// Body of `PUT /api/tournament/draft`: the draft's customization.
+/// Body of `PUT /draft`: the draft's customization.
 #[derive(Debug, Deserialize)]
 struct DraftUpdate {
     #[serde(default)]
@@ -373,10 +411,10 @@ struct DraftUpdate {
 
 /// Edit the current draft (absent set, forced pairings, forced bye).
 async fn update_draft(
-    State(state): State<AppState>,
+    TournamentCtx(instance): TournamentCtx,
     Json(req): Json<DraftUpdate>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(|t| {
         t.update_draft(req.absent, req.forced_boards, req.forced_bye)
             .map(|_| ())
@@ -386,24 +424,31 @@ async fn update_draft(
 
 /// Confirm the draft: pair the remaining players and start the round.
 async fn confirm_round(
-    State(state): State<AppState>,
+    TournamentCtx(instance): TournamentCtx,
 ) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(|t| t.confirm_round().map(|_| ()))?;
     let label = round_label(&store, "round", "started");
     backup_after(&store, &label);
     Ok((StatusCode::CREATED, view(&store)?))
 }
 
+/// The round number from the path (see [`BackupParams`] on why this is a
+/// named struct rather than a bare `Path<u32>`).
+#[derive(Deserialize)]
+struct RoundParams {
+    round_number: u32,
+}
+
 /// Explain a round's Swiss pairings: per-board rule ledger and round report.
 /// Read-only, so no backup is taken.
 async fn round_explanation(
-    State(state): State<AppState>,
-    Path(round_number): Path<u32>,
+    TournamentCtx(instance): TournamentCtx,
+    Path(params): Path<RoundParams>,
 ) -> Result<Json<RoundExplanation>, ApiError> {
-    let store = state.store.read().expect("store lock poisoned");
+    let store = instance.store.read().expect("store lock poisoned");
     let tournament = store.current().ok_or(ApiError::NoTournament)?;
-    let explanation = tournament.explain_round(round_number)?;
+    let explanation = tournament.explain_round(params.round_number)?;
     Ok(Json(explanation))
 }
 
@@ -425,8 +470,8 @@ fn default_counterfactual_mode() -> CounterfactualMode {
 /// Explain what forcing or forbidding the pairing `a`–`b` in this round would
 /// cost. Read-only.
 async fn round_counterfactual(
-    State(state): State<AppState>,
-    Path(round_number): Path<u32>,
+    TournamentCtx(instance): TournamentCtx,
+    Path(params): Path<RoundParams>,
     Json(req): Json<CounterfactualRequest>,
 ) -> Result<Json<Counterfactual>, ApiError> {
     if req.a == req.b {
@@ -434,9 +479,9 @@ async fn round_counterfactual(
             "a counterfactual needs two different players".into(),
         ));
     }
-    let store = state.store.read().expect("store lock poisoned");
+    let store = instance.store.read().expect("store lock poisoned");
     let tournament = store.current().ok_or(ApiError::NoTournament)?;
-    let result = tournament.explain_counterfactual(round_number, req.a, req.b, req.mode)?;
+    let result = tournament.explain_counterfactual(params.round_number, req.a, req.b, req.mode)?;
     Ok(Json(result))
 }
 
@@ -450,7 +495,7 @@ struct ForcePairingRequest {
 /// Force the pairing `a`–`b` onto the current round (re-pairs it with that board
 /// fixed). Mutates, so a backup is taken.
 async fn force_pairing(
-    State(state): State<AppState>,
+    TournamentCtx(instance): TournamentCtx,
     Json(req): Json<ForcePairingRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     if req.a == req.b {
@@ -458,11 +503,19 @@ async fn force_pairing(
             "a forced pairing needs two different players".into(),
         ));
     }
-    let mut store = state.store.write().expect("store lock poisoned");
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(|t| t.force_pairing(req.a, req.b).map(|_| ()))?;
     let label = round_label(&store, "round", "re-paired");
     backup_after(&store, &label);
     view(&store)
+}
+
+/// The round number and board index from the path (see [`BackupParams`] on
+/// why this is a named struct).
+#[derive(Deserialize)]
+struct BoardParams {
+    round_number: u32,
+    board_index: usize,
 }
 
 /// Body of the board-result endpoint: which player the referee clicked.
@@ -473,13 +526,13 @@ struct SetResultRequest {
 
 /// Toggle a board's winner in response to a clicked player.
 async fn set_board_result(
-    State(state): State<AppState>,
-    Path((round_number, board_index)): Path<(u32, usize)>,
+    TournamentCtx(instance): TournamentCtx,
+    Path(params): Path<BoardParams>,
     Json(req): Json<SetResultRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(|t| {
-        t.toggle_board_winner(round_number, board_index, req.clicked)
+        t.toggle_board_winner(params.round_number, params.board_index, req.clicked)
             .map(|_| ())
     })?;
     view(&store)
@@ -493,13 +546,13 @@ struct SetDrawnRequest {
 
 /// Set (or clear) a board's "a draw occurred" flag.
 async fn set_board_drawn(
-    State(state): State<AppState>,
-    Path((round_number, board_index)): Path<(u32, usize)>,
+    TournamentCtx(instance): TournamentCtx,
+    Path(params): Path<BoardParams>,
     Json(req): Json<SetDrawnRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(|t| {
-        t.set_board_drawn(round_number, board_index, req.drawn)
+        t.set_board_drawn(params.round_number, params.board_index, req.drawn)
             .map(|_| ())
     })?;
     view(&store)
@@ -514,46 +567,53 @@ struct SetHandicapRequest {
 /// Set or clear a board's handicap. The giver is frozen server-side from the
 /// players' current ratings.
 async fn set_board_handicap(
-    State(state): State<AppState>,
-    Path((round_number, board_index)): Path<(u32, usize)>,
+    TournamentCtx(instance): TournamentCtx,
+    Path(params): Path<BoardParams>,
     Json(req): Json<SetHandicapRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(|t| {
-        t.set_board_handicap(round_number, board_index, req.handicap)
+        t.set_board_handicap(params.round_number, params.board_index, req.handicap)
             .map(|_| ())
     })?;
     view(&store)
 }
 
-/// Register a player in the current tournament.
+/// Register a player in the tournament.
 async fn add_player(
-    State(state): State<AppState>,
+    TournamentCtx(instance): TournamentCtx,
     Json(new_player): Json<NewPlayer>,
 ) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(|t| t.add_player(new_player).map(|_| ()))?;
     Ok((StatusCode::CREATED, view(&store)?))
 }
 
+/// The player's own id from the path (see [`BackupParams`] on why this is a
+/// named struct).
+#[derive(Deserialize)]
+struct PlayerParams {
+    player_id: Uuid,
+}
+
 /// Edit an existing player's fields (in-place cell editing).
 async fn edit_player(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    TournamentCtx(instance): TournamentCtx,
+    Path(params): Path<PlayerParams>,
     Json(new_player): Json<NewPlayer>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.edit_player(id, new_player).map(|_| ()))?;
+    let mut store = instance.store.write().expect("store lock poisoned");
+    store.mutate(|t| t.edit_player(params.player_id, new_player).map(|_| ()))?;
     view(&store)
 }
 
-/// Remove a player from the current tournament by id.
+/// Remove a player from the tournament by id.
 async fn remove_player(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    TournamentCtx(instance): TournamentCtx,
+    Path(params): Path<PlayerParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.remove_player(id))?;
+    let mut store = instance.store.write().expect("store lock poisoned");
+    store.mutate(|t| t.remove_player(params.player_id))?;
     view(&store)
 }
 
@@ -565,12 +625,15 @@ struct SetEligibleRequest {
 
 /// Set whether a player is eligible for the direct-elimination cup.
 async fn set_player_eligible(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    TournamentCtx(instance): TournamentCtx,
+    Path(params): Path<PlayerParams>,
     Json(req): Json<SetEligibleRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.set_player_eligible(id, req.eligible).map(|_| ()))?;
+    let mut store = instance.store.write().expect("store lock poisoned");
+    store.mutate(|t| {
+        t.set_player_eligible(params.player_id, req.eligible)
+            .map(|_| ())
+    })?;
     view(&store)
 }
 
@@ -583,24 +646,35 @@ struct AddAdjustmentRequest {
 
 /// Apply a manual point bonus/malus to a player.
 async fn add_point_adjustment(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    TournamentCtx(instance): TournamentCtx,
+    Path(params): Path<PlayerParams>,
     Json(req): Json<AddAdjustmentRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
+    let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(|t| {
-        t.add_point_adjustment(id, req.delta, req.reason)
+        t.add_point_adjustment(params.player_id, req.delta, req.reason)
             .map(|_| ())
     })?;
     view(&store)
 }
 
+/// The player id and adjustment id from the path (see [`BackupParams`] on why
+/// this is a named struct).
+#[derive(Deserialize)]
+struct AdjustmentParams {
+    player_id: Uuid,
+    adjustment_id: Uuid,
+}
+
 /// Remove a previously applied point adjustment.
 async fn remove_point_adjustment(
-    State(state): State<AppState>,
-    Path((id, adjustment_id)): Path<(Uuid, Uuid)>,
+    TournamentCtx(instance): TournamentCtx,
+    Path(params): Path<AdjustmentParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = state.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.remove_point_adjustment(id, adjustment_id).map(|_| ()))?;
+    let mut store = instance.store.write().expect("store lock poisoned");
+    store.mutate(|t| {
+        t.remove_point_adjustment(params.player_id, params.adjustment_id)
+            .map(|_| ())
+    })?;
     view(&store)
 }

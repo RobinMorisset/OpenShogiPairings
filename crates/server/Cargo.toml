@@ -31,9 +31,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 # Locating a per-user cache directory for the persisted ratings list.
 dirs = "5"
-# Constant-time comparison for the shared password and session token, so the
-# login/auth checks leak nothing through timing (see `auth.rs`).
+# Constant-time comparison for the session token, so token checks leak nothing
+# through timing (see `auth.rs`).
 constant_time_eq = "0.3"
+# Hashing per-tournament passwords before they touch disk (see `auth.rs`).
+bcrypt = "0.15"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

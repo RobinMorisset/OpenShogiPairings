@@ -180,29 +180,36 @@ per-tournament `/login`, etc. New routes for the registry itself:
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | `GET` | `/api/tournaments` | none | List `{ id, name, has_password }` for every known tournament — enough to render the picker, no tournament content. |
-| `POST` | `/api/tournaments` | global admin password | `{ name, password? }` → creates, persists, returns `{ id }` (and a token immediately if a password was given, so the creator doesn't have to log in to their own tournament). See §3.1. |
+| `POST` | `/api/admin/login` | — | `{ password }` → `{ token }`, exchanging `OSP_ADMIN_PASSWORD` for the admin bearer token. 404 if no admin password is configured. |
+| `POST` | `/api/tournaments` | admin token | `{ name, password? }` → creates, persists, returns `{ id }` (and a token immediately if a password was given, so the creator doesn't have to log in to their own tournament). See §3.1. |
+| `GET`  | `/api/ratings`, `POST /api/ratings/refresh` | admin token | The FESA ratings proxy — an instance-wide resource, not per-tournament data, so it shares the admin gate rather than any tournament's password. See §3.1. |
 | `DELETE` | `/api/tournaments/{id}` | that tournament's own token | Removes the registry entry, its persisted file, and its backups directory. 404 if `id` unknown. |
 | `POST` | `/api/tournaments/{id}/login` | — | Existing shape, scoped. 404 if `id` unknown, no-op/200 with no token needed if that tournament has no password. |
 | `GET` | `/api/tournaments/{id}/events` | none (SSE can't send auth) | Same as today, scoped to one instance's broadcaster. |
 | everything else | `/api/tournaments/{id}/...` | per-instance token | Existing handlers, just nested + reading from the looked-up `TournamentInstance` instead of the global `AppState.store`. |
 
-### 3.1 Global admin password (creation gate)
+### 3.1 Global admin password (creation + ratings gate)
 
 `POST /api/tournaments` is the one endpoint that has to be reachable before
 anyone holds any tournament's password — so on a host whose URL has leaked
 beyond the referees who were meant to have it (very plausible over a long
 enough timeline for a shared federation instance), it's the one place someone
 with no legitimate access could still spam the server with junk tournaments
-and fill disk.
+and fill disk. The FESA ratings proxy (`/api/ratings*`) has the same problem
+from a different angle: it's an instance-wide resource, not scoped to any one
+tournament, and left open it lets a stranger use this server as a free relay
+to fetch/refresh the FESA list — so it's gated the same way rather than by
+any individual tournament's password (which a stranger, by definition,
+doesn't have either).
 
-Fix: a separate, single, instance-wide `OSP_ADMIN_PASSWORD` env var, checked
-by `POST /api/tournaments` only (a simple `Authorization: Bearer` or a
-`password` field in the body, reusing the existing `AuthConfig` shape but as
-one more instance singleton, not per-tournament). It gates *creation* alone —
-everything else about a created tournament is exactly the per-tournament-
-password model from §0. Unset (e.g. local/embedded Tauri mode, or a
-throwaway dev server) disables the check, matching how `OSP_PASSWORD` already
-behaves today for the whole API.
+Fix: a separate, single, instance-wide `OSP_ADMIN_PASSWORD` env var, exchanged
+for a bearer token via `POST /api/admin/login` (mirroring per-tournament
+login) — reusing the existing `AuthConfig` shape as one more instance
+singleton, not per-tournament. That token then gates both `POST
+/api/tournaments` and `/api/ratings*`; everything else about a created
+tournament is exactly the per-tournament-password model from §0. Unset (e.g.
+local/embedded Tauri mode, or a throwaway dev server) disables the check on
+both, matching how `OSP_PASSWORD` already behaves today for the whole API.
 
 Axum-wise: nest the protected routes under `/api/tournaments/{id}` so a
 `Path<Uuid>` extractor is available to a middleware chain applied via
@@ -278,8 +285,9 @@ an existing client, not a rewrite.
   domain logic in `tournament.rs` handlers: unchanged, just invoked with an
   extra id-lookup indirection.
 - Backups (`backup.rs`): already keyed by `tournament.id` on disk — no change.
-- The FESA ratings cache: stays global in `AppState` (it's a shared external
-  list, not per-tournament data).
+- The FESA ratings cache itself: stays global in `AppState` (it's a shared
+  external list, not per-tournament data) — only its *access gate* changes,
+  from the old whole-API password to the new admin password (§3.1).
 - Sente/Phase 1–4 auth/live-sync mechanics from
   [`multi-referee-internet.md`](multi-referee-internet.md): unchanged in
   *shape* (bearer token, SSE version stream, 409-on-stale-version), just
