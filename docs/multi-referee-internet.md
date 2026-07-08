@@ -1,7 +1,11 @@
 # Multiple referees on one tournament, over the internet — design
 
-Status: **Not started** — design only. Supersedes the two `TODO.md` lines
-"Add authentication to the distributed instance" and (partly) the webhook item.
+Status: **Phase 1 in progress** — the shared-password auth code has landed
+(server middleware + `POST /api/login`, `OSP_PASSWORD` on the standalone binary,
+and the client login overlay); TLS via a reverse proxy is documented but not yet
+scripted (folds into the Phase 2 deploy recipe). Phases 2–4 not started.
+Supersedes the two `TODO.md` lines "Add authentication to the distributed
+instance" and (partly) the webhook item.
 
 Goal: let several referees edit **one** tournament simultaneously, from
 different machines, **over the public internet**, safely (only referees, and

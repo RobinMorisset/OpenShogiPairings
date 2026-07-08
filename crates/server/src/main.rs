@@ -27,7 +27,18 @@ async fn main() {
     let addr: SocketAddr = listener.local_addr().expect("listener has a local address");
     tracing::info!("OpenShogiPairings server listening on http://{addr}");
 
-    osp_server::serve(listener)
+    // Remote mode gates the whole API behind a shared password (see
+    // `docs/multi-referee-internet.md`). Supply it via `OSP_PASSWORD`; leaving it
+    // unset runs the server open, which is only appropriate on a trusted machine.
+    let password = std::env::var("OSP_PASSWORD").ok().filter(|p| !p.is_empty());
+    match password {
+        Some(_) => tracing::info!("authentication enabled (shared password)"),
+        None => tracing::warn!(
+            "authentication DISABLED — set OSP_PASSWORD to require a password before exposing this server"
+        ),
+    }
+
+    osp_server::serve_with_auth(listener, password)
         .await
         .expect("server exited unexpectedly");
 }

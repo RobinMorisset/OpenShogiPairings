@@ -52,7 +52,9 @@
     saveTournament,
   } from "./lib/tournamentFile";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
+  import Login from "./lib/components/Login.svelte";
   import CreateTournament from "./lib/components/CreateTournament.svelte";
+  import { authRequired } from "./lib/session";
   import PlayerRegistration from "./lib/components/PlayerRegistration.svelte";
   import PlayerList from "./lib/components/PlayerList.svelte";
   import RoundView from "./lib/components/RoundView.svelte";
@@ -276,7 +278,11 @@
     }
   });
 
-  onMount(async () => {
+  // Initial (and post-login) load of ratings + the current tournament. Re-run
+  // after a successful sign-in, since the first attempt would have 401'd.
+  async function loadInitial() {
+    initialLoad = "loading";
+
     // Load the FESA ratings in the background — autocomplete is a nice-to-have,
     // so a failure here must not block or error the rest of the app.
     fetchRatings()
@@ -294,11 +300,17 @@
         hasUnsavedChanges = false;
       }
     } catch (err) {
-      error = describe(err);
+      // A 401 just means "log in first" — the login overlay handles it, so
+      // don't also surface it as an error banner.
+      if (!(err instanceof ApiError && err.status === 401)) {
+        error = describe(err);
+      }
     } finally {
       initialLoad = "done";
     }
-  });
+  }
+
+  onMount(loadInitial);
 
   function describe(err: unknown): string {
     if (err instanceof ApiError && err.status === 0) {
@@ -518,11 +530,13 @@
     </div>
   </header>
 
-  {#if error}
+  {#if error && !$authRequired}
     <p class="error-banner" role="alert">{error}</p>
   {/if}
 
-  {#if initialLoad === "loading"}
+  {#if $authRequired}
+    <Login onSuccess={loadInitial} />
+  {:else if initialLoad === "loading"}
     <p class="muted">{$_("app.loading")}</p>
   {:else if showCreate}
     <CreateTournament

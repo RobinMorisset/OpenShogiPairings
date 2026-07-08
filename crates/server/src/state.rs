@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use osp_core::{Tournament, TournamentError};
 
+use crate::auth::AuthConfig;
 use crate::ratings::CachedRatings;
 
 /// The current tournament plus a linear undo history.
@@ -84,4 +85,7 @@ pub struct AppState {
     pub store: Arc<RwLock<TournamentStore>>,
     /// Cached FESA rating list (see [`crate::ratings`]).
     pub ratings: Arc<RwLock<Option<CachedRatings>>>,
+    /// Shared-password auth, or `None` in local/embedded mode where the API is
+    /// loopback-only and needs no gate (see [`crate::auth`]).
+    pub auth: Option<AuthConfig>,
 }

@@ -11,15 +11,18 @@
 //! The server holds the current tournament in memory as the single source of
 //! truth shared by all connected clients; see [`AppState`].
 
+mod auth;
 mod backup;
 mod error;
 mod ratings;
 mod state;
 mod tournament;
 
+pub use auth::AuthConfig;
 pub use state::AppState;
 
 use axum::{
+    middleware,
     routing::{get, post},
     Json, Router,
 };
@@ -28,30 +31,61 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 /// Build the application router around the given state.
+///
+/// `/api/health` and `/api/login` are always open; every other route sits
+/// behind the [`auth::require_auth`] middleware, which is a no-op unless the
+/// state carries an [`AuthConfig`] (remote mode).
 pub fn router(state: AppState) -> Router {
     // Permissive CORS: clients are served from a different origin than this API
     // — the Vite dev server (:5173) in the browser, and the `tauri://` /
     // `http://tauri.localhost` webview origin in the desktop app. Fine for a
-    // localhost-only API; lock down before exposing this beyond the machine.
+    // localhost-only API; the hosted remote server (Phase 2) serves the SPA
+    // same-origin and drops this.
     let cors = CorsLayer::permissive();
 
-    Router::new()
-        .route("/api/health", get(health))
+    // Everything except health/login requires a valid session token when auth
+    // is enabled. The middleware self-disables when it isn't.
+    let protected = Router::new()
         .route("/api/ratings", get(ratings::ratings_handler))
         .route("/api/ratings/refresh", post(ratings::refresh_handler))
         .merge(tournament::routes())
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_auth,
+        ));
+
+    Router::new()
+        .route("/api/health", get(health))
+        .route("/api/login", post(auth::login))
+        .merge(protected)
         .with_state(state)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
 }
 
-/// Serve the API on an already-bound listener until the process ends.
+/// Serve the API on an already-bound listener until the process ends, without
+/// authentication (embedded/local mode).
 ///
 /// Taking a bound [`TcpListener`](tokio::net::TcpListener) (rather than an
 /// address) lets the caller bind first and read back the chosen port — which the
 /// embedded server relies on when binding to an OS-assigned port.
 pub async fn serve(listener: tokio::net::TcpListener) -> std::io::Result<()> {
     axum::serve(listener, router(AppState::default())).await
+}
+
+/// Serve the API with an optional shared password (remote mode).
+///
+/// `Some(password)` gates the whole API behind that password; `None` behaves
+/// exactly like [`serve`]. Used by the standalone binary.
+pub async fn serve_with_auth(
+    listener: tokio::net::TcpListener,
+    password: Option<String>,
+) -> std::io::Result<()> {
+    let state = AppState {
+        auth: password.map(AuthConfig::new),
+        ..Default::default()
+    };
+    axum::serve(listener, router(state)).await
 }
 
 /// Report that the server is up. Returns the shared [`HealthStatus`] shape.
@@ -102,6 +136,30 @@ mod tests {
             .header("content-type", "application/json")
             .body(Body::from(body.to_string()))
             .unwrap()
+    }
+
+    /// A JSON request carrying an `Authorization: Bearer <token>` header.
+    fn json_req_auth(
+        method: &str,
+        uri: &str,
+        body: serde_json::Value,
+        token: &str,
+    ) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// State whose API is gated behind the shared password `secret`.
+    fn authed_state() -> AppState {
+        AppState {
+            auth: Some(AuthConfig::new("secret")),
+            ..Default::default()
+        }
     }
 
     /// Prepare and confirm the next round with no customization.
@@ -683,5 +741,70 @@ mod tests {
 
         let (status, _) = send(router(state), json_req("PUT", "/api/tournament", future)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn health_is_open_without_a_token() {
+        let (status, body) = send(router(authed_state()), get("/api/health")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn protected_route_without_a_token_is_401() {
+        let (status, _) = send(router(authed_state()), get("/api/tournament")).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn login_with_the_wrong_password_is_401() {
+        let (status, _) = send(
+            router(authed_state()),
+            json_req("POST", "/api/login", json!({ "password": "nope" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn login_then_use_the_token_to_reach_the_api() {
+        let state = authed_state();
+
+        // Log in with the right password to obtain the session token.
+        let (status, body) = send(
+            router(state.clone()),
+            json_req("POST", "/api/login", json!({ "password": "secret" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let token = body["token"].as_str().unwrap().to_string();
+        assert!(!token.is_empty());
+
+        // A bogus token is still rejected.
+        let (status, _) = send(
+            router(state.clone()),
+            json_req_auth("POST", "/api/tournament", json!({ "name": "Cup" }), "wrong"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        // The real token gets through and the request succeeds.
+        let (status, body) = send(
+            router(state.clone()),
+            json_req_auth("POST", "/api/tournament", json!({ "name": "Cup" }), &token),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(body["tournament"]["name"], "Cup");
+    }
+
+    #[tokio::test]
+    async fn login_is_404_when_auth_is_disabled() {
+        let (status, _) = send(
+            router(AppState::default()),
+            json_req("POST", "/api/login", json!({ "password": "whatever" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 }

@@ -13,6 +13,7 @@ import type {
   Winner,
 } from "./types";
 import { isTauri } from "./platform";
+import { authRequired, clearToken, getToken, setToken } from "./session";
 
 // Where the API lives.
 //   - Tauri: the server is embedded and bound to an OS-assigned port, so we ask
@@ -58,14 +59,29 @@ export class ApiError extends Error {
  */
 async function fetchOk(path: string, init?: RequestInit): Promise<Response> {
   let response: Response;
+  const token = getToken();
   try {
     response = await fetch(await apiUrl(path), {
       ...init,
-      headers: { "content-type": "application/json", ...init?.headers },
+      headers: {
+        "content-type": "application/json",
+        // Replay the session token in remote mode; harmless when the server
+        // doesn't require it.
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...init?.headers,
+      },
     });
   } catch (cause) {
     // Network-level failure (server down, CORS, etc.).
     throw new ApiError(0, cause instanceof Error ? cause.message : String(cause));
+  }
+
+  // The server requires a (fresh) login: drop the stale token and raise the
+  // login gate. Callers see a 401 ApiError; the UI shows the login overlay.
+  if (response.status === 401) {
+    clearToken();
+    authRequired.set(true);
+    throw new ApiError(401, "authentication required");
   }
 
   if (!response.ok) {
@@ -91,6 +107,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 /** Ask the server whether it is up. */
 export function fetchHealth(): Promise<HealthStatus> {
   return request<HealthStatus>("/api/health");
+}
+
+/**
+ * Exchange the shared password for a session token (remote mode). On success the
+ * token is stored and the login gate lowered. Deliberately bypasses
+ * {@link fetchOk}: a 401 here means "wrong password" for the caller to show, not
+ * a reason to re-raise the very gate we're trying to clear.
+ */
+export async function login(password: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(await apiUrl("/api/login"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+  } catch (cause) {
+    throw new ApiError(0, cause instanceof Error ? cause.message : String(cause));
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, `${response.status} ${response.statusText}`);
+  }
+  const { token } = (await response.json()) as { token: string };
+  setToken(token);
+  authRequired.set(false);
 }
 
 /** Fetch the FESA rating list (server-cached) for registration autocomplete. */

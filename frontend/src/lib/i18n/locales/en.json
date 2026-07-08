@@ -46,6 +46,14 @@
     "confirmDiscard": "\"{name}\" has unsaved changes that will be lost. Continue anyway?",
     "cannotReachServer": "Cannot reach the server. Is it running (cargo run -p osp-server)?"
   },
+  "login": {
+    "title": "Referee sign-in",
+    "prompt": "This tournament server is password-protected. Enter the referee password to continue.",
+    "passwordPlaceholder": "Password",
+    "submit": "Sign in",
+    "signingIn": "Signing in…",
+    "wrongPassword": "Wrong password. Please try again."
+  },
   "localeSwitcher": {
     "label": "Language"
   },

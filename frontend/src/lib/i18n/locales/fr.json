@@ -46,6 +46,14 @@
     "confirmDiscard": "« {name} » contient des modifications non enregistrées qui seront perdues. Continuer quand même ?",
     "cannotReachServer": "Impossible de contacter le serveur. Est-il lancé (cargo run -p osp-server) ?"
   },
+  "login": {
+    "title": "Connexion arbitre",
+    "prompt": "Ce serveur de tournoi est protégé par un mot de passe. Saisissez le mot de passe arbitre pour continuer.",
+    "passwordPlaceholder": "Mot de passe",
+    "submit": "Se connecter",
+    "signingIn": "Connexion…",
+    "wrongPassword": "Mot de passe incorrect. Veuillez réessayer."
+  },
   "localeSwitcher": {
     "label": "Langue"
   },
