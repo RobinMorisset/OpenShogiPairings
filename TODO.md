@@ -25,6 +25,11 @@ Known limitations and future work, roughly ordered by area.
 
 - **Add a button to load a CSV of player names in the players tab**
 
+- **Show 8th, 16th, 32nd, etc.. eligible players** when cup mode is enabled. I'm not sure whether this should live in Settings or Players.
+  Probably the latter, something next to the eligibility checkbox ?
+
+- **Replace the padlock icon by an open one for unlocked tournaments**
+
 ## Multi-tournament server
 
 Support several tournaments on one running server (hosted or Tauri-embedded),
@@ -50,3 +55,5 @@ with clients picking which to connect to. Design:
 - **Team tournaments**
 
 - **Standings by direct confrontation**
+
+- **Package the executable** so it can be easily downloaded through github, rather than requiring building from source.
