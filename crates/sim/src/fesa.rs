@@ -203,4 +203,36 @@ mod tests {
         assert_eq!(map[&a], 1834.0); // post-tournament rating used as truth
         assert!(!map.contains_key(&b)); // no FESA entry → falls back to grid rating
     }
+
+    /// A player with the given last/first name.
+    fn player(base: &mut Tournament, last: &str, first: &str) -> uuid::Uuid {
+        base.add_player(NewPlayer {
+            last_name: last.into(),
+            first_name: Some(first.into()),
+            rating: Some(1500),
+            ..Default::default()
+        })
+        .unwrap()
+        .id
+    }
+
+    #[test]
+    fn overrides_from_a_repo_fixture_parse_and_match_without_network() {
+        // Reads a checked-in, synthetic FESA list through the real fixed-width
+        // parser — no download. Guards the parse + name-match path end to end.
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/fesa-ratinglist-sample.txt"
+        );
+        let mut base = Tournament::new("T").unwrap();
+        let cheymol = player(&mut base, "Cheymol", "Jean");
+        let goix = player(&mut base, "Goix", "Nicolas");
+        let ghost = player(&mut base, "Ghost", "Nobody"); // absent from the list
+
+        let (map, matched) = overrides_from_list(path, &base).unwrap();
+        assert_eq!(matched, 2);
+        assert_eq!(map[&cheymol], 2011.0);
+        assert_eq!(map[&goix], 1720.0);
+        assert!(!map.contains_key(&ghost)); // unmatched → keeps its grid rating
+    }
 }

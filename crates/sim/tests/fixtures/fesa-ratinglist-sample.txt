@@ -1,0 +1,8 @@
+FESA rating list - SAMPLE FIXTURE (synthetic data for tests, not real)
+Rank Name              Grades      Elo  #G Nat
+-------------------------------------------------
+  1 Cheymol           Jean 1 Dan 2011 60 FR
+  2 Imanishi          Toru 3 Dan 2105 80 JP
+  3 Pucher            Stefan 1 Kyu 1650 30 AT
+  8 Goix              Nicolas 2 Kyu 1720 45 FR
+ 40 DeLaTour          Marie 5 Kyu 1210 12 FR
