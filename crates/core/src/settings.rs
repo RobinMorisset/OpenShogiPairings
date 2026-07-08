@@ -36,6 +36,32 @@ pub enum HandicapPolicy {
     Suggested,
 }
 
+/// A single MacMahon starting-points band: the rating a player must meet or
+/// exceed to count it, plus (for degressive MacMahon) the round after which it
+/// stops applying.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct MacMahonThreshold {
+    /// The rating a player must meet or exceed to count this threshold.
+    pub value: u32,
+    /// Degressive MacMahon ("accelerated Swiss"): if `Some(n)`, this threshold
+    /// stops applying after round `n` — dropped as soon as `n` rounds are
+    /// complete — so the starting-point spread shrinks as the tournament
+    /// converges. `None` means it's always in effect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drops_after_round: Option<u32>,
+}
+
+impl MacMahonThreshold {
+    /// A threshold that never degresses.
+    pub fn new(value: u32) -> Self {
+        MacMahonThreshold {
+            value,
+            drops_after_round: None,
+        }
+    }
+}
+
 /// A tie-break metric the referee can put in the ranking order.
 ///
 /// Every metric comes in two flavours: the `…M` variants score an opponent by
@@ -124,21 +150,15 @@ fn default_elo_provisional_multiplier_percent() -> u32 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct TournamentSettings {
-    /// ELO thresholds (ascending, de-duplicated) defining the MacMahon starting
-    /// groups. A player's MacMahon points is the number of thresholds their
-    /// rating meets or exceeds — e.g. thresholds `[1200, 1700]` give 0 points
-    /// below 1200, 1 in `[1200, 1700)`, and 2 at 1700 or above. Empty means no
-    /// MacMahon (everyone starts at 0). An unrated player counts as below every
-    /// threshold, so they get 0.
+    /// ELO thresholds (ascending by value, de-duplicated) defining the MacMahon
+    /// starting groups. A player's MacMahon points is the number of thresholds
+    /// their rating meets or exceeds — e.g. thresholds `[1200, 1700]` give 0
+    /// points below 1200, 1 in `[1200, 1700)`, and 2 at 1700 or above. Empty
+    /// means no MacMahon (everyone starts at 0). An unrated player counts as
+    /// below every threshold, so they get 0. Each threshold can carry its own
+    /// degressive round (see [`MacMahonThreshold::drops_after_round`]).
     #[serde(default)]
-    pub macmahon_thresholds: Vec<u32>,
-    /// Degressive MacMahon ("accelerated Swiss"): round numbers at whose *end*
-    /// one bottom MacMahon threshold is dropped, so the starting-point spread
-    /// shrinks as the tournament converges. Sorted ascending; a repeated round
-    /// number drops several thresholds at the end of that round. Length is capped
-    /// at `macmahon_thresholds.len()` — you can't drop more groups than exist.
-    #[serde(default)]
-    pub macmahon_removals: Vec<u32>,
+    pub macmahon_thresholds: Vec<MacMahonThreshold>,
     /// Whether the pairing engine avoids pairing players from the same club
     /// ("club protection"). Off by default — enable it per tournament.
     #[serde(default)]
@@ -199,7 +219,6 @@ impl Default for TournamentSettings {
     fn default() -> Self {
         TournamentSettings {
             macmahon_thresholds: Vec::new(),
-            macmahon_removals: Vec::new(),
             club_protection_enabled: false,
             club_protection_rounds: None,
             club_protection_exempt_clubs: Vec::new(),
@@ -222,18 +241,17 @@ impl TournamentSettings {
         self.macmahon_points_at(rating, 0)
     }
 
-    /// The thresholds in effect once `rounds_played` rounds are complete: the
-    /// bottom `k` are dropped, where `k` is the number of removals scheduled at
-    /// or before that round (a removal "at the end of round N" applies as soon as
-    /// round N is complete, i.e. for pairing round N+1 and standings after N).
-    pub fn effective_macmahon_thresholds(&self, rounds_played: u32) -> &[u32] {
-        let dropped = self
-            .macmahon_removals
+    /// The threshold values in effect once `rounds_played` rounds are complete:
+    /// those whose [`drops_after_round`](MacMahonThreshold::drops_after_round)
+    /// is `None` or still ahead of `rounds_played` (a threshold dropping "after
+    /// round N" applies as soon as round N is complete, i.e. for pairing round
+    /// N+1 and standings after N).
+    pub fn effective_macmahon_thresholds(&self, rounds_played: u32) -> Vec<u32> {
+        self.macmahon_thresholds
             .iter()
-            .filter(|&&r| r <= rounds_played)
-            .count()
-            .min(self.macmahon_thresholds.len());
-        &self.macmahon_thresholds[dropped..]
+            .filter(|t| t.drops_after_round.is_none_or(|r| rounds_played < r))
+            .map(|t| t.value)
+            .collect()
     }
 
     /// The MacMahon starting points for a player once `rounds_played` rounds are
@@ -270,20 +288,15 @@ impl TournamentSettings {
             .collect()
     }
 
-    /// Return these settings in canonical form: thresholds sorted ascending and
-    /// de-duplicated, removals sorted ascending with zeros dropped and the list
-    /// truncated to the threshold count (can't drop more groups than exist), and
-    /// exempt clubs trimmed, emptied-dropped and de-duplicated case-insensitively.
-    /// Independent of the order fields were entered, so pairing/standings are
-    /// reproducible from the stored settings.
+    /// Return these settings in canonical form: thresholds sorted ascending by
+    /// value and de-duplicated (keeping the first entry for a repeated value,
+    /// and treating a `drops_after_round` of 0 as "never drops" since it can't
+    /// take effect before round 1 anyway), and exempt clubs trimmed,
+    /// emptied-dropped and de-duplicated case-insensitively. Independent of the
+    /// order fields were entered, so pairing/standings are reproducible from the
+    /// stored settings.
     pub fn normalized(mut self) -> Self {
         self.macmahon_thresholds = Self::normalize_thresholds(self.macmahon_thresholds);
-        self.macmahon_removals.retain(|&r| r >= 1);
-        self.macmahon_removals.sort_unstable();
-        // Keeping the earliest removals matches "these fire soonest"; the excess
-        // couldn't take effect anyway once every threshold is gone.
-        self.macmahon_removals
-            .truncate(self.macmahon_thresholds.len());
 
         // Exempt clubs: keep the first spelling of each, trimmed and non-empty.
         let mut seen = HashSet::new();
@@ -327,11 +340,18 @@ impl TournamentSettings {
         self.elo_provisional_multiplier_percent as f64 / 100.0
     }
 
-    /// Sort thresholds ascending and drop duplicates — the canonical form kept in
-    /// the settings, independent of the order they were entered.
-    pub fn normalize_thresholds(mut thresholds: Vec<u32>) -> Vec<u32> {
-        thresholds.sort_unstable();
-        thresholds.dedup();
+    /// Sort thresholds ascending by value and drop duplicate values (keeping the
+    /// first entry) — the canonical form kept in the settings, independent of
+    /// the order they were entered. A `drops_after_round` of 0 is normalized to
+    /// `None`, since it can't take effect before round 1 anyway.
+    pub fn normalize_thresholds(mut thresholds: Vec<MacMahonThreshold>) -> Vec<MacMahonThreshold> {
+        for t in &mut thresholds {
+            if t.drops_after_round == Some(0) {
+                t.drops_after_round = None;
+            }
+        }
+        thresholds.sort_by_key(|t| t.value);
+        thresholds.dedup_by_key(|t| t.value);
         thresholds
     }
 }
@@ -340,10 +360,23 @@ impl TournamentSettings {
 mod tests {
     use super::*;
 
+    /// A threshold with no degressive round, for terser test setup.
+    fn mmt(value: u32) -> MacMahonThreshold {
+        MacMahonThreshold::new(value)
+    }
+
+    /// A threshold that drops after the given round.
+    fn mmt_drops(value: u32, round: u32) -> MacMahonThreshold {
+        MacMahonThreshold {
+            value,
+            drops_after_round: Some(round),
+        }
+    }
+
     #[test]
     fn macmahon_points_count_thresholds_met() {
         let s = TournamentSettings {
-            macmahon_thresholds: vec![1200, 1700],
+            macmahon_thresholds: vec![mmt(1200), mmt(1700)],
             ..Default::default()
         };
         assert_eq!(s.macmahon_points(Some(1000)), 0);
@@ -364,45 +397,53 @@ mod tests {
     #[test]
     fn normalize_sorts_and_dedups() {
         assert_eq!(
-            TournamentSettings::normalize_thresholds(vec![1700, 1200, 1200, 1500]),
-            vec![1200, 1500, 1700]
+            TournamentSettings::normalize_thresholds(vec![
+                mmt(1700),
+                mmt(1200),
+                mmt(1200),
+                mmt(1500)
+            ]),
+            vec![mmt(1200), mmt(1500), mmt(1700)]
         );
     }
 
     #[test]
-    fn degressive_drops_bottom_thresholds_at_the_scheduled_round() {
-        // Three groups; drop two at the end of round 2, one more at the end of 4.
+    fn degressive_drops_thresholds_at_their_own_scheduled_round() {
+        // Two bottom groups drop at the end of round 2, the top never drops.
         let s = TournamentSettings {
-            macmahon_thresholds: vec![1200, 1500, 1800],
-            macmahon_removals: vec![2, 2, 4],
+            macmahon_thresholds: vec![mmt_drops(1200, 2), mmt_drops(1500, 2), mmt(1800)],
             ..Default::default()
         };
         // Rounds 1–2: full thresholds.
-        assert_eq!(s.effective_macmahon_thresholds(0), &[1200, 1500, 1800]);
-        assert_eq!(s.effective_macmahon_thresholds(1), &[1200, 1500, 1800]);
-        // After round 2, two bottom thresholds are gone.
-        assert_eq!(s.effective_macmahon_thresholds(2), &[1800]);
-        assert_eq!(s.effective_macmahon_thresholds(3), &[1800]);
-        // After round 4, the last one goes too.
-        assert_eq!(s.effective_macmahon_thresholds(4), &[] as &[u32]);
+        assert_eq!(s.effective_macmahon_thresholds(0), vec![1200, 1500, 1800]);
+        assert_eq!(s.effective_macmahon_thresholds(1), vec![1200, 1500, 1800]);
+        // After round 2, the two scheduled thresholds are gone; the top stays.
+        assert_eq!(s.effective_macmahon_thresholds(2), vec![1800]);
+        assert_eq!(s.effective_macmahon_thresholds(3), vec![1800]);
 
         // Points reflect the shrinking spread: a 2000 player has 3 pts up front,
-        // 1 pt from round 3, 0 from round 5.
+        // 1 pt from round 3 onward.
         assert_eq!(s.macmahon_points_at(Some(2000), 1), 3);
         assert_eq!(s.macmahon_points_at(Some(2000), 2), 1);
-        assert_eq!(s.macmahon_points_at(Some(2000), 4), 0);
+        assert_eq!(s.macmahon_points_at(Some(2000), 4), 1);
     }
 
     #[test]
-    fn normalized_sorts_and_caps_removals_to_threshold_count() {
+    fn normalized_sorts_by_value_and_zeroes_a_zero_drop_round() {
         let s = TournamentSettings {
-            macmahon_thresholds: vec![1500, 1200, 1200], // → [1200, 1500]
-            macmahon_removals: vec![4, 0, 1, 2],         // 0 dropped, capped to 2
+            macmahon_thresholds: vec![
+                mmt_drops(1500, 3),
+                mmt(1200),
+                mmt_drops(1200, 0), // duplicate value dropped, first kept
+                mmt_drops(1800, 0), // a drop round of 0 can't fire, normalized away
+            ],
             ..Default::default()
         }
         .normalized();
-        assert_eq!(s.macmahon_thresholds, vec![1200, 1500]);
-        assert_eq!(s.macmahon_removals, vec![1, 2]); // earliest two kept
+        assert_eq!(
+            s.macmahon_thresholds,
+            vec![mmt(1200), mmt_drops(1500, 3), mmt(1800)]
+        );
     }
 
     #[test]

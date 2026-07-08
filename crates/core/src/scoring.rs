@@ -193,6 +193,7 @@ pub(crate) fn compute_scores(
 mod tests {
     use super::*;
     use crate::round::{Board, CupStage};
+    use crate::settings::MacMahonThreshold;
 
     fn player(tid: u32, rating: Option<u32>) -> Player {
         Player {
@@ -253,7 +254,7 @@ mod tests {
             completed: true,
         };
         let settings = TournamentSettings {
-            macmahon_thresholds: vec![1500],
+            macmahon_thresholds: vec![MacMahonThreshold::new(1500)],
             ..Default::default()
         };
         let scores = compute_scores(&[a.clone(), b.clone()], &settings, &[round]);

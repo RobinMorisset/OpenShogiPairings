@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import { _ } from "svelte-i18n";
   import { TIEBREAKS } from "../types";
-  import type { HandicapPolicy, Player, Tiebreak, TournamentSettings } from "../types";
+  import type { HandicapPolicy, MacMahonThreshold, Player, Tiebreak, TournamentSettings } from "../types";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
 
   interface Props {
@@ -35,17 +35,34 @@
     );
   });
 
-  // Keep only positive integers, then sort ascending — the server's canonical
-  // order, used to compare our local state against what it stored.
-  function cleanSorted(arr: number[]): number[] {
-    return arr
-      .filter((v) => Number.isFinite(v) && v >= 1)
-      .map((v) => Math.round(v))
-      .sort((a, b) => a - b);
+  // A threshold row being edited: value plus its optional degressive stopping
+  // round (null = never drops).
+  type ThresholdRow = { value: number; dropsAfterRound: number | null };
+
+  // Clean, sort and de-duplicate (by value) into the server's canonical form —
+  // used both to persist and to compare our local rows against what's stored.
+  function cleanThresholds(rows: ThresholdRow[]): MacMahonThreshold[] {
+    return rows
+      .filter((r) => Number.isFinite(r.value) && r.value >= 1)
+      .map((r) => ({
+        value: Math.round(r.value),
+        drops_after_round:
+          r.dropsAfterRound != null && Number.isFinite(r.dropsAfterRound) && r.dropsAfterRound >= 1
+            ? Math.round(r.dropsAfterRound)
+            : null,
+      }))
+      .sort((a, b) => a.value - b.value)
+      .filter((v, i, arr) => i === 0 || v.value !== arr[i - 1].value);
   }
 
-  function eq(a: number[], b: number[]): boolean {
-    return a.length === b.length && a.every((v, i) => v === b[i]);
+  function eqThresholds(a: MacMahonThreshold[], b: MacMahonThreshold[]): boolean {
+    return (
+      a.length === b.length &&
+      a.every(
+        (v, i) =>
+          v.value === b[i].value && (v.drops_after_round ?? null) === (b[i].drops_after_round ?? null),
+      )
+    );
   }
 
   function eqStr(a: string[], b: string[]): boolean {
@@ -69,8 +86,7 @@
 
   // Local editable rows, kept in *entry* order (not sorted) so the row a referee
   // is editing never jumps or shows a stale value. The inputs bind to these.
-  let thresholds = $state<number[]>([]);
-  let removals = $state<number[]>([]);
+  let thresholds = $state<ThresholdRow[]>([]);
   let clubEnabled = $state(false);
   let clubRounds = $state<number | null>(null);
   let exemptClubs = $state<string[]>([]);
@@ -105,7 +121,6 @@
   // only, not our own writes.
   $effect(() => {
     const sThresholds = settings.macmahon_thresholds;
-    const sRemovals = settings.macmahon_removals;
     const sEnabled = settings.club_protection_enabled;
     const sRounds = settings.club_protection_rounds ?? null;
     const sExempt = settings.club_protection_exempt_clubs;
@@ -118,8 +133,7 @@
     const sEloProv = settings.elo_provisional_multiplier_percent ?? 200;
     untrack(() => {
       const matches =
-        eq(cleanSorted(thresholds), sThresholds) &&
-        eq(cleanSorted(removals), sRemovals) &&
+        eqThresholds(cleanThresholds(thresholds), sThresholds) &&
         clubEnabled === sEnabled &&
         (clubRounds ?? null) === sRounds &&
         eqStr(normExempt(exemptClubs), sExempt) &&
@@ -131,8 +145,10 @@
         eloKPercent === sEloK &&
         eloProvisionalPercent === sEloProv;
       if (!matches) {
-        thresholds = [...sThresholds];
-        removals = [...sRemovals];
+        thresholds = sThresholds.map((t) => ({
+          value: t.value,
+          dropsAfterRound: t.drops_after_round ?? null,
+        }));
         clubEnabled = sEnabled;
         clubRounds = sRounds;
         exemptClubs = [...sExempt];
@@ -149,14 +165,9 @@
 
   function persist() {
     // Send the current values; the server normalizes them (sorts/de-dups the
-    // MacMahon lists, caps the removals, trims/de-dups the exempt clubs).
+    // MacMahon thresholds, trims/de-dups the exempt clubs).
     onUpdate({
-      macmahon_thresholds: thresholds
-        .filter((v) => Number.isFinite(v) && v >= 1)
-        .map((v) => Math.round(v)),
-      macmahon_removals: removals
-        .filter((v) => Number.isFinite(v) && v >= 1)
-        .map((v) => Math.round(v)),
+      macmahon_thresholds: cleanThresholds(thresholds),
       club_protection_enabled: clubEnabled,
       club_protection_rounds: clubRounds,
       club_protection_exempt_clubs: exemptClubs
@@ -275,7 +286,8 @@
   }
 
   function addThreshold() {
-    thresholds.push(thresholds.length ? Math.max(...thresholds) + 100 : 1500);
+    const maxValue = thresholds.length ? Math.max(...thresholds.map((t) => t.value)) : 1400;
+    thresholds.push({ value: maxValue + 100, dropsAfterRound: null });
     persist();
   }
 
@@ -285,38 +297,26 @@
   }
 
   function editThreshold(i: number, raw: string) {
-    thresholds[i] = Number(raw);
+    thresholds[i].value = Number(raw);
     persist();
   }
 
-  function addRemoval() {
-    // Default to the round of the last removal (so repeated clicks stack drops on
-    // the same round), or round 1 for the first one.
-    removals.push(removals.length ? Math.max(...removals) : 1);
+  function toggleThresholdDrop(i: number, on: boolean) {
+    thresholds[i].dropsAfterRound = on ? (thresholds[i].dropsAfterRound ?? 1) : null;
     persist();
   }
 
-  function removeRemoval(i: number) {
-    removals.splice(i, 1);
+  function editThresholdDropRound(i: number, raw: string) {
+    const n = Math.round(Number(raw));
+    thresholds[i].dropsAfterRound = Number.isFinite(n) && n >= 1 ? n : 1;
     persist();
   }
 
-  function editRemoval(i: number, raw: string) {
-    removals[i] = Number(raw);
-    persist();
-  }
-
-  // Normalized (sorted, de-duplicated, capped) view of the local rows — drives the
+  // Normalized (sorted, de-duplicated) view of the local rows — drives the
   // previews so they always reflect what the server will store, updated live on
   // each edit rather than lagging a round-trip.
-  const normThresholds = $derived.by(() => {
-    const sorted = cleanSorted(thresholds);
-    return sorted.filter((v, i) => i === 0 || v !== sorted[i - 1]);
-  });
-  const normRemovals = $derived(cleanSorted(removals).slice(0, normThresholds.length));
-
-  // Can't schedule more removals than there are (distinct) thresholds to drop.
-  const canAddRemoval = $derived(removals.length < normThresholds.length);
+  const normalized = $derived(cleanThresholds(thresholds));
+  const normThresholds = $derived(normalized.map((t) => t.value));
 
   // How many registered players fall into each MacMahon band — unrated
   // players and those below the first threshold count as band 0, mirroring
@@ -363,10 +363,12 @@
   });
 
   // Preview of how the starting-point spread shrinks over the rounds, driven by
-  // the normalized removal schedule.
+  // each threshold's own drop round.
   const schedule = $derived.by(() => {
-    const total = normThresholds.length;
-    const rem = normRemovals;
+    const total = normalized.length;
+    const rem = normalized
+      .map((t) => t.drops_after_round)
+      .filter((r): r is number => r != null);
     if (total === 0 || rem.length === 0) return [];
     const counts = new Map<number, number>();
     for (const r of rem) counts.set(r, (counts.get(r) ?? 0) + 1);
@@ -452,17 +454,35 @@
   </p>
 
   <div class="thresholds">
-    {#each thresholds as v, i (i)}
+    {#each thresholds as row, i (i)}
       <div class="threshold-row">
         <input
           type="number"
           min="1"
           step="1"
           class="threshold"
-          value={v}
+          value={row.value}
           disabled={busy}
           onchange={(e) => editThreshold(i, e.currentTarget.value)}
         />
+        <label class="check drop-check">
+          <input
+            type="checkbox"
+            checked={row.dropsAfterRound != null}
+            disabled={busy}
+            onchange={(e) => toggleThresholdDrop(i, e.currentTarget.checked)}
+          />
+          {$_("settings.dropAfterRoundCheckbox")}
+          <input
+            type="number"
+            min="1"
+            step="1"
+            class="threshold narrow"
+            value={row.dropsAfterRound ?? 1}
+            disabled={busy || row.dropsAfterRound == null}
+            onchange={(e) => editThresholdDropRound(i, e.currentTarget.value)}
+          />
+        </label>
         <button
           type="button"
           class="remove"
@@ -505,40 +525,6 @@
       <p class="desc">
         {$_("settings.degressiveDesc")}
       </p>
-
-      <div class="thresholds">
-        {#each removals as r, i (i)}
-          <div class="threshold-row">
-            <span class="prefix">{$_("settings.dropPrefix")}</span>
-            <input
-              type="number"
-              min="1"
-              step="1"
-              class="threshold narrow"
-              value={r}
-              disabled={busy}
-              onchange={(e) => editRemoval(i, e.currentTarget.value)}
-            />
-            <button
-              type="button"
-              class="remove"
-              disabled={busy}
-              title={$_("settings.removeDrop")}
-              onclick={() => removeRemoval(i)}>✕</button
-            >
-          </div>
-        {/each}
-        {#if removals.length === 0}
-          <p class="muted">{$_("settings.noDrops")}</p>
-        {/if}
-        <button
-          type="button"
-          class="ghost small"
-          disabled={busy || !canAddRemoval}
-          title={canAddRemoval ? "" : $_("settings.cantDropMore")}
-          onclick={addRemoval}>{$_("settings.addDrop")}</button
-        >
-      </div>
 
       {#if schedule.length > 0}
         <div class="preview">
@@ -889,10 +875,6 @@
     font-size: 0.9rem;
     line-height: 1;
   }
-  .prefix {
-    color: var(--text-strong);
-    font-size: 0.9rem;
-  }
   .threshold {
     width: 6rem;
     background: var(--bg-inset);
@@ -918,6 +900,9 @@
   }
   .check + .check {
     margin-top: 0.4rem;
+  }
+  .drop-check {
+    white-space: nowrap;
   }
   .club-sub {
     margin: 0.8rem 0 0 1.6rem;

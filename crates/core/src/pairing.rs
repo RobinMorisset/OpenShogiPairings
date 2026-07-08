@@ -1263,6 +1263,7 @@ pub fn pair_round_weighted(
 mod tests {
     use super::*;
     use crate::round::Winner;
+    use crate::settings::MacMahonThreshold;
 
     // --- solve_matching's width dispatch -----------------------------------
 
@@ -1459,7 +1460,7 @@ mod tests {
         ];
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
         let settings = TournamentSettings {
-            macmahon_thresholds: vec![1500],
+            macmahon_thresholds: vec![MacMahonThreshold::new(1500)],
             ..Default::default()
         };
 
@@ -1705,7 +1706,7 @@ mod tests {
         ];
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
         let settings = TournamentSettings {
-            macmahon_thresholds: vec![1500], // X0..X2 on 1 point, Y on 0
+            macmahon_thresholds: vec![MacMahonThreshold::new(1500)], // X0..X2 on 1 point, Y on 0
             ..Default::default()
         };
 
@@ -1730,7 +1731,7 @@ mod tests {
         ];
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
         let base = TournamentSettings {
-            macmahon_thresholds: vec![1500],
+            macmahon_thresholds: vec![MacMahonThreshold::new(1500)],
             ..Default::default()
         };
 
@@ -1795,7 +1796,7 @@ mod tests {
             Some(id(4)), // p5 took a bye
         );
         let settings = TournamentSettings {
-            macmahon_thresholds: vec![1500],
+            macmahon_thresholds: vec![MacMahonThreshold::new(1500)],
             ..Default::default()
         };
         let scores = compute_scores(&p, &settings, &[r1]);
@@ -1916,7 +1917,7 @@ mod tests {
             player(4, Some(900), None),
         ];
         let settings = TournamentSettings {
-            macmahon_thresholds: vec![1500],
+            macmahon_thresholds: vec![MacMahonThreshold::new(1500)],
             ..Default::default()
         };
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
