@@ -28,7 +28,7 @@
 //!    unknown).
 //! 6. **Fold within a score group** — sort a group (equal points) by rating
 //!    (unrated = 1), descending; the Nth player of the top half should meet the
-//!    Nth of the bottom half, penalized by how far the actual pairing deviates.
+//!    Nth of the bottom half, penalized by the *squared* deviation from that ideal.
 //!
 //! Priority lives in exactly one place — the order of [`Rule::ORDER`] — and the
 //! separation between tiers is proven by construction (see [`scale_ladder`]), so
@@ -112,7 +112,7 @@ enum Rule {
     FloaterSelection,
     /// Avoid pairing club-mates (ignored when a club is unknown).
     Club,
-    /// Fold within a score group (top half meets bottom half).
+    /// Fold within a score group (top half meets bottom half), by squared deviation.
     Fold,
     /// (ELO mode) Choose *who* takes the bye — the weakest present player by
     /// estimated ELO. A bye-only rule, sitting above [`Rule::EloGap`] (which is
@@ -292,7 +292,11 @@ impl Rule {
                     _ => 0,
                 }
             }
-            // Rule 6: fold within a score group — deviation from the ideal fold.
+            // Rule 6: fold within a score group — squared deviation from the ideal
+            // fold. Squaring (rather than |·|) spreads an unavoidable deviation across
+            // boards instead of dumping it all on one, so no single player faces an
+            // opponent far from the fold's intent — and it matches the squared
+            // ScoreGap / EloGap rules. See `docs/swiss-fold.md`.
             Rule::Fold => {
                 if sa.points != sb.points {
                     return 0;
@@ -301,7 +305,9 @@ impl Rule {
                     (Some(fa), Some(fb)) => {
                         let ia = ideal_rank(fa.rank, fa.group_size) as i128;
                         let ib = ideal_rank(fb.rank, fb.group_size) as i128;
-                        (fb.rank as i128 - ia).abs() + (fa.rank as i128 - ib).abs()
+                        let da = fb.rank as i128 - ia;
+                        let db = fa.rank as i128 - ib;
+                        da * da + db * db
                     }
                     _ => 0,
                 }
@@ -348,8 +354,8 @@ impl Rule {
             // A descender and an ascender term, each a rank distance ≤ group_size − 1.
             Rule::FloaterSelection => 2 * (ctx.max_group - 1).max(0),
             Rule::Club => i128::from(ctx.club_active), // 0 when off — no wasted tier
-            // Two |·| terms, each ≤ group_size − 1.
-            Rule::Fold => 2 * (ctx.max_group - 1).max(0),
+            // Two squared terms, each a rank deviation ≤ (group_size − 1)².
+            Rule::Fold => 2 * (ctx.max_group - 1).max(0).pow(2),
             // The squared gap between the widest-separated free players.
             Rule::EloGap => ctx.max_elo_gap * ctx.max_elo_gap,
             Rule::ByeSelection => unreachable!("handled above"),
@@ -1866,15 +1872,17 @@ mod tests {
         assert_eq!(ex.boards.len(), 2);
         for board in &ex.boards {
             assert_eq!(board.binding, Some(RuleId::Fold));
-            assert_eq!(contribution(board, RuleId::Fold), Some(4));
+            // p0-p1: (1−ideal(0))² + (0−ideal(1))² = (1−2)² + (0−3)² = 1 + 9 = 10.
+            // p2-p3: (3−ideal(2))² + (2−ideal(3))² = (3−0)² + (2−1)² = 9 + 1 = 10.
+            assert_eq!(contribution(board, RuleId::Fold), Some(10));
             // Nothing higher-priority fired: same score, no clubs, no floats.
             assert_eq!(board.contributions.len(), 1);
         }
-        // The report rolls the two boards up: Fold, 2 boards, 8 units total.
+        // The report rolls the two boards up: Fold, 2 boards, 20 units total.
         assert_eq!(ex.report.len(), 1);
         assert_eq!(ex.report[0].rule, RuleId::Fold);
         assert_eq!(ex.report[0].boards, 2);
-        assert_eq!(ex.report[0].units, 8);
+        assert_eq!(ex.report[0].units, 20);
     }
 
     #[test]

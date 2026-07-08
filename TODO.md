@@ -29,12 +29,6 @@ Known limitations and future work, roughly ordered by area.
 - **Airtight groups** Extra rule saying that for the first N rounds, players with different
   MM points should not play each other. Priority: just below rematch.
 - **MM by rank** A new way to set thresholds, it requires updating the players list and fesa ratings parsing as well.
-- **Refine Fold rule** to better match the normal swiss rules. In particular, I think there
-  should be a separation between FoldUpper and FoldLower, with FoldUpper being higher priority.
-  Also the penalty should be fancier than what it is currently to support the right order of trying permutations.
-  Design: [`docs/fide-fold-approximation.md`](docs/fide-fold-approximation.md) — three fold tiers
-  (exchange count → exchange order → transposition order) behind a `Simplified` / `FideApproximating`
-  toggle, falling back to simplified for score groups over 16.
 
 
 ## FESA rating list
