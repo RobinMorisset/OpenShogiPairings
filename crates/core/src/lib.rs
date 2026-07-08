@@ -29,10 +29,9 @@ pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
 pub use grid_import::{import_american_grid, GridImportError};
 pub use handicap::suggested_handicap;
 pub use pairing::{
-    counterfactual_forbid, counterfactual_force, explain_pairing, pair_round,
-    pair_round_constrained, pair_round_weighted, AffectedCycle, BoardLedger, Counterfactual,
-    CounterfactualMode, RoundExplanation, RuleContribution, RuleDelta, RuleId, RuleTotal,
-    ScopeReason,
+    counterfactual_forbid, counterfactual_force, explain_pairing, pair_round_weighted,
+    AffectedCycle, BoardLedger, Counterfactual, CounterfactualMode, RoundExplanation,
+    RuleContribution, RuleDelta, RuleId, RuleTotal, ScopeReason,
 };
 pub use player::{NewPlayer, Player, PointAdjustment};
 pub use round::{Board, CupStage, Handicap, HandicapGame, PairingSource, Round, RoundDraft, Winner};
