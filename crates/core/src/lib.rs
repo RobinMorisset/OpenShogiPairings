@@ -42,6 +42,7 @@ pub use tournament::{
 };
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Human-readable service identifier reported by the health endpoint.
 pub const SERVICE_NAME: &str = "openshogipairings-server";
@@ -53,7 +54,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// Defined here (rather than in the server) precisely so every client — the web
 /// UI, the planned CLI, and the Tauri app — can depend on one canonical shape.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct HealthStatus {
     /// Always `"ok"` when the server is able to respond.
     pub status: String,

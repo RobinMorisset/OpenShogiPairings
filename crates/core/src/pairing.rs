@@ -44,6 +44,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::elo::{estimate_elos, UNRATED_PRIOR_MEAN};
@@ -93,7 +94,8 @@ enum Rule {
 /// A serializable identity for a [`Rule`], surfaced to clients so a pairing can be
 /// explained in the vocabulary of its rules. Mirrors [`Rule`] exactly (minus any
 /// explanation-internal tiebreakers, which carry no meaning to a referee).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
 pub enum RuleId {
     Rematch,
@@ -561,40 +563,50 @@ impl<'a> PairingModel<'a> {
 
 /// One rule's contribution to a single board (or the bye): the rule and the
 /// penalty *units* it emitted, before the priority multiplier.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct RuleContribution {
     pub rule: RuleId,
+    /// Small penalty count; serialized as a JSON number (fits in a JS number).
+    #[ts(type = "number")]
     pub units: i64,
 }
 
 /// The rule ledger for one pairing: every rule that fired on it (units > 0), in
 /// priority order, plus the highest-priority one — the rule that "bound" the
 /// pairing. `player2` is `None` for the bye.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct BoardLedger {
     pub player1: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub player2: Option<Uuid>,
     pub contributions: Vec<RuleContribution>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub binding: Option<RuleId>,
 }
 
 /// How often one rule had to be relaxed across a whole round, and the total units.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct RuleTotal {
     pub rule: RuleId,
     pub boards: u32,
+    #[ts(type = "number")]
     pub units: i64,
 }
 
 /// A human-facing explanation of one round's Swiss pairings: a per-board ledger,
 /// the bye's ledger, and the per-rule round totals (in priority order).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct RoundExplanation {
     pub round: u32,
     pub boards: Vec<BoardLedger>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub bye: Option<BoardLedger>,
     pub report: Vec<RuleTotal>,
 }
@@ -708,7 +720,8 @@ fn unord_pair(a: Uuid, b: Uuid) -> (Uuid, Uuid) {
 
 /// Why a probed player is out of the engine's hands — its board wasn't chosen by
 /// the Swiss matching, so the counterfactual has nothing to reason about.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
 pub enum ScopeReason {
     /// The player's board was fixed by the referee.
@@ -722,27 +735,32 @@ pub enum ScopeReason {
 /// One rule's net change between the confirmed pairing and the counterfactual:
 /// signed penalty units, where a positive value means the alternative is *worse*
 /// on this rule.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct RuleDelta {
     pub rule: RuleId,
+    #[ts(type = "number")]
     pub units: i64,
 }
 
 /// A ring of players who must reshuffle to honour the probe — a vertex-disjoint
 /// alternating cycle of (baseline △ counterfactual), ordered for storytelling.
 /// The bye appears as the nil sentinel so clients can render it as "(bye)".
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct AffectedCycle {
     pub players: Vec<Uuid>,
 }
 
 /// The consequence of forcing a pairing the engine didn't choose: which boards
 /// change, the rings of affected players, and the net per-rule cost.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Counterfactual {
     /// Set when the probe can't be reasoned about (a probed player isn't an
     /// engine-paired Swiss player); the other fields are then empty.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub scoped_out: Option<ScopeReason>,
     /// Per-rule net change (priority order), only rules that actually moved.
     pub cost_delta: Vec<RuleDelta>,
@@ -869,7 +887,8 @@ fn alternating_cycles(
 }
 
 /// Which alternative a referee is probing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
 pub enum CounterfactualMode {
     /// "Why aren't A and B paired?" — force the edge, re-solve the rest.

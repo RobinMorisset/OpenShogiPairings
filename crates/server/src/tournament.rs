@@ -121,7 +121,8 @@ pub fn routes() -> Router<AppState> {
 /// `can_undo` flag is server session state and `standings` is derived, both kept
 /// out of the persisted shape. Standings are computed server-side so every
 /// client (and the future American grid) shares one ranking.
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, rename = "TournamentResponse", export_to = "../../../frontend/src/lib/generated/")]
 struct TournamentView {
     tournament: Tournament,
     can_undo: bool,

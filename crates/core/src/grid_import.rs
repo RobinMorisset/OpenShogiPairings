@@ -97,7 +97,7 @@ pub fn import_american_grid(text: &str) -> Result<Tournament, GridImportError> {
         let id = tournament
             .add_player(NewPlayer {
                 last_name: row.last_name.clone(),
-                first_name: row.first_name.clone(),
+                first_name: Some(row.first_name.clone()),
                 rating: row.rating,
                 fesa_games: None,
                 nationality: row.nationality.clone(),

@@ -20,6 +20,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::elo::estimate_elos;
@@ -30,7 +31,8 @@ use crate::settings::{Tiebreak, TournamentSettings};
 
 /// One player's standing: score and every tie-break metric. The position in the
 /// returned [`compute_standings`] vector is the player's rank.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Standing {
     pub player_id: Uuid,
     /// Games won (effective winner; a bye counts as a win).

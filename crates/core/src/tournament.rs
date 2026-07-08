@@ -9,6 +9,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::cup::{Cup, CupPodium, CUP_SIZES};
@@ -40,7 +41,8 @@ fn default_format_version() -> u32 {
 pub const MIN_PLAYERS_PER_ROUND: usize = 2;
 
 /// A tournament: a name and its registered players.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Tournament {
     /// Format version of this record (see [`TOURNAMENT_FORMAT_VERSION`]).
     #[serde(default = "default_format_version")]
@@ -1104,7 +1106,7 @@ mod tests {
                 id,
                 NewPlayer {
                     last_name: "Alice".into(),
-                    first_name: "Anne".into(),
+                    first_name: Some("Anne".into()),
                     rating: Some(1600),
                     ..Default::default()
                 },

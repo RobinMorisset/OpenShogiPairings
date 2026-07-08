@@ -16,6 +16,7 @@
 //! Swiss pool.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::round::{CupStage, PairingSource, Round};
@@ -24,7 +25,8 @@ use crate::round::{CupStage, PairingSource, Round};
 pub const CUP_SIZES: [u32; 4] = [8, 16, 32, 64];
 
 /// A hybrid tournament's cup, fixed at finalization.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Cup {
     /// Bracket size (8/16/32/64).
     pub size: u32,
@@ -41,7 +43,8 @@ pub struct CupMatch {
 }
 
 /// The cup podium, once the final round is decided.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct CupPodium {
     pub champion: Uuid,
     pub runner_up: Uuid,

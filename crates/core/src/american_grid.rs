@@ -200,7 +200,7 @@ mod tests {
         let p1 = t
             .add_player(crate::player::NewPlayer {
                 last_name: "Alpha".into(),
-                first_name: "Ann".into(),
+                first_name: Some("Ann".into()),
                 rating: Some(2000),
                 nationality: Some("fr".into()),
                 ..Default::default()
@@ -210,7 +210,7 @@ mod tests {
         let p2 = t
             .add_player(crate::player::NewPlayer {
                 last_name: "Beta".into(),
-                first_name: "Bo".into(),
+                first_name: Some("Bo".into()),
                 rating: Some(1000),
                 nationality: Some("jp".into()),
                 ..Default::default()

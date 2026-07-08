@@ -14,6 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use osp_core::Tournament;
 use serde::Serialize;
+use ts_rs::TS;
 use uuid::Uuid;
 
 /// How many backups are kept per tournament before the oldest are rotated out.
@@ -22,11 +23,13 @@ pub const MAX_BACKUPS: usize = 10;
 
 /// One backup's metadata, as listed to clients (the tournament body itself is
 /// only fetched on restore).
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct BackupInfo {
     /// Opaque id used to restore this backup (its file stem).
     pub id: String,
     /// Unix seconds when the backup was taken.
+    #[ts(type = "number")]
     pub taken_at: u64,
     /// Which transition triggered it, e.g. "round 2 started".
     pub label: String,

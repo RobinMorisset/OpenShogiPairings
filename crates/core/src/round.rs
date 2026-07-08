@@ -1,11 +1,13 @@
 //! Rounds and their pairings.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
 /// Which player won a board. Colour (sente/gote) is chosen at random per game
 /// and isn't tracked, so the result is simply which of the two players won.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
 pub enum Winner {
     Player1,
@@ -15,7 +17,8 @@ pub enum Winner {
 /// A piece-odds handicap, smallest to largest. The even game is the
 /// absence of a handicap, so there is no `None` variant here. Serialized as the
 /// short code used in the results table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub enum Handicap {
     #[serde(rename = "s")]
     Sente,
@@ -92,7 +95,8 @@ impl Handicap {
 /// frozen when the handicap is set, so a later rating edit can't retroactively
 /// flip who conceded the odds. A handicap game always counts as a win for the
 /// giver in the standings, whatever the actual result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct HandicapGame {
     pub handicap: Handicap,
     pub giver: Winner,
@@ -106,7 +110,8 @@ fn is_false(b: &bool) -> bool {
 /// Which stage of the direct-elimination cup a board belongs to. `RoundOf(n)`
 /// covers the early bracket rounds (round of 64/32/16); the last three rounds are
 /// named explicitly. Used to label cup games in the pairings view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
 pub enum CupStage {
     RoundOf(u32),
@@ -119,7 +124,8 @@ pub enum CupStage {
 /// How a board's pairing was decided, surfaced to clients so the pairings view can
 /// flag each game. Serialized internally-tagged, e.g. `{"kind":"swiss"}` or
 /// `{"kind":"cup","stage":{"round_of":32}}`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PairingSource {
     /// Produced by the Swiss / MacMahon matching engine.
@@ -140,7 +146,8 @@ impl PairingSource {
 
 /// A single board (game) in a round: two paired players and, once played, a
 /// result. `result` is `None` while the game hasn't been played yet.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Board {
     pub player1: Uuid,
     pub player2: Uuid,
@@ -215,7 +222,8 @@ impl Board {
 
 /// One round of the tournament: the boards, plus the player sitting out (a bye)
 /// when there is an odd number of players.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Round {
     /// 1-based round number.
     pub number: u32,
@@ -238,7 +246,8 @@ pub struct Round {
 /// The referee customizes it — mark players absent, force specific pairings,
 /// force the bye — and then confirms, which generates the pairings for the
 /// remaining players and turns it into a real [`Round`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct RoundDraft {
     /// The number the round will have once confirmed.
     pub number: u32,

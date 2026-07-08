@@ -3,11 +3,13 @@
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Which player a score group sends *up* as its ascending floater when it has to
 /// pair across groups. The descending floater is always the last (weakest) of the
 /// upper group; this only chooses the ascending one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
 pub enum FloaterStyle {
     /// Classic Swiss: the first (strongest) of the lower group floats up.
@@ -21,7 +23,8 @@ pub enum FloaterStyle {
 /// both what the pairings view shows and whether a suggested handicap is
 /// computed for display. The suggestion never affects pairing itself and is
 /// never auto-filled — the referee always picks the handicap by hand.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
 pub enum HandicapPolicy {
     /// No handicap column at all.
@@ -41,7 +44,8 @@ pub enum HandicapPolicy {
 /// computed for every player ([`crate::standings::Standing`]); the referee picks
 /// which ones rank the table, and in which order, via
 /// [`TournamentSettings::tiebreaks`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
 pub enum Tiebreak {
     /// Total score: MacMahon start + wins. Normally the primary ranking key, but
@@ -112,7 +116,8 @@ fn default_elo_provisional_multiplier_percent() -> u32 {
 /// without disturbing the rest of the tournament shape. Added as an additive,
 /// defaulted field, so tournaments saved before it existed still load (with no
 /// MacMahon groups).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct TournamentSettings {
     /// ELO thresholds (ascending, de-duplicated) defining the MacMahon starting
     /// groups. A player's MacMahon points is the number of thresholds their

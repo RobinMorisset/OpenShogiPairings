@@ -28,6 +28,7 @@
 //!   positions.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Width, in characters, of the last-name column (after the rank).
 const LAST_NAME_WIDTH: usize = 18;
@@ -36,7 +37,8 @@ const LAST_NAME_WIDTH: usize = 18;
 const HEADER_LINES: usize = 3;
 
 /// One entry from the FESA rating list. Used to autocomplete registration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct RatedPlayer {
     pub last_name: String,
     pub first_name: String,

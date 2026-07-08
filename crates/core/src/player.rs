@@ -1,6 +1,7 @@
 //! Players and player registration.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
 /// A player registered in a tournament.
@@ -9,7 +10,8 @@ use uuid::Uuid;
 /// the primary identifier). Only `last_name` is required; the rest is optional
 /// metadata the pairing engine will eventually use (rating for seeding, club to
 /// avoid pairing team-mates early). `nationality` is a country code (e.g. `JP`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Player {
     /// Stable unique identifier, assigned by the server on registration.
     pub id: Uuid,
@@ -17,6 +19,7 @@ pub struct Player {
     /// (or on registration if added afterwards). `None` until then. Used to
     /// reference opponents in the results table.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub tournament_id: Option<u32>,
     /// Family name. Guaranteed non-empty (trimmed) once registered.
     pub last_name: String,
@@ -25,6 +28,7 @@ pub struct Player {
     pub first_name: String,
     /// Optional playing strength / rating.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub rating: Option<u32>,
     /// Number of rated games behind `rating` in the FESA list, when the rating was
     /// picked from it. `None` means the rating was entered by hand or the player
@@ -32,12 +36,15 @@ pub struct Player {
     /// provisional (see [`crate::estimate_elos`]). A `Some` below the reliability
     /// threshold is likewise provisional.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub fesa_games: Option<u32>,
     /// Optional country code (uppercase, e.g. `JP`, `FR`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub nationality: Option<String>,
     /// Optional club or federation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub club: Option<String>,
     /// Whether the referee has marked this player eligible for the direct-
     /// elimination cup (only meaningful when the cup is enabled). Set during
@@ -55,7 +62,8 @@ pub struct Player {
 
 /// A single manual point bonus (positive `delta`) or malus (negative `delta`)
 /// applied to a player by a referee, with a mandatory human-readable reason.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct PointAdjustment {
     /// Stable id, so a specific entry can be removed later.
     pub id: Uuid,
@@ -69,20 +77,26 @@ pub struct PointAdjustment {
 ///
 /// This is the request shape clients send; the server turns it into a [`Player`]
 /// with a freshly minted [`Uuid`].
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct NewPlayer {
     pub last_name: String,
     #[serde(default)]
-    pub first_name: String,
+    #[ts(optional)]
+    pub first_name: Option<String>,
     #[serde(default)]
+    #[ts(optional)]
     pub rating: Option<u32>,
     /// FESA #games behind the rating, when it was picked from the list (see
     /// [`Player::fesa_games`]).
     #[serde(default)]
+    #[ts(optional)]
     pub fesa_games: Option<u32>,
     #[serde(default)]
+    #[ts(optional)]
     pub nationality: Option<String>,
     #[serde(default)]
+    #[ts(optional)]
     pub club: Option<String>,
 }
 
@@ -107,7 +121,7 @@ impl Player {
             id: Uuid::new_v4(),
             tournament_id: None,
             last_name: new.last_name.trim().to_string(),
-            first_name: new.first_name.trim().to_string(),
+            first_name: new.first_name.unwrap_or_default().trim().to_string(),
             rating: new.rating,
             // Only meaningful alongside a rating; drop it if the rating was cleared.
             fesa_games: new.rating.and(new.fesa_games),
