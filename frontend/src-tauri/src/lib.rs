@@ -29,6 +29,16 @@ fn read_text_file(path: String) -> Result<String, String> {
   std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+/// Where the embedded server persists its tournaments, so the desktop app's
+/// registry (and picker) survives a restart — the same per-user data
+/// directory `osp-server`'s own automatic backups already use (see
+/// `crates/server/src/backup.rs`), just a `tournaments` sibling of `backups`.
+/// `None` (no known data directory on this platform) falls back to in-memory
+/// only, same as a throwaway dev server.
+fn local_data_dir() -> Option<std::path::PathBuf> {
+  Some(dirs::data_dir()?.join("openshogipairings").join("tournaments"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -60,8 +70,15 @@ pub fn run() {
       log::info!("OpenShogiPairings embedded server listening on {base}");
       app.manage(ApiBase(base));
 
+      // No admin password and no static dir (the frontend is the webview
+      // itself, not served by this API) — just persistence, so tournaments
+      // created here survive an app restart. See `local_data_dir`.
+      let config = osp_server::ServerConfig {
+        data_dir: local_data_dir(),
+        ..Default::default()
+      };
       tauri::async_runtime::spawn(async move {
-        if let Err(err) = osp_server::serve(listener).await {
+        if let Err(err) = osp_server::serve_with_config(listener, config).await {
           log::error!("embedded server stopped: {err}");
         }
       });

@@ -1,9 +1,11 @@
 # Multi-tournament server — design
 
-Status: **Not started** — design only. Supersedes the "Scope decision: one
-tournament per server instance" section of
-[`multi-referee-internet.md`](multi-referee-internet.md), which explicitly
-deferred this as V2.
+Status: **All three phases landed** (server registry, frontend picker, Tauri
+persistence — see §7). Supersedes the "Scope decision: one tournament per
+server instance" section of [`multi-referee-internet.md`](multi-referee-internet.md),
+which explicitly deferred this as V2. Also gates the FESA ratings proxy
+behind the admin password (added after the initial design, alongside
+tournament creation — see §3.1).
 
 Goal: one running `osp-server` (hosted, or embedded in the Tauri desktop app)
 holds **several** tournaments at once; each client picks which one to connect
@@ -309,15 +311,30 @@ an existing client, not a rewrite.
 
 ## 7. Suggested phasing
 
-1. **Server**: registry + per-tournament `TournamentInstance` + `OSP_DATA_DIR`
-   + route renesting + delete endpoint + the global admin password, with the
-   existing `feat/multi-referee-internet` auth/live-sync mechanics adapted to
-   be per-instance. Existing server test suite becomes "create two
-   tournaments, verify they don't see each other's state/undo/version" as the
-   key new coverage.
-2. **Frontend (browser/hosted)**: picker screen (list + create + delete) +
-   `currentTournamentId` + `api.ts` prefixing + per-id token/version/SSE.
-3. **Tauri**: point the embedded server at a local `OSP_DATA_DIR`-equivalent,
-   reuse the same picker, demote file open/save to import/export. (No admin
-   password needed locally — `OSP_ADMIN_PASSWORD` stays unset in embedded
-   mode, same as `OSP_PASSWORD` today.)
+1. **Server — done.** Registry + per-tournament `TournamentInstance` +
+   `OSP_DATA_DIR` + route renesting + delete endpoint + the global admin
+   password (later extended to also gate the ratings proxy, §3.1), with the
+   `feat/multi-referee-internet` auth/live-sync mechanics adapted to be
+   per-instance. Includes the "create two tournaments, verify they don't see
+   each other's state/undo/version" isolation coverage. Axum gotcha hit along
+   the way: a bare `Path<Uuid>` needs *exactly one* captured path param, so
+   once nested under `/api/tournaments/{id}` every extractor (including the
+   `TournamentCtx` resolving the instance itself) had to switch to
+   named-field structs that pick their field by name and ignore the rest.
+2. **Frontend (browser/hosted) — done.** `TournamentPicker.svelte` (list +
+   create + delete), `currentTournamentId` (`session.ts`, persisted) +
+   per-tournament token storage + a separate admin token, `api.ts` scoping
+   every call off the open tournament and resetting version/SSE on switch,
+   `App.svelte`'s old create/load screen replaced by the picker plus a
+   "Switch tournament…" action. Verified end-to-end in the browser (both
+   plain and password-protected tournaments, the login gate on a session with
+   no stored token, switching, deleting).
+3. **Tauri — done.** The embedded server now boots via `serve_with_config`
+   with `data_dir` pointed at `dirs::data_dir()/openshogipairings/tournaments/`
+   (a sibling of the existing `backups/` directory, same base as `backup.rs`
+   already uses) instead of the in-memory-only `serve()` — so tournaments
+   created in the desktop app persist across restarts, no admin password (matches
+   local mode staying open, like `OSP_PASSWORD` before it). The picker and
+   file-based import/export (create-from-file in the picker, "Save" in the
+   open tournament) needed no Tauri-specific frontend changes — they already
+   went through the same platform-abstracted `tournamentFile.ts` from phase 2.

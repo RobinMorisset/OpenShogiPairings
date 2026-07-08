@@ -34,3 +34,7 @@ tauri-plugin-dialog = "2"
 # self-contained (no separate server binary to launch).
 osp-server = { path = "../../crates/server" }
 tokio = { version = "1", features = ["net", "rt"] }
+# Locating the same per-user data directory osp-server's own backups already
+# use (see crates/server/src/backup.rs), so the embedded server's persisted
+# tournaments live alongside them.
+dirs = "5"

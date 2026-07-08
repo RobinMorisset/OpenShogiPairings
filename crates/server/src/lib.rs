@@ -97,8 +97,10 @@ fn router_inner(state: AppState, static_dir: Option<PathBuf>) -> Router {
     app.layer(cors).layer(TraceLayer::new_for_http())
 }
 
-/// Serve the API on an already-bound listener until the process ends, without
-/// authentication or persistence (embedded/local mode).
+/// Serve the API on an already-bound listener until the process ends, with an
+/// empty in-memory registry and no admin auth — the fully open, throwaway
+/// configuration (tests, quick manual runs). The Tauri desktop app uses
+/// [`serve_with_config`] instead, so its tournaments persist across restarts.
 ///
 /// Taking a bound [`TcpListener`](tokio::net::TcpListener) (rather than an
 /// address) lets the caller bind first and read back the chosen port — which the
