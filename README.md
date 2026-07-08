@@ -52,14 +52,15 @@ The UI organizes a tournament into tabs: **Settings** (MacMahon groups,
 degressive schedule, club protection, floater style, hybrid cup),
 **Players**, **Results** (per-round results plus Victories and total Points),
 and one tab per round. Points are each player's victories plus their MacMahon
-starting points (one per ELO threshold their rating reaches), and the pairing
-engine scores by total points.
+starting points (one per threshold they reach — an ELO rating or a dan/kyu
+grade), and the pairing engine scores by total points.
 
 > **Current status:** early. The server holds a single in-memory tournament (a
 > name + a list of players) as the shared source of truth, with a REST API to
 > create it, register/remove players, and replace it wholesale (for load).
-> Players have a last name, first name, optional rating, nationality and club.
-> Registration autocompletes names + ELOs from the FESA rating list. The player
+> Players have a last name, first name, optional rating, optional grade,
+> nationality and club. Registration autocompletes names + ELOs (+ grade, when
+> the list has one) from the FESA rating list. The player
 > table is sorted by descending ELO (unrated last), any cell is editable in
 > place, and a server-side undo history reverts changes. Rounds can be started,
 > which pairs players by weighted minimum-weight matching (see below). The round lifecycle is
@@ -108,7 +109,7 @@ first), then tournament number.
 | `POST /api/tournament/undo` | Revert the last change (server-side undo history). |
 | `GET /api/tournament/american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
 | `PUT /api/tournament/american-grid` | Import an American Grid (raw `text/plain` body), rebuilding the tournament from it — registers the players, forces every round's pairings, and replays the results. Replaces the current tournament; meant for seeding a non-trivial state in tests/simulations, not surfaced in the UI. |
-| `PUT /api/tournament/settings` | Update settings (the whole `TournamentSettings`): `{ "macmahon_thresholds": [{ "value": 1200 }, { "value": 1700, "drops_after_round": 3 }], "airtight_groups_rounds": 2, "club_protection_enabled": true, "club_protection_rounds": 3, "club_protection_exempt_clubs": ["Paris"] }`. Thresholds stored sorted by value & de-duplicated; each threshold's own `drops_after_round` (degressive MacMahon: the round-end after which that threshold stops applying) is optional; `airtight_groups_rounds`, if set, forbids pairing players with a different number of MacMahon points during rounds `1..=n` (a rule just below no-rematch, squared penalty); club protection avoids same-club pairings (off by default; optional round limit; exempt clubs trimmed, de-duplicated case-insensitively). `floater_style` is `"classic"｜"median"`; `cup_enabled` toggles the hybrid direct-elimination cup (its size is chosen at finalization). |
+| `PUT /api/tournament/settings` | Update settings (the whole `TournamentSettings`): `{ "macmahon_thresholds": [{ "criterion": { "kind": "elo", "value": 1200 } }, { "criterion": { "kind": "grade", "grade": { "kind": "dan", "level": 1 } }, "drops_after_round": 3 }], "airtight_groups_rounds": 2, "club_protection_enabled": true, "club_protection_rounds": 3, "club_protection_exempt_clubs": ["Paris"] }`. Each threshold's `criterion` is either an ELO rating (`{ "kind": "elo", "value": … }`) or a dan/kyu grade (`{ "kind": "grade", "grade": { "kind": "dan"｜"kyu", "level": … } }`) — a tournament can freely mix both kinds, each counted independently; thresholds stored sorted (ELO by value, then grade by strength) & de-duplicated; each threshold's own `drops_after_round` (degressive MacMahon: the round-end after which that threshold stops applying) is optional; `airtight_groups_rounds`, if set, forbids pairing players with a different number of MacMahon points during rounds `1..=n` (a rule just below no-rematch, squared penalty); club protection avoids same-club pairings (off by default; optional round limit; exempt clubs trimmed, de-duplicated case-insensitively). `floater_style` is `"classic"｜"median"`; `cup_enabled` toggles the hybrid direct-elimination cup (its size is chosen at finalization). |
 | `POST /api/tournament/finalize-registration` | Finalize registration (unlocks round 1). Body optional: `{ "cup_size": 8｜16｜32｜64 }` when the hybrid cup is enabled — seeds the top-N eligible players into a direct-elimination bracket (400 if fewer than N are eligible). |
 | `POST /api/tournament/complete-round` | Complete the current round (all games must be played). |
 | `POST /api/tournament/cancel-round` | Cancel the last round — discards the open draft if one is being prepared, otherwise removes the most recent round (undoable). Steps back one stage, e.g. to replay a round in a simulation. |
@@ -118,7 +119,7 @@ first), then tournament number.
 | `POST /api/tournament/rounds/{n}/boards/{i}/result` | Toggle a board's winner: `{ "clicked": "player1"｜"player2" }`. |
 | `POST /api/tournament/rounds/{n}/boards/{i}/drawn` | Set the "a draw occurred" flag: `{ "drawn": true｜false }`. |
 | `PUT /api/tournament/rounds/{n}/boards/{i}/handicap` | Set/clear the handicap: `{ "handicap": "4p"｜null }` (giver frozen from ratings; 400 if ratings equal). |
-| `POST /api/tournament/players` | Register a player: `{ "last_name", "first_name?", "rating?", "nationality?", "club?" }`. |
+| `POST /api/tournament/players` | Register a player: `{ "last_name", "first_name?", "rating?", "grade?", "nationality?", "club?" }` (`grade` is `{ "kind": "dan"｜"kyu", "level": … }`). |
 | `PUT /api/tournament/players/{id}` | Edit a player's fields in place. |
 | `DELETE /api/tournament/players/{id}` | Remove a player (400 if they are seeded in the cup bracket). |
 | `POST /api/tournament/players/{id}/eligible` | Set cup eligibility: `{ "eligible": true｜false }`. |

@@ -5,6 +5,8 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::player::Grade;
+
 /// Which player a score group sends *up* as its ascending floater when it has to
 /// pair across groups. The descending floater is always the last (weakest) of the
 /// upper group; this only chooses the ascending one.
@@ -36,14 +38,50 @@ pub enum HandicapPolicy {
     Suggested,
 }
 
-/// A single MacMahon starting-points band: the rating a player must meet or
-/// exceed to count it, plus (for degressive MacMahon) the round after which it
-/// stops applying.
+/// What a MacMahon threshold compares against — an ELO rating or a dan/kyu
+/// grade. A tournament's thresholds can freely mix both kinds (e.g. some bands
+/// drawn from ELO, others from grade), each counted independently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ThresholdCriterion {
+    /// Met when the player's rating is at or above `value`.
+    Elo { value: u32 },
+    /// Met when the player's grade is at or above `grade` (see
+    /// [`Grade::rank`]).
+    Grade { grade: Grade },
+}
+
+impl ThresholdCriterion {
+    /// Whether a player with the given rating/grade meets this threshold. A
+    /// missing rating or grade never meets the corresponding kind of
+    /// threshold, same as an unrated player never meeting an ELO threshold.
+    fn met_by(self, rating: Option<u32>, grade: Option<Grade>) -> bool {
+        match self {
+            ThresholdCriterion::Elo { value } => rating.is_some_and(|r| r >= value),
+            ThresholdCriterion::Grade { grade: g } => grade.is_some_and(|pg| pg >= g),
+        }
+    }
+
+    /// A key that sorts ELO thresholds by value, then grade thresholds by
+    /// strength — used to keep the stored order canonical and independent of
+    /// entry order, without implying that an ELO and a grade threshold are
+    /// otherwise comparable.
+    fn sort_key(self) -> (u8, i64) {
+        match self {
+            ThresholdCriterion::Elo { value } => (0, value as i64),
+            ThresholdCriterion::Grade { grade } => (1, grade.rank()),
+        }
+    }
+}
+
+/// A single MacMahon starting-points band: the criterion (ELO or grade) a
+/// player must meet or exceed to count it, plus (for degressive MacMahon) the
+/// round after which it stops applying.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct MacMahonThreshold {
-    /// The rating a player must meet or exceed to count this threshold.
-    pub value: u32,
+    pub criterion: ThresholdCriterion,
     /// Degressive MacMahon ("accelerated Swiss"): if `Some(n)`, this threshold
     /// stops applying after round `n` — dropped as soon as `n` rounds are
     /// complete — so the starting-point spread shrinks as the tournament
@@ -53,10 +91,18 @@ pub struct MacMahonThreshold {
 }
 
 impl MacMahonThreshold {
-    /// A threshold that never degresses.
-    pub fn new(value: u32) -> Self {
+    /// An ELO threshold that never degresses.
+    pub fn elo(value: u32) -> Self {
         MacMahonThreshold {
-            value,
+            criterion: ThresholdCriterion::Elo { value },
+            drops_after_round: None,
+        }
+    }
+
+    /// A grade threshold that never degresses.
+    pub fn grade(grade: Grade) -> Self {
+        MacMahonThreshold {
+            criterion: ThresholdCriterion::Grade { grade },
             drops_after_round: None,
         }
     }
@@ -150,13 +196,16 @@ fn default_elo_provisional_multiplier_percent() -> u32 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct TournamentSettings {
-    /// ELO thresholds (ascending by value, de-duplicated) defining the MacMahon
-    /// starting groups. A player's MacMahon points is the number of thresholds
-    /// their rating meets or exceeds — e.g. thresholds `[1200, 1700]` give 0
-    /// points below 1200, 1 in `[1200, 1700)`, and 2 at 1700 or above. Empty
-    /// means no MacMahon (everyone starts at 0). An unrated player counts as
-    /// below every threshold, so they get 0. Each threshold can carry its own
-    /// degressive round (see [`MacMahonThreshold::drops_after_round`]).
+    /// Thresholds (sorted, de-duplicated) defining the MacMahon starting
+    /// groups, each an ELO rating or a dan/kyu grade (see
+    /// [`ThresholdCriterion`]) — a tournament can freely mix both kinds. A
+    /// player's MacMahon points is the number of thresholds they meet or
+    /// exceed — e.g. ELO thresholds `[1200, 1700]` give 0 points below 1200, 1
+    /// in `[1200, 1700)`, and 2 at 1700 or above. Empty means no MacMahon
+    /// (everyone starts at 0). A player missing the value a threshold needs
+    /// (no rating for an ELO threshold, no grade for a grade one) never meets
+    /// it. Each threshold can carry its own degressive round (see
+    /// [`MacMahonThreshold::drops_after_round`]).
     #[serde(default)]
     pub macmahon_thresholds: Vec<MacMahonThreshold>,
     /// "Airtight groups": if `Some(n)`, an extra pairing rule — just below
@@ -243,38 +292,42 @@ impl Default for TournamentSettings {
 }
 
 impl TournamentSettings {
-    /// The MacMahon starting points for a player with the given rating, using the
-    /// full configured thresholds (i.e. before any degressive removal). This is
-    /// [`macmahon_points_at`](Self::macmahon_points_at) at round 0.
-    pub fn macmahon_points(&self, rating: Option<u32>) -> u32 {
-        self.macmahon_points_at(rating, 0)
+    /// The MacMahon starting points for a player with the given rating/grade,
+    /// using the full configured thresholds (i.e. before any degressive
+    /// removal). This is [`macmahon_points_at`](Self::macmahon_points_at) at
+    /// round 0.
+    pub fn macmahon_points(&self, rating: Option<u32>, grade: Option<Grade>) -> u32 {
+        self.macmahon_points_at(rating, grade, 0)
     }
 
-    /// The threshold values in effect once `rounds_played` rounds are complete:
-    /// those whose [`drops_after_round`](MacMahonThreshold::drops_after_round)
-    /// is `None` or still ahead of `rounds_played` (a threshold dropping "after
-    /// round N" applies as soon as round N is complete, i.e. for pairing round
-    /// N+1 and standings after N).
-    pub fn effective_macmahon_thresholds(&self, rounds_played: u32) -> Vec<u32> {
+    /// The threshold criteria in effect once `rounds_played` rounds are
+    /// complete: those whose
+    /// [`drops_after_round`](MacMahonThreshold::drops_after_round) is `None`
+    /// or still ahead of `rounds_played` (a threshold dropping "after round N"
+    /// applies as soon as round N is complete, i.e. for pairing round N+1 and
+    /// standings after N).
+    pub fn effective_macmahon_thresholds(&self, rounds_played: u32) -> Vec<ThresholdCriterion> {
         self.macmahon_thresholds
             .iter()
             .filter(|t| t.drops_after_round.is_none_or(|r| rounds_played < r))
-            .map(|t| t.value)
+            .map(|t| t.criterion)
             .collect()
     }
 
-    /// The MacMahon starting points for a player once `rounds_played` rounds are
-    /// complete: the number of *effective* thresholds the rating meets or
-    /// exceeds. An unrated player counts as below every threshold, so gets 0.
-    pub fn macmahon_points_at(&self, rating: Option<u32>, rounds_played: u32) -> u32 {
-        match rating {
-            Some(r) => self
-                .effective_macmahon_thresholds(rounds_played)
-                .iter()
-                .filter(|&&t| r >= t)
-                .count() as u32,
-            None => 0,
-        }
+    /// The MacMahon starting points for a player once `rounds_played` rounds
+    /// are complete: the number of *effective* thresholds the player's rating
+    /// or grade meets or exceeds. A player missing the value a threshold needs
+    /// never meets it (see [`ThresholdCriterion::met_by`]).
+    pub fn macmahon_points_at(
+        &self,
+        rating: Option<u32>,
+        grade: Option<Grade>,
+        rounds_played: u32,
+    ) -> u32 {
+        self.effective_macmahon_thresholds(rounds_played)
+            .into_iter()
+            .filter(|c| c.met_by(rating, grade))
+            .count() as u32
     }
 
     /// The canonical form of a club name for comparison: trimmed and lower-cased,
@@ -359,18 +412,19 @@ impl TournamentSettings {
         self.elo_provisional_multiplier_percent as f64 / 100.0
     }
 
-    /// Sort thresholds ascending by value and drop duplicate values (keeping the
-    /// first entry) — the canonical form kept in the settings, independent of
-    /// the order they were entered. A `drops_after_round` of 0 is normalized to
-    /// `None`, since it can't take effect before round 1 anyway.
+    /// Sort thresholds (ELO ones by value, then grade ones by strength) and
+    /// drop duplicate criteria (keeping the first entry) — the canonical form
+    /// kept in the settings, independent of the order they were entered. A
+    /// `drops_after_round` of 0 is normalized to `None`, since it can't take
+    /// effect before round 1 anyway.
     pub fn normalize_thresholds(mut thresholds: Vec<MacMahonThreshold>) -> Vec<MacMahonThreshold> {
         for t in &mut thresholds {
             if t.drops_after_round == Some(0) {
                 t.drops_after_round = None;
             }
         }
-        thresholds.sort_by_key(|t| t.value);
-        thresholds.dedup_by_key(|t| t.value);
+        thresholds.sort_by_key(|t| t.criterion.sort_key());
+        thresholds.dedup_by_key(|t| t.criterion);
         thresholds
     }
 }
@@ -381,15 +435,20 @@ mod tests {
 
     /// A threshold with no degressive round, for terser test setup.
     fn mmt(value: u32) -> MacMahonThreshold {
-        MacMahonThreshold::new(value)
+        MacMahonThreshold::elo(value)
     }
 
     /// A threshold that drops after the given round.
     fn mmt_drops(value: u32, round: u32) -> MacMahonThreshold {
         MacMahonThreshold {
-            value,
+            criterion: ThresholdCriterion::Elo { value },
             drops_after_round: Some(round),
         }
+    }
+
+    /// The ELO criterion for a given value, for terser assertions.
+    fn elo(value: u32) -> ThresholdCriterion {
+        ThresholdCriterion::Elo { value }
     }
 
     #[test]
@@ -398,19 +457,44 @@ mod tests {
             macmahon_thresholds: vec![mmt(1200), mmt(1700)],
             ..Default::default()
         };
-        assert_eq!(s.macmahon_points(Some(1000)), 0);
-        assert_eq!(s.macmahon_points(Some(1200)), 1); // inclusive lower bound
-        assert_eq!(s.macmahon_points(Some(1699)), 1);
-        assert_eq!(s.macmahon_points(Some(1700)), 2);
-        assert_eq!(s.macmahon_points(Some(2500)), 2);
-        assert_eq!(s.macmahon_points(None), 0); // unrated → below every threshold
+        assert_eq!(s.macmahon_points(Some(1000), None), 0);
+        assert_eq!(s.macmahon_points(Some(1200), None), 1); // inclusive lower bound
+        assert_eq!(s.macmahon_points(Some(1699), None), 1);
+        assert_eq!(s.macmahon_points(Some(1700), None), 2);
+        assert_eq!(s.macmahon_points(Some(2500), None), 2);
+        assert_eq!(s.macmahon_points(None, None), 0); // unrated → below every threshold
+    }
+
+    #[test]
+    fn grade_thresholds_count_independently_of_elo_thresholds() {
+        // Mixed thresholds: an ELO band and a grade band, each counted on its
+        // own axis — a strong-graded but low-rated player (or vice versa) can
+        // meet one without the other.
+        let s = TournamentSettings {
+            macmahon_thresholds: vec![
+                MacMahonThreshold::elo(1500),
+                MacMahonThreshold::grade(Grade::dan(1)),
+            ],
+            ..Default::default()
+        };
+        // Meets neither.
+        assert_eq!(s.macmahon_points(Some(1000), Some(Grade::kyu(5))), 0);
+        // Meets only the grade threshold.
+        assert_eq!(s.macmahon_points(Some(1000), Some(Grade::dan(3))), 1);
+        // Meets only the ELO threshold.
+        assert_eq!(s.macmahon_points(Some(2000), Some(Grade::kyu(5))), 1);
+        // Meets both.
+        assert_eq!(s.macmahon_points(Some(2000), Some(Grade::dan(3))), 2);
+        // No grade at all never meets the grade threshold, same as unrated
+        // never meeting an ELO one.
+        assert_eq!(s.macmahon_points(Some(2000), None), 1);
     }
 
     #[test]
     fn no_thresholds_means_zero_points() {
         let s = TournamentSettings::default();
-        assert_eq!(s.macmahon_points(Some(9000)), 0);
-        assert_eq!(s.macmahon_points(None), 0);
+        assert_eq!(s.macmahon_points(Some(9000), None), 0);
+        assert_eq!(s.macmahon_points(None, None), 0);
     }
 
     #[test]
@@ -427,6 +511,18 @@ mod tests {
     }
 
     #[test]
+    fn normalize_sorts_grade_thresholds_after_elo_ones_by_strength() {
+        let grade_1d = MacMahonThreshold::grade(Grade::dan(1));
+        let grade_5d = MacMahonThreshold::grade(Grade::dan(5));
+        let grade_5k = MacMahonThreshold::grade(Grade::kyu(5));
+        let elo_1500 = mmt(1500);
+        assert_eq!(
+            TournamentSettings::normalize_thresholds(vec![grade_5d, elo_1500, grade_1d, grade_5k,]),
+            vec![elo_1500, grade_5k, grade_1d, grade_5d]
+        );
+    }
+
+    #[test]
     fn degressive_drops_thresholds_at_their_own_scheduled_round() {
         // Two bottom groups drop at the end of round 2, the top never drops.
         let s = TournamentSettings {
@@ -434,17 +530,23 @@ mod tests {
             ..Default::default()
         };
         // Rounds 1–2: full thresholds.
-        assert_eq!(s.effective_macmahon_thresholds(0), vec![1200, 1500, 1800]);
-        assert_eq!(s.effective_macmahon_thresholds(1), vec![1200, 1500, 1800]);
+        assert_eq!(
+            s.effective_macmahon_thresholds(0),
+            vec![elo(1200), elo(1500), elo(1800)]
+        );
+        assert_eq!(
+            s.effective_macmahon_thresholds(1),
+            vec![elo(1200), elo(1500), elo(1800)]
+        );
         // After round 2, the two scheduled thresholds are gone; the top stays.
-        assert_eq!(s.effective_macmahon_thresholds(2), vec![1800]);
-        assert_eq!(s.effective_macmahon_thresholds(3), vec![1800]);
+        assert_eq!(s.effective_macmahon_thresholds(2), vec![elo(1800)]);
+        assert_eq!(s.effective_macmahon_thresholds(3), vec![elo(1800)]);
 
         // Points reflect the shrinking spread: a 2000 player has 3 pts up front,
         // 1 pt from round 3 onward.
-        assert_eq!(s.macmahon_points_at(Some(2000), 1), 3);
-        assert_eq!(s.macmahon_points_at(Some(2000), 2), 1);
-        assert_eq!(s.macmahon_points_at(Some(2000), 4), 1);
+        assert_eq!(s.macmahon_points_at(Some(2000), None, 1), 3);
+        assert_eq!(s.macmahon_points_at(Some(2000), None, 2), 1);
+        assert_eq!(s.macmahon_points_at(Some(2000), None, 4), 1);
     }
 
     #[test]

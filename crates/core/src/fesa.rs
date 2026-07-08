@@ -21,14 +21,17 @@
 //! - **Latin-1 encoded**, not UTF-8 (`Rövekamp`), so callers decode with
 //!   [`decode_latin1`] first (1 byte = 1 char = 1 column).
 //! - **Variable grades** (0, 1 or 2 of `N Dan` / `N Kyu`) sit between the given
-//!   name and the Elo; we ignore them by parsing the trailing Elo / #games /
-//!   nationality tokens from the right and stripping any grade tokens.
+//!   name and the Elo; we parse the trailing Elo / #games / nationality tokens
+//!   from the right, then strip any grade tokens the same way, keeping the
+//!   first (leftmost) grade when two are given.
 //! - The rank field **overflows at 4 digits**, shifting later columns, so we
 //!   anchor to the name start (after removing the rank) rather than to absolute
 //!   positions.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+
+use crate::player::Grade;
 
 /// Width, in characters, of the last-name column (after the rank).
 const LAST_NAME_WIDTH: usize = 18;
@@ -49,6 +52,12 @@ pub struct RatedPlayer {
     pub games: u32,
     /// Country code, uppercased (e.g. `JP`, `FR`).
     pub nationality: String,
+    /// The player's dan/kyu grade, if the row listed one. Some rows list two
+    /// (e.g. a national and a local grade) — the first (leftmost) is kept.
+    /// `None` when the row had no grade column.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub grade: Option<Grade>,
 }
 
 /// Decode ISO-8859-1 (Latin-1) bytes to a `String`.
@@ -106,8 +115,9 @@ fn parse_row(line: &str) -> Option<RatedPlayer> {
     let games: u32 = tokens.pop()?.parse().unwrap_or(0);
     let rating: u32 = tokens.pop()?.parse().ok()?;
 
-    // Whatever grades remain sit at the end of the given-name region; drop them.
-    strip_trailing_grades(&mut tokens);
+    // Whatever grades remain sit at the end of the given-name region; strip
+    // them, keeping the first (leftmost) one.
+    let grade = strip_trailing_grades(&mut tokens);
     let first_name = tokens.join(" ");
 
     Some(RatedPlayer {
@@ -116,6 +126,7 @@ fn parse_row(line: &str) -> Option<RatedPlayer> {
         rating,
         games,
         nationality,
+        grade,
     })
 }
 
@@ -135,11 +146,25 @@ fn strip_rank(line: &str) -> Option<&str> {
     Some(rest.trim_start())
 }
 
-/// Strip up to two trailing grade tokens (`N Dan` / `N Kyu`, case-insensitive).
-fn strip_trailing_grades(tokens: &mut Vec<&str>) {
+/// Strip up to two trailing grade tokens (`N Dan` / `N Kyu`, case-insensitive),
+/// returning the *first* (leftmost) one parsed, if any. The loop strips
+/// right-to-left, so the second iteration — if it matches — parses the
+/// leftmost pair and overwrites whatever the first iteration found, which is
+/// exactly the "use the first rank when two are given" rule.
+fn strip_trailing_grades(tokens: &mut Vec<&str>) -> Option<Grade> {
     fn is_grade_unit(word: &str) -> bool {
         word.eq_ignore_ascii_case("dan") || word.eq_ignore_ascii_case("kyu")
     }
+    fn parse_grade(level: &str, unit: &str) -> Option<Grade> {
+        let level: u32 = level.parse().ok()?;
+        if unit.eq_ignore_ascii_case("dan") {
+            Some(Grade::dan(level))
+        } else {
+            Some(Grade::kyu(level))
+        }
+    }
+
+    let mut leftmost = None;
     for _ in 0..2 {
         let n = tokens.len();
         if n >= 2
@@ -147,11 +172,13 @@ fn strip_trailing_grades(tokens: &mut Vec<&str>) {
             && !tokens[n - 2].is_empty()
             && tokens[n - 2].chars().all(|c| c.is_ascii_digit())
         {
+            leftmost = parse_grade(tokens[n - 2], tokens[n - 1]);
             tokens.truncate(n - 2);
         } else {
             break;
         }
     }
+    leftmost
 }
 
 #[cfg(test)]
@@ -187,12 +214,14 @@ mod tests {
 
     #[test]
     fn two_grades() {
-        let p = parse_one(&row(1, "Kobayashi", "Taichi 5 Dan 5 Dan 2556 55 JP"));
+        // Distinct grades so the assertion actually proves which one is kept.
+        let p = parse_one(&row(1, "Kobayashi", "Taichi 5 Dan 4 Dan 2556 55 JP"));
         assert_eq!(p.last_name, "Kobayashi");
         assert_eq!(p.first_name, "Taichi");
         assert_eq!(p.rating, 2556);
         assert_eq!(p.games, 55);
         assert_eq!(p.nationality, "JP");
+        assert_eq!(p.grade, Some(Grade::dan(5))); // the first (leftmost) of the two
     }
 
     #[test]
@@ -216,9 +245,11 @@ mod tests {
             ),
             ("Vincent", 2469, "BY")
         );
+        assert_eq!(one.grade, Some(Grade::dan(5)));
 
         let none = parse_one(&row(3, "Takita", "Hirotaka 2462 7 JP"));
         assert_eq!((none.first_name.as_str(), none.rating), ("Hirotaka", 2462));
+        assert_eq!(none.grade, None);
     }
 
     #[test]
@@ -256,6 +287,7 @@ mod tests {
         let p = parse_one(&row(70, "Foo", "Grigoriy 20 kyu 300 5 UA"));
         assert_eq!(p.first_name, "Grigoriy");
         assert_eq!(p.rating, 300);
+        assert_eq!(p.grade, Some(Grade::kyu(20)));
     }
 
     #[test]

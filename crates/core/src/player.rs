@@ -1,8 +1,72 @@
 //! Players and player registration.
 
+use std::cmp::Ordering;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
+
+/// The two families of playing grade: dan (stronger, unbounded above) and kyu
+/// (weaker, unbounded below).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(rename_all = "snake_case")]
+pub enum GradeKind {
+    Dan,
+    Kyu,
+}
+
+/// A dan/kyu playing grade (e.g. `3 dan`, `15 kyu`), used for grade-based
+/// MacMahon thresholds alongside (or instead of) ELO-based ones — see
+/// [`crate::settings::ThresholdCriterion`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct Grade {
+    pub kind: GradeKind,
+    /// 1-based level within the kind (e.g. `3` for "3 dan").
+    pub level: u32,
+}
+
+impl Grade {
+    pub fn dan(level: u32) -> Self {
+        Grade {
+            kind: GradeKind::Dan,
+            level,
+        }
+    }
+
+    pub fn kyu(level: u32) -> Self {
+        Grade {
+            kind: GradeKind::Kyu,
+            level,
+        }
+    }
+
+    /// A contiguous strength scale for comparison: `n` dan is `n`; `n` kyu is
+    /// `1 - n`, so `1 kyu` (0) sits directly below `1 dan` (1) with no gap
+    /// across the dan/kyu boundary, and a bigger value always means stronger.
+    pub fn rank(self) -> i64 {
+        match self.kind {
+            GradeKind::Dan => self.level as i64,
+            GradeKind::Kyu => 1 - self.level as i64,
+        }
+    }
+}
+
+/// Ordered by playing strength (see [`Grade::rank`]), not by field order —
+/// `1 dan` is stronger than `1 kyu`, which the derived field-order comparison
+/// (`Dan < Kyu`) would get backwards.
+impl PartialOrd for Grade {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Grade {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.rank().cmp(&other.rank())
+    }
+}
 
 /// A player registered in a tournament.
 ///
@@ -30,6 +94,12 @@ pub struct Player {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub rating: Option<u32>,
+    /// Optional dan/kyu playing grade, independent of `rating` — used for
+    /// grade-based MacMahon thresholds (see
+    /// [`crate::settings::ThresholdCriterion`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub grade: Option<Grade>,
     /// Number of rated games behind `rating` in the FESA list, when the rating was
     /// picked from it. `None` means the rating was entered by hand or the player
     /// isn't in the list — in either case the ELO estimator treats the rating as
@@ -87,6 +157,9 @@ pub struct NewPlayer {
     #[serde(default)]
     #[ts(optional)]
     pub rating: Option<u32>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub grade: Option<Grade>,
     /// FESA #games behind the rating, when it was picked from the list (see
     /// [`Player::fesa_games`]).
     #[serde(default)]
@@ -123,6 +196,7 @@ impl Player {
             last_name: new.last_name.trim().to_string(),
             first_name: new.first_name.unwrap_or_default().trim().to_string(),
             rating: new.rating,
+            grade: new.grade,
             // Only meaningful alongside a rating; drop it if the rating was cleared.
             fesa_games: new.rating.and(new.fesa_games),
             nationality: non_empty(new.nationality.unwrap_or_default()).map(|c| c.to_uppercase()),
@@ -130,5 +204,20 @@ impl Player {
             eligible: false,
             adjustments: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grade_orders_across_the_dan_kyu_boundary_with_no_gap() {
+        // Ascending strength: weak kyu → 1 kyu → 1 dan → strong dan.
+        assert!(Grade::kyu(20) < Grade::kyu(1));
+        assert!(Grade::kyu(1) < Grade::dan(1));
+        assert!(Grade::dan(1) < Grade::dan(5));
+        // Contiguous: 1 kyu sits directly below 1 dan.
+        assert_eq!(Grade::kyu(1).rank() + 1, Grade::dan(1).rank());
     }
 }

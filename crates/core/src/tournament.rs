@@ -231,6 +231,7 @@ impl Tournament {
         player.last_name = normalized.last_name;
         player.first_name = normalized.first_name;
         player.rating = normalized.rating;
+        player.grade = normalized.grade;
         player.nationality = normalized.nationality;
         player.club = normalized.club;
         Ok(player)

@@ -33,7 +33,7 @@ pub use pairing::{
     AffectedCycle, BoardLedger, Counterfactual, CounterfactualMode, RoundExplanation,
     RuleContribution, RuleDelta, RuleId, RuleTotal, ScopeReason,
 };
-pub use player::{NewPlayer, Player, PointAdjustment};
+pub use player::{Grade, GradeKind, NewPlayer, Player, PointAdjustment};
 pub use round::{
     Board, CupStage, Handicap, HandicapGame, PairingSource, Round, RoundDraft, Winner,
 };

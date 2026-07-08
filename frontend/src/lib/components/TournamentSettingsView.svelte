@@ -2,8 +2,17 @@
   import { untrack } from "svelte";
   import { _ } from "svelte-i18n";
   import { TIEBREAKS } from "../types";
-  import type { HandicapPolicy, MacMahonThreshold, Player, Tiebreak, TournamentSettings } from "../types";
+  import type {
+    GradeKind,
+    HandicapPolicy,
+    MacMahonThreshold,
+    Player,
+    Tiebreak,
+    ThresholdCriterion,
+    TournamentSettings,
+  } from "../types";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
+  import { gradeRank } from "../grade";
 
   interface Props {
     settings: TournamentSettings;
@@ -35,24 +44,59 @@
     );
   });
 
-  // A threshold row being edited: value plus its optional degressive stopping
-  // round (null = never drops).
-  type ThresholdRow = { value: number; dropsAfterRound: number | null };
+  // A threshold row being edited: either an ELO value or a dan/kyu grade
+  // (only the fields for the active `kind` are meaningful), plus its optional
+  // degressive stopping round (null = never drops).
+  type ThresholdRow = {
+    kind: "elo" | "grade";
+    value: number;
+    gradeKind: GradeKind;
+    gradeLevel: number;
+    dropsAfterRound: number | null;
+  };
 
-  // Clean, sort and de-duplicate (by value) into the server's canonical form —
-  // used both to persist and to compare our local rows against what's stored.
+  // A key that sorts ELO thresholds by value, then grade thresholds by
+  // strength — mirrors the server's `ThresholdCriterion::sort_key`.
+  function criterionSortKey(c: ThresholdCriterion): [number, number] {
+    return c.kind === "elo" ? [0, c.value] : [1, gradeRank(c.grade)];
+  }
+
+  function criterionEquals(a: ThresholdCriterion, b: ThresholdCriterion): boolean {
+    if (a.kind !== b.kind) return false;
+    if (a.kind === "elo") return a.value === (b as { kind: "elo"; value: number }).value;
+    const bg = (b as { kind: "grade"; grade: { kind: GradeKind; level: number } }).grade;
+    return a.grade.kind === bg.kind && a.grade.level === bg.level;
+  }
+
+  // Clean, sort and de-duplicate (by criterion) into the server's canonical
+  // form — used both to persist and to compare our local rows against what's
+  // stored.
   function cleanThresholds(rows: ThresholdRow[]): MacMahonThreshold[] {
     return rows
-      .filter((r) => Number.isFinite(r.value) && r.value >= 1)
+      .filter((r) =>
+        r.kind === "elo"
+          ? Number.isFinite(r.value) && r.value >= 1
+          : Number.isFinite(r.gradeLevel) && r.gradeLevel >= 1,
+      )
       .map((r) => ({
-        value: Math.round(r.value),
+        criterion:
+          r.kind === "elo"
+            ? ({ kind: "elo", value: Math.round(r.value) } as const)
+            : ({
+                kind: "grade",
+                grade: { kind: r.gradeKind, level: Math.round(r.gradeLevel) },
+              } as const),
         drops_after_round:
           r.dropsAfterRound != null && Number.isFinite(r.dropsAfterRound) && r.dropsAfterRound >= 1
             ? Math.round(r.dropsAfterRound)
             : null,
       }))
-      .sort((a, b) => a.value - b.value)
-      .filter((v, i, arr) => i === 0 || v.value !== arr[i - 1].value);
+      .sort((a, b) => {
+        const [at, av] = criterionSortKey(a.criterion);
+        const [bt, bv] = criterionSortKey(b.criterion);
+        return at - bt || av - bv;
+      })
+      .filter((v, i, arr) => i === 0 || !criterionEquals(v.criterion, arr[i - 1].criterion));
   }
 
   function eqThresholds(a: MacMahonThreshold[], b: MacMahonThreshold[]): boolean {
@@ -60,7 +104,8 @@
       a.length === b.length &&
       a.every(
         (v, i) =>
-          v.value === b[i].value && (v.drops_after_round ?? null) === (b[i].drops_after_round ?? null),
+          criterionEquals(v.criterion, b[i].criterion) &&
+          (v.drops_after_round ?? null) === (b[i].drops_after_round ?? null),
       )
     );
   }
@@ -149,7 +194,10 @@
         eloProvisionalPercent === sEloProv;
       if (!matches) {
         thresholds = sThresholds.map((t) => ({
-          value: t.value,
+          kind: t.criterion.kind,
+          value: t.criterion.kind === "elo" ? t.criterion.value : 1500,
+          gradeKind: t.criterion.kind === "grade" ? t.criterion.grade.kind : "dan",
+          gradeLevel: t.criterion.kind === "grade" ? t.criterion.grade.level : 1,
           dropsAfterRound: t.drops_after_round ?? null,
         }));
         airtightRounds = sAirtight;
@@ -291,8 +339,15 @@
   }
 
   function addThreshold() {
-    const maxValue = thresholds.length ? Math.max(...thresholds.map((t) => t.value)) : 1400;
-    thresholds.push({ value: maxValue + 100, dropsAfterRound: null });
+    const eloValues = thresholds.filter((t) => t.kind === "elo").map((t) => t.value);
+    const maxValue = eloValues.length ? Math.max(...eloValues) : 1400;
+    thresholds.push({
+      kind: "elo",
+      value: maxValue + 100,
+      gradeKind: "dan",
+      gradeLevel: 1,
+      dropsAfterRound: null,
+    });
     persist();
   }
 
@@ -301,8 +356,23 @@
     persist();
   }
 
-  function editThreshold(i: number, raw: string) {
+  function editThresholdKind(i: number, kind: "elo" | "grade") {
+    thresholds[i].kind = kind;
+    persist();
+  }
+
+  function editThresholdValue(i: number, raw: string) {
     thresholds[i].value = Number(raw);
+    persist();
+  }
+
+  function editThresholdGradeLevel(i: number, raw: string) {
+    thresholds[i].gradeLevel = Number(raw);
+    persist();
+  }
+
+  function editThresholdGradeKind(i: number, kind: GradeKind) {
+    thresholds[i].gradeKind = kind;
     persist();
   }
 
@@ -332,50 +402,34 @@
   // previews so they always reflect what the server will store, updated live on
   // each edit rather than lagging a round-trip.
   const normalized = $derived(cleanThresholds(thresholds));
-  const normThresholds = $derived(normalized.map((t) => t.value));
 
-  // How many registered players fall into each MacMahon band — unrated
-  // players and those below the first threshold count as band 0, mirroring
-  // the server's own point calculation (one point per threshold reached).
+  // Whether a player meets one threshold, mirroring the server's
+  // `ThresholdCriterion::met_by`: a missing rating/grade never meets the
+  // corresponding kind of threshold.
+  function meetsCriterion(c: ThresholdCriterion, p: Player): boolean {
+    if (c.kind === "elo") return p.rating != null && p.rating >= c.value;
+    return p.grade != null && gradeRank(p.grade) >= gradeRank(c.grade);
+  }
+
+  // A player's MacMahon starting points: the number of normalized thresholds
+  // they meet. ELO and grade thresholds are independent axes, so — unlike a
+  // single-axis ELO ladder — meeting one doesn't imply meeting any other in
+  // particular; only the *count* is well-defined, not a contiguous "band".
+  function playerPoints(p: Player): number {
+    return normalized.filter((t) => meetsCriterion(t.criterion, p)).length;
+  }
+
+  // How many registered players land on each starting-points value, 0..total.
   const bandPlayerCounts = $derived.by(() => {
-    const t = normThresholds;
-    const counts = new Array(t.length + 1).fill(0);
-    for (const p of players) {
-      let band = 0;
-      if (p.rating != null) {
-        for (const threshold of t) {
-          if (p.rating >= threshold) band++;
-          else break;
-        }
-      }
-      counts[band]++;
-    }
+    const counts = new Array(normalized.length + 1).fill(0);
+    for (const p of players) counts[playerPoints(p)]++;
     return counts;
   });
 
-  // Preview of the resulting bands, e.g. "below 1200 → 0".
+  // Preview of the resulting starting-points histogram.
   const bands = $derived.by(() => {
-    const t = normThresholds;
-    const rows: { label: string; points: number; count: number }[] = [];
-    if (t.length === 0) return rows;
-    const counts = bandPlayerCounts;
-    rows.push({
-      label: $_("settings.bandBelow", { values: { value: t[0] } }),
-      points: 0,
-      count: counts[0],
-    });
-    for (let i = 0; i < t.length; i++) {
-      const hi = t[i + 1];
-      rows.push({
-        label:
-          hi != null
-            ? $_("settings.bandRange", { values: { lo: t[i], hi: hi - 1 } })
-            : $_("settings.bandAndAbove", { values: { value: t[i] } }),
-        points: i + 1,
-        count: counts[i + 1],
-      });
-    }
-    return rows;
+    if (normalized.length === 0) return [];
+    return bandPlayerCounts.map((count, points) => ({ points, count }));
   });
 
   // Preview of how the starting-point spread shrinks over the rounds, driven by
@@ -472,15 +526,45 @@
   <div class="thresholds">
     {#each thresholds as row, i (i)}
       <div class="threshold-row">
-        <input
-          type="number"
-          min="1"
-          step="1"
-          class="threshold"
-          value={row.value}
+        <select
+          class="threshold-kind"
+          value={row.kind}
           disabled={busy}
-          onchange={(e) => editThreshold(i, e.currentTarget.value)}
-        />
+          onchange={(e) => editThresholdKind(i, e.currentTarget.value as "elo" | "grade")}
+        >
+          <option value="elo">{$_("settings.thresholdKindElo")}</option>
+          <option value="grade">{$_("settings.thresholdKindGrade")}</option>
+        </select>
+        {#if row.kind === "elo"}
+          <input
+            type="number"
+            min="1"
+            step="1"
+            class="threshold"
+            value={row.value}
+            disabled={busy}
+            onchange={(e) => editThresholdValue(i, e.currentTarget.value)}
+          />
+        {:else}
+          <input
+            type="number"
+            min="1"
+            step="1"
+            class="threshold narrow"
+            value={row.gradeLevel}
+            disabled={busy}
+            onchange={(e) => editThresholdGradeLevel(i, e.currentTarget.value)}
+          />
+          <select
+            class="threshold-kind"
+            value={row.gradeKind}
+            disabled={busy}
+            onchange={(e) => editThresholdGradeKind(i, e.currentTarget.value as GradeKind)}
+          >
+            <option value="dan">{$_("settings.gradeKindDan")}</option>
+            <option value="kyu">{$_("settings.gradeKindKyu")}</option>
+          </select>
+        {/if}
         <label class="check drop-check">
           <input
             type="checkbox"
@@ -525,7 +609,9 @@
       <ul>
         {#each bands as b (b.points)}
           <li>
-            <span class="band">{b.label}</span> → <strong>{b.points}</strong>
+            <strong>
+              {$_(b.points === 1 ? "settings.pointsValueSingular" : "settings.pointsValuePlural", { values: { points: b.points } })}
+            </strong>
             <span class="band-count">
               ({$_(b.count === 1 ? "settings.playerCountSingular" : "settings.playerCountPlural", { values: { count: b.count } })})
             </span>
@@ -931,6 +1017,14 @@
   }
   .threshold.narrow {
     width: 4rem;
+  }
+  .threshold-kind {
+    background: var(--bg-inset);
+    color: inherit;
+    border: 1px solid var(--border-soft);
+    border-radius: 0.4rem;
+    padding: 0.3rem 0.45rem;
+    font: inherit;
   }
   .check {
     display: flex;

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
   import type { NewPlayer, RatedPlayer } from "../types";
+  import { formatGrade, parseGrade } from "../grade";
 
   interface Props {
     /** Register a new player. */
@@ -28,6 +29,9 @@
   let firstName = $state("");
   // Bound to a number input, so Svelte gives us a number (or null when empty).
   let rating = $state<number | null>(null);
+  // Free-text grade entry, e.g. "3d" / "3 dan" / "5k" / "5 kyu" — parsed into a
+  // Grade on submit; left as text so a referee can type it without a picker.
+  let gradeText = $state("");
   let nationality = $state("");
   let club = $state("");
   // The FESA #games behind a picked suggestion, so we can tell the server the
@@ -70,6 +74,7 @@
     firstName = r.first_name;
     rating = r.rating;
     fesaGames = r.games; // rating is now FESA-backed
+    gradeText = r.grade ? formatGrade(r.grade) : "";
     nationality = r.nationality;
     showSuggestions = false;
     highlighted = -1;
@@ -118,6 +123,8 @@
       // Only forward the games count if the rating is still the FESA-picked one.
       if (fesaGames !== null) player.fesa_games = fesaGames;
     }
+    const grade = parseGrade(gradeText);
+    if (grade) player.grade = grade;
     const nat = nationality.trim();
     if (nat) player.nationality = nat;
     const cl = club.trim();
@@ -131,6 +138,7 @@
     firstName = "";
     rating = null;
     fesaGames = null;
+    gradeText = "";
     nationality = "";
     club = "";
     showSuggestions = false;
@@ -198,6 +206,15 @@
   />
   <input
     type="text"
+    bind:value={gradeText}
+    placeholder={$_("playerRegistration.gradePlaceholder")}
+    autocomplete="off"
+    disabled={busy}
+    aria-label={$_("playerRegistration.grade")}
+    class="grade"
+  />
+  <input
+    type="text"
     bind:value={nationality}
     placeholder={$_("playerRegistration.natPlaceholder")}
     autocomplete="off"
@@ -248,12 +265,16 @@
     flex: 1 1 8rem;
     min-width: 7rem;
   }
-  input[type="text"]:not(.club):not(.nat) {
+  input[type="text"]:not(.club):not(.nat):not(.grade) {
     flex: 1 1 8rem;
     min-width: 7rem;
   }
   .rating {
     width: 5.5rem;
+    flex: none;
+  }
+  .grade {
+    width: 4.5rem;
     flex: none;
   }
   .nat {

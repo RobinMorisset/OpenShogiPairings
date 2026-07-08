@@ -1,6 +1,7 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
   import type { NewPlayer, Player } from "../types";
+  import { formatGrade, gradeRank, parseGrade } from "../grade";
 
   interface Props {
     players: Player[];
@@ -64,10 +65,10 @@
     onSetEligibleByNationality?.(bulkNationality, eligible);
   }
 
-  // #, last name, first name, rating, nat., club, [cup], actions.
-  const colCount = $derived(6 + (showEligible ? 1 : 0) + 1);
+  // #, last name, first name, rating, grade, nat., club, [cup], actions.
+  const colCount = $derived(7 + (showEligible ? 1 : 0) + 1);
 
-  type Field = "last_name" | "first_name" | "rating" | "nationality" | "club";
+  type Field = "last_name" | "first_name" | "rating" | "grade" | "nationality" | "club";
 
   // Sortable columns, including ones that aren't inline-editable ("#" and the
   // cup checkbox). This is display only, purely client-side — it never touches
@@ -89,6 +90,8 @@
         return p.first_name.toLowerCase() || null;
       case "rating":
         return p.rating ?? null;
+      case "grade":
+        return p.grade ? gradeRank(p.grade) : null;
       case "nationality":
         return p.nationality?.trim().toLowerCase() || null;
       case "club":
@@ -107,7 +110,7 @@
       return;
     }
     sortKey = key;
-    sortDir = key === "rating" || key === "tournament_id" || key === "eligible" ? -1 : 1;
+    sortDir = key === "rating" || key === "grade" || key === "tournament_id" || key === "eligible" ? -1 : 1;
   }
 
   // Missing values (no rating, no tournament number, blank nationality/club)
@@ -138,6 +141,8 @@
         return p.first_name;
       case "rating":
         return p.rating != null ? String(p.rating) : "";
+      case "grade":
+        return p.grade ? formatGrade(p.grade) : "";
       case "nationality":
         return p.nationality ?? "";
       case "club":
@@ -176,6 +181,7 @@
       last_name: p.last_name,
       first_name: p.first_name,
       rating: p.rating,
+      grade: p.grade,
       nationality: p.nationality,
       club: p.club,
     };
@@ -197,6 +203,9 @@
         edited.rating = value !== "" && Number.isInteger(n) && n >= 0 ? n : undefined;
         break;
       }
+      case "grade":
+        edited.grade = parseGrade(value) ?? undefined;
+        break;
     }
     return edited;
   }
@@ -328,6 +337,7 @@
         {@render sortHeader("last_name", $_("playerList.lastName"), false)}
         {@render sortHeader("first_name", $_("playerList.firstName"), false)}
         {@render sortHeader("rating", $_("playerList.rating"), true)}
+        {@render sortHeader("grade", $_("playerList.grade"), false)}
         {@render sortHeader("nationality", $_("playerList.nationality"), false)}
         {@render sortHeader("club", $_("playerList.club"), false)}
         {#if showEligible}
@@ -350,6 +360,7 @@
           <td>{@render cell(player, "last_name", false)}</td>
           <td>{@render cell(player, "first_name", false)}</td>
           <td class="num">{@render cell(player, "rating", true)}</td>
+          <td>{@render cell(player, "grade", false)}</td>
           <td>{@render cell(player, "nationality", false)}</td>
           <td>{@render cell(player, "club", false)}</td>
           {#if showEligible}

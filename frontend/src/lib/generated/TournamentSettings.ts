@@ -14,13 +14,16 @@ import type { Tiebreak } from "./Tiebreak";
  */
 export type TournamentSettings = { 
 /**
- * ELO thresholds (ascending by value, de-duplicated) defining the MacMahon
- * starting groups. A player's MacMahon points is the number of thresholds
- * their rating meets or exceeds — e.g. thresholds `[1200, 1700]` give 0
- * points below 1200, 1 in `[1200, 1700)`, and 2 at 1700 or above. Empty
- * means no MacMahon (everyone starts at 0). An unrated player counts as
- * below every threshold, so they get 0. Each threshold can carry its own
- * degressive round (see [`MacMahonThreshold::drops_after_round`]).
+ * Thresholds (sorted, de-duplicated) defining the MacMahon starting
+ * groups, each an ELO rating or a dan/kyu grade (see
+ * [`ThresholdCriterion`]) — a tournament can freely mix both kinds. A
+ * player's MacMahon points is the number of thresholds they meet or
+ * exceed — e.g. ELO thresholds `[1200, 1700]` give 0 points below 1200, 1
+ * in `[1200, 1700)`, and 2 at 1700 or above. Empty means no MacMahon
+ * (everyone starts at 0). A player missing the value a threshold needs
+ * (no rating for an ELO threshold, no grade for a grade one) never meets
+ * it. Each threshold can carry its own degressive round (see
+ * [`MacMahonThreshold::drops_after_round`]).
  */
 macmahon_thresholds: Array<MacMahonThreshold>, 
 /**

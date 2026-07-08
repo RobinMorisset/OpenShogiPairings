@@ -1346,6 +1346,7 @@ mod tests {
             last_name: format!("P{tid}"),
             first_name: String::new(),
             rating,
+            grade: None,
             fesa_games: None,
             nationality: None,
             club: club.map(|c| c.to_string()),
@@ -1499,7 +1500,7 @@ mod tests {
         ];
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
         let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::new(1500)],
+            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
         };
 
@@ -1658,7 +1659,7 @@ mod tests {
             player(8, Some(850), None),
         ];
         let settings_base = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::new(1500)],
+            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
         };
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
@@ -1723,7 +1724,7 @@ mod tests {
             player(8, Some(850), None),
         ];
         let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::new(1500)],
+            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             airtight_groups_rounds: Some(1),
             ..Default::default()
         };
@@ -1855,7 +1856,7 @@ mod tests {
         ];
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
         let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::new(1500)], // X0..X2 on 1 point, Y on 0
+            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)], // X0..X2 on 1 point, Y on 0
             ..Default::default()
         };
 
@@ -1880,7 +1881,7 @@ mod tests {
         ];
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
         let base = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::new(1500)],
+            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
         };
 
@@ -1945,7 +1946,7 @@ mod tests {
             Some(id(4)), // p5 took a bye
         );
         let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::new(1500)],
+            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
         };
         let scores = compute_scores(&p, &settings, &[r1]);
@@ -2071,7 +2072,7 @@ mod tests {
             player(4, Some(900), None),
         ];
         let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::new(1500)],
+            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
         };
         let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();

@@ -99,6 +99,7 @@ pub fn import_american_grid(text: &str) -> Result<Tournament, GridImportError> {
                 last_name: row.last_name.clone(),
                 first_name: Some(row.first_name.clone()),
                 rating: row.rating,
+                grade: None,
                 fesa_games: None,
                 nationality: row.nationality.clone(),
                 club: None,
