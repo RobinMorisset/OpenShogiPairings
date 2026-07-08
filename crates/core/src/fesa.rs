@@ -14,10 +14,14 @@
 //! Three header lines, then one row per player. Quirks that drive the parsing
 //! strategy:
 //!
-//! - **Fixed width, not delimited.** The last-name field is [`LAST_NAME_WIDTH`]
+//! - **Fixed width, not delimited.** The last-name field is a fixed number of
 //!   characters; the family name can contain spaces (`Ågren Thuné`) or fill the
 //!   field with no trailing space (`Imamura-Cornuejols` abutting `Toru`), so
-//!   whitespace-splitting cannot recover it — we slice the fixed column.
+//!   whitespace-splitting cannot recover it — we slice the fixed column. That
+//!   width isn't universal (FESA has widened it before), so it is *detected*
+//!   per file — the mode of the first 2-space gap across rows — rather than
+//!   hardcoded, falling back to [`DEFAULT_LAST_NAME_WIDTH`] if detection finds
+//!   nothing (e.g. an empty list).
 //! - **Latin-1 encoded**, not UTF-8 (`Rövekamp`), so callers decode with
 //!   [`decode_latin1`] first (1 byte = 1 char = 1 column).
 //! - **Variable grades** (0, 1 or 2 of `N Dan` / `N Kyu`) sit between the given
@@ -28,13 +32,16 @@
 //!   anchor to the name start (after removing the rank) rather than to absolute
 //!   positions.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::player::Grade;
 
-/// Width, in characters, of the last-name column (after the rank).
-const LAST_NAME_WIDTH: usize = 18;
+/// Fallback last-name column width if detection finds nothing (e.g. an empty
+/// list); the real width is [`detect_last_name_width`].
+const DEFAULT_LAST_NAME_WIDTH: usize = 18;
 
 /// Number of header lines before the player rows begin.
 const HEADER_LINES: usize = 3;
@@ -75,37 +82,78 @@ pub fn decode_latin1(bytes: &[u8]) -> String {
 /// Malformed rows are skipped rather than failing the whole parse, so a future
 /// format tweak degrades gracefully instead of producing garbage.
 pub fn parse_rating_list(text: &str) -> Vec<RatedPlayer> {
-    text.lines()
-        .skip(HEADER_LINES)
-        .filter_map(parse_row)
+    let data_lines: Vec<&str> = text.lines().skip(HEADER_LINES).collect();
+    // The last-name column width varies between exports, so measure it from the
+    // rows before parsing them.
+    let width = detect_last_name_width(data_lines.iter().copied());
+    data_lines
+        .into_iter()
+        .filter_map(|line| parse_row(line, width))
         .collect()
 }
 
+/// The last-name column width (chars from the name start to the first name),
+/// measured as the most common first-2-space-gap position across the rows. The
+/// width varies between exports, so it must be measured, not hardcoded; rows
+/// whose last name doesn't fill the column reveal the boundary, and the mode is
+/// robust to the exact-fill minority.
+fn detect_last_name_width<'a>(lines: impl Iterator<Item = &'a str>) -> usize {
+    let mut counts: HashMap<usize, usize> = HashMap::new();
+    for line in lines {
+        let Some(after_rank) = strip_rank(line) else {
+            continue;
+        };
+        let chars: Vec<char> = after_rank.chars().collect();
+        // First run of >= 2 spaces (single spaces are within a multi-word last
+        // name), then the first non-space: the first name. A row whose last
+        // name exactly fills the column (no gap at all, e.g. abutting the first
+        // name) contributes nothing rather than a spurious position.
+        let mut j = 0;
+        let mut found_gap = false;
+        while j + 1 < chars.len() {
+            if chars[j] == ' ' && chars[j + 1] == ' ' {
+                found_gap = true;
+                break;
+            }
+            j += 1;
+        }
+        if !found_gap {
+            continue;
+        }
+        while j < chars.len() && chars[j] == ' ' {
+            j += 1;
+        }
+        if j < chars.len() && j > 0 {
+            *counts.entry(j).or_default() += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .max_by_key(|&(_, n)| n)
+        .map_or(DEFAULT_LAST_NAME_WIDTH, |(w, _)| w)
+}
+
 /// Parse a single data row, or `None` if it doesn't look like a player row.
-fn parse_row(line: &str) -> Option<RatedPlayer> {
+fn parse_row(line: &str, width: usize) -> Option<RatedPlayer> {
     // Drop the leading rank ("  1 ", "1000 ", …) and anchor to the name start;
     // this absorbs the 4-digit rank column shift.
     let after_rank = strip_rank(line)?;
 
     let chars: Vec<char> = after_rank.chars().collect();
-    if chars.len() <= LAST_NAME_WIDTH {
+    if chars.len() <= width {
         return None;
     }
 
     // Last name is the fixed-width column; the family name may contain spaces or
     // fill the field, so it can only be read positionally.
-    let last_name = chars[..LAST_NAME_WIDTH]
-        .iter()
-        .collect::<String>()
-        .trim()
-        .to_string();
+    let last_name = chars[..width].iter().collect::<String>().trim().to_string();
     if last_name.is_empty() {
         return None;
     }
 
     // Everything after the last-name column: first name + grades + trailing
     // Elo / #games / nationality.
-    let rest: String = chars[LAST_NAME_WIDTH..].iter().collect();
+    let rest: String = chars[width..].iter().collect();
     let mut tokens: Vec<&str> = rest.split_whitespace().collect();
 
     // The last three tokens are always nationality, #games, Elo (right to left).
@@ -185,24 +233,29 @@ fn strip_trailing_grades(tokens: &mut Vec<&str>) -> Option<Grade> {
 mod tests {
     use super::*;
 
-    /// Pad `name` to the fixed last-name column width (by character count).
-    fn pad_last(name: &str) -> String {
+    /// Pad `name` to a fixed last-name column `width` (by character count).
+    fn pad_last(name: &str, width: usize) -> String {
         let mut out = name.to_string();
-        while out.chars().count() < LAST_NAME_WIDTH {
+        while out.chars().count() < width {
             out.push(' ');
         }
         out
     }
 
     /// Build a data row: right-justified rank, one space, fixed last-name
-    /// column, then the free-form remainder (single-spaced is fine — the parser
-    /// splits on whitespace past the last-name column).
+    /// column ([`DEFAULT_LAST_NAME_WIDTH`] wide), then the free-form remainder
+    /// (single-spaced is fine — the parser splits on whitespace past the
+    /// last-name column).
     fn row(rank: u32, last: &str, rest: &str) -> String {
-        format!("{rank:>3} {}{rest}", pad_last(last))
+        format!(
+            "{rank:>3} {}{rest}",
+            pad_last(last, DEFAULT_LAST_NAME_WIDTH)
+        )
     }
 
     fn parse_one(line: &str) -> RatedPlayer {
-        parse_row(line).expect("row should parse")
+        let width = detect_last_name_width(std::iter::once(line));
+        parse_row(line, width).expect("row should parse")
     }
 
     #[test]
@@ -262,9 +315,21 @@ mod tests {
 
     #[test]
     fn last_name_fills_field_no_separating_space() {
-        // "Imamura-Cornuejols" is exactly LAST_NAME_WIDTH chars and abuts "Toru".
-        let p = parse_one(&row(50, "Imamura-Cornuejols", "Toru 3 Dan 2100 20 JP"));
-        assert_eq!(p.last_name, "Imamura-Cornuejols");
+        // "Imamura-Cornuejols" is exactly DEFAULT_LAST_NAME_WIDTH chars and abuts
+        // "Toru", with no gap to reveal the column boundary on its own — so this
+        // row is parsed alongside a normal one, whose gap lets detection find the
+        // width (the exact-fill row is the minority the mode is robust to).
+        let text = format!(
+            "Elo list for 2026-06-01\n\n{header}\n{a}\n{b}\n",
+            header = "    Name                               Grades         Elo #games Nationality",
+            a = row(50, "Imamura-Cornuejols", "Toru 3 Dan 2100 20 JP"),
+            b = row(3, "Takita", "Hirotaka 2462 7 JP"),
+        );
+        let players = parse_rating_list(&text);
+        let p = players
+            .iter()
+            .find(|p| p.last_name == "Imamura-Cornuejols")
+            .expect("row should parse");
         assert_eq!(p.first_name, "Toru");
     }
 
@@ -288,6 +353,39 @@ mod tests {
         assert_eq!(p.first_name, "Grigoriy");
         assert_eq!(p.rating, 300);
         assert_eq!(p.grade, Some(Grade::kyu(20)));
+    }
+
+    #[test]
+    fn a_narrower_export_is_detected_and_parses() {
+        // A hypothetical export with a 12-char last-name column, narrower than
+        // the default 18 — the width must be detected per file, not hardcoded.
+        let width = 12;
+        let a = format!(
+            "{:>3} {}{}",
+            1,
+            pad_last("Kobayashi", width),
+            "Taichi 5 Dan 2556 55 JP"
+        );
+        let b = format!(
+            "{:>3} {}{}",
+            3,
+            pad_last("Takita", width),
+            "Hirotaka 2462 7 JP"
+        );
+        let text = format!(
+            "Elo list for 2026-06-01\n\
+             \n\
+             {header}\n\
+             {a}\n\
+             {b}\n",
+            header = "    Name             Grades         Elo #games Nationality",
+        );
+        let players = parse_rating_list(&text);
+        assert_eq!(players.len(), 2);
+        assert_eq!(players[0].last_name, "Kobayashi");
+        assert_eq!(players[0].first_name, "Taichi");
+        assert_eq!(players[1].last_name, "Takita");
+        assert_eq!(players[1].first_name, "Hirotaka");
     }
 
     #[test]

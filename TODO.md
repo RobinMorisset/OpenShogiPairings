@@ -20,18 +20,6 @@ Known limitations and future work, roughly ordered by area.
   giving the opponent the win); not handled yet. Byes (`0+`, win) and absences
   (`0-`, loss) are already handled.
 
-
-## FESA rating list
-
-- **Detect the fixed-width column width instead of hardcoding it.** The parser
-  ([`crates/core/src/fesa.rs`](crates/core/src/fesa.rs)) assumes the last-name
-  column is exactly `LAST_NAME_WIDTH` (18) characters. If FESA widens that column
-  — e.g. the day a player with a 19-character last name joins — every row would
-  mis-split. Derive the column boundaries from the file itself (e.g. from the
-  header row's `Name` / `Grades` positions, or by detecting the alignment) so the
-  parser adapts automatically instead of silently breaking.
-
-
 ## Frontend
 
 - **Add a button to load a CSV of player names in the players tab**
