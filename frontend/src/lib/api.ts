@@ -51,8 +51,12 @@ export class ApiError extends Error {
   }
 }
 
-/** Run a fetch and parse the JSON body, throwing an {@link ApiError} on failure. */
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * Run a fetch and return the raw {@link Response}, throwing an {@link ApiError}
+ * on a network failure or a non-2xx status. Callers decode the body (JSON or
+ * text) themselves.
+ */
+async function fetchOk(path: string, init?: RequestInit): Promise<Response> {
   let response: Response;
   try {
     response = await fetch(await apiUrl(path), {
@@ -76,7 +80,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(response.status, message);
   }
 
-  return (await response.json()) as T;
+  return response;
+}
+
+/** Run a fetch and parse the JSON body, throwing an {@link ApiError} on failure. */
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await (await fetchOk(path, init)).json()) as T;
 }
 
 /** Ask the server whether it is up. */
@@ -133,23 +142,7 @@ export function undoTournament(): Promise<TournamentResponse> {
  * an ELO update. Unlike the other endpoints this returns raw text, not JSON.
  */
 export async function fetchAmericanGrid(): Promise<string> {
-  let response: Response;
-  try {
-    response = await fetch(await apiUrl("/api/tournament/american-grid"));
-  } catch (cause) {
-    throw new ApiError(0, cause instanceof Error ? cause.message : String(cause));
-  }
-  if (!response.ok) {
-    let message = `${response.status} ${response.statusText}`;
-    try {
-      const body = await response.json();
-      if (body && typeof body.error === "string") message = body.error;
-    } catch {
-      // Non-JSON error body; keep the status text.
-    }
-    throw new ApiError(response.status, message);
-  }
-  return response.text();
+  return (await fetchOk("/api/tournament/american-grid")).text();
 }
 
 /** Update tournament settings (MacMahon groups, degressive schedule, …). The
