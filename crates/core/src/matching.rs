@@ -12,8 +12,10 @@
 //! each edge `offset - cost`, with `offset` chosen above every cost so all
 //! weights stay ≥ 1, therefore yields the minimum-cost perfect matching.
 //!
-//! Weights are [`i128`] so callers can stack large lexicographic multipliers (the
-//! pairing rule ladder in [`crate::pairing`]) without overflow.
+//! Weights are generic over [`Weight`] so callers can pick a type just wide
+//! enough for their largest lexicographic multiplier — `i64` for a small rule
+//! ladder, `i128` (used by the full ladder in [`crate::pairing`]) when more
+//! headroom is needed.
 //!
 //! The implementation is original — built from the published blossom algorithm,
 //! not ported from any codebase — and is checked against a brute-force oracle in
@@ -21,29 +23,58 @@
 
 use std::collections::VecDeque;
 
+/// Edge-weight type for the blossom solver: a signed integer wide enough to
+/// hold the caller's largest lexicographic multiplier without overflow.
+pub trait Weight:
+    Copy
+    + Ord
+    + std::fmt::Debug
+    + std::ops::Add<Output = Self>
+    + std::ops::Sub<Output = Self>
+    + std::ops::AddAssign
+    + std::ops::SubAssign
+{
+    const ZERO: Self;
+    const ONE: Self;
+    /// Larger than any edge slack that can arise, but small enough to leave
+    /// headroom against overflow when doubled.
+    fn inf() -> Self;
+    /// `self * 2`, used when doubling dual-variable adjustments.
+    fn double(self) -> Self;
+    /// `self / 2`, used when halving slack to keep duals integral.
+    fn half(self) -> Self;
+}
+
+macro_rules! impl_weight {
+    ($($t:ty),* $(,)?) => {$(
+        impl Weight for $t {
+            const ZERO: Self = 0;
+            const ONE: Self = 1;
+            fn inf() -> Self { <$t>::MAX / 4 }
+            fn double(self) -> Self { self * 2 }
+            fn half(self) -> Self { self / 2 }
+        }
+    )*};
+}
+impl_weight!(i32, i64, i128);
+
 /// One graph edge, carrying the *real* endpoints it stands for. For a super-vertex
 /// (contracted blossom) `b`, `g[b][x]` records the best underlying real edge, so
 /// `u`/`v` are always real-vertex indices even when the slot is `g[b][x]`.
 #[derive(Clone, Copy)]
-struct Edge {
+struct Edge<W> {
     u: usize,
     v: usize,
-    w: i128,
+    w: W,
 }
-
-const NIL_EDGE: Edge = Edge { u: 0, v: 0, w: 0 };
-
-/// Larger than any edge slack that can arise, but small enough to leave headroom
-/// against overflow when doubled.
-const INF: i128 = i128::MAX / 4;
 
 /// Working state of the blossom algorithm. Vertices are 1-indexed; indices
 /// `1..=n` are real players and `n+1..=2n` are contracted blossoms.
-struct Blossom {
+struct Blossom<W> {
     n: usize,
     n_x: usize,
-    g: Vec<Vec<Edge>>,
-    lab: Vec<i128>,
+    g: Vec<Vec<Edge<W>>>,
+    lab: Vec<W>,
     mate: Vec<usize>,
     slack: Vec<usize>,
     st: Vec<usize>,
@@ -56,14 +87,19 @@ struct Blossom {
     t: usize,
 }
 
-impl Blossom {
+impl<W: Weight> Blossom<W> {
     fn new(n: usize) -> Self {
         let sz = 2 * n + 1;
+        let nil_edge = Edge {
+            u: 0,
+            v: 0,
+            w: W::ZERO,
+        };
         Blossom {
             n,
             n_x: n,
-            g: vec![vec![NIL_EDGE; sz]; sz],
-            lab: vec![0; sz],
+            g: vec![vec![nil_edge; sz]; sz],
+            lab: vec![W::ZERO; sz],
             mate: vec![0; sz],
             slack: vec![0; sz],
             st: vec![0; sz],
@@ -77,15 +113,15 @@ impl Blossom {
         }
     }
 
-    fn set_edge(&mut self, u: usize, v: usize, w: i128) {
+    fn set_edge(&mut self, u: usize, v: usize, w: W) {
         self.g[u][v] = Edge { u, v, w };
         // Reverse orientation: endpoints swapped (field-named, not positional).
         self.g[v][u] = Edge { u: v, v: u, w };
     }
 
     /// Reduced cost (slack) of an edge; zero means the edge is tight.
-    fn e_delta(&self, e: Edge) -> i128 {
-        self.lab[e.u] + self.lab[e.v] - e.w * 2
+    fn e_delta(&self, e: Edge<W>) -> W {
+        self.lab[e.u] + self.lab[e.v] - e.w.double()
     }
 
     fn update_slack(&mut self, u: usize, x: usize) {
@@ -98,7 +134,7 @@ impl Blossom {
     fn set_slack(&mut self, x: usize) {
         self.slack[x] = 0;
         for u in 1..=self.n {
-            if self.g[u][x].w > 0 && self.st[u] != x && self.s[self.st[u]] == 0 {
+            if self.g[u][x].w > W::ZERO && self.st[u] != x && self.s[self.st[u]] == 0 {
                 self.update_slack(u, x);
             }
         }
@@ -193,7 +229,7 @@ impl Blossom {
         if b > self.n_x {
             self.n_x += 1;
         }
-        self.lab[b] = 0;
+        self.lab[b] = W::ZERO;
         self.s[b] = 0;
         self.mate[b] = self.mate[lca];
         self.flower[b].clear();
@@ -219,8 +255,8 @@ impl Blossom {
 
         self.set_st(b, b);
         for x in 1..=self.n_x {
-            self.g[b][x].w = 0;
-            self.g[x][b].w = 0;
+            self.g[b][x].w = W::ZERO;
+            self.g[x][b].w = W::ZERO;
         }
         for x in 1..=self.n {
             self.flower_from[b][x] = 0;
@@ -231,7 +267,7 @@ impl Blossom {
                 let gxsx = self.g[xs][x];
                 let gxxs = self.g[x][xs];
                 let gbx = self.g[b][x];
-                if gbx.w == 0 || self.e_delta(gxsx) < self.e_delta(gbx) {
+                if gbx.w == W::ZERO || self.e_delta(gxsx) < self.e_delta(gbx) {
                     self.g[b][x] = gxsx;
                     self.g[x][b] = gxxs;
                 }
@@ -274,7 +310,7 @@ impl Blossom {
         self.st[b] = 0;
     }
 
-    fn on_found_edge(&mut self, e: Edge) -> bool {
+    fn on_found_edge(&mut self, e: Edge<W>) -> bool {
         let u = self.st[e.u];
         let v = self.st[e.v];
         if self.s[v] == -1 {
@@ -323,8 +359,8 @@ impl Blossom {
                     continue;
                 }
                 for v in 1..=self.n {
-                    if self.g[u][v].w > 0 && self.st[u] != self.st[v] {
-                        if self.e_delta(self.g[u][v]) == 0 {
+                    if self.g[u][v].w > W::ZERO && self.st[u] != self.st[v] {
+                        if self.e_delta(self.g[u][v]) == W::ZERO {
                             if self.on_found_edge(self.g[u][v]) {
                                 return true;
                             }
@@ -335,10 +371,10 @@ impl Blossom {
                     }
                 }
             }
-            let mut d = INF;
+            let mut d = W::inf();
             for b in (self.n + 1)..=self.n_x {
                 if self.st[b] == b && self.s[b] == 1 {
-                    d = d.min(self.lab[b] / 2);
+                    d = d.min(self.lab[b].half());
                 }
             }
             for x in 1..=self.n_x {
@@ -347,7 +383,7 @@ impl Blossom {
                     if self.s[x] == -1 {
                         d = d.min(delta);
                     } else if self.s[x] == 0 {
-                        d = d.min(delta / 2);
+                        d = d.min(delta.half());
                     }
                 }
             }
@@ -366,9 +402,9 @@ impl Blossom {
             for b in (self.n + 1)..=self.n_x {
                 if self.st[b] == b {
                     if self.s[b] == 0 {
-                        self.lab[b] += d * 2;
+                        self.lab[b] += d.double();
                     } else if self.s[b] == 1 {
-                        self.lab[b] -= d * 2;
+                        self.lab[b] -= d.double();
                     }
                 }
             }
@@ -377,14 +413,14 @@ impl Blossom {
                 if self.st[x] == x
                     && self.slack[x] != 0
                     && self.st[self.slack[x]] != x
-                    && self.e_delta(self.g[self.slack[x]][x]) == 0
+                    && self.e_delta(self.g[self.slack[x]][x]) == W::ZERO
                     && self.on_found_edge(self.g[self.slack[x]][x])
                 {
                     return true;
                 }
             }
             for b in (self.n + 1)..=self.n_x {
-                if self.st[b] == b && self.s[b] == 1 && self.lab[b] == 0 {
+                if self.st[b] == b && self.s[b] == 1 && self.lab[b] == W::ZERO {
                     self.expand_blossom(b);
                 }
             }
@@ -404,7 +440,7 @@ impl Blossom {
             self.st[b] = 0;
             self.flower[b].clear();
         }
-        let mut w_max = 0;
+        let mut w_max = W::ZERO;
         for u in 1..=self.n {
             for v in 1..=self.n {
                 self.flower_from[u][v] = if u == v { u } else { 0 };
@@ -428,7 +464,7 @@ impl Blossom {
 /// full `n × n` matrix; the diagonal is ignored. Costs must be non-negative and
 /// symmetric. On the complete graph every vertex is pairable, so a perfect
 /// matching always exists.
-pub fn min_weight_perfect_matching(cost: &[Vec<i128>]) -> Vec<usize> {
+pub fn min_weight_perfect_matching<W: Weight>(cost: &[Vec<W>]) -> Vec<usize> {
     let n = cost.len();
     assert!(
         n.is_multiple_of(2),
@@ -440,7 +476,7 @@ pub fn min_weight_perfect_matching(cost: &[Vec<i128>]) -> Vec<usize> {
 
     // Reduce min-cost-perfect to max-weight: weight = offset - cost, with offset
     // above every cost so all weights are ≥ 1 (keeping the matching perfect).
-    let mut max_cost = 0i128;
+    let mut max_cost = W::ZERO;
     for (i, row) in cost.iter().enumerate() {
         for (j, &c) in row.iter().enumerate() {
             if i != j && c > max_cost {
@@ -448,7 +484,7 @@ pub fn min_weight_perfect_matching(cost: &[Vec<i128>]) -> Vec<usize> {
             }
         }
     }
-    let offset = max_cost + 1;
+    let offset = max_cost + W::ONE;
 
     let mut bl = Blossom::new(n);
     for (i, row) in cost.iter().enumerate() {
@@ -478,12 +514,12 @@ mod tests {
             // first unmatched vertex
             let i = (0..n).find(|&i| !used[i]).unwrap();
             used[i] = true;
-            let mut best = INF;
+            let mut best = i128::inf();
             for j in (i + 1)..n {
                 if !used[j] {
                     used[j] = true;
                     let sub = rec(cost, used, matched + 2, n);
-                    if sub < INF {
+                    if sub < i128::inf() {
                         best = best.min(cost[i][j] + sub);
                     }
                     used[j] = false;
@@ -578,5 +614,20 @@ mod tests {
             mate[0], 1,
             "should not pair the two most-penalized vertices"
         );
+    }
+
+    #[test]
+    fn works_with_a_narrower_weight_type() {
+        // Same instance as `picks_cheaper_of_two_pairings`, but run with `i64`
+        // weights to confirm the solver isn't secretly tied to `i128`.
+        let cost: Vec<Vec<i64>> = vec![
+            vec![0, 1, 10, 10],
+            vec![1, 0, 10, 10],
+            vec![10, 10, 0, 1],
+            vec![10, 10, 1, 0],
+        ];
+        let mate = min_weight_perfect_matching(&cost);
+        assert_eq!(mate[0], 1);
+        assert_eq!(mate[2], 3);
     }
 }

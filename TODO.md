@@ -14,6 +14,24 @@ Known limitations and future work, roughly ordered by area.
   formats (MacMahon-beyond, hard multi-round constraints) that need constraints a
   plain matching can't express, and by very large fields. Plan: `good_lp` + HiGHS
   first, then CP-SAT.
+- ~~**Make the blossom solver generic over the weight type.**~~ Done:
+  [`min_weight_perfect_matching`](crates/core/src/matching.rs) is now generic
+  over a small internal `Weight` trait (`i32`/`i64`/`i128` implement it).
+  [`pairing.rs`](crates/core/src/pairing.rs)'s `solve_matching` still builds the
+  cost matrix in `i128` (so scoring itself can never overflow), then picks the
+  narrowest of `i32`/`i64`/`i128` that comfortably holds the matrix's largest
+  value before handing it to the solver — most tournaments' ladders fit in
+  `i32`.
+- **Extract the blossom solver into its own crate.** `matching.rs` is fully
+  self-contained (no `use crate::…`, a single pure-function interface, its own
+  brute-force oracle test) and has one consumer, so it's the cleanest extraction
+  candidate in the workspace. Not worth the extra crate today, but pull it out
+  (`crates/matching`, an original MIT-clean `blossom`/min-weight-matching crate)
+  once a trigger fires: a second consumer (CLI, the ILP/CP-SAT backend wanting to
+  A/B against blossom), a publish intent, or independent benchmarking/fuzzing
+  without compiling osp-core. Best done together with the generic-weight change
+  above, so the crate lands with a reusable interface rather than an `i128`-only
+  one.
 - **No-shows.** A player who was paired for a round but did not show up (distinct
   from a game simply not yet recorded) should appear as `0#` in the results
   table. This needs a way to mark a board as a no-show (a new board-result state,

@@ -48,7 +48,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::elo::{estimate_elos, UNRATED_PRIOR_MEAN};
-use crate::matching::min_weight_perfect_matching;
+use crate::matching::{min_weight_perfect_matching, Weight};
 use crate::player::Player;
 use crate::round::{Board, PairingSource, Round};
 use crate::scoring::{compute_scores, Scores};
@@ -60,6 +60,39 @@ use crate::settings::{FloaterStyle, TournamentSettings};
 /// the player last floated the same way. Chosen with many small divisors so the
 /// decay reads smoothly.
 const FLOAT_BASE: i128 = 720;
+
+/// Solve a minimum-weight perfect matching, picking the narrowest edge-weight
+/// type that comfortably fits the cost matrix. Rule costs are built as `i128`
+/// so the ladder's lexicographic multipliers can never overflow while scoring,
+/// but most tournaments' actual ladders (few rules, modest gaps) fit easily in
+/// `i32` or `i64` — narrower arithmetic the blossom solver runs faster with.
+/// Only a ladder that genuinely needs `i128`'s headroom pays for it.
+///
+/// The `/ 16` margin covers the solver's internal doubling and its `MAX / 4`
+/// "infinity" sentinel with room to spare.
+fn solve_matching(cost: &[Vec<i128>]) -> Vec<usize> {
+    let max = cost.iter().flatten().copied().max().unwrap_or(0);
+    if max <= i32::MAX as i128 / 16 {
+        min_weight_perfect_matching(&narrow::<i32>(cost))
+    } else if max <= i64::MAX as i128 / 16 {
+        min_weight_perfect_matching(&narrow::<i64>(cost))
+    } else {
+        min_weight_perfect_matching(cost)
+    }
+}
+
+/// Convert an `i128` cost matrix down to a narrower [`Weight`] type. Panics if
+/// a value doesn't fit — callers must check the bound first (see
+/// [`solve_matching`]).
+fn narrow<W>(cost: &[Vec<i128>]) -> Vec<Vec<W>>
+where
+    W: Weight + TryFrom<i128>,
+    <W as TryFrom<i128>>::Error: std::fmt::Debug,
+{
+    cost.iter()
+        .map(|row| row.iter().map(|&c| W::try_from(c).unwrap()).collect())
+        .collect()
+}
 
 /// The pairing rules. The active subset and its priority order depend on the
 /// mode (see [`active_rules`]); that ordering is the single source of truth for
@@ -857,7 +890,7 @@ fn solve_stable(
             }
         }
     }
-    let mate = min_weight_perfect_matching(&cost);
+    let mate = solve_matching(&cost);
     let mut seen = vec![false; n];
     let mut pairs = Vec::new();
     for i in 0..n {
@@ -1184,7 +1217,7 @@ pub fn pair_round_weighted(
                 cost[p][i] = c;
             }
         }
-        let mate = min_weight_perfect_matching(&cost);
+        let mate = solve_matching(&cost);
         let mut seen = vec![false; vcount];
         for i in 0..vcount {
             if seen[i] {
@@ -1224,6 +1257,39 @@ pub fn pair_round_weighted(
 mod tests {
     use super::*;
     use crate::round::Winner;
+
+    // --- solve_matching's width dispatch -----------------------------------
+
+    #[test]
+    fn solve_matching_matches_i128_regardless_of_chosen_width() {
+        // One instance per width tier: small values (fits i32), values above
+        // i32::MAX/16 but below i64::MAX/16 (fits i64), and values above that
+        // (needs the i128 fallback). All three should agree with a direct
+        // i128 solve on the same instance.
+        let small = vec![
+            vec![0, 1, 10, 10],
+            vec![1, 0, 10, 10],
+            vec![10, 10, 0, 1],
+            vec![10, 10, 1, 0],
+        ];
+        let medium_unit = i32::MAX as i128 / 16 + 1;
+        let medium = vec![
+            vec![0, medium_unit, 10, 10],
+            vec![medium_unit, 0, 10, 10],
+            vec![10, 10, 0, medium_unit],
+            vec![10, 10, medium_unit, 0],
+        ];
+        let huge_unit = i64::MAX as i128 / 16 + 1;
+        let huge = vec![
+            vec![0, huge_unit, 10, 10],
+            vec![huge_unit, 0, 10, 10],
+            vec![10, 10, 0, huge_unit],
+            vec![10, 10, huge_unit, 0],
+        ];
+        for cost in [small, medium, huge] {
+            assert_eq!(solve_matching(&cost), min_weight_perfect_matching(&cost));
+        }
+    }
 
     // --- Weighted pairing -------------------------------------------------
 
