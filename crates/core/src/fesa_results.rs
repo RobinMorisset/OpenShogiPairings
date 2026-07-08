@@ -26,6 +26,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::grid_import::{build_tournament, parse_cell, Cell, GridImportError, RawRow};
+use crate::player::Grade;
 use crate::tournament::Tournament;
 
 /// Fallback last-name column width if detection finds nothing (e.g. an empty
@@ -210,14 +211,15 @@ fn parse_results_row(
         .map_err(|_| bad("unparseable ELO"))?;
 
     // Before the ELO: first-name words, then Nat, then an optional grade. Peel the
-    // grade and Nat off the right; the remainder is the first name.
+    // grade (kept as the player's rank) and Nat off the right; the remainder is the
+    // first name.
     let mut pre = tokens[..elo_idx].to_vec();
-    if pre.len() >= 2
-        && (pre[pre.len() - 1].eq_ignore_ascii_case("dan")
-            || pre[pre.len() - 1].eq_ignore_ascii_case("kyu"))
-        && pre[pre.len() - 2].chars().all(|c| c.is_ascii_digit())
-    {
-        pre.truncate(pre.len() - 2);
+    let mut grade = None;
+    if pre.len() >= 2 {
+        if let Some(g) = parse_grade(pre[pre.len() - 2], pre[pre.len() - 1]) {
+            grade = Some(g);
+            pre.truncate(pre.len() - 2);
+        }
     }
     let nationality = pre.pop().map(str::to_string);
     let first_name = pre.join(" ");
@@ -259,10 +261,24 @@ fn parse_results_row(
             first_name,
             nationality,
             rating,
+            grade,
             cells,
         },
         strength,
     ))
+}
+
+/// Parse a grade column pair like `("4", "Dan")` or `("1", "Kyu")` into a
+/// [`Grade`]; `None` if the unit isn't dan/kyu or the level isn't a number.
+fn parse_grade(level: &str, unit: &str) -> Option<Grade> {
+    let level: u32 = level.parse().ok()?;
+    if unit.eq_ignore_ascii_case("dan") {
+        Some(Grade::dan(level))
+    } else if unit.eq_ignore_ascii_case("kyu") {
+        Some(Grade::kyu(level))
+    } else {
+        None
+    }
 }
 
 /// A rating token: a 3-4 digit number, or any digits with a trailing `*` (the
@@ -389,5 +405,15 @@ mod tests {
         assert_eq!(t.rounds.len(), 6);
         let pucher = find(&t, "Pucher", "Olivier");
         assert_eq!(strengths[&pucher.id], 1873.0); // 1887 - 14
+    }
+
+    #[test]
+    fn the_grade_column_is_parsed_into_a_rank() {
+        use crate::Grade;
+        let (t, _) = wosc();
+        assert_eq!(find(&t, "Kobayashi", "Taichi").grade, Some(Grade::dan(4)));
+        assert_eq!(find(&t, "Kamo", "Dan").grade, Some(Grade::kyu(1)));
+        // A pre-unrated player has no grade column.
+        assert_eq!(find(&t, "Hayakawa", "Akio").grade, None);
     }
 }

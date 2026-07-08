@@ -214,6 +214,7 @@ mod tests {
                 first_name: "NICOLAS".into(),
                 rating: 1834,
                 games: 40,
+                grade: None,
                 nationality: "FR".into(),
             },
             RatedPlayer {
@@ -221,6 +222,7 @@ mod tests {
                 first_name: "Here".into(),
                 rating: 1200,
                 games: 5,
+                grade: None,
                 nationality: "FR".into(),
             },
         ];
@@ -237,6 +239,7 @@ mod tests {
             first_name: first.into(),
             rating,
             games: 30,
+            grade: None,
             nationality: "FR".into(),
         }
     }

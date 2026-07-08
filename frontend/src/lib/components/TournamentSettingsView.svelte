@@ -2,9 +2,18 @@
   import { untrack } from "svelte";
   import { _ } from "svelte-i18n";
   import { TIEBREAKS } from "../types";
-  import type { HandicapPolicy, Player, Tiebreak, TournamentSettings } from "../types";
+  import type {
+    GradeKind,
+    HandicapPolicy,
+    MacMahonThreshold,
+    Player,
+    Tiebreak,
+    ThresholdCriterion,
+    TournamentSettings,
+  } from "../types";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
   import { saveSettings } from "../tournamentFile";
+  import { gradeRank } from "../grade";
 
   interface Props {
     settings: TournamentSettings;
@@ -42,17 +51,70 @@
     );
   });
 
-  // Keep only positive integers, then sort ascending — the server's canonical
-  // order, used to compare our local state against what it stored.
-  function cleanSorted(arr: number[]): number[] {
-    return arr
-      .filter((v) => Number.isFinite(v) && v >= 1)
-      .map((v) => Math.round(v))
-      .sort((a, b) => a - b);
+  // A threshold row being edited: either an ELO value or a dan/kyu grade
+  // (only the fields for the active `kind` are meaningful), plus its optional
+  // degressive stopping round (null = never drops).
+  type ThresholdRow = {
+    kind: "elo" | "grade";
+    value: number;
+    gradeKind: GradeKind;
+    gradeLevel: number;
+    dropsAfterRound: number | null;
+  };
+
+  // A key that sorts ELO thresholds by value, then grade thresholds by
+  // strength — mirrors the server's `ThresholdCriterion::sort_key`.
+  function criterionSortKey(c: ThresholdCriterion): [number, number] {
+    return c.kind === "elo" ? [0, c.value] : [1, gradeRank(c.grade)];
   }
 
-  function eq(a: number[], b: number[]): boolean {
-    return a.length === b.length && a.every((v, i) => v === b[i]);
+  function criterionEquals(a: ThresholdCriterion, b: ThresholdCriterion): boolean {
+    if (a.kind !== b.kind) return false;
+    if (a.kind === "elo") return a.value === (b as { kind: "elo"; value: number }).value;
+    const bg = (b as { kind: "grade"; grade: { kind: GradeKind; level: number } }).grade;
+    return a.grade.kind === bg.kind && a.grade.level === bg.level;
+  }
+
+  // Clean, sort and de-duplicate (by criterion) into the server's canonical
+  // form — used both to persist and to compare our local rows against what's
+  // stored.
+  function cleanThresholds(rows: ThresholdRow[]): MacMahonThreshold[] {
+    return rows
+      .filter((r) =>
+        r.kind === "elo"
+          ? Number.isFinite(r.value) && r.value >= 1
+          : Number.isFinite(r.gradeLevel) && r.gradeLevel >= 1,
+      )
+      .map((r) => ({
+        criterion:
+          r.kind === "elo"
+            ? ({ kind: "elo", value: Math.round(r.value) } as const)
+            : ({
+                kind: "grade",
+                grade: { kind: r.gradeKind, level: Math.round(r.gradeLevel) },
+              } as const),
+        drops_after_round:
+          r.dropsAfterRound != null && Number.isFinite(r.dropsAfterRound) && r.dropsAfterRound >= 1
+            ? Math.round(r.dropsAfterRound)
+            : null,
+      }))
+      .sort((a, b) => {
+        const [at, av] = criterionSortKey(a.criterion);
+        const [bt, bv] = criterionSortKey(b.criterion);
+        return at - bt || av - bv;
+      })
+      .filter((v, i, arr) => i === 0 || !criterionEquals(v.criterion, arr[i - 1].criterion));
+  }
+
+  function eqThresholds(a: MacMahonThreshold[], b: MacMahonThreshold[]): boolean {
+    return (
+      a.length === b.length &&
+      a.every(
+        (v, i) =>
+          criterionEquals(v.criterion, b[i].criterion) &&
+          (v.drops_after_round ?? null) === (b[i].drops_after_round ?? null),
+      )
+    );
   }
 
   function eqStr(a: string[], b: string[]): boolean {
@@ -76,8 +138,8 @@
 
   // Local editable rows, kept in *entry* order (not sorted) so the row a referee
   // is editing never jumps or shows a stale value. The inputs bind to these.
-  let thresholds = $state<number[]>([]);
-  let removals = $state<number[]>([]);
+  let thresholds = $state<ThresholdRow[]>([]);
+  let airtightRounds = $state<number | null>(null);
   let clubEnabled = $state(false);
   let clubRounds = $state<number | null>(null);
   let exemptClubs = $state<string[]>([]);
@@ -112,7 +174,7 @@
   // only, not our own writes.
   $effect(() => {
     const sThresholds = settings.macmahon_thresholds;
-    const sRemovals = settings.macmahon_removals;
+    const sAirtight = settings.airtight_groups_rounds ?? null;
     const sEnabled = settings.club_protection_enabled;
     const sRounds = settings.club_protection_rounds ?? null;
     const sExempt = settings.club_protection_exempt_clubs;
@@ -125,8 +187,8 @@
     const sEloProv = settings.elo_provisional_multiplier_percent ?? 200;
     untrack(() => {
       const matches =
-        eq(cleanSorted(thresholds), sThresholds) &&
-        eq(cleanSorted(removals), sRemovals) &&
+        eqThresholds(cleanThresholds(thresholds), sThresholds) &&
+        (airtightRounds ?? null) === sAirtight &&
         clubEnabled === sEnabled &&
         (clubRounds ?? null) === sRounds &&
         eqStr(normExempt(exemptClubs), sExempt) &&
@@ -138,8 +200,14 @@
         eloKPercent === sEloK &&
         eloProvisionalPercent === sEloProv;
       if (!matches) {
-        thresholds = [...sThresholds];
-        removals = [...sRemovals];
+        thresholds = sThresholds.map((t) => ({
+          kind: t.criterion.kind,
+          value: t.criterion.kind === "elo" ? t.criterion.value : 1500,
+          gradeKind: t.criterion.kind === "grade" ? t.criterion.grade.kind : "dan",
+          gradeLevel: t.criterion.kind === "grade" ? t.criterion.grade.level : 1,
+          dropsAfterRound: t.drops_after_round ?? null,
+        }));
+        airtightRounds = sAirtight;
         clubEnabled = sEnabled;
         clubRounds = sRounds;
         exemptClubs = [...sExempt];
@@ -156,14 +224,10 @@
 
   function persist() {
     // Send the current values; the server normalizes them (sorts/de-dups the
-    // MacMahon lists, caps the removals, trims/de-dups the exempt clubs).
+    // MacMahon thresholds, trims/de-dups the exempt clubs).
     onUpdate({
-      macmahon_thresholds: thresholds
-        .filter((v) => Number.isFinite(v) && v >= 1)
-        .map((v) => Math.round(v)),
-      macmahon_removals: removals
-        .filter((v) => Number.isFinite(v) && v >= 1)
-        .map((v) => Math.round(v)),
+      macmahon_thresholds: cleanThresholds(thresholds),
+      airtight_groups_rounds: airtightRounds,
       club_protection_enabled: clubEnabled,
       club_protection_rounds: clubRounds,
       club_protection_exempt_clubs: exemptClubs
@@ -282,7 +346,15 @@
   }
 
   function addThreshold() {
-    thresholds.push(thresholds.length ? Math.max(...thresholds) + 100 : 1500);
+    const eloValues = thresholds.filter((t) => t.kind === "elo").map((t) => t.value);
+    const maxValue = eloValues.length ? Math.max(...eloValues) : 1400;
+    thresholds.push({
+      kind: "elo",
+      value: maxValue + 100,
+      gradeKind: "dan",
+      gradeLevel: 1,
+      dropsAfterRound: null,
+    });
     persist();
   }
 
@@ -291,89 +363,89 @@
     persist();
   }
 
-  function editThreshold(i: number, raw: string) {
-    thresholds[i] = Number(raw);
+  function editThresholdKind(i: number, kind: "elo" | "grade") {
+    thresholds[i].kind = kind;
     persist();
   }
 
-  function addRemoval() {
-    // Default to the round of the last removal (so repeated clicks stack drops on
-    // the same round), or round 1 for the first one.
-    removals.push(removals.length ? Math.max(...removals) : 1);
+  function editThresholdValue(i: number, raw: string) {
+    thresholds[i].value = Number(raw);
     persist();
   }
 
-  function removeRemoval(i: number) {
-    removals.splice(i, 1);
+  function editThresholdGradeLevel(i: number, raw: string) {
+    thresholds[i].gradeLevel = Number(raw);
     persist();
   }
 
-  function editRemoval(i: number, raw: string) {
-    removals[i] = Number(raw);
+  function editThresholdGradeKind(i: number, kind: GradeKind) {
+    thresholds[i].gradeKind = kind;
     persist();
   }
 
-  // Normalized (sorted, de-duplicated, capped) view of the local rows — drives the
+  function toggleThresholdDrop(i: number, on: boolean) {
+    thresholds[i].dropsAfterRound = on ? (thresholds[i].dropsAfterRound ?? 1) : null;
+    persist();
+  }
+
+  function editThresholdDropRound(i: number, raw: string) {
+    const n = Math.round(Number(raw));
+    thresholds[i].dropsAfterRound = Number.isFinite(n) && n >= 1 ? n : 1;
+    persist();
+  }
+
+  function setAirtightEnabled(on: boolean) {
+    airtightRounds = on ? (airtightRounds ?? 1) : null;
+    persist();
+  }
+
+  function editAirtightRounds(raw: string) {
+    const n = Math.round(Number(raw));
+    airtightRounds = Number.isFinite(n) && n >= 1 ? n : 1;
+    persist();
+  }
+
+  // Normalized (sorted, de-duplicated) view of the local rows — drives the
   // previews so they always reflect what the server will store, updated live on
   // each edit rather than lagging a round-trip.
-  const normThresholds = $derived.by(() => {
-    const sorted = cleanSorted(thresholds);
-    return sorted.filter((v, i) => i === 0 || v !== sorted[i - 1]);
-  });
-  const normRemovals = $derived(cleanSorted(removals).slice(0, normThresholds.length));
+  const normalized = $derived(cleanThresholds(thresholds));
 
-  // Can't schedule more removals than there are (distinct) thresholds to drop.
-  const canAddRemoval = $derived(removals.length < normThresholds.length);
+  // Whether a player meets one threshold, mirroring the server's
+  // `ThresholdCriterion::met_by`: a missing rating/grade never meets the
+  // corresponding kind of threshold.
+  function meetsCriterion(c: ThresholdCriterion, p: Player): boolean {
+    if (c.kind === "elo") return p.rating != null && p.rating >= c.value;
+    return p.grade != null && gradeRank(p.grade) >= gradeRank(c.grade);
+  }
 
-  // How many registered players fall into each MacMahon band — unrated
-  // players and those below the first threshold count as band 0, mirroring
-  // the server's own point calculation (one point per threshold reached).
+  // A player's MacMahon starting points: the number of normalized thresholds
+  // they meet. ELO and grade thresholds are independent axes, so — unlike a
+  // single-axis ELO ladder — meeting one doesn't imply meeting any other in
+  // particular; only the *count* is well-defined, not a contiguous "band".
+  function playerPoints(p: Player): number {
+    return normalized.filter((t) => meetsCriterion(t.criterion, p)).length;
+  }
+
+  // How many registered players land on each starting-points value, 0..total.
   const bandPlayerCounts = $derived.by(() => {
-    const t = normThresholds;
-    const counts = new Array(t.length + 1).fill(0);
-    for (const p of players) {
-      let band = 0;
-      if (p.rating != null) {
-        for (const threshold of t) {
-          if (p.rating >= threshold) band++;
-          else break;
-        }
-      }
-      counts[band]++;
-    }
+    const counts = new Array(normalized.length + 1).fill(0);
+    for (const p of players) counts[playerPoints(p)]++;
     return counts;
   });
 
-  // Preview of the resulting bands, e.g. "below 1200 → 0".
+  // Preview of the resulting starting-points histogram.
   const bands = $derived.by(() => {
-    const t = normThresholds;
-    const rows: { label: string; points: number; count: number }[] = [];
-    if (t.length === 0) return rows;
-    const counts = bandPlayerCounts;
-    rows.push({
-      label: $_("settings.bandBelow", { values: { value: t[0] } }),
-      points: 0,
-      count: counts[0],
-    });
-    for (let i = 0; i < t.length; i++) {
-      const hi = t[i + 1];
-      rows.push({
-        label:
-          hi != null
-            ? $_("settings.bandRange", { values: { lo: t[i], hi: hi - 1 } })
-            : $_("settings.bandAndAbove", { values: { value: t[i] } }),
-        points: i + 1,
-        count: counts[i + 1],
-      });
-    }
-    return rows;
+    if (normalized.length === 0) return [];
+    return bandPlayerCounts.map((count, points) => ({ points, count }));
   });
 
   // Preview of how the starting-point spread shrinks over the rounds, driven by
-  // the normalized removal schedule.
+  // each threshold's own drop round.
   const schedule = $derived.by(() => {
-    const total = normThresholds.length;
-    const rem = normRemovals;
+    const total = normalized.length;
+    const rem = normalized
+      .map((t) => t.drops_after_round)
+      .filter((r): r is number => r != null);
     if (total === 0 || rem.length === 0) return [];
     const counts = new Map<number, number>();
     for (const r of rem) counts.set(r, (counts.get(r) ?? 0) + 1);
@@ -459,17 +531,65 @@
   </p>
 
   <div class="thresholds">
-    {#each thresholds as v, i (i)}
+    {#each thresholds as row, i (i)}
       <div class="threshold-row">
-        <input
-          type="number"
-          min="1"
-          step="1"
-          class="threshold"
-          value={v}
+        <select
+          class="threshold-kind"
+          value={row.kind}
           disabled={busy}
-          onchange={(e) => editThreshold(i, e.currentTarget.value)}
-        />
+          onchange={(e) => editThresholdKind(i, e.currentTarget.value as "elo" | "grade")}
+        >
+          <option value="elo">{$_("settings.thresholdKindElo")}</option>
+          <option value="grade">{$_("settings.thresholdKindGrade")}</option>
+        </select>
+        {#if row.kind === "elo"}
+          <input
+            type="number"
+            min="1"
+            step="1"
+            class="threshold"
+            value={row.value}
+            disabled={busy}
+            onchange={(e) => editThresholdValue(i, e.currentTarget.value)}
+          />
+        {:else}
+          <input
+            type="number"
+            min="1"
+            step="1"
+            class="threshold narrow"
+            value={row.gradeLevel}
+            disabled={busy}
+            onchange={(e) => editThresholdGradeLevel(i, e.currentTarget.value)}
+          />
+          <select
+            class="threshold-kind"
+            value={row.gradeKind}
+            disabled={busy}
+            onchange={(e) => editThresholdGradeKind(i, e.currentTarget.value as GradeKind)}
+          >
+            <option value="dan">{$_("settings.gradeKindDan")}</option>
+            <option value="kyu">{$_("settings.gradeKindKyu")}</option>
+          </select>
+        {/if}
+        <label class="check drop-check">
+          <input
+            type="checkbox"
+            checked={row.dropsAfterRound != null}
+            disabled={busy}
+            onchange={(e) => toggleThresholdDrop(i, e.currentTarget.checked)}
+          />
+          {$_("settings.dropAfterRoundCheckbox")}
+          <input
+            type="number"
+            min="1"
+            step="1"
+            class="threshold narrow"
+            value={row.dropsAfterRound ?? 1}
+            disabled={busy || row.dropsAfterRound == null}
+            onchange={(e) => editThresholdDropRound(i, e.currentTarget.value)}
+          />
+        </label>
         <button
           type="button"
           class="remove"
@@ -496,7 +616,9 @@
       <ul>
         {#each bands as b (b.points)}
           <li>
-            <span class="band">{b.label}</span> → <strong>{b.points}</strong>
+            <strong>
+              {$_(b.points === 1 ? "settings.pointsValueSingular" : "settings.pointsValuePlural", { values: { points: b.points } })}
+            </strong>
             <span class="band-count">
               ({$_(b.count === 1 ? "settings.playerCountSingular" : "settings.playerCountPlural", { values: { count: b.count } })})
             </span>
@@ -513,40 +635,6 @@
         {$_("settings.degressiveDesc")}
       </p>
 
-      <div class="thresholds">
-        {#each removals as r, i (i)}
-          <div class="threshold-row">
-            <span class="prefix">{$_("settings.dropPrefix")}</span>
-            <input
-              type="number"
-              min="1"
-              step="1"
-              class="threshold narrow"
-              value={r}
-              disabled={busy}
-              onchange={(e) => editRemoval(i, e.currentTarget.value)}
-            />
-            <button
-              type="button"
-              class="remove"
-              disabled={busy}
-              title={$_("settings.removeDrop")}
-              onclick={() => removeRemoval(i)}>✕</button
-            >
-          </div>
-        {/each}
-        {#if removals.length === 0}
-          <p class="muted">{$_("settings.noDrops")}</p>
-        {/if}
-        <button
-          type="button"
-          class="ghost small"
-          disabled={busy || !canAddRemoval}
-          title={canAddRemoval ? "" : $_("settings.cantDropMore")}
-          onclick={addRemoval}>{$_("settings.addDrop")}</button
-        >
-      </div>
-
       {#if schedule.length > 0}
         <div class="preview">
           <h4>{$_("settings.spreadOverRounds")}</h4>
@@ -561,6 +649,35 @@
           </ul>
         </div>
       {/if}
+    </div>
+  {/if}
+
+  {#if thresholds.length > 0}
+    <div class="section">
+      <h3>{$_("settings.airtightGroupsTitle")}</h3>
+      <p class="desc">
+        {$_("settings.airtightGroupsDesc")}
+      </p>
+
+      <label class="check">
+        <input
+          type="checkbox"
+          checked={airtightRounds != null}
+          disabled={busy}
+          onchange={(e) => setAirtightEnabled(e.currentTarget.checked)}
+        />
+        {$_("settings.onlyFirstRoundsPrefix")}
+        <input
+          type="number"
+          min="1"
+          step="1"
+          class="threshold narrow"
+          value={airtightRounds ?? 1}
+          disabled={busy || airtightRounds == null}
+          onchange={(e) => editAirtightRounds(e.currentTarget.value)}
+        />
+        {$_("settings.onlyFirstRoundsSuffix")}
+      </label>
     </div>
   {/if}
 
@@ -904,10 +1021,6 @@
     font-size: 0.9rem;
     line-height: 1;
   }
-  .prefix {
-    color: var(--text-strong);
-    font-size: 0.9rem;
-  }
   .threshold {
     width: 6rem;
     background: var(--bg-inset);
@@ -919,6 +1032,14 @@
   }
   .threshold.narrow {
     width: 4rem;
+  }
+  .threshold-kind {
+    background: var(--bg-inset);
+    color: inherit;
+    border: 1px solid var(--border-soft);
+    border-radius: 0.4rem;
+    padding: 0.3rem 0.45rem;
+    font: inherit;
   }
   .check {
     display: flex;
@@ -933,6 +1054,9 @@
   }
   .check + .check {
     margin-top: 0.4rem;
+  }
+  .drop-check {
+    white-space: nowrap;
   }
   .club-sub {
     margin: 0.8rem 0 0 1.6rem;

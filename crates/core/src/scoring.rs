@@ -89,7 +89,7 @@ pub(crate) fn compute_scores(
     let mut by_id: HashMap<Uuid, PlayerScore> = players
         .iter()
         .map(|p| {
-            let macmahon = settings.macmahon_points_at(p.rating, rounds_played);
+            let macmahon = settings.macmahon_points_at(p.rating, p.grade, rounds_played);
             // Manual bonuses/maluses are folded in alongside MacMahon starting
             // points, before any round is replayed, so they shape both the
             // standings and the score-gap pairing weight from here on. The
@@ -193,6 +193,7 @@ pub(crate) fn compute_scores(
 mod tests {
     use super::*;
     use crate::round::{Board, CupStage};
+    use crate::settings::MacMahonThreshold;
 
     fn player(tid: u32, rating: Option<u32>) -> Player {
         Player {
@@ -201,6 +202,7 @@ mod tests {
             last_name: format!("P{tid}"),
             first_name: String::new(),
             rating,
+            grade: None,
             fesa_games: None,
             nationality: None,
             club: None,
@@ -253,7 +255,7 @@ mod tests {
             completed: true,
         };
         let settings = TournamentSettings {
-            macmahon_thresholds: vec![1500],
+            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
         };
         let scores = compute_scores(&[a.clone(), b.clone()], &settings, &[round]);

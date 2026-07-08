@@ -111,6 +111,7 @@ pub(crate) fn build_tournament(
                 last_name: row.last_name.clone(),
                 first_name: Some(row.first_name.clone()),
                 rating: row.rating,
+                grade: row.grade,
                 fesa_games: None,
                 nationality: row.nationality.clone(),
                 club: None,
@@ -252,6 +253,9 @@ pub(crate) struct RawRow {
     pub(crate) first_name: String,
     pub(crate) nationality: Option<String>,
     pub(crate) rating: Option<u32>,
+    /// The player's dan/kyu grade, if the source carries one. The American grid
+    /// doesn't (always `None`); a FESA result table does.
+    pub(crate) grade: Option<crate::player::Grade>,
     pub(crate) cells: Vec<Cell>,
 }
 
@@ -402,6 +406,7 @@ fn parse_row(
         first_name,
         nationality,
         rating,
+        grade: None, // the American grid has no grade column
         cells,
     })
 }

@@ -5,4 +5,4 @@
  * explained in the vocabulary of its rules. Mirrors [`Rule`] exactly (minus any
  * explanation-internal tiebreakers, which carry no meaning to a referee).
  */
-export type RuleId = "rematch" | "score_gap" | "float_repeat" | "floater_selection" | "club" | "fold" | "bye_selection" | "elo_gap";
+export type RuleId = "rematch" | "airtight_groups" | "score_gap" | "float_repeat" | "floater_selection" | "club" | "fold" | "bye_selection" | "elo_gap";

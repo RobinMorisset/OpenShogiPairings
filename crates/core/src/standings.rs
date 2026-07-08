@@ -196,6 +196,7 @@ pub fn compute_standings(
 mod tests {
     use super::*;
     use crate::round::{Board, PairingSource, Winner};
+    use crate::settings::{MacMahonThreshold, ThresholdCriterion};
 
     fn player(tid: u32, rating: Option<u32>) -> Player {
         Player {
@@ -204,6 +205,7 @@ mod tests {
             last_name: format!("P{tid}"),
             first_name: String::new(),
             rating,
+            grade: None,
             fesa_games: None,
             nationality: None,
             club: None,
@@ -276,7 +278,7 @@ mod tests {
         let b = player(2, Some(1600));
         let rounds = vec![round(1, vec![board(a.id, b.id, Winner::Player1)])];
         let settings = TournamentSettings {
-            macmahon_thresholds: vec![1500],
+            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
         };
         let standings = compute_standings(&[a.clone(), b.clone()], &settings, &rounds);
@@ -305,8 +307,10 @@ mod tests {
         let b = player(2, Some(1000));
         let rounds = vec![round(1, vec![board(a.id, b.id, Winner::Player1)])];
         let settings = TournamentSettings {
-            macmahon_thresholds: vec![1500],
-            macmahon_removals: vec![1],
+            macmahon_thresholds: vec![MacMahonThreshold {
+                criterion: ThresholdCriterion::Elo { value: 1500 },
+                drops_after_round: Some(1),
+            }],
             ..Default::default()
         };
         let standings = compute_standings(&[a.clone(), b.clone()], &settings, &rounds);
@@ -337,7 +341,7 @@ mod tests {
             round(2, vec![board(a.id, c.id, Winner::Player1)]),
         ];
         let settings = TournamentSettings {
-            macmahon_thresholds: vec![1500],
+            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
         };
         let standings = compute_standings(&[a.clone(), b.clone(), c.clone()], &settings, &rounds);
@@ -529,7 +533,7 @@ mod tests {
             f.clone(),
         ];
         let base = TournamentSettings {
-            macmahon_thresholds: vec![1500],
+            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
         };
         let pos = |st: &[Standing], id| st.iter().position(|s| s.player_id == id).unwrap();
