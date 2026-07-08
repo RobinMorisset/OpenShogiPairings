@@ -19,6 +19,7 @@ Known limitations and future work, roughly ordered by area.
   table. This needs a way to mark a board as a no-show (a new board-result state,
   giving the opponent the win); not handled yet. Byes (`0+`, win) and absences
   (`0-`, loss) are already handled.
+- **Weak club protection** Intermediate between normal and exempt.
 
 ## Frontend
 
@@ -38,6 +39,14 @@ with clients picking which to connect to. Design:
   — read it from an environment variable, falling back to the current default
   when unset.
 
+- **OAuth authentication**
+
+- **Log of which user took which action**
+
 ## Other
 
 - **Webhook for pushing results and pulling players** See https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification
+
+- **Team tournaments**
+
+- **Standings by direct confrontation**
