@@ -974,8 +974,9 @@
      own separators. */
   fieldset.swiss-fieldset {
     border: none;
-    margin: 0;
-    padding: 0;
+    border-top: 1px solid var(--border-divider);
+    margin: 1.75rem 0 0;
+    padding: 1rem 0 0;
     min-width: 0;
   }
   fieldset.swiss-fieldset:disabled {
