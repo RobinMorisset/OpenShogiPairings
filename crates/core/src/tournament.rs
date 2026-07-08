@@ -227,11 +227,7 @@ impl Tournament {
         if new.last_name.trim().is_empty() {
             return Err(TournamentError::EmptyPlayerName);
         }
-        let player = self
-            .players
-            .iter_mut()
-            .find(|p| p.id == id)
-            .ok_or(TournamentError::PlayerNotFound(id))?;
+        let player = self.player_mut(id)?;
         // Reuse the normalization in `from_new`, but keep the existing id.
         let normalized = Player::from_new(new);
         player.last_name = normalized.last_name;
@@ -363,11 +359,7 @@ impl Tournament {
         id: Uuid,
         eligible: bool,
     ) -> Result<&Player, TournamentError> {
-        let player = self
-            .players
-            .iter_mut()
-            .find(|p| p.id == id)
-            .ok_or(TournamentError::PlayerNotFound(id))?;
+        let player = self.player_mut(id)?;
         player.eligible = eligible;
         Ok(player)
     }
@@ -391,11 +383,7 @@ impl Tournament {
         if delta == 0 {
             return Err(TournamentError::ZeroPointAdjustment);
         }
-        let player = self
-            .players
-            .iter_mut()
-            .find(|p| p.id == player_id)
-            .ok_or(TournamentError::PlayerNotFound(player_id))?;
+        let player = self.player_mut(player_id)?;
         player.adjustments.push(PointAdjustment {
             id: Uuid::new_v4(),
             delta,
@@ -414,11 +402,7 @@ impl Tournament {
         player_id: Uuid,
         adjustment_id: Uuid,
     ) -> Result<&Player, TournamentError> {
-        let player = self
-            .players
-            .iter_mut()
-            .find(|p| p.id == player_id)
-            .ok_or(TournamentError::PlayerNotFound(player_id))?;
+        let player = self.player_mut(player_id)?;
         let before = player.adjustments.len();
         player.adjustments.retain(|a| a.id != adjustment_id);
         if player.adjustments.len() == before {
@@ -882,7 +866,7 @@ impl Tournament {
                 });
             }
         }
-        if self.players.iter().any(|p| p.id == id) {
+        if self.player(id).is_some() {
             Ok(ScopeReason::Absent)
         } else {
             Err(TournamentError::PlayerNotFound(id))
@@ -947,8 +931,8 @@ impl Tournament {
                 if matches!(board.source, PairingSource::Cup { .. }) {
                     return Err(TournamentError::HandicapNotAllowedForCup);
                 }
-                let rating = |id| self.players.iter().find(|p| p.id == id).and_then(|p| p.rating);
-                let giver = Self::rating_giver(rating(board.player1), rating(board.player2))
+                let (p1, p2) = (board.player1, board.player2);
+                let giver = Self::rating_giver(self.player_rating(p1), self.player_rating(p2))
                     .ok_or(TournamentError::HandicapNeedsRatingDifference)?;
                 Some(HandicapGame { handicap, giver })
             }
@@ -965,8 +949,10 @@ impl Tournament {
         if matches!(board.source, PairingSource::Cup { .. }) {
             return None;
         }
-        let rating = |id| self.players.iter().find(|p| p.id == id).and_then(|p| p.rating);
-        crate::handicap::suggested_handicap(rating(board.player1), rating(board.player2))
+        crate::handicap::suggested_handicap(
+            self.player_rating(board.player1),
+            self.player_rating(board.player2),
+        )
     }
 
     /// Which side gives the handicap, given the two players' ratings: the higher
@@ -981,6 +967,24 @@ impl Tournament {
             (None, Some(_)) => Some(Winner::Player2),
             _ => None, // equal ratings or both unrated
         }
+    }
+
+    /// Immutable access to a player by id.
+    fn player(&self, id: Uuid) -> Option<&Player> {
+        self.players.iter().find(|p| p.id == id)
+    }
+
+    /// Mutable access to a player by id, or [`TournamentError::PlayerNotFound`].
+    fn player_mut(&mut self, id: Uuid) -> Result<&mut Player, TournamentError> {
+        self.players
+            .iter_mut()
+            .find(|p| p.id == id)
+            .ok_or(TournamentError::PlayerNotFound(id))
+    }
+
+    /// A player's registration rating, if the player exists and is rated.
+    fn player_rating(&self, id: Uuid) -> Option<u32> {
+        self.player(id).and_then(|p| p.rating)
     }
 
     /// Immutable access to a board by round number and index.
