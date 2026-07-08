@@ -1,26 +1,158 @@
 # OpenShogiPairings
 
 Tournament management software for shogi, built to fit shogi's needs rather than
-reusing go/chess software. Designed around a **client/server** architecture so
-that multiple referees can edit the same tournament from their own machines, and
-so that additional clients (a CLI for quick simulations, a Tauri desktop app) can
-be added over time.
+reusing go/chess software. Built around a **client/server** architecture so
+that multiple referees can edit the same tournament live, from their own
+machines — as a portable single-file desktop app, or hosted on the internet and
+reached from a browser.
+
+## Features
+
+A tour of what OpenShogiPairings does for the referee actually running a
+tournament. For how it's built, see [Architecture](#architecture) below.
+
+### Shogi-specific
+
+- **MacMahon groups**, with thresholds on either ELO rating or dan/kyu grade
+  (freely mixed), and an optional **degressive ("accelerated") schedule** that
+  lets a starting-point head start fade out over the first few rounds.
+- **Hybrid direct-elimination cup** alongside the Swiss (the French / European
+  Championship format): top 8/16/32/64 eligible players play a seeded bracket
+  over the first rounds, eliminated players drop back into the Swiss, and the
+  Standings tab shows the podium medals.
+- **Handicap games**, with a recommended handicap (FFS Annexe 7, from the
+  rating gap) suggested automatically, and draws-before-the-decisive-game
+  recorded for ELO purposes.
+- **FESA rating list integration**: registration autocompletes name, ELO, and
+  grade from the federation's list, refreshable on demand; a completed round
+  can be exported as an **American Grid** cross-table for the federation's
+  ELO update, and a grid can be imported back to rebuild a tournament.
+- **Manual point adjustments** (a bonus or penalty with a mandatory reason),
+  for corrections outside the normal scoring.
+
+### Exotic pairing options
+
+- **Experimental ELO-based pairing mode**: ignores MacMahon and Swiss score
+  groups entirely and instead maintains a live Bayesian estimate of every
+  player's strength, pairing each round to minimize the estimated ELO gap —
+  a "continuous Swiss" for fields where a smooth strength axis fits better
+  than integer points.
+- **Club protection**, avoiding pairing players from the same club, optionally
+  limited to the first N rounds and with specific clubs (e.g. the host club)
+  exempted.
+- **Airtight groups**: for the first N rounds, forbid pairing players with a
+  different MacMahon point total, ahead of the usual score-gap penalty.
+- **Floater selection style** — classic Swiss (the strongest of the lower
+  group floats up) or median Swiss (the median floats up) — when a score
+  group must pair across group lines.
+
+### Convenience & ergonomics
+
+- **"Why these pairings?"**: every round explains itself — a per-board
+  compromise ledger, a round-level report of which rules had to bend, and a
+  counterfactual probe ("why weren't these two paired?" / "why were they?")
+  that shows exactly what forcing or forbidding a pairing would cost.
+- **Click-to-edit** any player cell in place; forced pairings and a forced
+  bye when hand-tuning a round draft.
+- **Print** pairings, **save/load** a tournament as a portable JSON file.
+- **English and French UI**, light/dark theme.
+- Runs as a **single portable desktop executable** (no install, no command
+  line) or in a plain browser against a hosted server — same app either way.
+
+### Safety
+
+- **Multi-referee live collaboration over the internet**: several referees can
+  edit the same tournament from different machines at once, with changes
+  appearing live and simultaneous edits caught by conflict detection rather
+  than silently overwritten.
+- **Password-protected tournaments** (each with its own password, set at
+  creation) plus a separate admin password gating who can create tournaments
+  on a shared server — so one hosted instance can safely serve many
+  tournaments/federations at once, picked from a list.
+- **Full undo history** and **automatic backups** at every round-lifecycle
+  transition (finalize / prepare / start / complete / cancel), restorable
+  from the UI.
+- **Guarded round lifecycle**: a round can't be completed with games still
+  unplayed, registration can't be skipped, and destructive actions (discard,
+  delete) always ask for confirmation first.
+
+## Limitations
+
+- **Not yet battle-tested:** this project has not been used in a real tournament yet.
+- **Not exact FIDE-style Swiss:** like OpenGotha or pairgoth, this software uses an engine
+  that searches for a global optimum for pairings. This is intrinsically incompatible with
+  the intricate rules governing the order in which pairings are to be tried under FIDE's
+  Swiss regulations. All that can be guaranteed is that the resulting pairings are no worse,
+  by a number of metrics, than those a more classical Swiss pairing program would find.
+- **Not protected from untrusted referees:** the software assumes that all of the referees
+  with access to a tournament can be trusted. In particular, it has no detailed log of
+  which referee took which action.
+- **Portability:** this project has only been tested on one Windows 10 desktop and one macOS
+  laptop. It should run fine on Linux, and the web UI should work in any modern browser, but
+  neither has been tested yet.
 
 ## Architecture
 
 | Piece | Location | Tech | Role |
 |-------|----------|------|------|
-| Domain / pairing engine | [`crates/core`](crates/core) | Rust | Correctness-critical logic + shared DTOs. Reused by every client. |
-| Matching solver | [`crates/matching`](crates/matching) | Rust | Standalone blossom (min-weight perfect matching) solver, self-contained and dependency-free. |
-| HTTP server | [`crates/server`](crates/server) | Rust + axum | Single source of truth; exposes the API. |
+| Domain / pairing engine | [`crates/core`](crates/core) (`osp-core`) | Rust | Correctness-critical logic + shared DTOs. Reused by every client. |
+| Matching solver | [`crates/matching`](crates/matching) (`integer-blossom`) | Rust | Standalone blossom (min-weight perfect matching) solver, self-contained and dependency-free. |
+| HTTP server | [`crates/server`](crates/server) (`osp-server`) | Rust + axum | Multi-tournament source of truth; exposes the API, both as a standalone binary and as a library. |
+| Simulation CLI | [`crates/sim`](crates/sim) (`osp-sim`) | Rust | Monte-Carlo comparison of pairing-settings variants — links `osp-core` directly and drives its pairing/scoring loop in-process, parallelized. See [`docs/simulation-cli.md`](docs/simulation-cli.md). |
 | Web UI | [`frontend`](frontend) | TypeScript + Svelte 5 + Vite | Browser client; also the frontend embedded by Tauri. |
 | Desktop app | `frontend/src-tauri` | Tauri 2 (Rust + system webview) | Self-contained app: **embeds the server** (`osp-server` as a library) and runs it in-process. |
 
-The `osp-server` crate is both a standalone binary (browser dev, future CLI) and
-a library. The desktop app links the library and starts the API in-process on an
-**OS-assigned port** (bound to `127.0.0.1:0` to avoid clashes and firewall
-prompts); the frontend asks Rust for that port via the `api_base` command. This
-is what lets the packaged app ship as a single self-contained executable.
+The `osp-server` crate is both a standalone binary (browser dev, and the hosted
+remote deployment — see [`docs/multi-referee-internet.md`](docs/multi-referee-internet.md))
+and a library. The desktop app links the library and starts the API in-process
+on an **OS-assigned port** (bound to `127.0.0.1:0` to avoid clashes and
+firewall prompts); the frontend asks Rust for that port via the `api_base`
+command. This is what lets the packaged app ship as a single self-contained
+executable.
+
+### Multi-tournament registry, and per-tournament access control
+
+The server holds **any number of tournaments** at once, keyed by each
+`Tournament`'s stable `id: Uuid` — a `TournamentRegistry`
+([`crates/server/src/state.rs`](crates/server/src/state.rs)) mapping ids to
+`TournamentInstance`s, each wrapping its own `TournamentStore` (current state +
+undo history) and its own optional password. Clients start at a **picker**
+(`GET /api/tournaments`, rendered by `TournamentPicker.svelte`) and open one
+tournament at a time.
+
+Auth is two-level, both a shared-password-plus-bearer-token model (see
+[`crates/server/src/auth.rs`](crates/server/src/auth.rs)):
+
+- **Per-tournament**: each tournament may have its own password, set at
+  creation and checked at `POST /api/tournaments/{id}/login`; the hash (never
+  the plaintext) persists in a `{id}.auth.json` sidecar file.
+- **Admin**: one process-wide password (`OSP_ADMIN_PASSWORD`) gates *creating*
+  tournaments and the FESA ratings proxy — both instance-wide capabilities
+  rather than something scoped to one tournament.
+
+A login exchanges the password for a per-boot random bearer token
+(`Authorization: Bearer <token>`); a restart rotates every token. When
+`OSP_DATA_DIR` is set, tournaments (and their passwords) persist to disk and
+reload on boot; otherwise the registry is in-memory only.
+
+### Live multi-referee sync and conflict detection
+
+Several referees can edit the same tournament from different machines at
+once, over the internet. Each mutation bumps a per-tournament monotonic
+`version` counter; `GET /api/tournaments/{id}/events`
+([`crates/server/src/live.rs`](crates/server/src/live.rs)) is a Server-Sent
+Events stream that pushes that counter to every connected client, which then
+refetches. Clients echo the version they last saw in an
+`X-Tournament-Version` header on every mutation; if another referee's change
+landed first, the request is rejected `409 Conflict` and the client refetches
+and re-presents the edit rather than silently clobbering it (see the
+`ConnectionStatus.svelte` Live/Reconnecting/Offline indicator and the
+"another referee changed the tournament" reload message in the UI). See
+[`docs/multi-referee-internet.md`](docs/multi-referee-internet.md) for the
+full design (auth, hosted deployment, SSE sync, and reconnect resilience were
+delivered as four separate phases, all now landed).
+
+### Pairing engine
 
 The pairing engine models a round as a **minimum-weight perfect matching** over a
 complete player graph. The matching itself is an integer **blossom** solver
@@ -40,6 +172,15 @@ contribution, so the tiers are strictly disjoint by construction (lexicographic
 priority) with no hand-tuned gaps; an ILP/CP-SAT backend for very large fields and
 formats needing hard constraints is future work (see [TODO.md](TODO.md)).
 
+Because a global optimum has no local "reason" for any one board, the engine
+can also **explain itself**
+([`docs/pairing-explanations.md`](docs/pairing-explanations.md)): a per-board
+penalty ledger and a per-round report of which rules had to bend are always
+computed (`GET /rounds/{n}/explanation`), and a referee can probe a specific
+counterfactual — "why weren't these two paired?" or "why were they?" — via
+`POST /rounds/{n}/counterfactual`, which re-solves with that pairing forced or
+forbidden and reports the chain of boards that would change and why.
+
 An optional **hybrid cup** runs a seeded direct-elimination bracket (top 8/16/32/
 64 eligible players) over the first `log2(size)` rounds alongside the Swiss — the
 French / European Championship format. Eligibility is marked per player during
@@ -47,83 +188,100 @@ registration, the size is chosen at finalization, and eliminated players drop
 back into the Swiss (their cup games count, but a bracket pairing is not a Swiss
 float). The semifinal losers play a small final for third place; the pairings
 view badges every board as Swiss, referee-forced, or its cup stage, and the
-Results tab shows the podium medals (without reordering the Swiss ranking).
+Standings tab shows the podium medals (without reordering the Swiss ranking).
 
-The UI organizes a tournament into tabs: **Settings** (MacMahon groups,
-degressive schedule, club protection, floater style, hybrid cup),
-**Players**, **Results** (per-round results plus Victories and total Points),
-and one tab per round. Points are each player's victories plus their MacMahon
+An experimental **ELO-based pairing mode**
+([`crates/core/src/elo.rs`](crates/core/src/elo.rs),
+[`docs/elo-pairing-mode.md`](docs/elo-pairing-mode.md)) can replace MacMahon
+and the Swiss-specific rules entirely: OSP maintains a live Bayesian
+(maximum-a-posteriori, Bradley–Terry) estimate of every player's strength from
+results so far, and the rule ladder collapses to minimizing the squared
+estimated-ELO gap on each board — a "continuous Swiss" where winners and
+losers drift along a smooth strength axis instead of jumping between integer
+score groups.
+
+### The UI
+
+The web UI organizes a tournament into tabs: **Settings** (MacMahon groups,
+degressive schedule, club protection, floater style, ELO mode, hybrid cup),
+**Players**, **Standings** (per-round results plus Wins and total Points),
+and one tab per round. Points are each player's wins plus their MacMahon
 starting points (one per threshold they reach — an ELO rating or a dan/kyu
-grade), and the pairing engine scores by total points.
-
-> **Current status:** early. The server holds a single in-memory tournament (a
-> name + a list of players) as the shared source of truth, with a REST API to
-> create it, register/remove players, and replace it wholesale (for load).
-> Players have a last name, first name, optional rating, optional grade,
-> nationality and club. Registration autocompletes names + ELOs (+ grade, when
-> the list has one) from the FESA rating list. The player
-> table is sorted by descending ELO (unrated last), any cell is editable in
-> place, and a server-side undo history reverts changes. Rounds can be started,
-> which pairs players by weighted minimum-weight matching (see below). The round lifecycle is
-> gated: **finalize registration** → **prepare round** (a draft state to mark
-> players absent, force pairings, and force the bye) → **start round** (confirm)
-> → play games → **complete round** (only once every game is played) → prepare
-> the next round; **cancel last round** peels back one stage (discarding an open
-> draft, else removing the most recent round) to replay it or undo a mistake. In a round
-> tab, clicking a player records them as the winner (click the other to switch,
-> click the winner again to clear — three states); completed rounds stay editable
-> with a warning. Finalizing registration assigns each player a tournament
-> number (by ELO, unrated last; later additions get the next free number). The
-> **Results** tab is a ranked table: a row per player (ordered by the
-> referee-chosen criteria) with one column per completed round
-> (`opponent-number` + `+`/`−`, or `0+` for a bye / `0-` for an absence), a
-> victory count, and one column per selected ranking criterion. The criteria are
-> Points plus twelve tie-break metrics — SOS / SODOS / SOSOS, the Buchholz cuts
-> (SOSM-1/-2), and the cumulative score (CUSS), each in a MacMahon-inclusive (M)
-> and a wins-only (W) flavour — and the Settings tab picks which ones rank the
-> table and in what order (default: the classic Points → SOSM → SODOSM → SOSOSM;
-> Points is reorderable like the rest). The web UI is organized
-> into tabs (Settings / Players / Results / one per round) and can save/load the
-> tournament as a JSON file. Once a round is complete it can also export the
-> **American Grid** cross-table (the federation's ELO-update format); a matching
-> import API rebuilds a tournament from such a grid, for tests and simulations.
+grade), and the pairing engine scores by total points. The round lifecycle is
+gated: **finalize registration** → **prepare round** (a draft state to mark
+players absent, force pairings, and force the bye) → **start round** (confirm)
+→ play games → **complete round** (only once every game is played) → prepare
+the next round; **cancel last round** peels back one stage (discarding an open
+draft, else removing the most recent round) to replay it or undo a mistake.
+Finalizing registration assigns each player a tournament number (by ELO,
+unrated last; later additions get the next free number). The Standings tab is
+a ranked table: a row per player (ordered by the referee-chosen criteria) with
+one column per completed round (`opponent-number` + `+`/`−`, or `0+` for a bye
+/ `0-` for an absence), a win count, and one column per selected ranking
+criterion — Points plus twelve tie-break metrics (SOS / SODOS / SOSOS, the
+Buchholz cuts, and the cumulative score, each in a MacMahon-inclusive and a
+wins-only flavour), reorderable in Settings.
 
 Mutations go through a `TournamentStore` that keeps the current tournament plus a
-stack of prior snapshots (the undo history); create/load reset it. Endpoints
-return `{ tournament, can_undo, standings }` so the client refreshes the view,
-the undo button, and the ranked table together (the persisted save-file shape
-stays the bare tournament). `standings` is computed server-side (in `osp-core`)
-so every client — and the American grid export — shares one canonical ranking:
-by the criteria chosen in the settings (in order; points is one of them, normally
-first), then tournament number.
+stack of prior snapshots (the undo history); create/load/restore reset it.
+Endpoints return a `TournamentView` — the tournament, `can_undo`, the change
+`version`, server-computed `standings`, the cup podium (once decided), and
+suggested handicaps per board — so the client refreshes the view, the undo
+button, and the ranked table together from one response (the persisted
+save-file shape stays the bare `Tournament`). `standings` is computed
+server-side (in `osp-core`) so every client — and the American Grid export —
+shares one canonical ranking: by the criteria chosen in the settings (in
+order; points is one of them, normally first), then tournament number.
 
 ### API
+
+Registry-level routes (not scoped to any one tournament):
 
 | Method & path | Purpose |
 |---------------|---------|
 | `GET /api/health` | Liveness check. |
-| `GET /api/ratings` | FESA rating list (server-cached) for registration autocomplete. |
-| `POST /api/ratings/refresh` | Re-download the FESA list now (manual refresh). |
-| `POST /api/tournament` | Create a new (empty) tournament: `{ "name": "..." }`. |
-| `GET /api/tournament` | Fetch the current tournament (404 if none). |
-| `PUT /api/tournament` | Replace the current tournament (used by "load"). |
-| `POST /api/tournament/undo` | Revert the last change (server-side undo history). |
-| `GET /api/tournament/american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
-| `PUT /api/tournament/american-grid` | Import an American Grid (raw `text/plain` body), rebuilding the tournament from it — registers the players, forces every round's pairings, and replays the results. Replaces the current tournament; meant for seeding a non-trivial state in tests/simulations, not surfaced in the UI. |
-| `PUT /api/tournament/settings` | Update settings (the whole `TournamentSettings`): `{ "macmahon_thresholds": [{ "criterion": { "kind": "elo", "value": 1200 } }, { "criterion": { "kind": "grade", "grade": { "kind": "dan", "level": 1 } }, "drops_after_round": 3 }], "airtight_groups_rounds": 2, "club_protection_enabled": true, "club_protection_rounds": 3, "club_protection_exempt_clubs": ["Paris"] }`. Each threshold's `criterion` is either an ELO rating (`{ "kind": "elo", "value": … }`) or a dan/kyu grade (`{ "kind": "grade", "grade": { "kind": "dan"｜"kyu", "level": … } }`) — a tournament can freely mix both kinds, each counted independently; thresholds stored sorted (ELO by value, then grade by strength) & de-duplicated; each threshold's own `drops_after_round` (degressive MacMahon: the round-end after which that threshold stops applying) is optional; `airtight_groups_rounds`, if set, forbids pairing players with a different number of MacMahon points during rounds `1..=n` (a rule just below no-rematch, squared penalty); club protection avoids same-club pairings (off by default; optional round limit; exempt clubs trimmed, de-duplicated case-insensitively). `floater_style` is `"classic"｜"median"`; `cup_enabled` toggles the hybrid direct-elimination cup (its size is chosen at finalization). |
-| `POST /api/tournament/finalize-registration` | Finalize registration (unlocks round 1). Body optional: `{ "cup_size": 8｜16｜32｜64 }` when the hybrid cup is enabled — seeds the top-N eligible players into a direct-elimination bracket (400 if fewer than N are eligible). |
-| `POST /api/tournament/complete-round` | Complete the current round (all games must be played). |
-| `POST /api/tournament/cancel-round` | Cancel the last round — discards the open draft if one is being prepared, otherwise removes the most recent round (undoable). Steps back one stage, e.g. to replay a round in a simulation. |
-| `POST /api/tournament/rounds/prepare` | Begin drafting the next round. |
-| `PUT /api/tournament/draft` | Edit the draft (absent set, forced pairings, forced bye). |
-| `POST /api/tournament/rounds` | Confirm the draft: pair remaining players and start the round. |
-| `POST /api/tournament/rounds/{n}/boards/{i}/result` | Toggle a board's winner: `{ "clicked": "player1"｜"player2" }`. |
-| `POST /api/tournament/rounds/{n}/boards/{i}/drawn` | Set the "a draw occurred" flag: `{ "drawn": true｜false }`. |
-| `PUT /api/tournament/rounds/{n}/boards/{i}/handicap` | Set/clear the handicap: `{ "handicap": "4p"｜null }` (giver frozen from ratings; 400 if ratings equal). |
-| `POST /api/tournament/players` | Register a player: `{ "last_name", "first_name?", "rating?", "grade?", "nationality?", "club?" }` (`grade` is `{ "kind": "dan"｜"kyu", "level": … }`). |
-| `PUT /api/tournament/players/{id}` | Edit a player's fields in place. |
-| `DELETE /api/tournament/players/{id}` | Remove a player (400 if they are seeded in the cup bracket). |
-| `POST /api/tournament/players/{id}/eligible` | Set cup eligibility: `{ "eligible": true｜false }`. |
+| `GET /api/tournaments` | List every known tournament (id, name, whether it's password-protected) — public, needed to render the picker before logging in anywhere. |
+| `POST /api/tournaments` | Create a new tournament: `{ "name": "...", "password"? }`. Admin-gated if `OSP_ADMIN_PASSWORD` is set. Returns `{ "id", "token"? }` (a token if the new tournament has a password, so the creator needn't immediately log in to it). |
+| `DELETE /api/tournaments/{id}` | Delete a tournament: its registry entry, persisted file, and backups. |
+| `POST /api/admin/login` | Exchange the admin password for a bearer token. |
+| `GET /api/ratings` | FESA rating list (server-cached) for registration autocomplete. Admin-gated. |
+| `POST /api/ratings/refresh` | Re-download the FESA list now (manual refresh). Admin-gated. |
+
+Per-tournament routes, all nested under `/api/tournaments/{id}` and requiring
+that tournament's bearer token if it has a password (except `/login` and
+`/events`):
+
+| Method & path | Purpose |
+|---------------|---------|
+| `POST /login` | Exchange this tournament's password for a bearer token. |
+| `GET /events` | SSE stream of this tournament's change `version`, for live sync. |
+| `GET /` | Fetch the tournament (`TournamentView`; 404 if unknown). |
+| `PUT /` | Replace the tournament wholesale (used by "load"); resets undo history. |
+| `DELETE /` | Delete the tournament. |
+| `POST /undo` | Revert the last change (server-side undo history). |
+| `GET /american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
+| `PUT /american-grid` | Import an American Grid (raw `text/plain` body), rebuilding the tournament from it — registers the players, forces every round's pairings, and replays the results. Meant for seeding a non-trivial state in tests/simulations, not surfaced in the UI. |
+| `PUT /settings` | Update settings (the whole `TournamentSettings`): `{ "macmahon_thresholds": [{ "criterion": { "kind": "elo", "value": 1200 } }, { "criterion": { "kind": "grade", "grade": { "kind": "dan", "level": 1 } }, "drops_after_round": 3 }], "airtight_groups_rounds": 2, "club_protection_enabled": true, "club_protection_rounds": 3, "club_protection_exempt_clubs": ["Paris"], "elo_mode_enabled": … }`. Each threshold's `criterion` is either an ELO rating (`{ "kind": "elo", "value": … }`) or a dan/kyu grade (`{ "kind": "grade", "grade": { "kind": "dan"｜"kyu", "level": … } }`) — a tournament can freely mix both kinds, each counted independently; `airtight_groups_rounds`, if set, forbids pairing players with a different number of MacMahon points during rounds `1..=n`; `floater_style` is `"classic"｜"median"`; `cup_enabled` toggles the hybrid direct-elimination cup (its size is chosen at finalization). |
+| `POST /finalize-registration` | Finalize registration (unlocks round 1). Body optional: `{ "cup_size": 8｜16｜32｜64 }` when the hybrid cup is enabled — seeds the top-N eligible players into a direct-elimination bracket. |
+| `POST /complete-round` | Complete the current round (all games must be played). |
+| `POST /cancel-round` | Cancel the last round — discards the open draft if one is being prepared, otherwise removes the most recent round (undoable). |
+| `POST /rounds/prepare` | Begin drafting the next round. |
+| `PUT /draft` | Edit the draft (absent set, forced pairings, forced bye). |
+| `POST /rounds` | Confirm the draft: pair remaining players and start the round. |
+| `GET /rounds/{n}/explanation` | Explain a round's Swiss pairings: per-board rule ledger and round report. Read-only. |
+| `POST /rounds/{n}/counterfactual` | Explain forcing (`"force"`) or forbidding (`"forbid"`) a pairing `{a, b}` in this round. Read-only. |
+| `POST /rounds/force-pairing` | Re-pair the current round with board `{a, b}` fixed. |
+| `POST /rounds/{n}/boards/{i}/result` | Toggle a board's winner: `{ "clicked": "player1"｜"player2" }`. |
+| `POST /rounds/{n}/boards/{i}/drawn` | Set the "a draw occurred" flag: `{ "drawn": true｜false }`. |
+| `PUT /rounds/{n}/boards/{i}/handicap` | Set/clear the handicap: `{ "handicap": "4p"｜null }` (giver frozen from ratings; 400 if ratings equal). |
+| `POST /players` | Register a player: `{ "last_name", "first_name?", "rating?", "grade?", "nationality?", "club?" }` (`grade` is `{ "kind": "dan"｜"kyu", "level": … }`). |
+| `PUT /players/{id}` | Edit a player's fields in place. |
+| `DELETE /players/{id}` | Remove a player (400 if they are seeded in the cup bracket). |
+| `POST /players/{id}/eligible` | Set cup eligibility: `{ "eligible": true｜false }`. |
+| `POST /players/{id}/adjustments` | Apply a manual point bonus/penalty: `{ "delta", "reason" }` (reason mandatory). |
+| `DELETE /players/{id}/adjustments/{adjustment_id}` | Remove a point adjustment. |
+| `GET /backups` | List automatic backups, newest first (taken at every round-lifecycle transition). |
+| `POST /backups/{backup_id}/restore` | Restore a backup as the current tournament; resets undo history. |
 
 The FESA rating list is fixed-width, Latin-1 text (parsed in
 [`crates/core`](crates/core/src/fesa.rs)). It's shared reference data, so the
@@ -135,7 +293,7 @@ Clients pull the list once and filter locally.
 
 Known limitations and future work are tracked in [TODO.md](TODO.md).
 
-Every mutating endpoint returns the full updated tournament. Save/load is
+Every mutating endpoint returns the full updated `TournamentView`. Save/load is
 platform-aware: in the **Tauri** desktop app it uses native OS file dialogs (the
 `dialog` plugin plus small `read_text_file`/`write_text_file` commands), and in
 the browser it falls back to a JSON download / file-picker upload. Either way a
