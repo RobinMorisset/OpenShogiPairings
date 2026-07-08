@@ -136,6 +136,7 @@
       "byeBoard": "{name} (bye)",
       "rule": {
         "rematch": "rematch",
+        "bye_group": "bye group",
         "airtight_groups": "airtight groups",
         "score_gap": "score gap",
         "float_repeat": "repeat float",

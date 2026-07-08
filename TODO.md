@@ -7,28 +7,18 @@ Known limitations and future work, roughly ordered by area.
 - **ILP/CP-SAT backend.** Pairing is now a real **minimum-weight perfect
   matching** (integer blossom in the standalone [`integer-blossom`](crates/matching/src/lib.rs)
   crate) over a rule-weighted graph ([`crates/core/src/pairing.rs`](crates/core/src/pairing.rs)):
-  rematch/repeat-bye ≫ score gap² ≫ float-repeat ≫ floater-selection ≫ same-club ≫
-  within-group fold, ordered by a scalar multiplier ladder whose tiers are derived
+  rematch/repeat-bye ≫ bye-group² ≫ score gap² ≫ float-repeat ≫ floater-selection ≫
+  same-club ≫ within-group fold, ordered by a scalar multiplier ladder whose tiers are derived
   from each rule's worst-case contribution (so the lexicographic separation is
   exact, not hand-tuned). An ILP/CP-SAT backend is still motivated by experimental
   formats (MacMahon-beyond, hard multi-round constraints) that need constraints a
   plain matching can't express, and by very large fields. Plan: `good_lp` + HiGHS
   first, then CP-SAT.
-- ~~**Extract the blossom solver into its own crate.**~~ Done: the solver now
-  lives in [`crates/matching`](crates/matching/src/lib.rs) (package `integer-blossom`),
-  with `crates/core/src/matching.rs` reduced to a `pub use` shim so
-  `crate::matching::…` call sites in `pairing.rs` didn't need to change. Still
-  a single consumer today; the crate is ready for a second one (CLI, an
-  ILP/CP-SAT A/B, independent benchmarking/fuzzing) or a publish, whenever that
-  need shows up.
 - **No-shows.** A player who was paired for a round but did not show up (distinct
   from a game simply not yet recorded) should appear as `0#` in the results
   table. This needs a way to mark a board as a no-show (a new board-result state,
   giving the opponent the win); not handled yet. Byes (`0+`, win) and absences
   (`0-`, loss) are already handled.
-- **Airtight groups** Extra rule saying that for the first N rounds, players with different
-  MM points should not play each other. Priority: just below rematch.
-- **MM by rank** A new way to set thresholds, it requires updating the players list and fesa ratings parsing as well.
 
 
 ## FESA rating list
@@ -45,18 +35,6 @@ Known limitations and future work, roughly ordered by area.
 ## Frontend
 
 - **Add a button to load a CSV of player names in the players tab**
-
-- **Export settings as JSON from the Settings tab** A download button that
-  serializes the current `TournamentSettings`, to feed the simulation CLI's
-  `--configs` (see [`docs/simulation-cli.md`](docs/simulation-cli.md) §3.4).
-
-## Simulations
-
-See [`docs/simulation-cli.md`](docs/simulation-cli.md) for the design.
-
-## Multi-referee setup
-
-See [`docs/multi-referee-internet.md`](docs/multi-referee-internet.md) for the design.
 
 ## Multi-tournament server
 

@@ -12,25 +12,30 @@
 //!
 //! 1. **No rematch / no repeat bye** — two players never meet twice, and no one
 //!    takes the bye twice.
-//! 2. **Airtight groups** (optional, off by default) — for the first N
+//! 2. **Bye in the lowest group** — the bye should go to the lowest-scoring free
+//!    player, not (say) the tournament leader; the penalty grows with the
+//!    *square* of the points gap to the lowest score among free players. A
+//!    bye-only rule, sitting right below no-rematch so it's decided before any
+//!    other pairing preference.
+//! 3. **Airtight groups** (optional, off by default) — for the first N
 //!    configured rounds, avoid pairing players with a different number of
 //!    MacMahon points; the penalty grows with the *square* of the gap, same as
 //!    the score-gap rule below. Costs nothing when unset.
-//! 3. **Equal scores** — prefer opponents with the same number of points (each
+//! 4. **Equal scores** — prefer opponents with the same number of points (each
 //!    player's MacMahon starting points plus their victories); the penalty grows
 //!    with the *square* of the points gap.
-//! 4. **No repeated float** — avoid making a player an ascending floater (meeting
+//! 5. **No repeated float** — avoid making a player an ascending floater (meeting
 //!    someone with more points) or a descending floater (fewer points, or a
 //!    bye) twice; the penalty fades with the number of rounds since the last such
 //!    float.
-//! 5. **Floater selection** — when a group has to pair across score groups, choose
+//! 6. **Floater selection** — when a group has to pair across score groups, choose
 //!    *who* floats: the descending floater should be the last (weakest) of the
 //!    upper group, and the ascending floater the first (classic Swiss) or the
 //!    median (median Swiss) of the lower group. The penalty rises with the
 //!    distance from that ideal in-group rank.
-//! 6. **Different clubs** — avoid pairing club-mates (ignored when a club is
+//! 7. **Different clubs** — avoid pairing club-mates (ignored when a club is
 //!    unknown).
-//! 7. **Fold within a score group** — sort a group (equal points) by rating
+//! 8. **Fold within a score group** — sort a group (equal points) by rating
 //!    (unrated = 1), descending; the Nth player of the top half should meet the
 //!    Nth of the bottom half, penalized by the *squared* deviation from that ideal.
 //!
@@ -106,6 +111,10 @@ where
 enum Rule {
     /// Never play the same opponent twice / never take the bye twice.
     Rematch,
+    /// The bye should go to the lowest-scoring free player; penalty is the
+    /// square of the points gap to the lowest score among free players. A
+    /// bye-only rule (real boards are neutral).
+    ByeGroup,
     /// (Optional, first N rounds) Avoid pairing players with a different number
     /// of MacMahon points; penalty grows with the square of the gap. A no-op
     /// outside its configured round window.
@@ -140,6 +149,7 @@ enum Rule {
 #[serde(rename_all = "snake_case")]
 pub enum RuleId {
     Rematch,
+    ByeGroup,
     AirtightGroups,
     ScoreGap,
     FloatRepeat,
@@ -155,8 +165,9 @@ pub enum RuleId {
 /// score/float/fold/club family for a bye-selection rule and a squared-ELO-gap
 /// rule, keeping only no-rematch above them.
 fn active_rules(settings: &TournamentSettings) -> &'static [Rule] {
-    const SWISS: [Rule; 7] = [
+    const SWISS: [Rule; 8] = [
         Rule::Rematch,
+        Rule::ByeGroup,
         Rule::AirtightGroups,
         Rule::ScoreGap,
         Rule::FloatRepeat,
@@ -193,6 +204,8 @@ struct Ctx<'a> {
     edges: i128,
     /// Largest points gap between any two vertices (bounds the score rule).
     max_gap: i128,
+    /// Lowest points among the free players (the bye's target group).
+    min_points: i128,
     /// Largest MacMahon-points gap between any two vertices (bounds the airtight
     /// groups rule).
     max_mm_gap: i128,
@@ -244,6 +257,7 @@ impl Rule {
     fn id(self) -> RuleId {
         match self {
             Rule::Rematch => RuleId::Rematch,
+            Rule::ByeGroup => RuleId::ByeGroup,
             Rule::AirtightGroups => RuleId::AirtightGroups,
             Rule::ScoreGap => RuleId::ScoreGap,
             Rule::FloatRepeat => RuleId::FloatRepeat,
@@ -262,7 +276,9 @@ impl Rule {
         match self {
             // Rule 1: never play the same opponent twice.
             Rule::Rematch => i128::from(sa.opponents.contains(&b)),
-            // Rule 2 (optional, first N rounds): forbid crossing MacMahon groups;
+            // Rule 2: bye-only rule, real boards are neutral.
+            Rule::ByeGroup => 0,
+            // Rule 3 (optional, first N rounds): forbid crossing MacMahon groups;
             // penalty is the square of the gap in MacMahon starting points.
             Rule::AirtightGroups => {
                 if !ctx.airtight_active {
@@ -356,6 +372,12 @@ impl Rule {
         let s = ctx.scores.get(&player);
         match self {
             Rule::Rematch => i128::from(s.had_bye),
+            // The bye should go to the lowest score group; penalty is the square
+            // of the gap to the lowest score among free players.
+            Rule::ByeGroup => {
+                let gap = s.points as i128 - ctx.min_points;
+                gap * gap
+            }
             Rule::FloatRepeat => float_units(s.last_descended, ctx.round),
             // A bye is a downfloat, so prefer the weakest of the group to take it.
             Rule::FloaterSelection => floater_units(ctx, player, true),
@@ -373,6 +395,11 @@ impl Rule {
         if let Rule::ByeSelection = self {
             return (ctx.free_count - 1).max(0);
         }
+        // Likewise, the bye-group rule fires once, bounded by the squared gap
+        // between the lowest and highest score among free players.
+        if let Rule::ByeGroup = self {
+            return ctx.max_gap * ctx.max_gap;
+        }
         let per_edge = match self {
             Rule::Rematch => 1,
             // 0 when off or out of its round window — no wasted tier.
@@ -388,7 +415,7 @@ impl Rule {
             Rule::Fold => 2 * (ctx.max_group - 1).max(0).pow(2),
             // The squared gap between the widest-separated free players.
             Rule::EloGap => ctx.max_elo_gap * ctx.max_elo_gap,
-            Rule::ByeSelection => unreachable!("handled above"),
+            Rule::ByeSelection | Rule::ByeGroup => unreachable!("handled above"),
         };
         per_edge * ctx.edges
     }
@@ -502,6 +529,7 @@ struct PairingModel<'a> {
     airtight_active: bool,
     edges: i128,
     max_gap: i128,
+    min_points: i128,
     max_mm_gap: i128,
     max_group: i128,
     free_count: i128,
@@ -584,6 +612,7 @@ impl<'a> PairingModel<'a> {
             airtight_active: settings.airtight_groups_active(number),
             edges: (vcount / 2) as i128,
             max_gap: hi.saturating_sub(lo) as i128,
+            min_points: lo as i128,
             max_mm_gap: mm_hi.saturating_sub(mm_lo) as i128,
             max_group,
             free_count: k as i128,
@@ -614,6 +643,7 @@ impl<'a> PairingModel<'a> {
             exempt_clubs: &self.exempt_clubs,
             edges: self.edges,
             max_gap: self.max_gap,
+            min_points: self.min_points,
             max_mm_gap: self.max_mm_gap,
             max_group: self.max_group,
             free_count: self.free_count,
@@ -1448,6 +1478,38 @@ mod tests {
     }
 
     #[test]
+    fn weighted_gives_the_bye_to_the_lowest_group() {
+        // 5 same-rated players: round 1 pairs p0-p1 and p2-p3 (winners p0, p2);
+        // p4 takes the bye. Going into round 2: p0, p2, p4 lead on 1 point, p1
+        // and p3 trail on 0. p4 already had the bye, so it must fall to p1 or
+        // p3 — never to one of the two leaders, even though that could look
+        // like a perfectly valid matching otherwise.
+        let p: Vec<Player> = (1..=5).map(|i| player(i, Some(1500), None)).collect();
+        let r1 = completed_round(
+            1,
+            &[
+                (p[0].id, p[1].id, Winner::Player1),
+                (p[2].id, p[3].id, Winner::Player1),
+            ],
+            Some(p[4].id),
+        );
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+
+        let round = pair_round_weighted(
+            2,
+            &p,
+            &TournamentSettings::default(),
+            &[r1],
+            &present,
+            &[],
+            None,
+        );
+
+        let bye = round.bye.expect("odd field needs a bye");
+        assert!(bye == p[1].id || bye == p[3].id, "bye went to a leader");
+    }
+
+    #[test]
     fn pairing_freezes_the_points_diff_on_each_board() {
         // After round 1 (A, C on 1 point; B, D on 0), force A vs D in round 2.
         // The board should record the float A had going in: 1 − 0 = 1.
@@ -1977,6 +2039,7 @@ mod tests {
             exempt_clubs: &exempt_clubs,
             edges,
             max_gap: (hi - lo) as i128,
+            min_points: lo as i128,
             max_mm_gap: (mm_hi - mm_lo) as i128,
             max_group: fold.values().map(|f| f.group_size).max().unwrap_or(0) as i128,
             free_count: free.len() as i128,
@@ -1985,9 +2048,15 @@ mod tests {
             max_elo_gap: 0,
         };
 
-        // Check the Swiss rules (the ones active in the default mode).
+        // Check the Swiss rules (the ones active in the default mode). Bye-only
+        // rules fire once per round, not once per edge, so their bound isn't
+        // scaled by `edges` (see `max_total_units`).
         for &rule in active_rules(&TournamentSettings::default()) {
             let bound = rule.max_total_units(&ctx);
+            let bye_scale = match rule {
+                Rule::ByeSelection | Rule::ByeGroup => 1,
+                _ => edges,
+            };
             for i in 0..free.len() {
                 for j in (i + 1)..free.len() {
                     assert!(
@@ -1996,7 +2065,7 @@ mod tests {
                     );
                 }
                 assert!(
-                    rule.bye_units(&ctx, free[i]) * edges <= bound,
+                    rule.bye_units(&ctx, free[i]) * bye_scale <= bound,
                     "a bye exceeded the rule's total-units bound"
                 );
             }

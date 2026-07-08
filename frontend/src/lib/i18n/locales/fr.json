@@ -136,6 +136,7 @@
       "byeBoard": "{name} (exempt)",
       "rule": {
         "rematch": "revanche",
+        "bye_group": "groupe de l'exempt",
         "airtight_groups": "groupes étanches",
         "score_gap": "écart de points",
         "float_repeat": "flottement répété",

@@ -28,7 +28,8 @@ complete player graph. The matching itself is an integer **blossom** solver
 Hungarian doesn't apply); the edge weights come from a set of Swiss rules
 ([`crates/core/src/pairing.rs`](crates/core/src/pairing.rs)) combined on a
 priority ladder of multipliers — most important first: never rematch or repeat a
-bye, prefer equal scores (penalty ∝ gap²), avoid repeating a float in the same
+bye, give the bye to the lowest score group (penalty ∝ gap²), prefer equal
+scores (penalty ∝ gap²), avoid repeating a float in the same
 direction (decaying with time), select floaters (the weakest of the upper group
 drops, the first — classic Swiss — or median lower-group player rises), avoid
 club-mates (optional per tournament, and optionally only for the first N rounds
