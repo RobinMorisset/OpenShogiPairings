@@ -157,6 +157,9 @@
       onblur={() => (showSuggestions = false)}
       placeholder={$_("playerRegistration.lastName")}
       autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+      spellcheck="false"
       disabled={busy}
       aria-label={$_("playerRegistration.lastName")}
       role="combobox"
