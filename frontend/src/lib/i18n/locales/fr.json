@@ -7,7 +7,8 @@
     "save": "Enregistrer",
     "backups": "Sauvegardes…",
     "backupsTitle": "Sauvegardes automatiques prises à chaque transition de round",
-    "new": "Nouveau…",
+    "switchTournament": "Changer de tournoi…",
+    "switchTournamentTitle": "Revenir à la liste des tournois",
     "unsavedChanges": "Modifications non enregistrées",
     "noBackupsYet": "Aucune sauvegarde pour l'instant — elles sont prises automatiquement lors des étapes finalisation/préparation/démarrage/complétion/annulation.",
     "restore": "Restaurer",
@@ -232,10 +233,21 @@
     "title": "Nouveau tournoi",
     "name": "Nom",
     "namePlaceholder": "ex. Paris Open 2026",
+    "password": "Mot de passe (optionnel)",
+    "passwordPlaceholder": "Laisser vide pour aucun mot de passe",
     "create": "Créer",
     "cancel": "Annuler",
     "or": "ou",
     "loadFromFile": "Charger depuis un fichier…"
+  },
+  "picker": {
+    "title": "Tournois",
+    "empty": "Aucun tournoi pour l'instant — créez-en un ci-dessous.",
+    "passwordProtected": "Protégé par mot de passe",
+    "delete": "Supprimer",
+    "confirmDelete": "Supprimer « {name} » ? Le tournoi et ses sauvegardes seront retirés du serveur. Cette action est irréversible.",
+    "adminPasswordTitle": "Connexion administrateur requise",
+    "adminPasswordPrompt": "Ce serveur exige le mot de passe administrateur pour créer des tournois."
   },
   "settings": {
     "finalizedWarning": "Les inscriptions sont finalisées — modifier les groupes MacMahon changera les points de tous les joueurs et les appariements futurs.",

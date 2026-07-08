@@ -7,7 +7,8 @@
     "save": "Save",
     "backups": "Backups…",
     "backupsTitle": "Automatic backups taken at each round transition",
-    "new": "New…",
+    "switchTournament": "Switch tournament…",
+    "switchTournamentTitle": "Return to the tournament list",
     "unsavedChanges": "Unsaved changes",
     "noBackupsYet": "No backups yet — taken automatically as the round moves through finalize/prepare/start/complete/cancel.",
     "restore": "Restore",
@@ -232,10 +233,21 @@
     "title": "New tournament",
     "name": "Name",
     "namePlaceholder": "e.g. Paris Open 2026",
+    "password": "Password (optional)",
+    "passwordPlaceholder": "Leave blank for no password",
     "create": "Create",
     "cancel": "Cancel",
     "or": "or",
     "loadFromFile": "Load from file…"
+  },
+  "picker": {
+    "title": "Tournaments",
+    "empty": "No tournaments yet — create one below.",
+    "passwordProtected": "Password-protected",
+    "delete": "Delete",
+    "confirmDelete": "Delete \"{name}\"? This removes it and its backups from the server. This cannot be undone.",
+    "adminPasswordTitle": "Admin sign-in required",
+    "adminPasswordPrompt": "This server requires the admin password to create tournaments."
   },
   "settings": {
     "finalizedWarning": "Registration is finalized — changing the MacMahon groups will change everyone's points and future pairings.",

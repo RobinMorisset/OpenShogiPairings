@@ -1,6 +1,6 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
-  import { ApiError, login } from "../api";
+  import { ApiError, loginTournament } from "../api";
 
   interface Props {
     /** Called once the password is accepted and a token is stored. */
@@ -19,7 +19,7 @@
     busy = true;
     error = "";
     try {
-      await login(password);
+      await loginTournament(password);
       password = "";
       onSuccess();
     } catch (err) {

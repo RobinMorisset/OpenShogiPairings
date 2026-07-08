@@ -2,24 +2,23 @@
   import { _ } from "svelte-i18n";
 
   interface Props {
-    /** Create a new tournament with the given name. */
-    onCreate: (name: string) => void;
-    /** Open a file picker and load the chosen tournament. */
+    /** Create a new tournament with the given name and optional password. */
+    onCreate: (name: string, password: string | undefined) => void;
+    /** Open a file picker and load the chosen tournament as a new entry. */
     onLoad: () => void;
-    /** Cancel and return to the existing tournament (only when one exists). */
-    onCancel?: () => void;
     /** True while a create/load request is in flight. */
     busy?: boolean;
   }
 
-  let { onCreate, onLoad, onCancel, busy = false }: Props = $props();
+  let { onCreate, onLoad, busy = false }: Props = $props();
 
   let name = $state("");
+  let password = $state("");
 
   function submit(event: SubmitEvent) {
     event.preventDefault();
     const trimmed = name.trim();
-    if (trimmed) onCreate(trimmed);
+    if (trimmed) onCreate(trimmed, password.trim() || undefined);
   }
 </script>
 
@@ -36,15 +35,20 @@
         disabled={busy}
       />
     </label>
+    <label>
+      {$_("createTournament.password")}
+      <input
+        type="password"
+        bind:value={password}
+        placeholder={$_("createTournament.passwordPlaceholder")}
+        autocomplete="new-password"
+        disabled={busy}
+      />
+    </label>
     <div class="actions">
       <button type="submit" disabled={busy || name.trim() === ""}>
         {$_("createTournament.create")}
       </button>
-      {#if onCancel}
-        <button type="button" class="ghost" onclick={onCancel} disabled={busy}>
-          {$_("createTournament.cancel")}
-        </button>
-      {/if}
     </div>
   </form>
 
@@ -68,8 +72,13 @@
     text-align: left;
     font-size: 0.85rem;
     color: var(--text-secondary);
+    margin-top: 0.6rem;
   }
-  input[type="text"] {
+  label:first-child {
+    margin-top: 0;
+  }
+  input[type="text"],
+  input[type="password"] {
     display: block;
     width: 100%;
     box-sizing: border-box;

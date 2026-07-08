@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { _ } from "svelte-i18n";
   import {
     addPlayer,
@@ -8,7 +7,6 @@
     cancelRound,
     completeRound,
     confirmRound,
-    createTournament,
     editPlayer,
     fetchAmericanGrid,
     fetchBackups,
@@ -22,7 +20,6 @@
     refreshRatings,
     removePlayer,
     removePointAdjustment,
-    replaceTournament,
     restoreBackup,
     setBoardDrawn,
     setBoardHandicap,
@@ -47,15 +44,11 @@
     TournamentSettings,
     Winner,
   } from "./lib/types";
-  import {
-    loadTournament,
-    saveAmericanGrid,
-    saveTournament,
-  } from "./lib/tournamentFile";
+  import { saveAmericanGrid, saveTournament } from "./lib/tournamentFile";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
   import Login from "./lib/components/Login.svelte";
-  import CreateTournament from "./lib/components/CreateTournament.svelte";
-  import { authRequired } from "./lib/session";
+  import TournamentPicker from "./lib/components/TournamentPicker.svelte";
+  import { authRequired, currentTournamentId } from "./lib/session";
   import PlayerRegistration from "./lib/components/PlayerRegistration.svelte";
   import PlayerList from "./lib/components/PlayerList.svelte";
   import RoundView from "./lib/components/RoundView.svelte";
@@ -73,7 +66,6 @@
   let suggestedHandicaps = $state<(Handicap | null)[][]>([]);
   let canUndo = $state(false);
   let initialLoad = $state<"loading" | "done">("loading");
-  let creatingNew = $state(false);
   let busy = $state(false);
   let error = $state<string | null>(null);
   let ratings = $state<RatedPlayer[]>([]);
@@ -105,10 +97,6 @@
       $_("app.confirmDiscard", { values: { name: tournament.name } }),
     );
   }
-
-  // Show the create form when there is no tournament, or when the user
-  // explicitly asked to start a new one.
-  let showCreate = $derived(tournament === null || creatingNew);
 
   // Which tab is open: "players", "results", or "round-{n}".
   let activeTab = $state("players");
@@ -280,13 +268,14 @@
     }
   });
 
-  // Initial (and post-login) load of ratings + the current tournament. Re-run
+  // Initial (and post-login) load of ratings + the open tournament. Re-run
   // after a successful sign-in, since the first attempt would have 401'd.
   async function loadInitial() {
     initialLoad = "loading";
 
     // Load the FESA ratings in the background — autocomplete is a nice-to-have,
-    // so a failure here must not block or error the rest of the app.
+    // so a failure here must not block or error the rest of the app. (Also
+    // silently covers the admin password being required and not yet entered.)
     fetchRatings()
       .then((r) => (ratings = r))
       .catch(() => {
@@ -300,6 +289,10 @@
         // Resuming whatever the server already had isn't a new edit made in
         // this session — nothing to warn about losing yet.
         hasUnsavedChanges = false;
+      } else {
+        // The tournament no longer exists (e.g. deleted from another
+        // client/tab) — back to the picker.
+        currentTournamentId.set(null);
       }
     } catch (err) {
       // A 401 just means "log in first" — the login overlay handles it, so
@@ -331,7 +324,22 @@
     }
   }
 
-  onMount(() => {
+  // (Re)load whenever the open tournament changes — including the very first
+  // selection — and keep the live-sync subscription scoped to it.
+  $effect(() => {
+    if ($currentTournamentId === null) return;
+    // Reset the view before loading the newly selected tournament, so a
+    // moment of stale UI from the previous one never shows.
+    tournament = null;
+    standings = [];
+    cupPodium = null;
+    draftCupPlayers = [];
+    suggestedHandicaps = [];
+    canUndo = false;
+    hasUnsavedChanges = false;
+    error = null;
+    activeTab = "players";
+
     void loadInitial();
     // Live sync: refetch on another referee's change and on every (re)connect.
     const unsubscribe = subscribeToChanges(refetch);
@@ -375,26 +383,6 @@
     } finally {
       busy = false;
     }
-  }
-
-  function handleCreate(name: string) {
-    if (!confirmDiscard()) return;
-    run(async () => {
-      apply(await createTournament(name));
-      hasUnsavedChanges = false; // brand new — nothing to lose yet
-      creatingNew = false;
-    });
-  }
-
-  function handleLoad() {
-    if (!confirmDiscard()) return;
-    run(async () => {
-      const loaded = await loadTournament();
-      if (!loaded) return; // user cancelled the file dialog
-      apply(await replaceTournament(loaded));
-      hasUnsavedChanges = false; // matches what's on disk
-      creatingNew = false;
-    });
   }
 
   function handleAddPlayer(player: NewPlayer) {
@@ -580,17 +568,12 @@
     <p class="error-banner" role="alert">{error}</p>
   {/if}
 
-  {#if $authRequired}
+  {#if $currentTournamentId === null}
+    <TournamentPicker />
+  {:else if $authRequired}
     <Login onSuccess={loadInitial} />
   {:else if initialLoad === "loading"}
     <p class="muted">{$_("app.loading")}</p>
-  {:else if showCreate}
-    <CreateTournament
-      onCreate={handleCreate}
-      onLoad={handleLoad}
-      onCancel={tournament ? () => (creatingNew = false) : undefined}
-      {busy}
-    />
   {:else if tournament}
     <section class="card">
       <div class="toolbar">
@@ -626,10 +609,11 @@
           <button
             type="button"
             class="ghost"
-            onclick={() => (creatingNew = true)}
+            onclick={() => currentTournamentId.set(null)}
             disabled={busy}
+            title={$_("app.switchTournamentTitle")}
           >
-            {$_("app.new")}
+            {$_("app.switchTournament")}
           </button>
         </div>
       </div>

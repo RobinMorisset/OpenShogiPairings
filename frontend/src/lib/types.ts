@@ -43,6 +43,7 @@ export type { ThresholdCriterion } from "./generated/ThresholdCriterion";
 export type { Tiebreak } from "./generated/Tiebreak";
 export type { Tournament } from "./generated/Tournament";
 export type { TournamentResponse } from "./generated/TournamentResponse";
+export type { TournamentSummary } from "./generated/TournamentSummary";
 export type { TournamentSettings } from "./generated/TournamentSettings";
 export type { Winner } from "./generated/Winner";
 
