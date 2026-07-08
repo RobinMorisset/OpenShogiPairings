@@ -18,8 +18,8 @@ use rayon::prelude::*;
 use serde::Serialize;
 use uuid::Uuid;
 
-use osp_core::sim::{simulate_run, RunOutcome, StrengthMap};
-use osp_core::{Tournament, TournamentSettings};
+use osp_core::sim::{game_elo_diffs, sample_strengths, simulate_run, RunOutcome, StrengthMap};
+use osp_core::{estimate_elos, Player, Tournament, TournamentSettings};
 
 use stats::{diff_stats, mean, spearman, wilson, DiffStats, Proportion};
 
@@ -103,6 +103,7 @@ fn run(args: Args) -> Result<(), String> {
     };
 
     let names = player_names(&base);
+    let observed = observed_report(&base, &overrides, &args.thresholds);
     let mut reports = Vec::new();
     for (name, settings) in &variants {
         let outcomes =
@@ -111,12 +112,21 @@ fn run(args: Args) -> Result<(), String> {
         reports.push(aggregate(name.clone(), &outcomes, &args.thresholds));
     }
 
-    print_report(&reports, &names, rounds, args.runs, args.seed, args.jitter);
+    print_report(
+        &reports,
+        observed.as_ref(),
+        &names,
+        rounds,
+        args.runs,
+        args.seed,
+        args.jitter,
+    );
 
     if let Some(dir) = &args.out {
         write_outputs(
             dir,
             &reports,
+            observed.as_ref(),
             &base,
             args.jitter,
             args.seed,
@@ -231,15 +241,33 @@ struct PlayerProb {
     top3: f64,
 }
 
-/// True-strength order (strongest first) for one run.
-fn true_order(out: &RunOutcome) -> Vec<Uuid> {
-    let mut ids: Vec<Uuid> = out.strengths.keys().copied().collect();
+/// Strength order (strongest first) for a strength map.
+fn strength_order(strengths: &StrengthMap) -> Vec<Uuid> {
+    let mut ids: Vec<Uuid> = strengths.keys().copied().collect();
     ids.sort_by(|a, b| {
-        out.strengths[b]
-            .partial_cmp(&out.strengths[a])
+        strengths[b]
+            .partial_cmp(&strengths[a])
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     ids
+}
+
+/// True-strength order (strongest first) for one run.
+fn true_order(out: &RunOutcome) -> Vec<Uuid> {
+    strength_order(&out.strengths)
+}
+
+/// Players ordered by descending ELO estimate, ties broken by tournament number.
+fn estimate_order(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<Uuid> {
+    let mut ids: Vec<&Player> = players.iter().collect();
+    ids.sort_by(|a, b| {
+        let ea = estimate.get(&a.id).copied().unwrap_or(f64::MIN);
+        let eb = estimate.get(&b.id).copied().unwrap_or(f64::MIN);
+        eb.partial_cmp(&ea)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.tournament_id.cmp(&b.tournament_id))
+    });
+    ids.into_iter().map(|p| p.id).collect()
 }
 
 fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> VariantReport {
@@ -302,6 +330,66 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
     }
 }
 
+/// Metrics from the base tournament's *actual* played rounds — a real-world
+/// yardstick beside the simulated variants (design §3.3). Strengths are nominal
+/// (override else registration rating, no jitter), since a real event is a single
+/// realisation with no sampling.
+struct ObservedReport {
+    rounds: u32,
+    diff: DiffStats,
+    pooled: Vec<f64>,
+    fidelity_score: f64,
+    fidelity_estimate: f64,
+    /// Finishing rank (0-based) of each player in the real standings.
+    rank_of: HashMap<Uuid, usize>,
+    winner: Option<Uuid>,
+}
+
+/// Build the observed report from the base's real results, or `None` if the base
+/// has no played games (e.g. a synthetic, never-played base).
+fn observed_report(
+    base: &Tournament,
+    overrides: &StrengthMap,
+    thresholds: &[f64],
+) -> Option<ObservedReport> {
+    let played = base
+        .rounds
+        .iter()
+        .flat_map(|r| &r.boards)
+        .any(|b| b.result.is_some());
+    if !played {
+        return None;
+    }
+
+    // Nominal strengths: jitter 0 → override else registration rating. The rng is
+    // unused at jitter 0 but the signature needs one.
+    let mut rng = ChaCha8Rng::seed_from_u64(0);
+    let strengths = sample_strengths(&base.players, &base.settings, overrides, 0.0, &mut rng);
+
+    let mut pooled = game_elo_diffs(base, &strengths);
+    let diff = diff_stats(&pooled, thresholds);
+    pooled.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let final_order: Vec<Uuid> = base.standings().into_iter().map(|s| s.player_id).collect();
+    let true_ord = strength_order(&strengths);
+    let estimate = estimate_elos(&base.players, &base.settings, &base.rounds);
+    let est_ord = estimate_order(&base.players, &estimate);
+
+    Some(ObservedReport {
+        rounds: base.rounds.len() as u32,
+        diff,
+        pooled,
+        fidelity_score: spearman(&final_order, &true_ord),
+        fidelity_estimate: spearman(&est_ord, &true_ord),
+        rank_of: final_order
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (*id, i))
+            .collect(),
+        winner: final_order.first().copied(),
+    })
+}
+
 // --- output ----------------------------------------------------------------
 
 fn player_names(base: &Tournament) -> HashMap<Uuid, String> {
@@ -319,6 +407,7 @@ fn player_names(base: &Tournament) -> HashMap<Uuid, String> {
 
 fn print_report(
     reports: &[VariantReport],
+    observed: Option<&ObservedReport>,
     names: &HashMap<Uuid, String>,
     rounds: u32,
     runs: u64,
@@ -328,27 +417,34 @@ fn print_report(
     println!("osp-sim: {runs} runs × {rounds} rounds, seed {seed}, jitter {jitter}");
     println!("(no draws modelled; byes excluded from game stats)\n");
 
-    // Headline table: one row per variant.
-    println!(
-        "{:<14} {:>7} {:>7} {:>7} {:>7}   P(|d|>T)",
-        "variant", "mean|d|", "median", "p90", "p95"
-    );
-    for r in reports {
-        let exceed: Vec<String> = r
-            .diff
+    // Row formatter for the diff table, shared by variants and the observed line.
+    let diff_row = |label: &str, d: &DiffStats| {
+        let exceed: Vec<String> = d
             .exceed
             .iter()
             .map(|(t, p)| format!("{}:{:.1}%", *t as i64, p * 100.0))
             .collect();
         println!(
             "{:<14} {:>7.0} {:>7.0} {:>7.0} {:>7.0}   {}",
-            trunc(&r.name, 14),
-            r.diff.mean,
-            r.diff.median,
-            r.diff.p90,
-            r.diff.p95,
+            trunc(label, 14),
+            d.mean,
+            d.median,
+            d.p90,
+            d.p95,
             exceed.join("  "),
         );
+    };
+
+    // Headline table: one row per variant, then the observed reality.
+    println!(
+        "{:<14} {:>7} {:>7} {:>7} {:>7}   P(|d|>T)",
+        "variant", "mean|d|", "median", "p90", "p95"
+    );
+    for r in reports {
+        diff_row(&r.name, &r.diff);
+    }
+    if let Some(o) = observed {
+        diff_row("observed*", &o.diff);
     }
 
     println!(
@@ -363,8 +459,15 @@ fn print_report(
             r.fidelity_estimate
         );
     }
+    if let Some(o) = observed {
+        println!(
+            "{:<14} {:>16.3} {:>16.3}",
+            "observed*", o.fidelity_score, o.fidelity_estimate
+        );
+    }
 
-    // Victory probabilities: union of the top few players across variants.
+    // Victory probabilities: union of the top few players across variants, with an
+    // extra column for each player's real finishing rank.
     let mut shown: Vec<Uuid> = Vec::new();
     for r in reports {
         for pp in r.players.iter().take(6) {
@@ -380,6 +483,9 @@ fn print_report(
     print!("{:<20}", "player");
     for r in reports {
         print!("  {:>22}", trunc(&r.name, 22));
+    }
+    if observed.is_some() {
+        print!("  {:>8}", "obs.rank");
     }
     println!();
     for id in &shown {
@@ -398,7 +504,32 @@ fn print_report(
                 None => print!("  {:>22}", "-"),
             }
         }
+        if let Some(o) = observed {
+            let rank = o
+                .rank_of
+                .get(id)
+                .map(|r| format!("#{}", r + 1))
+                .unwrap_or_else(|| "-".into());
+            print!("  {rank:>8}");
+        }
         println!();
+    }
+
+    if let Some(o) = observed {
+        let winner = o
+            .winner
+            .and_then(|id| names.get(&id))
+            .map(String::as_str)
+            .unwrap_or("?");
+        println!(
+            "\n* observed: the base's real {}-round result; winner {winner}.",
+            o.rounds
+        );
+        if jitter > 0.0 {
+            println!(
+                "  (observed uses registration ratings; simulated diffs use jittered strengths — compare loosely)"
+            );
+        }
     }
 }
 
@@ -419,6 +550,23 @@ struct JsonReport {
     seed: u64,
     jitter: f64,
     variants: Vec<JsonVariant>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    observed: Option<JsonObserved>,
+}
+
+#[derive(Serialize)]
+struct JsonObserved {
+    rounds: u32,
+    games: usize,
+    mean_diff: f64,
+    median_diff: f64,
+    p90_diff: f64,
+    p95_diff: f64,
+    exceed: Vec<JsonExceed>,
+    fidelity_score: f64,
+    fidelity_estimate: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    winner: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -450,9 +598,11 @@ struct JsonVictory {
     top3: f64,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_outputs(
     dir: &Path,
     reports: &[VariantReport],
+    observed: Option<&ObservedReport>,
     base: &Tournament,
     jitter: f64,
     seed: u64,
@@ -467,6 +617,26 @@ fn write_outputs(
         rounds,
         seed,
         jitter,
+        observed: observed.map(|o| JsonObserved {
+            rounds: o.rounds,
+            games: o.diff.count,
+            mean_diff: o.diff.mean,
+            median_diff: o.diff.median,
+            p90_diff: o.diff.p90,
+            p95_diff: o.diff.p95,
+            exceed: o
+                .diff
+                .exceed
+                .iter()
+                .map(|(t, f)| JsonExceed {
+                    threshold: *t,
+                    fraction: *f,
+                })
+                .collect(),
+            fidelity_score: o.fidelity_score,
+            fidelity_estimate: o.fidelity_estimate,
+            winner: o.winner.and_then(|id| names.get(&id).cloned()),
+        }),
         variants: reports
             .iter()
             .map(|r| JsonVariant {
@@ -509,15 +679,15 @@ fn write_outputs(
         serde_json::to_string_pretty(&json).unwrap(),
     )?;
 
-    // One CSV histogram (50-point bins) of the pooled |diff| per variant, from the
-    // diffs retained at aggregation time — no re-simulation.
+    // One CSV histogram (50-point bins) of the pooled |diff| per variant (and the
+    // observed distribution), from the diffs retained at aggregation — no re-sim.
     let bin = 50.0;
-    for r in reports {
+    let write_hist = |name: &str, pooled: &[f64]| -> std::io::Result<()> {
         let mut csv = String::from("bin_lo,bin_hi,count\n");
-        let max = r.pooled.last().copied().unwrap_or(0.0);
+        let max = pooled.last().copied().unwrap_or(0.0);
         let nbins = (max / bin).ceil() as usize + 1;
         let mut counts = vec![0usize; nbins];
-        for d in &r.pooled {
+        for d in pooled {
             let b = (*d / bin) as usize;
             counts[b.min(nbins - 1)] += 1;
         }
@@ -529,7 +699,13 @@ fn write_outputs(
                 c
             ));
         }
-        std::fs::write(dir.join(format!("elo-diff-{}.csv", sanitize(&r.name))), csv)?;
+        std::fs::write(dir.join(format!("elo-diff-{}.csv", sanitize(name))), csv)
+    };
+    for r in reports {
+        write_hist(&r.name, &r.pooled)?;
+    }
+    if let Some(o) = observed {
+        write_hist("observed", &o.pooled)?;
     }
     Ok(())
 }
