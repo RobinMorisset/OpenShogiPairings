@@ -12,12 +12,14 @@
 //! "Promoting …" section that is ignored. Two wrinkles the parser handles:
 //!
 //! - A player **unrated** before the tournament has no grade and no `+/-`; their
-//!   ELO cell carries a `*` suffix and *is* their assigned post-tournament rating.
-//!   A rated player's strength is `ELO + (+/-)`.
+//!   ELO cell carries a `*` suffix and *is* their assigned post-tournament rating
+//!   (which can be as low as `1`). A rated player's strength is `ELO + (+/-)`.
 //! - Columns are only *mostly* fixed-width: a 3-digit player number or a 3-digit
 //!   opponent in a round cell shifts everything to its right. So only the last
-//!   name is read positionally (a fixed 18-wide field); everything after it is
-//!   tokenised and classified by shape, which is drift-proof.
+//!   name is read positionally — and its column width, which differs between
+//!   exports, is *detected* per file rather than hardcoded — while everything to
+//!   its right is tokenised and classified by shape, which is drift-proof (and
+//!   copes with an optional `MMS` column some tables carry before `Pts`).
 
 use std::collections::HashMap;
 
@@ -26,8 +28,9 @@ use uuid::Uuid;
 use crate::grid_import::{build_tournament, parse_cell, Cell, GridImportError, RawRow};
 use crate::tournament::Tournament;
 
-/// Width of the fixed last-name column (matches the FESA rating list).
-const LAST_NAME_WIDTH: usize = 18;
+/// Fallback last-name column width if detection finds nothing (e.g. an empty
+/// table); the real width is [`detect_last_name_width`].
+const DEFAULT_LAST_NAME_WIDTH: usize = 18;
 
 /// Parse a FESA result table, returning the replayed tournament and each player's
 /// post-tournament strength (`ELO + (+/-)`, or the `*` rating for a pre-unrated
@@ -36,8 +39,7 @@ pub fn import_fesa_results(
     text: &str,
 ) -> Result<(Tournament, HashMap<Uuid, f64>), GridImportError> {
     let mut title: Option<String> = None;
-    let mut rows: Vec<RawRow> = Vec::new();
-    let mut strength_by_number: HashMap<u32, f64> = HashMap::new();
+    let mut data: Vec<(usize, &str)> = Vec::new();
 
     for (i, raw) in text.lines().enumerate() {
         let line = raw.trim_end();
@@ -45,14 +47,24 @@ pub fn import_fesa_results(
             continue;
         }
         if is_data_row(line) {
-            let (row, strength) = parse_results_row(line, i + 1)?;
-            strength_by_number.insert(row.number, strength);
-            rows.push(row);
+            data.push((i + 1, line));
         } else if title.is_none() {
             // The first non-empty, non-data line is the title; the column header
             // and the trailing "Promoting …" lines are non-data and ignored.
             title = Some(line.trim().to_string());
         }
+    }
+
+    // The last-name column width varies between exports, so measure it from the
+    // rows before parsing them.
+    let width = detect_last_name_width(data.iter().map(|(_, l)| *l));
+
+    let mut rows: Vec<RawRow> = Vec::new();
+    let mut strength_by_number: HashMap<u32, f64> = HashMap::new();
+    for (line_no, line) in data {
+        let (row, strength) = parse_results_row(line, line_no, width)?;
+        strength_by_number.insert(row.number, strength);
+        rows.push(row);
     }
 
     demote_extra_byes(&mut rows);
@@ -101,39 +113,78 @@ fn is_data_row(line: &str) -> bool {
     false
 }
 
-/// Parse one player row into a [`RawRow`] and the player's strength.
-fn parse_results_row(line: &str, line_no: usize) -> Result<(RawRow, f64), GridImportError> {
+/// The player number and the index where the name column starts (past the number
+/// and its trailing spaces), or `None` if the line has no leading number.
+fn split_number(chars: &[char]) -> Option<(u32, usize)> {
+    let mut i = 0;
+    while i < chars.len() && chars[i] == ' ' {
+        i += 1;
+    }
+    let start = i;
+    while i < chars.len() && chars[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == start {
+        return None;
+    }
+    let number = chars[start..i].iter().collect::<String>().parse().ok()?;
+    while i < chars.len() && chars[i] == ' ' {
+        i += 1;
+    }
+    Some((number, i))
+}
+
+/// The last-name column width (chars from the name start to the first name),
+/// measured as the most common first-2-space-gap position across the rows. The
+/// width varies between exports, so it must be measured, not hardcoded; rows
+/// whose last name doesn't fill the column reveal the boundary, and the mode is
+/// robust to the exact-fill minority.
+fn detect_last_name_width<'a>(lines: impl Iterator<Item = &'a str>) -> usize {
+    let mut counts: HashMap<usize, usize> = HashMap::new();
+    for line in lines {
+        let chars: Vec<char> = line.chars().collect();
+        let Some((_, name_start)) = split_number(&chars) else {
+            continue;
+        };
+        // First run of >= 2 spaces after the name start (single spaces are within
+        // a multi-word last name), then the first non-space: the first name.
+        let mut j = name_start;
+        while j + 1 < chars.len() && !(chars[j] == ' ' && chars[j + 1] == ' ') {
+            j += 1;
+        }
+        while j < chars.len() && chars[j] == ' ' {
+            j += 1;
+        }
+        if j < chars.len() && j > name_start {
+            *counts.entry(j - name_start).or_default() += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .max_by_key(|&(_, n)| n)
+        .map_or(DEFAULT_LAST_NAME_WIDTH, |(w, _)| w)
+}
+
+/// Parse one player row into a [`RawRow`] and the player's strength, given the
+/// detected last-name column `width`.
+fn parse_results_row(
+    line: &str,
+    line_no: usize,
+    width: usize,
+) -> Result<(RawRow, f64), GridImportError> {
     let bad = |reason: &str| GridImportError::BadRow {
         line: line_no,
         reason: reason.to_string(),
     };
     let chars: Vec<char> = line.chars().collect();
-
-    // Player number, then skip to the name column.
-    let mut i = 0;
-    while i < chars.len() && chars[i] == ' ' {
-        i += 1;
-    }
-    let num_start = i;
-    while i < chars.len() && chars[i].is_ascii_digit() {
-        i += 1;
-    }
-    let number: u32 = chars[num_start..i]
-        .iter()
-        .collect::<String>()
-        .parse()
-        .map_err(|_| bad("missing player number"))?;
-    while i < chars.len() && chars[i] == ' ' {
-        i += 1;
-    }
-    let name_start = i;
-    if name_start + LAST_NAME_WIDTH >= chars.len() {
+    let (number, name_start) = split_number(&chars).ok_or_else(|| bad("missing player number"))?;
+    if name_start + width > chars.len() {
         return Err(bad("row too short for the name column"));
     }
 
     // Last name is the only positional field (its column is left of any drift);
-    // everything after it is tokenised.
-    let last_name = chars[name_start..name_start + LAST_NAME_WIDTH]
+    // everything after it is tokenised, which is drift-proof.
+    let last_name = chars[name_start..name_start + width]
         .iter()
         .collect::<String>()
         .trim()
@@ -141,11 +192,12 @@ fn parse_results_row(line: &str, line_no: usize) -> Result<(RawRow, f64), GridIm
     if last_name.is_empty() {
         return Err(bad("empty last name"));
     }
-    let remainder: String = chars[name_start + LAST_NAME_WIDTH..].iter().collect();
+    let remainder: String = chars[name_start + width..].iter().collect();
     let tokens: Vec<&str> = remainder.split_whitespace().collect();
 
-    // ELO is the first bare 3-4 digit number (optionally `*`): it sits before the
-    // round cells (which always end in a sign) and is wider than Pts (1-2 digits).
+    // ELO is the first 3-4 digit number, or any digits with a `*` (an unrated
+    // player's assigned rating, which can be a single digit). It precedes the
+    // round cells (which end in a sign) and is distinct from Pts/MMS (1-2 digits).
     let elo_idx = tokens
         .iter()
         .position(|t| is_elo_token(t))
@@ -170,8 +222,10 @@ fn parse_results_row(line: &str, line_no: usize) -> Result<(RawRow, f64), GridIm
     let nationality = pre.pop().map(str::to_string);
     let first_name = pre.join(" ");
 
-    // After the ELO: round cells, then Pts, then an optional `+/-` delta. Cells end
-    // in a sign; Pts and the delta don't, so the first non-cell ends the cells.
+    // After the ELO: round cells (each ends in a sign), then Pts (and, in some
+    // tables, an MMS column), then an optional `+/-` delta. The first non-cell
+    // ends the cells; the delta is the trailing *signed* token, so an MMS column
+    // between the cells and Pts doesn't fool it.
     let post = &tokens[elo_idx + 1..];
     let mut cells = Vec::new();
     let mut trailing = Vec::new();
@@ -186,15 +240,13 @@ fn parse_results_row(line: &str, line_no: usize) -> Result<(RawRow, f64), GridIm
         return Err(bad("no round cells"));
     }
 
-    // trailing = [Pts, +/-?]. A rated player's +/- feeds the strength; an unrated
-    // player has none (the `*` ELO is already their post-tournament rating).
-    let delta: i64 = if unrated {
-        0
-    } else {
-        match trailing.get(1) {
-            Some(d) => d.parse().map_err(|_| bad("unparseable +/- delta"))?,
-            None => 0,
+    // A rated player's +/- feeds the strength; an unrated player has none (the `*`
+    // ELO is already their post-tournament rating).
+    let delta: i64 = match trailing.last() {
+        Some(t) if !unrated && is_delta_token(t) => {
+            t.parse().map_err(|_| bad("unparseable +/- delta"))?
         }
+        _ => 0,
     };
 
     let strength = f64::from(elo) + delta as f64;
@@ -213,10 +265,21 @@ fn parse_results_row(line: &str, line_no: usize) -> Result<(RawRow, f64), GridIm
     ))
 }
 
-/// A 3-4 digit number, optionally with a trailing `*` (pre-unrated marker).
+/// A rating token: a 3-4 digit number, or any digits with a trailing `*` (the
+/// pre-unrated marker — an assigned rating that can be a single digit).
 fn is_elo_token(t: &str) -> bool {
-    let core = t.strip_suffix('*').unwrap_or(t);
-    (3..=4).contains(&core.len()) && core.chars().all(|c| c.is_ascii_digit())
+    match t.strip_suffix('*') {
+        Some(core) => !core.is_empty() && core.chars().all(|c| c.is_ascii_digit()),
+        None => (3..=4).contains(&t.len()) && t.chars().all(|c| c.is_ascii_digit()),
+    }
+}
+
+/// A signed integer like `+15` or `-6` — the `+/-` delta column (sign leads,
+/// unlike a round cell where the sign trails).
+fn is_delta_token(t: &str) -> bool {
+    matches!(t.as_bytes().first(), Some(b'+' | b'-'))
+        && t.len() > 1
+        && t[1..].chars().all(|c| c.is_ascii_digit())
 }
 
 /// A round cell: digits then a result sign (`+`, `-`, `=`, `#`), tolerating a
@@ -237,13 +300,14 @@ mod tests {
     use super::*;
     use crate::decode_latin1;
 
-    fn wosc() -> (Tournament, HashMap<Uuid, f64>) {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/results_WOSC_2024.txt"
-        );
-        let bytes = std::fs::read(path).expect("fixture present");
+    fn load(fixture: &str) -> (Tournament, HashMap<Uuid, f64>) {
+        let path = format!("{}/tests/fixtures/{fixture}", env!("CARGO_MANIFEST_DIR"));
+        let bytes = std::fs::read(&path).expect("fixture present");
         import_fesa_results(&decode_latin1(&bytes)).expect("parses")
+    }
+
+    fn wosc() -> (Tournament, HashMap<Uuid, f64>) {
+        load("results_WOSC_2024.txt")
     }
 
     fn find<'a>(t: &'a Tournament, last: &str, first: &str) -> &'a crate::Player {
@@ -299,5 +363,31 @@ mod tests {
         // A 3-digit-number (offset) row still parses.
         let ozal = find(&t, "\u{d6}zal", "Berke"); // "Özal", row 100
         assert_eq!(strengths[&ozal.id], 1496.0); // 1499 - 3
+    }
+
+    #[test]
+    fn cdf_files_with_a_narrower_name_column_and_an_mms_column_parse() {
+        // CdF 2024: last-name column is narrower than WOSC's, and there is an MMS
+        // column between the rounds and Pts — the delta must still be the trailing
+        // signed token, not the column after the rounds.
+        let (t, strengths) = load("results_CdF_2024.txt");
+        assert_eq!(t.rounds.len(), 6);
+        assert!(t.rounds.iter().all(|r| r.completed));
+        let nguyen = find(&t, "Nguyen", "Anh Tuan");
+        assert_eq!(nguyen.rating, Some(1862));
+        assert_eq!(strengths[&nguyen.id], 1869.0); // 1862 + 7 (delta past the MMS "1")
+
+        // A pre-unrated player with a single-digit `*` rating ("1*").
+        let anais = find(&t, "Massis", "Ana\u{ef}s"); // "Anaïs"
+        assert_eq!(anais.rating, None);
+        assert_eq!(strengths[&anais.id], 1.0);
+    }
+
+    #[test]
+    fn cdf_2025_parses_with_its_own_detected_width() {
+        let (t, strengths) = load("results_CdF_2025.txt");
+        assert_eq!(t.rounds.len(), 6);
+        let pucher = find(&t, "Pucher", "Olivier");
+        assert_eq!(strengths[&pucher.id], 1873.0); // 1887 - 14
     }
 }

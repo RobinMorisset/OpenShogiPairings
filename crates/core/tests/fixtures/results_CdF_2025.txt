@@ -1,0 +1,42 @@
+CdF Nantes 2025 : 2025-04-19/20
+Nr Name                       Nat  Grade  ELO    1   2   3   4   5   6  Pts   +/-
+ 1 Pucher          Olivier    FR   2 Dan  1887  16+  9- 13+  6+  5- 10+   4   -14
+ 2 Nguyen          Anh Tuan   FR   2 Dan  1861  15+ 10- 14+  8+  9- 17-   3   -41
+ 3 Flahaut         Clément    FR   1 Dan  1813  14+  6+ 10+  9+  4+  5-   5   +23
+ 4 Huwart          Guillaume  FR   1 Dan  1757  13+  5- 15+ 12+  3- 14-   3   -21
+ 5 Weimann         Célestin   FR   1 Kyu  1726  12+  4+  9- 10+  1+  3+   5   +50
+ 6 Wiethölter      Frederik   FR   1 Dan  1698  11+  3- 16+  1- 13+  9+   4   +19
+ 7 Weimann         Christophe FR   1 Dan  1683  10- 17- 23+ 18+ 14- 19+   3   -33
+ 8 Party           Eliot      FR   1 Kyu  1672   9- 18+ 17+  2- 15+ 16+   4    +7
+ 9 Coirier         Victor     FR   1 Kyu  1671   8+  1+  5+  3-  2+  6-   4   +52
+10 Dovetta         Philippe   FR   1 Dan  1660   7+  2+  3-  5- 16+  1-   3   +17
+11 Gazel           Arthur     FR   2 Kyu  1611   6- 19- 24+ 17- 23+ 18+   3   -25
+12 Pagès           Jérémy     FR   1 Kyu  1583   5- 20+ 19+  4- 17- 21-   2   -37
+13 Tertre          Manuel     FR   1 Kyu  1563   4- 21+  1- 19+  6- 27+   3    -2
+14 Audebrand       Ronan      FR   3 Kyu  1509   3- 22+  2- 21+  7+  4+   4   +68
+15 Osmont          Fabien     FR   3 Kyu  1508   2- 23+  4- 22+  8- 25+   3    -8
+16 Morisset        Robin      FR   3 Kyu  1487   1- 24+  6- 25+ 10-  8-   2    -8
+17 Goix            Théo       FR   5 Kyu  1408  25+  7+  8- 11+ 12+  2+   5  +146
+18 Marchand        Jordan     FR   4 Kyu  1389  26+  8- 30+  7- 24+ 11-   3    +1
+19 Grondin         Alexandre  FR   4 Kyu  1361  27+ 11+ 12- 13- 25+  7-   3   +39
+20 Kaliszczack     Julien     FR   4 Kyu  1308  28+ 12- 25- 31- 30+ 29-   2   -71
+21 Rautureau       Flavian    FR   6 Kyu  1219  29+ 13- 28+ 14- 31+ 12+   4   +73
+22 Béziau          Jocelyn    FR   5 Kyu  1213  30+ 14- 31+ 15- 27- 23-   2   -20
+23 Ecolan          Marc       FR   7 Kyu  1080  31+ 15-  7- 28+ 11- 22+   3   +51
+24 Mizessyn        François   FR   9 Kyu  1062  32+ 16- 11- 30+ 18- 26+   3   +26
+25 Brujan          Mathieu    FR   9 Kyu  1049  17- 29+ 20+ 16- 19- 15-   2   +57
+26 Coirier         Catherine  FR             1* 18- 30- 32- 29- 28- 24-   0  
+27 Dinet           Florent    FR          1145* 19- 31- 29+ 32+ 22+ 13-   3  
+28 Le Hecho Ladjal Younès     FR           793* 20- 32+ 21- 23- 26+ 31-   2  
+29 Canham          Matthew    FR   9 Kyu   956  21- 25- 27- 26+ 32+ 20+   3   +73
+30 Bouzeloc        Pierre     FR  10 Kyu   901  22- 26+ 18- 24- 20- 32-   1   -19
+31 Montanelli      Tristan    FR           798  23- 27+ 22- 20+ 21- 28+   3  +181
+32 Thibierge       Gabriel    FR  14 Kyu   662  24- 28- 26+ 27- 29- 30+   2   +70
+
+Promoting Weimann Célestin to 1 Dan
+Promoting Audebrand Ronan to 2 Kyu
+Promoting Goix Théo to 3 Kyu
+Promoting Rautureau Flavian to 5 Kyu
+Promoting Mizessyn François to 8 Kyu
+Promoting Montanelli Tristan to 10 Kyu
+Promoting Thibierge Gabriel to 12 Kyu
