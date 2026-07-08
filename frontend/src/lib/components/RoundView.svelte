@@ -15,6 +15,7 @@
     type Winner,
   } from "../types";
   import { sourceBadge } from "../pairingSource";
+  import { handicapGiverId } from "../boardOutcome";
 
   interface Props {
     round: Round;
@@ -311,8 +312,8 @@
 
   // Name of the frozen handicap giver, for the "X gives" hint.
   function giverName(board: Board): string {
-    if (!board.handicap) return "";
-    const id = board.handicap.giver === "player1" ? board.player1 : board.player2;
+    const id = handicapGiverId(board);
+    if (id == null) return "";
     const p = byId.get(id);
     return p ? `${p.last_name} ${p.first_name}`.trim() : $_("roundView.unknownPlayer");
   }

@@ -1,8 +1,9 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
   import { TIEBREAKS } from "../types";
-  import type { CupPodium, Player, Round, Standing, Tournament } from "../types";
+  import type { CupPodium, Player, Round, Standing, Tournament, Winner } from "../types";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
+  import { boardOutcome } from "../boardOutcome";
 
   interface Props {
     tournament: Tournament;
@@ -95,23 +96,16 @@
     );
     if (!board) return { kind: "absent" };
     const isP1 = board.player1 === player.id;
+    const side: Winner = isP1 ? "player1" : "player2";
     const opponentId = numberOf.get(isP1 ? board.player2 : board.player1);
     const opponent = opponentId != null ? String(opponentId) : "?";
     if (!board.result) return { kind: "pending", opponent };
-    const actualWon =
-      (board.result === "player1" && isP1) ||
-      (board.result === "player2" && !isP1);
 
-    // A handicap game always counts as a win for the giver, whoever won.
-    let effectiveWon = actualWon;
-    let handicap: PlayedCell["handicap"];
-    if (board.handicap) {
-      const gave =
-        (board.handicap.giver === "player1" && isP1) ||
-        (board.handicap.giver === "player2" && !isP1);
-      effectiveWon = gave;
-      handicap = { code: board.handicap.handicap, gave };
-    }
+    // The giver of a handicap game always counts as its winner, whoever won.
+    const { actualWon, effectiveWon, gave } = boardOutcome(board, side);
+    const handicap: PlayedCell["handicap"] = board.handicap
+      ? { code: board.handicap.handicap, gave }
+      : undefined;
     // points_diff = points(player1) − points(player2), frozen at pairing time.
     // From this player's own perspective: a positive diff for player1 means
     // player1 outranked player2, i.e. player1 played down (▼); the sign flips
