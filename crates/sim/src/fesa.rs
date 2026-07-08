@@ -55,26 +55,53 @@ pub fn list_url(date: Ymd) -> String {
     )
 }
 
-/// Canonical name key for matching: trimmed and lower-cased.
-fn normalize(s: &str) -> String {
-    s.trim().to_lowercase()
+/// Canonical name key for matching: lower-cased, diacritics folded to ASCII, and
+/// whitespace collapsed.
+///
+/// The grid and the FESA list don't always spell accents the same way — one may
+/// carry them and the other not (e.g. grid "Frederik" vs FESA "Frédérik"), and a
+/// UTF-8 grid may store an accent decomposed (`e` + a combining mark) while the
+/// Latin-1 list has it precomposed. Folding to a bare-ASCII key makes the match
+/// robust to all of these. Names genuinely absent from the list still don't match
+/// (they fall back to the grid rating) — folding only removes accent noise.
+fn fold_name(s: &str) -> String {
+    let folded: String = s
+        .to_lowercase()
+        .chars()
+        .filter_map(|c| match c {
+            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => Some('a'),
+            'ç' => Some('c'),
+            'è' | 'é' | 'ê' | 'ë' => Some('e'),
+            'ì' | 'í' | 'î' | 'ï' => Some('i'),
+            'ñ' => Some('n'),
+            'ò' | 'ó' | 'ô' | 'õ' | 'ö' => Some('o'),
+            'ù' | 'ú' | 'û' | 'ü' => Some('u'),
+            'ý' | 'ÿ' => Some('y'),
+            'ß' => Some('s'),
+            // Combining diacritical marks (the tail of a decomposed NFD letter).
+            c if ('\u{0300}'..='\u{036F}').contains(&c) => None,
+            c => Some(c),
+        })
+        .collect();
+    // Collapse internal runs of whitespace so "Le  Roux" == "Le Roux".
+    folded.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Build a strength override by matching base players to FESA entries on
-/// `(last, first)` name. Returns the map and how many players matched.
+/// accent-folded `(last, first)` name. Returns the map and how many matched.
 pub fn match_fesa(rated: &[RatedPlayer], base: &Tournament) -> (StrengthMap, usize) {
     let by_name: HashMap<(String, String), u32> = rated
         .iter()
         .map(|r| {
             (
-                (normalize(&r.last_name), normalize(&r.first_name)),
+                (fold_name(&r.last_name), fold_name(&r.first_name)),
                 r.rating,
             )
         })
         .collect();
     let mut map = StrengthMap::new();
     for p in &base.players {
-        if let Some(&elo) = by_name.get(&(normalize(&p.last_name), normalize(&p.first_name))) {
+        if let Some(&elo) = by_name.get(&(fold_name(&p.last_name), fold_name(&p.first_name))) {
             map.insert(p.id, f64::from(elo));
         }
     }
@@ -202,6 +229,34 @@ mod tests {
         assert_eq!(matched, 1);
         assert_eq!(map[&a], 1834.0); // post-tournament rating used as truth
         assert!(!map.contains_key(&b)); // no FESA entry → falls back to grid rating
+    }
+
+    fn rated(last: &str, first: &str, rating: u32) -> RatedPlayer {
+        RatedPlayer {
+            last_name: last.into(),
+            first_name: first.into(),
+            rating,
+            games: 30,
+            nationality: "FR".into(),
+        }
+    }
+
+    #[test]
+    fn folding_matches_across_accents_and_composition() {
+        let mut base = Tournament::new("T").unwrap();
+        // Grid without the accent the list carries.
+        let frederik = player(&mut base, "Wietholter", "Frederik");
+        // Grid with a *decomposed* (NFD) accent: "André" as 'e' + U+0301.
+        let andre = player(&mut base, "Muller", "Andre\u{0301}");
+
+        let list = vec![
+            rated("Wietholter", "Frédérik", 1698), // precomposed accents in the list
+            rated("Müller", "André", 1600),        // precomposed, plus an umlaut surname
+        ];
+        let (map, matched) = match_fesa(&list, &base);
+        assert_eq!(matched, 2, "accents/composition should not block a match");
+        assert_eq!(map[&frederik], 1698.0);
+        assert_eq!(map[&andre], 1600.0);
     }
 
     /// A player with the given last/first name.
