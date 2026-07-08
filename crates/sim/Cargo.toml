@@ -1,17 +1,19 @@
 [package]
-name = "osp-core"
+name = "osp-sim"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "osp-sim"
+path = "src/main.rs"
+
 [dependencies]
-integer-blossom = { workspace = true }
+osp-core = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 uuid = { workspace = true }
-thiserror = { workspace = true }
-ts-rs = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
-
-[dev-dependencies]
-serde_json = { workspace = true }
+rayon = "1"
+clap = { version = "4", features = ["derive"] }

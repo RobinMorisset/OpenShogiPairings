@@ -175,6 +175,20 @@ fn prior(player: &Player, k_multiplier: f64, provisional_mult: f64) -> (f64, f64
     }
 }
 
+/// The Gaussian prior `(mean, standard deviation)` the estimator assigns
+/// `player` under `settings` — the same `N(rating, σ₀²)` used by [`estimate_elos`].
+///
+/// Exposed for the simulator ([`crate::sim`]), which draws each player's
+/// ground-truth strength from this prior so the injected noise is rating-
+/// dependent and coherent with the estimator rather than a second, flat model.
+pub(crate) fn player_prior(player: &Player, settings: &TournamentSettings) -> (f64, f64) {
+    prior(
+        player,
+        settings.elo_k_multiplier(),
+        settings.elo_provisional_multiplier(),
+    )
+}
+
 /// Expected score `σ(x) = 1/(1+e^−x)` for `x = (θself − θopp)/s`.
 fn expected(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())

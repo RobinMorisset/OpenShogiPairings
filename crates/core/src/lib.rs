@@ -19,6 +19,7 @@ mod player;
 mod round;
 mod scoring;
 mod settings;
+pub mod sim;
 mod standings;
 mod tournament;
 
