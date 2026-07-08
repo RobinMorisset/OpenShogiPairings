@@ -75,7 +75,12 @@ pub fn to_grid(tournament: &Tournament, standings: &[Standing]) -> String {
     // reference), join with a single space, and strip each line's trailing space.
     let columns = rows[0].len();
     let widths: Vec<usize> = (0..columns)
-        .map(|c| rows.iter().map(|row| row[c].chars().count()).max().unwrap_or(0))
+        .map(|c| {
+            rows.iter()
+                .map(|row| row[c].chars().count())
+                .max()
+                .unwrap_or(0)
+        })
         .collect();
 
     let mut out = format!("[{}]\n", tournament.name);
@@ -113,8 +118,14 @@ fn row_for(
     }
 
     let mut row = vec![
-        rank_of.get(&player.id).map_or_else(|| "?".into(), |r| r.to_string()),
-        if player.rating.is_none() { "N".into() } else { String::new() },
+        rank_of
+            .get(&player.id)
+            .map_or_else(|| "?".into(), |r| r.to_string()),
+        if player.rating.is_none() {
+            "N".into()
+        } else {
+            String::new()
+        },
         format!("[{}] [{}]", player.last_name, player.first_name),
         player.nationality.clone().unwrap_or_default(),
         player.rating.map(|r| r.to_string()).unwrap_or_default(),
@@ -140,7 +151,11 @@ fn round_cell(player_id: Uuid, round: &Round, rank_of: &HashMap<Uuid, u32>) -> S
     };
 
     let is_player1 = board.player1 == player_id;
-    let opponent_id = if is_player1 { board.player2 } else { board.player1 };
+    let opponent_id = if is_player1 {
+        board.player2
+    } else {
+        board.player1
+    };
     let opponent = rank_of
         .get(&opponent_id)
         .map_or_else(|| "?".into(), |r| r.to_string());

@@ -89,7 +89,12 @@ async fn fetch_from_fesa() -> Result<Vec<RatedPlayer>, ApiError> {
 /// automatically — use [`refresh_from_fesa`] (the refresh button) to update it.
 async fn get_ratings(state: &AppState) -> Result<Vec<RatedPlayer>, ApiError> {
     // 1. Already in memory?
-    if let Some(cached) = state.ratings.read().expect("ratings lock poisoned").as_ref() {
+    if let Some(cached) = state
+        .ratings
+        .read()
+        .expect("ratings lock poisoned")
+        .as_ref()
+    {
         return Ok(cached.players.clone());
     }
 

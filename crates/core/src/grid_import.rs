@@ -140,11 +140,13 @@ fn rebuild_round(
                 outcome,
                 handicap,
             } => {
-                let opp = *by_number.get(opponent).ok_or(GridImportError::UnknownOpponent {
-                    round: round_number,
-                    by: row.number,
-                    opponent: *opponent,
-                })?;
+                let opp = *by_number
+                    .get(opponent)
+                    .ok_or(GridImportError::UnknownOpponent {
+                        round: round_number,
+                        by: row.number,
+                        opponent: *opponent,
+                    })?;
                 // Handle each pair once, from the lower-numbered side, checking
                 // the opponent mirrors it consistently.
                 if row.number < *opponent {
@@ -187,7 +189,9 @@ fn rebuild_round(
     }
 
     if byes.len() > 1 {
-        return Err(GridImportError::MultipleByes { round: round_number });
+        return Err(GridImportError::MultipleByes {
+            round: round_number,
+        });
     }
     let forced_bye = byes.into_iter().next();
 
@@ -448,9 +452,7 @@ fn parse_handicap(suffix: &str, line_no: usize, cell: &str) -> Result<Handicap, 
         .strip_prefix('(')
         .and_then(|s| s.strip_suffix(')'))
         .ok_or_else(bad)?;
-    let code = inner
-        .strip_prefix(['+', '-'])
-        .ok_or_else(bad)?;
+    let code = inner.strip_prefix(['+', '-']).ok_or_else(bad)?;
     Handicap::from_code(code).ok_or_else(bad)
 }
 
@@ -461,7 +463,10 @@ mod tests {
 
     /// Find a player by last name.
     fn player<'a>(t: &'a Tournament, last: &str) -> &'a crate::player::Player {
-        t.players.iter().find(|p| p.last_name == last).expect("player exists")
+        t.players
+            .iter()
+            .find(|p| p.last_name == last)
+            .expect("player exists")
     }
 
     /// The board in a round that pairs the two named players.
@@ -508,7 +513,11 @@ Nr Name          Nat Elo  1   2   Pts
         let alpha_is_p1 = b.player1 == player(&t, "Alpha").id;
         assert_eq!(
             b.effective_winner(),
-            Some(if alpha_is_p1 { Winner::Player1 } else { Winner::Player2 })
+            Some(if alpha_is_p1 {
+                Winner::Player1
+            } else {
+                Winner::Player2
+            })
         );
 
         // Standings: Alpha clear first with 2 points.
@@ -614,7 +623,10 @@ Nr Name        Nat Elo  1        2   Pts
         let g1 = crate::american_grid(&t1, &t1.standings());
         let t2 = import_american_grid(&g1).unwrap();
         let g2 = crate::american_grid(&t2, &t2.standings());
-        assert_eq!(g1, g2, "export is not a fixpoint:\n---g1---\n{g1}\n---g2---\n{g2}");
+        assert_eq!(
+            g1, g2,
+            "export is not a fixpoint:\n---g1---\n{g1}\n---g2---\n{g2}"
+        );
     }
 
     #[test]
@@ -666,7 +678,10 @@ Nr Name    Nat Elo  1   2   Pts
 ";
         assert!(matches!(
             import_american_grid(grid),
-            Err(GridImportError::InconsistentRounds { expected: 2, found: 1 })
+            Err(GridImportError::InconsistentRounds {
+                expected: 2,
+                found: 1
+            })
         ));
     }
 
@@ -782,7 +797,11 @@ Nr Name    Nat Elo  1   Pts
 ";
         assert!(matches!(
             import_american_grid(grid),
-            Err(GridImportError::Asymmetric { round: 1, a: 1, b: 2 })
+            Err(GridImportError::Asymmetric {
+                round: 1,
+                a: 1,
+                b: 2
+            })
         ));
     }
 
@@ -798,7 +817,11 @@ Nr Name    Nat Elo  1   Pts
 ";
         assert!(matches!(
             import_american_grid(grid),
-            Err(GridImportError::Asymmetric { round: 1, a: 1, b: 2 })
+            Err(GridImportError::Asymmetric {
+                round: 1,
+                a: 1,
+                b: 2
+            })
         ));
     }
 }

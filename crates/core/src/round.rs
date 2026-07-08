@@ -180,7 +180,12 @@ pub struct Board {
 impl Board {
     /// A not-yet-played board between two players, tagged with how it was paired
     /// and (for engine pairings) its frozen float.
-    pub fn pending(player1: Uuid, player2: Uuid, points_diff: Option<i32>, source: PairingSource) -> Self {
+    pub fn pending(
+        player1: Uuid,
+        player2: Uuid,
+        points_diff: Option<i32>,
+        source: PairingSource,
+    ) -> Self {
         Board {
             player1,
             player2,

@@ -85,17 +85,29 @@ impl Cup {
             let stage = stage_before_final(frontier.len() as u32);
             fold(&frontier)
                 .into_iter()
-                .map(|(player1, player2)| CupMatch { player1, player2, stage })
+                .map(|(player1, player2)| CupMatch {
+                    player1,
+                    player2,
+                    stage,
+                })
                 .collect()
         } else {
             // The final round: the final, then the small final for third place.
             let losers = semifinal_losers.expect("semifinal replayed before the final round");
             let mut v = Vec::new();
             for (player1, player2) in fold(&frontier) {
-                v.push(CupMatch { player1, player2, stage: CupStage::Final });
+                v.push(CupMatch {
+                    player1,
+                    player2,
+                    stage: CupStage::Final,
+                });
             }
             for (player1, player2) in fold(&losers) {
-                v.push(CupMatch { player1, player2, stage: CupStage::SmallFinal });
+                v.push(CupMatch {
+                    player1,
+                    player2,
+                    stage: CupStage::SmallFinal,
+                });
             }
             v
         };
@@ -158,9 +170,10 @@ fn stage_before_final(alive: u32) -> CupStage {
 /// Find the board between `a` and `b` in round `k` and return (winner, loser).
 fn decide(rounds: &[Round], k: u32, a: Uuid, b: Uuid) -> Option<(Uuid, Uuid)> {
     let round = rounds.iter().find(|r| r.number == k)?;
-    let board = round.boards.iter().find(|bd| {
-        (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a)
-    })?;
+    let board = round
+        .boards
+        .iter()
+        .find(|bd| (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a))?;
     Some((board.winner_id()?, board.effective_loser()?))
 }
 
@@ -194,7 +207,10 @@ mod tests {
     #[test]
     fn round_one_folds_the_seeds() {
         let seeds = ids(8);
-        let cup = Cup { size: 8, seed_order: seeds.clone() };
+        let cup = Cup {
+            size: 8,
+            seed_order: seeds.clone(),
+        };
         let m = cup.matches_for_round(&[], 1).unwrap();
         // 1v8, 2v7, 3v6, 4v5 — all quarterfinals.
         assert_eq!(m.len(), 4);
@@ -207,7 +223,10 @@ mod tests {
     #[test]
     fn semifinal_winners_meet_in_the_final_and_losers_in_the_small_final() {
         let s = ids(8);
-        let cup = Cup { size: 8, seed_order: s.clone() };
+        let cup = Cup {
+            size: 8,
+            seed_order: s.clone(),
+        };
         // R1 (QF): top seed of each match wins → winners s0,s1,s2,s3 in match order.
         let r1 = cup_round(
             1,
@@ -219,13 +238,16 @@ mod tests {
             ],
         );
         // R2 (SF): fold [s0,s1,s2,s3] → (s0,s3) and (s1,s2). Say s0 and s1 win.
-        let sf = cup.matches_for_round(&[r1.clone()], 2).unwrap();
+        let sf = cup.matches_for_round(std::slice::from_ref(&r1), 2).unwrap();
         assert_eq!((sf[0].player1, sf[0].player2), (s[0], s[3]));
         assert_eq!((sf[1].player1, sf[1].player2), (s[1], s[2]));
         assert!(matches!(sf[0].stage, CupStage::Semifinal));
         let r2 = cup_round(
             2,
-            &[(s[0], s[3], CupStage::Semifinal), (s[1], s[2], CupStage::Semifinal)],
+            &[
+                (s[0], s[3], CupStage::Semifinal),
+                (s[1], s[2], CupStage::Semifinal),
+            ],
         );
         // R3 (final round): final s0 vs s1, small final s3 vs s2.
         let f = cup.matches_for_round(&[r1, r2], 3).unwrap();
@@ -238,8 +260,14 @@ mod tests {
 
     #[test]
     fn stage_names_scale_with_size() {
-        let cup = Cup { size: 32, seed_order: ids(32) };
+        let cup = Cup {
+            size: 32,
+            seed_order: ids(32),
+        };
         assert_eq!(cup.cup_rounds(), 5);
-        assert!(matches!(cup.matches_for_round(&[], 1).unwrap()[0].stage, CupStage::RoundOf(32)));
+        assert!(matches!(
+            cup.matches_for_round(&[], 1).unwrap()[0].stage,
+            CupStage::RoundOf(32)
+        ));
     }
 }

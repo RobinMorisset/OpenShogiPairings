@@ -85,7 +85,12 @@ impl Tiebreak {
     /// order that preceded this setting, so pre-existing tournaments (and new
     /// ones that never touch the setting) rank exactly as before.
     pub fn default_order() -> Vec<Tiebreak> {
-        vec![Tiebreak::Points, Tiebreak::SosM, Tiebreak::SodosM, Tiebreak::SososM]
+        vec![
+            Tiebreak::Points,
+            Tiebreak::SosM,
+            Tiebreak::SodosM,
+            Tiebreak::SososM,
+        ]
     }
 }
 
@@ -277,7 +282,8 @@ impl TournamentSettings {
         self.macmahon_removals.sort_unstable();
         // Keeping the earliest removals matches "these fire soonest"; the excess
         // couldn't take effect anyway once every threshold is gone.
-        self.macmahon_removals.truncate(self.macmahon_thresholds.len());
+        self.macmahon_removals
+            .truncate(self.macmahon_thresholds.len());
 
         // Exempt clubs: keep the first spelling of each, trimmed and non-empty.
         let mut seen = HashSet::new();
@@ -441,8 +447,14 @@ mod tests {
 
     #[test]
     fn handicap_policy_defaults_to_allowed_and_round_trips_snake_case() {
-        assert_eq!(TournamentSettings::default().handicap_policy, HandicapPolicy::Allowed);
-        assert_eq!(serde_json::to_string(&HandicapPolicy::Suggested).unwrap(), "\"suggested\"");
+        assert_eq!(
+            TournamentSettings::default().handicap_policy,
+            HandicapPolicy::Allowed
+        );
+        assert_eq!(
+            serde_json::to_string(&HandicapPolicy::Suggested).unwrap(),
+            "\"suggested\""
+        );
         // Omitted in the payload → the default (Allowed).
         let s: TournamentSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(s.handicap_policy, HandicapPolicy::Allowed);
@@ -454,20 +466,39 @@ mod tests {
         let s: TournamentSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(
             s.tiebreaks,
-            vec![Tiebreak::Points, Tiebreak::SosM, Tiebreak::SodosM, Tiebreak::SososM]
+            vec![
+                Tiebreak::Points,
+                Tiebreak::SosM,
+                Tiebreak::SodosM,
+                Tiebreak::SososM
+            ]
         );
         // Snake-case codes on the wire.
-        assert_eq!(serde_json::to_string(&Tiebreak::Points).unwrap(), "\"points\"");
-        assert_eq!(serde_json::to_string(&Tiebreak::CussW).unwrap(), "\"cuss_w\"");
+        assert_eq!(
+            serde_json::to_string(&Tiebreak::Points).unwrap(),
+            "\"points\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Tiebreak::CussW).unwrap(),
+            "\"cuss_w\""
+        );
 
         // Normalizing drops duplicates, keeping the first occurrence (so order is
         // meaningful and each column appears once).
         let n = TournamentSettings {
-            tiebreaks: vec![Tiebreak::SosW, Tiebreak::SosM, Tiebreak::SosW, Tiebreak::CussM],
+            tiebreaks: vec![
+                Tiebreak::SosW,
+                Tiebreak::SosM,
+                Tiebreak::SosW,
+                Tiebreak::CussM,
+            ],
             ..Default::default()
         }
         .normalized();
-        assert_eq!(n.tiebreaks, vec![Tiebreak::SosW, Tiebreak::SosM, Tiebreak::CussM]);
+        assert_eq!(
+            n.tiebreaks,
+            vec![Tiebreak::SosW, Tiebreak::SosM, Tiebreak::CussM]
+        );
     }
 
     #[test]
@@ -488,13 +519,22 @@ mod tests {
             ..Default::default()
         }
         .normalized();
-        assert_eq!(on.tiebreaks, vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM]);
+        assert_eq!(
+            on.tiebreaks,
+            vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM]
+        );
     }
 
     #[test]
     fn floater_style_defaults_to_classic_and_round_trips_snake_case() {
-        assert_eq!(TournamentSettings::default().floater_style, FloaterStyle::Classic);
-        assert_eq!(serde_json::to_string(&FloaterStyle::Median).unwrap(), "\"median\"");
+        assert_eq!(
+            TournamentSettings::default().floater_style,
+            FloaterStyle::Classic
+        );
+        assert_eq!(
+            serde_json::to_string(&FloaterStyle::Median).unwrap(),
+            "\"median\""
+        );
         // Omitted in the payload → the default (Classic).
         let s: TournamentSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(s.floater_style, FloaterStyle::Classic);

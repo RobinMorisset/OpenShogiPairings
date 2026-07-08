@@ -148,8 +148,16 @@ pub fn compute_standings(
                 sosw: sosw[&p.id],
                 sodosm: s.defeated.iter().map(&score_m).sum(),
                 sodosw: s.defeated.iter().map(&score_w).sum(),
-                sososm: s.opponents.iter().map(|o| sosm.get(o).copied().unwrap_or(0)).sum(),
-                sososw: s.opponents.iter().map(|o| sosw.get(o).copied().unwrap_or(0)).sum(),
+                sososm: s
+                    .opponents
+                    .iter()
+                    .map(|o| sosm.get(o).copied().unwrap_or(0))
+                    .sum(),
+                sososw: s
+                    .opponents
+                    .iter()
+                    .map(|o| sosw.get(o).copied().unwrap_or(0))
+                    .sum(),
                 sosm1: sum_dropping_lowest(opp_m.clone(), 1),
                 sosm2: sum_dropping_lowest(opp_m, 2),
                 sosw1: sum_dropping_lowest(opp_w.clone(), 1),
@@ -274,8 +282,14 @@ mod tests {
         let standings = compute_standings(&[a.clone(), b.clone()], &settings, &rounds);
 
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
-        assert_eq!((of(a.id).macmahon, of(a.id).victories, of(a.id).points), (1, 1, 2));
-        assert_eq!((of(b.id).macmahon, of(b.id).victories, of(b.id).points), (1, 0, 1));
+        assert_eq!(
+            (of(a.id).macmahon, of(a.id).victories, of(a.id).points),
+            (1, 1, 2)
+        );
+        assert_eq!(
+            (of(b.id).macmahon, of(b.id).victories, of(b.id).points),
+            (1, 0, 1)
+        );
         assert_eq!(of(a.id).sosm, 1); // opponent B has 1 point
         assert_eq!(of(a.id).sodosm, 1); // defeated B (1 point)
         assert_eq!(standings[0].player_id, a.id); // A ranks first
@@ -298,8 +312,14 @@ mod tests {
         let standings = compute_standings(&[a.clone(), b.clone()], &settings, &rounds);
 
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
-        assert_eq!((of(a.id).macmahon, of(a.id).victories, of(a.id).points), (0, 1, 1));
-        assert_eq!((of(b.id).macmahon, of(b.id).victories, of(b.id).points), (0, 0, 0));
+        assert_eq!(
+            (of(a.id).macmahon, of(a.id).victories, of(a.id).points),
+            (0, 1, 1)
+        );
+        assert_eq!(
+            (of(b.id).macmahon, of(b.id).victories, of(b.id).points),
+            (0, 0, 0)
+        );
     }
 
     #[test]
@@ -336,12 +356,33 @@ mod tests {
         let c = player(3, None);
         let d = player(4, None);
         let rounds = vec![
-            round(1, vec![board(a.id, b.id, Winner::Player1), board(c.id, d.id, Winner::Player1)]),
-            round(2, vec![board(a.id, c.id, Winner::Player1), board(b.id, d.id, Winner::Player1)]),
-            round(3, vec![board(a.id, d.id, Winner::Player1), board(b.id, c.id, Winner::Player1)]),
+            round(
+                1,
+                vec![
+                    board(a.id, b.id, Winner::Player1),
+                    board(c.id, d.id, Winner::Player1),
+                ],
+            ),
+            round(
+                2,
+                vec![
+                    board(a.id, c.id, Winner::Player1),
+                    board(b.id, d.id, Winner::Player1),
+                ],
+            ),
+            round(
+                3,
+                vec![
+                    board(a.id, d.id, Winner::Player1),
+                    board(b.id, c.id, Winner::Player1),
+                ],
+            ),
         ];
-        let standings =
-            compute_standings(&[a.clone(), b.clone(), c.clone(), d.clone()], &TournamentSettings::default(), &rounds);
+        let standings = compute_standings(
+            &[a.clone(), b.clone(), c.clone(), d.clone()],
+            &TournamentSettings::default(),
+            &rounds,
+        );
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
         // A faced B (2 wins), C (1 win), D (0 wins) → {2, 1, 0}.
         assert_eq!(of(a.id).sosw, 3);
@@ -358,16 +399,37 @@ mod tests {
         let c = player(3, None);
         let d = player(4, None);
         let rounds = vec![
-            round(1, vec![board(a.id, b.id, Winner::Player1), board(c.id, d.id, Winner::Player1)]),
-            round(2, vec![board(a.id, c.id, Winner::Player2), board(b.id, d.id, Winner::Player1)]),
-            round(3, vec![board(a.id, d.id, Winner::Player1), board(b.id, c.id, Winner::Player2)]),
+            round(
+                1,
+                vec![
+                    board(a.id, b.id, Winner::Player1),
+                    board(c.id, d.id, Winner::Player1),
+                ],
+            ),
+            round(
+                2,
+                vec![
+                    board(a.id, c.id, Winner::Player2),
+                    board(b.id, d.id, Winner::Player1),
+                ],
+            ),
+            round(
+                3,
+                vec![
+                    board(a.id, d.id, Winner::Player1),
+                    board(b.id, c.id, Winner::Player2),
+                ],
+            ),
         ];
-        let standings =
-            compute_standings(&[a.clone(), b.clone(), c.clone(), d.clone()], &TournamentSettings::default(), &rounds);
+        let standings = compute_standings(
+            &[a.clone(), b.clone(), c.clone(), d.clone()],
+            &TournamentSettings::default(),
+            &rounds,
+        );
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
         assert_eq!(of(a.id).cussw, 4); // 1 + 1 + 2
         assert_eq!(of(b.id).cussw, 2); // 0 + 1 + 1
-        // No MacMahon here, so the M flavour matches the W flavour.
+                                       // No MacMahon here, so the M flavour matches the W flavour.
         assert_eq!(of(a.id).cussm, 4);
     }
 
@@ -385,7 +447,11 @@ mod tests {
         assert_eq!(of(&none, b.id), 1800);
 
         let rounds = vec![round(1, vec![board(a.id, b.id, Winner::Player1)])]; // A upsets B
-        let after = compute_standings(&[a.clone(), b.clone()], &TournamentSettings::default(), &rounds);
+        let after = compute_standings(
+            &[a.clone(), b.clone()],
+            &TournamentSettings::default(),
+            &rounds,
+        );
         assert!(of(&after, a.id) > 1400, "the winner's estimate rises");
         assert!(of(&after, b.id) < 1800, "the loser's estimate falls");
     }
@@ -454,7 +520,14 @@ mod tests {
                 ],
             ),
         ];
-        let players = vec![a.clone(), b.clone(), c.clone(), d.clone(), e.clone(), f.clone()];
+        let players = vec![
+            a.clone(),
+            b.clone(),
+            c.clone(),
+            d.clone(),
+            e.clone(),
+            f.clone(),
+        ];
         let base = TournamentSettings {
             macmahon_thresholds: vec![1500],
             ..Default::default()
@@ -463,14 +536,20 @@ mod tests {
 
         let by_m = compute_standings(
             &players,
-            &TournamentSettings { tiebreaks: vec![Tiebreak::SosM], ..base.clone() },
+            &TournamentSettings {
+                tiebreaks: vec![Tiebreak::SosM],
+                ..base.clone()
+            },
             &rounds,
         );
         assert!(pos(&by_m, e.id) < pos(&by_m, f.id)); // E above F by SOSM
 
         let by_w = compute_standings(
             &players,
-            &TournamentSettings { tiebreaks: vec![Tiebreak::SosW], ..base },
+            &TournamentSettings {
+                tiebreaks: vec![Tiebreak::SosW],
+                ..base
+            },
             &rounds,
         );
         assert!(pos(&by_w, f.id) < pos(&by_w, e.id)); // F above E by SOSW

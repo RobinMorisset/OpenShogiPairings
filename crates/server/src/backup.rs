@@ -106,7 +106,9 @@ pub fn take(tournament: &Tournament, label: &str) {
 /// the `(secs, seq)` encoded in each filename — *not* a plain lexicographic
 /// sort, since `seq` isn't zero-padded ("10" would otherwise sort before "9").
 fn rotate(dir: &Path) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     let mut files: Vec<(u64, u64, PathBuf)> = entries
         .filter_map(|e| e.ok())
         .filter_map(|e| {
@@ -128,8 +130,12 @@ fn rotate(dir: &Path) {
 
 /// List backups for `tournament_id`, newest first.
 pub fn list(tournament_id: Uuid) -> Vec<BackupInfo> {
-    let Some(dir) = backups_dir(tournament_id) else { return Vec::new() };
-    let Ok(entries) = fs::read_dir(&dir) else { return Vec::new() };
+    let Some(dir) = backups_dir(tournament_id) else {
+        return Vec::new();
+    };
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
     // Sort by (seconds, sequence) — several backups can share the same second,
     // and `seq` is what breaks the tie in the order they were actually taken.
     let mut infos: Vec<(u64, u64, BackupInfo)> = entries
@@ -145,11 +151,15 @@ pub fn list(tournament_id: Uuid) -> Vec<BackupInfo> {
             Some((
                 secs,
                 seq,
-                BackupInfo { taken_at: secs, label, id: stem },
+                BackupInfo {
+                    taken_at: secs,
+                    label,
+                    id: stem,
+                },
             ))
         })
         .collect();
-    infos.sort_by(|a, b| (b.0, b.1).cmp(&(a.0, a.1)));
+    infos.sort_by_key(|(secs, seq, _)| std::cmp::Reverse((*secs, *seq)));
     infos.into_iter().map(|(_, _, info)| info).collect()
 }
 

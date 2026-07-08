@@ -89,8 +89,7 @@ impl Blossom {
     }
 
     fn update_slack(&mut self, u: usize, x: usize) {
-        if self.slack[x] == 0
-            || self.e_delta(self.g[u][x]) < self.e_delta(self.g[self.slack[x]][x])
+        if self.slack[x] == 0 || self.e_delta(self.g[u][x]) < self.e_delta(self.g[self.slack[x]][x])
         {
             self.slack[x] = u;
         }
@@ -268,8 +267,7 @@ impl Blossom {
         }
         self.s[xr] = 1;
         self.pa[xr] = self.pa[b];
-        for i in (pr + 1)..fb.len() {
-            let xs = fb[i];
+        for &xs in &fb[(pr + 1)..] {
             self.s[xs] = -1;
             self.set_slack(xs);
         }
@@ -432,7 +430,10 @@ impl Blossom {
 /// matching always exists.
 pub fn min_weight_perfect_matching(cost: &[Vec<i128>]) -> Vec<usize> {
     let n = cost.len();
-    assert!(n % 2 == 0, "a perfect matching needs an even vertex count");
+    assert!(
+        n.is_multiple_of(2),
+        "a perfect matching needs an even vertex count"
+    );
     if n == 0 {
         return Vec::new();
     }
@@ -440,20 +441,20 @@ pub fn min_weight_perfect_matching(cost: &[Vec<i128>]) -> Vec<usize> {
     // Reduce min-cost-perfect to max-weight: weight = offset - cost, with offset
     // above every cost so all weights are ≥ 1 (keeping the matching perfect).
     let mut max_cost = 0i128;
-    for i in 0..n {
-        for j in 0..n {
-            if i != j && cost[i][j] > max_cost {
-                max_cost = cost[i][j];
+    for (i, row) in cost.iter().enumerate() {
+        for (j, &c) in row.iter().enumerate() {
+            if i != j && c > max_cost {
+                max_cost = c;
             }
         }
     }
     let offset = max_cost + 1;
 
     let mut bl = Blossom::new(n);
-    for i in 0..n {
+    for (i, row) in cost.iter().enumerate() {
         for j in (i + 1)..n {
-            debug_assert_eq!(cost[i][j], cost[j][i], "cost matrix must be symmetric");
-            bl.set_edge(i + 1, j + 1, offset - cost[i][j]);
+            debug_assert_eq!(row[j], cost[j][i], "cost matrix must be symmetric");
+            bl.set_edge(i + 1, j + 1, offset - row[j]);
         }
     }
     bl.solve();
@@ -544,6 +545,7 @@ mod tests {
         for &n in &[2usize, 4, 6, 8, 10] {
             for _ in 0..200 {
                 let mut cost = vec![vec![0i128; n]; n];
+                #[allow(clippy::needless_range_loop)]
                 for i in 0..n {
                     for j in (i + 1)..n {
                         let c = (next() % 1000) as i128;
@@ -572,6 +574,9 @@ mod tests {
         ];
         let mate = min_weight_perfect_matching(&cost);
         assert_eq!(brute_min_cost(&cost), total_of(&cost, &mate));
-        assert_ne!(mate[0], 1, "should not pair the two most-penalized vertices");
+        assert_ne!(
+            mate[0], 1,
+            "should not pair the two most-penalized vertices"
+        );
     }
 }

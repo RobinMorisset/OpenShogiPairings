@@ -163,7 +163,11 @@ fn prior(player: &Player, k_multiplier: f64, provisional_mult: f64) -> (f64, f64
     match player.rating {
         Some(rating) => {
             // Multipliers are clamped ≥ 1%/100% by settings normalization, so K > 0.
-            let reliability = if is_reliably_rated(player) { 1.0 } else { provisional_mult };
+            let reliability = if is_reliably_rated(player) {
+                1.0
+            } else {
+                provisional_mult
+            };
             let k = k_multiplier * fesa_k(rating) * reliability;
             (f64::from(rating), (k * S).sqrt())
         }
@@ -210,7 +214,8 @@ pub fn estimate_elos(
     let mut games: Vec<Vec<(usize, f64, f64)>> = vec![Vec::new(); n];
     for round in rounds.iter().filter(|r| r.completed) {
         for board in &round.boards {
-            let (Some(&a), Some(&b)) = (index.get(&board.player1), index.get(&board.player2)) else {
+            let (Some(&a), Some(&b)) = (index.get(&board.player1), index.get(&board.player2))
+            else {
                 continue; // an opponent no longer in the tournament
             };
             // Handicaps use the *actual* result (who really won), so score player1
@@ -228,12 +233,20 @@ pub fn estimate_elos(
             // received them, 0 for an even game. Needs the giver's fixed rating.
             let offset_a = match &board.handicap {
                 Some(hg) => {
-                    let giver = if hg.giver == Winner::Player1 { &players[a] } else { &players[b] };
+                    let giver = if hg.giver == Winner::Player1 {
+                        &players[a]
+                    } else {
+                        &players[b]
+                    };
                     let Some(giver_rating) = giver.rating else {
                         continue; // giver must be rated to size the handicap (always is)
                     };
                     let h = handicap_offset(giver_rating, hg.handicap);
-                    if hg.giver == Winner::Player1 { -h } else { h }
+                    if hg.giver == Winner::Player1 {
+                        -h
+                    } else {
+                        h
+                    }
                 }
                 None => 0.0,
             };
@@ -306,7 +319,13 @@ mod tests {
         }
     }
 
-    fn handicap_board(a: Uuid, b: Uuid, result: Winner, handicap: Handicap, giver: Winner) -> Board {
+    fn handicap_board(
+        a: Uuid,
+        b: Uuid,
+        result: Winner,
+        handicap: Handicap,
+        giver: Winner,
+    ) -> Board {
         Board {
             result: Some(result),
             handicap: Some(HandicapGame { handicap, giver }),
@@ -332,7 +351,11 @@ mod tests {
         let a = player(Some(1500));
         let b = player(Some(1500));
         let r = decided(1, vec![win(a.id, b.id)]);
-        let elos = estimate_elos(&[a.clone(), b.clone()], &TournamentSettings::default(), &[r]);
+        let elos = estimate_elos(
+            &[a.clone(), b.clone()],
+            &TournamentSettings::default(),
+            &[r],
+        );
         assert!(elos[&a.id] > 1500.0, "winner rises");
         assert!(elos[&b.id] < 1500.0, "loser falls");
         // Symmetric priors and opposite results → symmetric shifts.
@@ -355,7 +378,10 @@ mod tests {
             &[r],
         );
         let shift = elos[&winner.id] - 1100.0;
-        assert!(shift > 25.0 && shift < 32.0, "shift was {shift}, expected ~30 (< K=32)");
+        assert!(
+            shift > 25.0 && shift < 32.0,
+            "shift was {shift}, expected ~30 (< K=32)"
+        );
     }
 
     #[test]
@@ -368,9 +394,14 @@ mod tests {
             elo_k_multiplier_percent: 400,
             ..Default::default()
         };
-        let shift_base = estimate_elos(&[a.clone(), b.clone()], &base, std::slice::from_ref(&r))[&a.id] - 1500.0;
-        let shift_hot = estimate_elos(&[a.clone(), b.clone()], &hot, std::slice::from_ref(&r))[&a.id] - 1500.0;
-        assert!(shift_hot > shift_base * 2.0, "a 4× multiplier should move the estimate much more");
+        let shift_base =
+            estimate_elos(&[a.clone(), b.clone()], &base, std::slice::from_ref(&r))[&a.id] - 1500.0;
+        let shift_hot =
+            estimate_elos(&[a.clone(), b.clone()], &hot, std::slice::from_ref(&r))[&a.id] - 1500.0;
+        assert!(
+            shift_hot > shift_base * 2.0,
+            "a 4× multiplier should move the estimate much more"
+        );
     }
 
     #[test]
@@ -385,7 +416,11 @@ mod tests {
             &TournamentSettings::default(),
             &[r],
         );
-        assert!(elos[&newcomer.id] > 1100.0, "unrated upset should swing far, got {}", elos[&newcomer.id]);
+        assert!(
+            elos[&newcomer.id] > 1100.0,
+            "unrated upset should swing far, got {}",
+            elos[&newcomer.id]
+        );
     }
 
     #[test]
@@ -401,7 +436,12 @@ mod tests {
         let o1 = player(Some(1500));
         let o2 = player(Some(1500));
 
-        let players = vec![established.clone(), provisional.clone(), o1.clone(), o2.clone()];
+        let players = vec![
+            established.clone(),
+            provisional.clone(),
+            o1.clone(),
+            o2.clone(),
+        ];
         let r = decided(
             1,
             vec![win(established.id, o1.id), win(provisional.id, o2.id)],
@@ -460,7 +500,10 @@ mod tests {
     fn grade_number_and_rating_are_inverse_and_handicap_offset_matches_fesa() {
         // Round-trips at a lower bound, a midpoint, and below/above the table.
         for &r in &[1680.0, 1740.0, 2000.0, 300.0, 2400.0] {
-            assert!((rating_at_grade(grade_number(r)) - r).abs() < 1e-6, "round-trip {r}");
+            assert!(
+                (rating_at_grade(grade_number(r)) - r).abs() < 1e-6,
+                "round-trip {r}"
+            );
         }
         // Worked FESA example: a 1740 (1 Dan) giver conceding Rook odds (2.1 grades)
         // drops to grade 18.4 → rating 1500, a 240-point effect.
@@ -475,7 +518,13 @@ mod tests {
         // A 1800 giver beats a 1500 receiver at Rook odds — no longer excluded.
         let giver = player(Some(1800));
         let receiver = player(Some(1500));
-        let board = handicap_board(giver.id, receiver.id, Winner::Player1, Handicap::Rook, Winner::Player1);
+        let board = handicap_board(
+            giver.id,
+            receiver.id,
+            Winner::Player1,
+            Handicap::Rook,
+            Winner::Player1,
+        );
         let elos = estimate_elos(
             &[giver.clone(), receiver.clone()],
             &TournamentSettings::default(),
@@ -495,11 +544,24 @@ mod tests {
         let players = vec![giver.clone(), receiver.clone()];
         let settings = TournamentSettings::default();
 
-        let even = estimate_elos(&players, &settings, &[decided(1, vec![win(giver.id, receiver.id)])]);
+        let even = estimate_elos(
+            &players,
+            &settings,
+            &[decided(1, vec![win(giver.id, receiver.id)])],
+        );
         let handi = estimate_elos(
             &players,
             &settings,
-            &[decided(1, vec![handicap_board(giver.id, receiver.id, Winner::Player1, Handicap::Rook, Winner::Player1)])],
+            &[decided(
+                1,
+                vec![handicap_board(
+                    giver.id,
+                    receiver.id,
+                    Winner::Player1,
+                    Handicap::Rook,
+                    Winner::Player1,
+                )],
+            )],
         );
         assert!(
             handi[&giver.id] > even[&giver.id],
@@ -530,7 +592,10 @@ mod tests {
             let now = elos[&hero.id];
             let gain = now - prev;
             assert!(gain > 0.0, "estimate should keep rising");
-            assert!(gain < prev_gain, "each win should move it less than the last");
+            assert!(
+                gain < prev_gain,
+                "each win should move it less than the last"
+            );
             prev = now;
             prev_gain = gain;
         }

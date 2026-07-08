@@ -226,7 +226,11 @@ mod tests {
             absent: Vec::new(),
             completed: true,
         };
-        let scores = compute_scores(&[a.clone(), b.clone()], &TournamentSettings::default(), &[round]);
+        let scores = compute_scores(
+            &[a.clone(), b.clone()],
+            &TournamentSettings::default(),
+            &[round],
+        );
         assert_eq!(scores.get(&a.id).last_descended, Some(1));
         assert_eq!(scores.get(&a.id).last_ascended, None);
         assert_eq!(scores.get(&b.id).last_ascended, Some(1));
@@ -289,13 +293,24 @@ mod tests {
             number: 1,
             boards: vec![Board {
                 result: Some(Winner::Player1),
-                ..Board::pending(a.id, b.id, Some(5), PairingSource::Cup { stage: CupStage::Final })
+                ..Board::pending(
+                    a.id,
+                    b.id,
+                    Some(5),
+                    PairingSource::Cup {
+                        stage: CupStage::Final,
+                    },
+                )
             }],
             bye: None,
             absent: Vec::new(),
             completed: true,
         };
-        let scores = compute_scores(&[a.clone(), b.clone()], &TournamentSettings::default(), &[round]);
+        let scores = compute_scores(
+            &[a.clone(), b.clone()],
+            &TournamentSettings::default(),
+            &[round],
+        );
         // The win still scores, and both are recorded as opponents faced (so a
         // later Swiss round won't re-pair them).
         assert_eq!(scores.get(&a.id).points, 1);

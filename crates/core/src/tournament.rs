@@ -221,11 +221,7 @@ impl Tournament {
     ///
     /// Returns [`TournamentError::EmptyPlayerName`] if the new last name is blank
     /// or [`TournamentError::PlayerNotFound`] if no player has that id.
-    pub fn edit_player(
-        &mut self,
-        id: Uuid,
-        new: NewPlayer,
-    ) -> Result<&Player, TournamentError> {
+    pub fn edit_player(&mut self, id: Uuid, new: NewPlayer) -> Result<&Player, TournamentError> {
         if new.last_name.trim().is_empty() {
             return Err(TournamentError::EmptyPlayerName);
         }
@@ -326,7 +322,7 @@ impl Tournament {
         order.sort_by(|&a, &b| {
             let (ra, rb) = (self.players[a].rating, self.players[b].rating);
             let by_rating = match (ra, rb) {
-                (Some(x), Some(y)) => y.cmp(&x), // descending
+                (Some(x), Some(y)) => y.cmp(&x),   // descending
                 (Some(_), None) => Ordering::Less, // rated before unrated
                 (None, Some(_)) => Ordering::Greater,
                 (None, None) => Ordering::Equal,
@@ -603,13 +599,20 @@ impl Tournament {
                 .ok_or(TournamentError::CupBracketInconsistent)?
                 .into_iter()
                 .map(|m| {
-                    Board::pending(m.player1, m.player2, None, PairingSource::Cup { stage: m.stage })
+                    Board::pending(
+                        m.player1,
+                        m.player2,
+                        None,
+                        PairingSource::Cup { stage: m.stage },
+                    )
                 })
                 .collect(),
             None => Vec::new(),
         };
-        let cup_players: HashSet<Uuid> =
-            cup_boards.iter().flat_map(|b| [b.player1, b.player2]).collect();
+        let cup_players: HashSet<Uuid> = cup_boards
+            .iter()
+            .flat_map(|b| [b.player1, b.player2])
+            .collect();
 
         // The Swiss pool: present players not taken by the cup this round.
         let swiss_present: Vec<Uuid> = present
@@ -663,7 +666,7 @@ impl Tournament {
             }
             // With a forced bye, the Swiss players left to auto-pair must be even.
             let leftover = swiss_present.len() - 2 * draft.forced_boards.len() - 1;
-            if leftover % 2 != 0 {
+            if !leftover.is_multiple_of(2) {
                 return Err(TournamentError::InvalidDraft(
                     "a forced bye needs an odd number of Swiss players".into(),
                 ));
@@ -723,10 +726,7 @@ impl Tournament {
     /// Reconstructs the exact inputs the round was paired from (the standings
     /// entering it and the same free set), so the ledger matches what the engine
     /// actually optimized.
-    pub fn explain_round(
-        &self,
-        round_number: u32,
-    ) -> Result<RoundExplanation, TournamentError> {
+    pub fn explain_round(&self, round_number: u32) -> Result<RoundExplanation, TournamentError> {
         let idx = self
             .rounds
             .iter()
@@ -1075,7 +1075,10 @@ mod tests {
     #[test]
     fn add_player_rejects_blank_name() {
         let mut t = Tournament::new("Paris Open").unwrap();
-        assert_eq!(t.add_player(named("  ")), Err(TournamentError::EmptyPlayerName));
+        assert_eq!(
+            t.add_player(named("  ")),
+            Err(TournamentError::EmptyPlayerName)
+        );
         assert!(t.players.is_empty());
     }
 
@@ -1181,7 +1184,10 @@ mod tests {
         let id = t.add_player(named("Alice")).unwrap().id;
         assert!(t.remove_player(id).is_ok());
         assert!(t.players.is_empty());
-        assert_eq!(t.remove_player(id), Err(TournamentError::PlayerNotFound(id)));
+        assert_eq!(
+            t.remove_player(id),
+            Err(TournamentError::PlayerNotFound(id))
+        );
     }
 
     #[test]
@@ -1227,7 +1233,13 @@ mod tests {
         assert!(t.players.iter().all(|p| p.tournament_id.is_none()));
 
         t.finalize_registration().unwrap();
-        let id_of = |uuid| t.players.iter().find(|p| p.id == uuid).unwrap().tournament_id;
+        let id_of = |uuid| {
+            t.players
+                .iter()
+                .find(|p| p.id == uuid)
+                .unwrap()
+                .tournament_id
+        };
         assert_eq!(id_of(high), Some(1));
         assert_eq!(id_of(mid), Some(2));
         assert_eq!(id_of(low), Some(3));
@@ -1378,7 +1390,10 @@ mod tests {
             Some(Winner::Player2)
         );
         // click the current winner again -> back to not played
-        assert_eq!(t.toggle_board_winner(1, 0, Winner::Player2).unwrap().result, None);
+        assert_eq!(
+            t.toggle_board_winner(1, 0, Winner::Player2).unwrap().result,
+            None
+        );
     }
 
     #[test]
@@ -1472,11 +1487,19 @@ mod tests {
         let r1 = t.rounds.last().unwrap();
         let a = r1.boards[0].player1;
         let b = r1.boards[1].player1;
-        let paired = |bd: &Board, x, y| (bd.player1 == x && bd.player2 == y) || (bd.player1 == y && bd.player2 == x);
-        assert!(!r1.boards.iter().any(|bd| paired(bd, a, b)), "a and b start unpaired");
+        let paired = |bd: &Board, x, y| {
+            (bd.player1 == x && bd.player2 == y) || (bd.player1 == y && bd.player2 == x)
+        };
+        assert!(
+            !r1.boards.iter().any(|bd| paired(bd, a, b)),
+            "a and b start unpaired"
+        );
 
         let round = t.force_pairing(a, b).unwrap();
-        assert_eq!(round.number, 1, "the same round is re-paired, not a new one");
+        assert_eq!(
+            round.number, 1,
+            "the same round is re-paired, not a new one"
+        );
         assert!(
             round
                 .boards
@@ -1549,7 +1572,10 @@ mod tests {
             .collect();
         let mut sorted = ranks.clone();
         sorted.sort_unstable();
-        assert_eq!(ranks, sorted, "boards should already be in rank order: {ranks:?}");
+        assert_eq!(
+            ranks, sorted,
+            "boards should already be in rank order: {ranks:?}"
+        );
     }
 
     #[test]
@@ -1565,7 +1591,7 @@ mod tests {
         let board = t.set_board_drawn(1, 0, true).unwrap();
         assert!(board.drawn);
         assert_eq!(board.result, Some(Winner::Player1)); // result untouched
-        // Effective winner unaffected by the draw flag.
+                                                         // Effective winner unaffected by the draw flag.
         assert_eq!(board.effective_winner(), Some(Winner::Player1));
         assert!(!t.set_board_drawn(1, 0, false).unwrap().drawn);
     }
@@ -1579,22 +1605,27 @@ mod tests {
         t.finalize_registration().unwrap();
         start_next_round(&mut t);
 
-        let (p1_is_high, giver) = {
-            let b = &t.rounds[0].boards[0];
-            (b.player1 == high, ())
-        };
-        let _ = giver;
+        let p1_is_high = t.rounds[0].boards[0].player1 == high;
 
         // Give a 4-piece handicap. Whoever actually loses, the giver (High)
         // scores the effective point.
-        t.set_board_handicap(1, 0, Some(Handicap::FourPiece)).unwrap();
+        t.set_board_handicap(1, 0, Some(Handicap::FourPiece))
+            .unwrap();
         // The receiver actually wins the game...
-        let receiver_wins = if p1_is_high { Winner::Player2 } else { Winner::Player1 };
+        let receiver_wins = if p1_is_high {
+            Winner::Player2
+        } else {
+            Winner::Player1
+        };
         t.toggle_board_winner(1, 0, receiver_wins).unwrap();
 
         let board = &t.rounds[0].boards[0];
         assert_eq!(board.result, Some(receiver_wins)); // actual result recorded
-        let giver_side = if p1_is_high { Winner::Player1 } else { Winner::Player2 };
+        let giver_side = if p1_is_high {
+            Winner::Player1
+        } else {
+            Winner::Player2
+        };
         assert_eq!(board.handicap.unwrap().giver, giver_side);
         // ...but the giver still counts as the effective winner.
         assert_eq!(board.effective_winner(), Some(giver_side));
@@ -1627,7 +1658,9 @@ mod tests {
         t.add_player(rated("Low", 1000)).unwrap();
         t.finalize_registration().unwrap();
         start_next_round(&mut t);
-        t.rounds[0].boards[0].source = PairingSource::Cup { stage: CupStage::Final };
+        t.rounds[0].boards[0].source = PairingSource::Cup {
+            stage: CupStage::Final,
+        };
         assert_eq!(
             t.set_board_handicap(1, 0, Some(Handicap::Rook)),
             Err(TournamentError::HandicapNotAllowedForCup)
@@ -1659,7 +1692,8 @@ mod tests {
         t.add_player(named("Unrated")).unwrap();
         t.finalize_registration().unwrap();
         start_next_round(&mut t);
-        t.set_board_handicap(1, 0, Some(Handicap::TwoPiece)).unwrap();
+        t.set_board_handicap(1, 0, Some(Handicap::TwoPiece))
+            .unwrap();
         let board = &t.rounds[0].boards[0];
         let giver_side = if board.player1 == rated_id {
             Winner::Player1
@@ -1713,15 +1747,13 @@ mod tests {
     }
 
     /// Find the board (in the round with the given number) pairing `a` and `b`.
-    fn find_board<'a>(t: &'a Tournament, rnum: u32, a: Uuid, b: Uuid) -> Option<&'a Board> {
+    fn find_board(t: &Tournament, rnum: u32, a: Uuid, b: Uuid) -> Option<&Board> {
         t.rounds
             .iter()
             .find(|r| r.number == rnum)?
             .boards
             .iter()
-            .find(|bd| {
-                (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a)
-            })
+            .find(|bd| (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a))
     }
 
     /// Record `winner` beating `loser` on their board in round `rnum`.
@@ -1745,7 +1777,13 @@ mod tests {
 
     /// Give player1 the win on every still-unplayed board (to complete a round).
     fn decide_rest(t: &mut Tournament, rnum: u32) {
-        let n = t.rounds.iter().find(|r| r.number == rnum).unwrap().boards.len();
+        let n = t
+            .rounds
+            .iter()
+            .find(|r| r.number == rnum)
+            .unwrap()
+            .boards
+            .len();
         for idx in 0..n {
             let unplayed = t.rounds.iter().find(|r| r.number == rnum).unwrap().boards[idx]
                 .result
@@ -1773,7 +1811,12 @@ mod tests {
         t.prepare_round().unwrap();
         t.confirm_round().unwrap();
         let qf = find_board(&t, 1, s[0], s[7]).unwrap();
-        assert!(matches!(qf.source, PairingSource::Cup { stage: CupStage::Quarterfinal }));
+        assert!(matches!(
+            qf.source,
+            PairingSource::Cup {
+                stage: CupStage::Quarterfinal
+            }
+        ));
         assert!(find_board(&t, 1, s[3], s[4]).is_some());
         let swiss = find_board(&t, 1, n9, n10).unwrap();
         assert!(matches!(swiss.source, PairingSource::Swiss));
@@ -1789,12 +1832,19 @@ mod tests {
         t.confirm_round().unwrap();
         assert!(matches!(
             find_board(&t, 2, s[0], s[3]).unwrap().source,
-            PairingSource::Cup { stage: CupStage::Semifinal }
+            PairingSource::Cup {
+                stage: CupStage::Semifinal
+            }
         ));
         assert!(find_board(&t, 2, s[1], s[2]).is_some());
         // A QF loser is now Swiss-paired (not in a cup board).
         assert!(matches!(
-            t.rounds[1].boards.iter().find(|b| b.player1 == s[4] || b.player2 == s[4]).unwrap().source,
+            t.rounds[1]
+                .boards
+                .iter()
+                .find(|b| b.player1 == s[4] || b.player2 == s[4])
+                .unwrap()
+                .source,
             PairingSource::Swiss
         ));
         decide(&mut t, 2, s[0], s[3]); // E0 beats E3
@@ -1807,11 +1857,15 @@ mod tests {
         t.confirm_round().unwrap();
         assert!(matches!(
             find_board(&t, 3, s[0], s[1]).unwrap().source,
-            PairingSource::Cup { stage: CupStage::Final }
+            PairingSource::Cup {
+                stage: CupStage::Final
+            }
         ));
         assert!(matches!(
             find_board(&t, 3, s[3], s[2]).unwrap().source,
-            PairingSource::Cup { stage: CupStage::SmallFinal }
+            PairingSource::Cup {
+                stage: CupStage::SmallFinal
+            }
         ));
         decide(&mut t, 3, s[0], s[1]); // champion E0, runner-up E1
         decide(&mut t, 3, s[3], s[2]); // third E3, fourth E2
@@ -1844,7 +1898,10 @@ mod tests {
         // Only 8 eligible, ask for 16.
         assert_eq!(
             t.clone().finalize_registration_with(Some(16)),
-            Err(TournamentError::NotEnoughEligiblePlayers { needed: 16, have: 8 })
+            Err(TournamentError::NotEnoughEligiblePlayers {
+                needed: 16,
+                have: 8
+            })
         );
         // A rejected cup leaves registration open.
         assert!(!t.registration_finalized);

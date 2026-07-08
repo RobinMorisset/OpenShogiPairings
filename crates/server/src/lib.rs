@@ -297,15 +297,13 @@ mod tests {
         assert_eq!(body["tournament"]["players"][0]["rating"], 1900);
 
         // Undo the edit → rating restored.
-        let (status, body) =
-            send(router(state.clone()), post_empty("/api/tournament/undo")).await;
+        let (status, body) = send(router(state.clone()), post_empty("/api/tournament/undo")).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["tournament"]["players"][0]["rating"], 1500);
         assert_eq!(body["can_undo"], true); // the add is still undoable
 
         // Undo the add → back to empty, nothing left to undo.
-        let (status, body) =
-            send(router(state.clone()), post_empty("/api/tournament/undo")).await;
+        let (status, body) = send(router(state.clone()), post_empty("/api/tournament/undo")).await;
         assert_eq!(status, StatusCode::OK);
         assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
         assert_eq!(body["can_undo"], false);
@@ -362,7 +360,11 @@ mod tests {
         for name in ["Alice", "Bob"] {
             send(
                 router(state.clone()),
-                json_req("POST", "/api/tournament/players", json!({ "last_name": name })),
+                json_req(
+                    "POST",
+                    "/api/tournament/players",
+                    json!({ "last_name": name }),
+                ),
             )
             .await;
         }
@@ -388,8 +390,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        let (status, _) =
-            send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+        let (status, _) = send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
         assert_eq!(status, StatusCode::CREATED);
 
         // Can't complete before the game is played.
@@ -424,8 +425,7 @@ mod tests {
             post_empty("/api/tournament/rounds/prepare"),
         )
         .await;
-        let (status, _) =
-            send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+        let (status, _) = send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
         assert_eq!(status, StatusCode::CREATED);
     }
 
@@ -440,7 +440,11 @@ mod tests {
         for name in ["Alice", "Bob"] {
             send(
                 router(state.clone()),
-                json_req("POST", "/api/tournament/players", json!({ "last_name": name })),
+                json_req(
+                    "POST",
+                    "/api/tournament/players",
+                    json!({ "last_name": name }),
+                ),
             )
             .await;
         }
@@ -462,7 +466,10 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body["tournament"]["rounds"][0]["boards"][0]["result"], "player1");
+        assert_eq!(
+            body["tournament"]["rounds"][0]["boards"][0]["result"],
+            "player1"
+        );
 
         // Bad board index → 404.
         let (status, _) = send(
@@ -487,7 +494,11 @@ mod tests {
         .await;
         send(
             router(state.clone()),
-            json_req("POST", "/api/tournament/players", json!({ "last_name": "Solo" })),
+            json_req(
+                "POST",
+                "/api/tournament/players",
+                json!({ "last_name": "Solo" }),
+            ),
         )
         .await;
         send(
@@ -500,8 +511,7 @@ mod tests {
             post_empty("/api/tournament/rounds/prepare"),
         )
         .await;
-        let (status, _) =
-            send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
+        let (status, _) = send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
@@ -529,7 +539,11 @@ mod tests {
     async fn add_player_without_tournament_is_404() {
         let (status, _) = send(
             router(AppState::default()),
-            json_req("POST", "/api/tournament/players", json!({ "last_name": "Alice" })),
+            json_req(
+                "POST",
+                "/api/tournament/players",
+                json!({ "last_name": "Alice" }),
+            ),
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
@@ -546,7 +560,11 @@ mod tests {
 
         let (status, _) = send(
             router(state.clone()),
-            json_req("POST", "/api/tournament/players", json!({ "last_name": "   " })),
+            json_req(
+                "POST",
+                "/api/tournament/players",
+                json!({ "last_name": "   " }),
+            ),
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -589,7 +607,11 @@ mod tests {
         for name in ["Alice", "Bob"] {
             send(
                 router(state.clone()),
-                json_req("POST", "/api/tournament/players", json!({ "last_name": name })),
+                json_req(
+                    "POST",
+                    "/api/tournament/players",
+                    json!({ "last_name": name }),
+                ),
             )
             .await;
         }
@@ -605,7 +627,11 @@ mod tests {
         // must not show up as an extra backup.
         send(
             router(state.clone()),
-            json_req("POST", "/api/tournament/players", json!({ "last_name": "Carol" })),
+            json_req(
+                "POST",
+                "/api/tournament/players",
+                json!({ "last_name": "Carol" }),
+            ),
         )
         .await;
 
@@ -617,8 +643,7 @@ mod tests {
         .await;
         send(router(state.clone()), post_empty("/api/tournament/rounds")).await;
 
-        let (status, backups) =
-            send(router(state.clone()), get("/api/tournament/backups")).await;
+        let (status, backups) = send(router(state.clone()), get("/api/tournament/backups")).await;
         assert_eq!(status, StatusCode::OK);
         let backups = backups.as_array().unwrap();
         assert_eq!(backups.len(), 3);

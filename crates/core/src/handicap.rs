@@ -23,7 +23,9 @@ fn elo_prime(elo: f64) -> f64 {
 /// or the adjusted gap is small enough to call it an even game (≤45). The nine
 /// non-equal bins map 1:1 onto [`Handicap::ALL`].
 pub fn suggested_handicap(rating1: Option<u32>, rating2: Option<u32>) -> Option<Handicap> {
-    let diff = (elo_prime(rating1? as f64) - elo_prime(rating2? as f64)).abs().round() as u32;
+    let diff = (elo_prime(rating1? as f64) - elo_prime(rating2? as f64))
+        .abs()
+        .round() as u32;
     Some(match diff {
         0..=45 => return None,
         46..=135 => Handicap::Sente,
@@ -62,7 +64,10 @@ mod tests {
         // Both below 1360: elo' = elo, so a 45-point gap is even and a 46-point
         // gap is the smallest handicap.
         assert_eq!(suggested_handicap(Some(1000), Some(1045)), None);
-        assert_eq!(suggested_handicap(Some(1000), Some(1046)), Some(Handicap::Sente));
+        assert_eq!(
+            suggested_handicap(Some(1000), Some(1046)),
+            Some(Handicap::Sente)
+        );
     }
 
     #[test]
@@ -71,17 +76,29 @@ mod tests {
         // elo'(1560) = 1360 + 0.8*(1560-1360) = 1520 (the middle band's formula
         // applies exactly at 1560; the transform has a small jump there, per spec).
         // diff ≈ 333.33 -> rook.
-        assert_eq!(suggested_handicap(Some(2000), Some(1560)), Some(Handicap::Rook));
+        assert_eq!(
+            suggested_handicap(Some(2000), Some(1560)),
+            Some(Handicap::Rook)
+        );
     }
 
     #[test]
     fn six_piece_is_open_ended_at_the_top() {
-        assert_eq!(suggested_handicap(Some(3000), Some(500)), Some(Handicap::SixPiece));
+        assert_eq!(
+            suggested_handicap(Some(3000), Some(500)),
+            Some(Handicap::SixPiece)
+        );
     }
 
     #[test]
     fn boundary_between_lance_and_bishop_below_1360() {
-        assert_eq!(suggested_handicap(Some(1000), Some(1225)), Some(Handicap::Lance));
-        assert_eq!(suggested_handicap(Some(1000), Some(1226)), Some(Handicap::Bishop));
+        assert_eq!(
+            suggested_handicap(Some(1000), Some(1225)),
+            Some(Handicap::Lance)
+        );
+        assert_eq!(
+            suggested_handicap(Some(1000), Some(1226)),
+            Some(Handicap::Bishop)
+        );
     }
 }

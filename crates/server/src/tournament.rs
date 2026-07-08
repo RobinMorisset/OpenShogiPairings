@@ -122,7 +122,11 @@ pub fn routes() -> Router<AppState> {
 /// out of the persisted shape. Standings are computed server-side so every
 /// client (and the future American grid) shares one ranking.
 #[derive(Serialize, ts_rs::TS)]
-#[ts(export, rename = "TournamentResponse", export_to = "../../../frontend/src/lib/generated/")]
+#[ts(
+    export,
+    rename = "TournamentResponse",
+    export_to = "../../../frontend/src/lib/generated/"
+)]
 struct TournamentView {
     tournament: Tournament,
     can_undo: bool,
@@ -259,8 +263,8 @@ async fn import_american_grid(
     State(state): State<AppState>,
     body: String,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let tournament = osp_core::import_american_grid(&body)
-        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    let tournament =
+        osp_core::import_american_grid(&body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let mut store = state.store.write().expect("store lock poisoned");
     store.set_current(tournament);
     view(&store)
@@ -302,9 +306,7 @@ async fn finalize_registration(
 }
 
 /// Complete the current (in-progress) round.
-async fn complete_round(
-    State(state): State<AppState>,
-) -> Result<Json<TournamentView>, ApiError> {
+async fn complete_round(State(state): State<AppState>) -> Result<Json<TournamentView>, ApiError> {
     let mut store = state.store.write().expect("store lock poisoned");
     store.mutate(|t| t.complete_current_round())?;
     let label = round_label(&store, "round", "completed");
@@ -314,9 +316,7 @@ async fn complete_round(
 
 /// Cancel the last round (or the open draft), stepping the tournament back one
 /// stage. Undoable like any other mutation.
-async fn cancel_round(
-    State(state): State<AppState>,
-) -> Result<Json<TournamentView>, ApiError> {
+async fn cancel_round(State(state): State<AppState>) -> Result<Json<TournamentView>, ApiError> {
     let mut store = state.store.write().expect("store lock poisoned");
     store.mutate(|t| t.cancel_last_round())?;
     backup_after(&store, "round cancelled");
@@ -324,9 +324,7 @@ async fn cancel_round(
 }
 
 /// Begin drafting the next round (enters the round-draft state).
-async fn prepare_round(
-    State(state): State<AppState>,
-) -> Result<Json<TournamentView>, ApiError> {
+async fn prepare_round(State(state): State<AppState>) -> Result<Json<TournamentView>, ApiError> {
     let mut store = state.store.write().expect("store lock poisoned");
     store.mutate(|t| t.prepare_round().map(|_| ()))?;
     let label = store
@@ -585,7 +583,10 @@ async fn add_point_adjustment(
     Json(req): Json<AddAdjustmentRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = state.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.add_point_adjustment(id, req.delta, req.reason).map(|_| ()))?;
+    store.mutate(|t| {
+        t.add_point_adjustment(id, req.delta, req.reason)
+            .map(|_| ())
+    })?;
     view(&store)
 }
 

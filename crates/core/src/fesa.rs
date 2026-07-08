@@ -199,13 +199,23 @@ mod tests {
     fn parses_the_number_of_games() {
         // A provisional rating (few games) vs an established one.
         assert_eq!(parse_one(&row(3, "Takita", "Hirotaka 2462 7 JP")).games, 7);
-        assert_eq!(parse_one(&row(1000, "Tkachenko", "Vladimir 17 Kyu 326 18 BY")).games, 18);
+        assert_eq!(
+            parse_one(&row(1000, "Tkachenko", "Vladimir 17 Kyu 326 18 BY")).games,
+            18
+        );
     }
 
     #[test]
     fn one_grade_and_zero_grades() {
         let one = parse_one(&row(2, "Tanyan", "Vincent 5 Dan 2469 1224 BY"));
-        assert_eq!((one.first_name.as_str(), one.rating, one.nationality.as_str()), ("Vincent", 2469, "BY"));
+        assert_eq!(
+            (
+                one.first_name.as_str(),
+                one.rating,
+                one.nationality.as_str()
+            ),
+            ("Vincent", 2469, "BY")
+        );
 
         let none = parse_one(&row(3, "Takita", "Hirotaka 2462 7 JP"));
         assert_eq!((none.first_name.as_str(), none.rating), ("Hirotaka", 2462));
