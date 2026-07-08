@@ -31,6 +31,7 @@
     undoTournament,
     updateDraft,
     updateSettings,
+    subscribeToChanges,
     type DraftUpdate,
   } from "./lib/api";
   import type {
@@ -310,7 +311,23 @@
     }
   }
 
-  onMount(loadInitial);
+  // Silently pull the authoritative state — after a live change pushed by
+  // another referee, or after a rejected (conflicting) edit. Safe because every
+  // edit already lives on the server; there is no unsaved local state to lose.
+  async function refetch() {
+    try {
+      const res = await fetchTournament();
+      if (res) apply(res);
+    } catch {
+      /* transient; the SSE stream will trigger another refetch on the next change */
+    }
+  }
+
+  onMount(() => {
+    void loadInitial();
+    // Live sync: refetch whenever another referee changes the tournament.
+    return subscribeToChanges(refetch);
+  });
 
   function describe(err: unknown): string {
     if (err instanceof ApiError && err.status === 0) {
@@ -326,7 +343,14 @@
     try {
       await action();
     } catch (err) {
-      error = describe(err);
+      if (err instanceof ApiError && err.status === 409) {
+        // Another referee changed the tournament first, so this edit was
+        // rejected. Reload the authoritative state and say the action didn't take.
+        error = $_("app.conflictReloaded");
+        await refetch();
+      } else {
+        error = describe(err);
+      }
     } finally {
       busy = false;
     }

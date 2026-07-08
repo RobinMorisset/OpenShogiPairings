@@ -44,7 +44,8 @@
     "refreshRatings": "Rafraîchir la liste FESA",
     "refreshRatingsTitle": "Retélécharger la liste des classements depuis le site de la FESA",
     "confirmDiscard": "« {name} » contient des modifications non enregistrées qui seront perdues. Continuer quand même ?",
-    "cannotReachServer": "Impossible de contacter le serveur. Est-il lancé (cargo run -p osp-server) ?"
+    "cannotReachServer": "Impossible de contacter le serveur. Est-il lancé (cargo run -p osp-server) ?",
+    "conflictReloaded": "Un autre arbitre a modifié le tournoi avant vous : votre dernière action n'a pas été appliquée. L'état à jour a été rechargé — veuillez réessayer."
   },
   "login": {
     "title": "Connexion arbitre",

@@ -41,6 +41,12 @@ async function apiUrl(path: string): Promise<string> {
   return `${await resolveApiBase()}${path}`;
 }
 
+// The latest tournament version we've seen from the server. Sent back on every
+// mutation as `X-Tournament-Version` so the server can reject an edit based on a
+// stale view (409), and used to skip the SSE echo of our own changes. `null`
+// until we've loaded a tournament.
+let knownVersion: number | null = null;
+
 /** Error carrying the HTTP status, so callers can special-case e.g. 404. */
 export class ApiError extends Error {
   constructor(
@@ -60,6 +66,8 @@ export class ApiError extends Error {
 async function fetchOk(path: string, init?: RequestInit): Promise<Response> {
   let response: Response;
   const token = getToken();
+  const method = (init?.method ?? "GET").toUpperCase();
+  const mutating = method === "POST" || method === "PUT" || method === "DELETE";
   try {
     response = await fetch(await apiUrl(path), {
       ...init,
@@ -68,6 +76,11 @@ async function fetchOk(path: string, init?: RequestInit): Promise<Response> {
         // Replay the session token in remote mode; harmless when the server
         // doesn't require it.
         ...(token ? { authorization: `Bearer ${token}` } : {}),
+        // Declare the version this edit is based on, so the server can reject it
+        // if another referee has since changed the tournament (409).
+        ...(mutating && knownVersion !== null
+          ? { "x-tournament-version": String(knownVersion) }
+          : {}),
         ...init?.headers,
       },
     });
@@ -101,7 +114,41 @@ async function fetchOk(path: string, init?: RequestInit): Promise<Response> {
 
 /** Run a fetch and parse the JSON body, throwing an {@link ApiError} on failure. */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  return (await (await fetchOk(path, init)).json()) as T;
+  const body = (await (await fetchOk(path, init)).json()) as T;
+  // Track the tournament version from any envelope that carries one, so the next
+  // mutation can declare the state it was based on.
+  const versioned = body as { version?: unknown };
+  if (versioned && typeof versioned.version === "number") {
+    knownVersion = versioned.version;
+  }
+  return body;
+}
+
+/**
+ * Subscribe to server-pushed change notifications (SSE), calling `onChange`
+ * whenever the tournament is modified by *another* client. Our own edits are
+ * skipped (their version echoes what we already hold). Returns an unsubscribe
+ * function. The browser's EventSource reconnects on its own if the stream drops.
+ */
+export function subscribeToChanges(onChange: () => void): () => void {
+  let source: EventSource | null = null;
+  let closed = false;
+  void resolveApiBase().then((base) => {
+    if (closed) return;
+    source = new EventSource(`${base}/api/tournament/events`);
+    source.addEventListener("changed", (event) => {
+      const version = Number((event as MessageEvent).data);
+      // Refetch when the change is newer than what we hold, or on a resync
+      // signal ("reload" → NaN). Skip the echo of our own edits.
+      if (!Number.isFinite(version) || knownVersion === null || version > knownVersion) {
+        onChange();
+      }
+    });
+  });
+  return () => {
+    closed = true;
+    source?.close();
+  };
 }
 
 /** Ask the server whether it is up. */

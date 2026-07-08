@@ -14,6 +14,7 @@
 mod auth;
 mod backup;
 mod error;
+mod live;
 mod ratings;
 mod state;
 mod tournament;
@@ -64,10 +65,16 @@ fn router_inner(state: AppState, static_dir: Option<PathBuf>) -> Router {
 
     // Everything except health/login requires a valid session token when auth
     // is enabled. The middleware self-disables when it isn't.
+    // Layers wrap outermost-last, so auth runs before the version check: an
+    // unauthenticated request is rejected before we touch the store.
     let protected = Router::new()
         .route("/api/ratings", get(ratings::ratings_handler))
         .route("/api/ratings/refresh", post(ratings::refresh_handler))
         .merge(tournament::routes())
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            live::check_version,
+        ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,
@@ -76,6 +83,8 @@ fn router_inner(state: AppState, static_dir: Option<PathBuf>) -> Router {
     let mut app = Router::new()
         .route("/api/health", get(health))
         .route("/api/login", post(auth::login))
+        // Public: only opaque version numbers, and EventSource can't send auth.
+        .route("/api/tournament/events", get(live::events))
         .merge(protected)
         .with_state(state);
 
@@ -862,6 +871,50 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn stale_version_header_is_409_but_matching_one_passes() {
+        let state = AppState::default();
+
+        // Create a tournament; the response carries the new version.
+        let (status, body) = send(
+            router(state.clone()),
+            json_req("POST", "/api/tournament", json!({ "name": "Cup" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let version = body["version"].as_u64().unwrap();
+
+        // A stale base version is rejected with 409.
+        let stale = version - 1;
+        let (status, _) = send(
+            router(state.clone()),
+            Request::builder()
+                .method("POST")
+                .uri("/api/tournament/players")
+                .header("content-type", "application/json")
+                .header("x-tournament-version", stale.to_string())
+                .body(Body::from(json!({ "last_name": "Stale" }).to_string()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+
+        // The current version is accepted, and bumps the version again.
+        let (status, body) = send(
+            router(state.clone()),
+            Request::builder()
+                .method("POST")
+                .uri("/api/tournament/players")
+                .header("content-type", "application/json")
+                .header("x-tournament-version", version.to_string())
+                .body(Body::from(json!({ "last_name": "Fresh" }).to_string()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(body["version"].as_u64().unwrap() > version);
     }
 
     #[tokio::test]

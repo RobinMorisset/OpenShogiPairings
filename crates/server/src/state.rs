@@ -5,9 +5,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use osp_core::{Tournament, TournamentError};
+use tokio::sync::broadcast;
 
 use crate::auth::AuthConfig;
 use crate::ratings::CachedRatings;
+
+/// Capacity of the change-notification channel. Small on purpose: subscribers
+/// only care about the *latest* version, and one that lags past the buffer is
+/// simply told to resync (see [`crate::live`]).
+const NOTIFY_CAPACITY: usize = 16;
 
 /// The current tournament plus a linear undo history.
 ///
@@ -21,13 +27,34 @@ use crate::ratings::CachedRatings;
 /// data file), the *current* tournament is written through to disk after every
 /// change, and reloaded on boot — so an always-on server survives a restart. The
 /// undo history is session state and deliberately not persisted.
-#[derive(Default)]
+///
+/// A monotonic [`version`](Self::version) is bumped on every change and pushed to
+/// subscribers of [`notifier`](Self::notifier), which drives both live sync (the
+/// SSE stream) and optimistic-concurrency conflict detection — see
+/// [`crate::live`].
 pub struct TournamentStore {
     current: Option<Tournament>,
     history: Vec<Tournament>,
     /// Where to write the current tournament, or `None` for in-memory only
     /// (embedded desktop / dev / tests).
     persist_path: Option<PathBuf>,
+    /// Bumped on every state change; echoed by clients to detect stale edits.
+    version: u32,
+    /// Broadcasts the new version to connected clients after each change.
+    notifier: broadcast::Sender<u32>,
+}
+
+impl Default for TournamentStore {
+    fn default() -> Self {
+        let (notifier, _) = broadcast::channel(NOTIFY_CAPACITY);
+        Self {
+            current: None,
+            history: Vec::new(),
+            persist_path: None,
+            version: 0,
+            notifier,
+        }
+    }
 }
 
 impl TournamentStore {
@@ -40,9 +67,27 @@ impl TournamentStore {
         }
         Self {
             current,
-            history: Vec::new(),
             persist_path: Some(path),
+            ..Default::default()
         }
+    }
+
+    /// The current change version. Bumped on every state change.
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+
+    /// Subscribe to change notifications: each message is the new [`version`].
+    pub fn subscribe(&self) -> broadcast::Receiver<u32> {
+        self.notifier.subscribe()
+    }
+
+    /// Advance the version and notify subscribers. Called after every change so
+    /// connected clients can refetch (live sync). A send error just means no one
+    /// is currently listening, which is fine.
+    fn bump_and_notify(&mut self) {
+        self.version = self.version.wrapping_add(1);
+        let _ = self.notifier.send(self.version);
     }
 
     /// Read and parse the persisted tournament, or `None` if the file is absent
@@ -103,6 +148,7 @@ impl TournamentStore {
         self.current = Some(tournament);
         self.history.clear();
         self.persist();
+        self.bump_and_notify();
     }
 
     /// Apply a mutation to the current tournament, checkpointing first.
@@ -122,6 +168,7 @@ impl TournamentStore {
         let previous = self.current.replace(next).expect("current was Some");
         self.history.push(previous);
         self.persist();
+        self.bump_and_notify();
         Ok(())
     }
 
@@ -130,6 +177,7 @@ impl TournamentStore {
         if let Some(previous) = self.history.pop() {
             self.current = Some(previous);
             self.persist();
+            self.bump_and_notify();
         }
     }
 }
@@ -190,6 +238,31 @@ mod tests {
         assert_eq!(tournament.players[0].last_name, "Bob");
 
         std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn changes_bump_the_version_and_notify_subscribers() {
+        let mut store = TournamentStore::default();
+        assert_eq!(store.version(), 0);
+
+        let mut rx = store.subscribe();
+        store.set_current(Tournament::new("Cup").unwrap());
+
+        // The version advanced and the new value was broadcast.
+        assert_eq!(store.version(), 1);
+        assert_eq!(rx.recv().await.unwrap(), 1);
+
+        store
+            .mutate(|t| {
+                t.add_player(NewPlayer {
+                    last_name: "Bob".into(),
+                    ..Default::default()
+                })
+                .map(|_| ())
+            })
+            .unwrap();
+        assert_eq!(store.version(), 2);
+        assert_eq!(rx.recv().await.unwrap(), 2);
     }
 
     #[test]

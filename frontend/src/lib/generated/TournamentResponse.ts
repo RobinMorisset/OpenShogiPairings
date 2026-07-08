@@ -13,7 +13,13 @@ import type { Tournament } from "./Tournament";
  * out of the persisted shape. Standings are computed server-side so every
  * client (and the future American grid) shares one ranking.
  */
-export type TournamentResponse = { tournament: Tournament, can_undo: boolean, standings: Array<Standing>, 
+export type TournamentResponse = { tournament: Tournament, can_undo: boolean, 
+/**
+ * Monotonic change version. Clients echo it in the `X-Tournament-Version`
+ * header so a stale edit is rejected (409), and use it to ignore the SSE
+ * echo of their own change (see [`crate::live`]).
+ */
+version: number, standings: Array<Standing>, 
 /**
  * The cup podium once decided (champion / runner-up / third / fourth), for the
  * Results-tab medals. `None` when there is no cup or the final isn't finished.

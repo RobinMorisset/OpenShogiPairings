@@ -1,13 +1,16 @@
 # Multiple referees on one tournament, over the internet — design
 
-Status: **Phases 1–2 landed.** Phase 1: shared-password auth (server middleware +
+Status: **Phases 1–3 landed.** Phase 1: shared-password auth (server middleware +
 `POST /api/login`, `OSP_PASSWORD`, client login overlay). Phase 2: the standalone
 server can serve the built SPA same-origin (`OSP_STATIC_DIR`), persist the
 tournament through to disk and reload on boot (`OSP_DATA_FILE`), and bind a
 configurable address (`OSP_BIND`); a `deploy/` recipe (Docker, systemd, Caddy)
-ties it together with TLS. Next: **Phase 3** (live sync + concurrency). Supersedes
-the two `TODO.md` lines "Add authentication to the distributed instance" and
-(partly) the webhook item.
+ties it together with TLS. Phase 3: live sync via an SSE stream
+(`GET /api/tournament/events`) that pushes a monotonic `version` on every change
+so clients refetch, plus optimistic-concurrency guarding — clients echo the
+version in `X-Tournament-Version` and a stale edit is rejected 409. Next:
+**Phase 4** (flaky-connection resilience). Supersedes the two `TODO.md` lines
+"Add authentication to the distributed instance" and (partly) the webhook item.
 
 Goal: let several referees edit **one** tournament simultaneously, from
 different machines, **over the public internet**, safely (only referees, and

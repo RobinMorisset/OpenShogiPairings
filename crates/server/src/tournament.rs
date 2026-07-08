@@ -130,6 +130,10 @@ pub fn routes() -> Router<AppState> {
 struct TournamentView {
     tournament: Tournament,
     can_undo: bool,
+    /// Monotonic change version. Clients echo it in the `X-Tournament-Version`
+    /// header so a stale edit is rejected (409), and use it to ignore the SSE
+    /// echo of their own change (see [`crate::live`]).
+    version: u32,
     standings: Vec<Standing>,
     /// The cup podium once decided (champion / runner-up / third / fourth), for the
     /// Results-tab medals. `None` when there is no cup or the final isn't finished.
@@ -166,6 +170,7 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
     Ok(Json(TournamentView {
         tournament,
         can_undo: store.can_undo(),
+        version: store.version(),
         standings,
         cup_podium,
         draft_cup_players,

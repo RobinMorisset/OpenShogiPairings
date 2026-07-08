@@ -22,6 +22,9 @@ pub enum ApiError {
     NotFound(String),
     /// The request lacked a valid session token (401). See [`crate::auth`].
     Unauthorized,
+    /// A mutating request was based on a stale tournament version (409). See
+    /// [`crate::live`].
+    VersionConflict,
     /// An upstream dependency (e.g. FESA) failed and no cache is available (502).
     Upstream(String),
 }
@@ -87,6 +90,10 @@ impl IntoResponse for ApiError {
             ApiError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 "authentication required".to_string(),
+            ),
+            ApiError::VersionConflict => (
+                StatusCode::CONFLICT,
+                "the tournament changed since your last view; reload and retry".to_string(),
             ),
             ApiError::Upstream(message) => (StatusCode::BAD_GATEWAY, message),
         };

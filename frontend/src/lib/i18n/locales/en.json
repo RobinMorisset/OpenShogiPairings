@@ -44,7 +44,8 @@
     "refreshRatings": "Refresh FESA list",
     "refreshRatingsTitle": "Re-download the rating list from the FESA website",
     "confirmDiscard": "\"{name}\" has unsaved changes that will be lost. Continue anyway?",
-    "cannotReachServer": "Cannot reach the server. Is it running (cargo run -p osp-server)?"
+    "cannotReachServer": "Cannot reach the server. Is it running (cargo run -p osp-server)?",
+    "conflictReloaded": "Another referee changed the tournament first, so your last action wasn't applied. The latest state has been reloaded — please try again."
   },
   "login": {
     "title": "Referee sign-in",
