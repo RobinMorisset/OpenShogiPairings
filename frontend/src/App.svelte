@@ -64,6 +64,7 @@
   import TournamentSettingsView from "./lib/components/TournamentSettingsView.svelte";
   import LocaleSwitcher from "./lib/components/LocaleSwitcher.svelte";
   import ThemeSwitcher from "./lib/components/ThemeSwitcher.svelte";
+  import ConnectionStatus from "./lib/components/ConnectionStatus.svelte";
 
   let tournament = $state<Tournament | null>(null);
   let standings = $state<Standing[]>([]);
@@ -312,12 +313,19 @@
   }
 
   // Silently pull the authoritative state — after a live change pushed by
-  // another referee, or after a rejected (conflicting) edit. Safe because every
-  // edit already lives on the server; there is no unsaved local state to lose.
+  // another referee, on reconnect, or after a rejected (conflicting) edit. Safe
+  // because every edit already lives on the server; there is no unsaved local
+  // state to lose.
   async function refetch() {
     try {
       const res = await fetchTournament();
-      if (res) apply(res);
+      if (res) {
+        // A resync/live update isn't a local edit, so don't let it flip the
+        // "unsaved changes" flag — apply() sets that for genuine local edits.
+        const wasUnsaved = hasUnsavedChanges;
+        apply(res);
+        hasUnsavedChanges = wasUnsaved;
+      }
     } catch {
       /* transient; the SSE stream will trigger another refetch on the next change */
     }
@@ -325,8 +333,21 @@
 
   onMount(() => {
     void loadInitial();
-    // Live sync: refetch whenever another referee changes the tournament.
-    return subscribeToChanges(refetch);
+    // Live sync: refetch on another referee's change and on every (re)connect.
+    const unsubscribe = subscribeToChanges(refetch);
+    // Also resync when the tab regains focus/visibility, in case the SSE stream
+    // was throttled or dropped while the tab was backgrounded.
+    const onFocus = () => void refetch();
+    const onVisible = () => {
+      if (!document.hidden) void refetch();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   });
 
   function describe(err: unknown): string {
@@ -548,6 +569,7 @@
         <p class="subtitle">{$_("app.subtitle")}</p>
       </div>
       <div class="header-controls">
+        <ConnectionStatus />
         <ThemeSwitcher />
         <LocaleSwitcher />
       </div>

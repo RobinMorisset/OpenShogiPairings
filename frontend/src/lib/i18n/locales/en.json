@@ -55,6 +55,14 @@
     "signingIn": "Signing in…",
     "wrongPassword": "Wrong password. Please try again."
   },
+  "connection": {
+    "live": "Live",
+    "liveTitle": "Connected — changes from other referees appear live",
+    "reconnecting": "Reconnecting…",
+    "reconnectingTitle": "Lost the live connection; retrying automatically",
+    "offline": "Offline",
+    "offlineTitle": "Not connected to the server"
+  },
   "localeSwitcher": {
     "label": "Language"
   },

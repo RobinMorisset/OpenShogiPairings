@@ -8,9 +8,15 @@ configurable address (`OSP_BIND`); a `deploy/` recipe (Docker, systemd, Caddy)
 ties it together with TLS. Phase 3: live sync via an SSE stream
 (`GET /api/tournament/events`) that pushes a monotonic `version` on every change
 so clients refetch, plus optimistic-concurrency guarding — clients echo the
-version in `X-Tournament-Version` and a stale edit is rejected 409. Next:
-**Phase 4** (flaky-connection resilience). Supersedes the two `TODO.md` lines
-"Add authentication to the distributed instance" and (partly) the webhook item.
+version in `X-Tournament-Version` and a stale edit is rejected 409. Phase 4:
+flaky-connection resilience — a connection-status indicator (Live / Reconnecting
+/ Offline) driven by the SSE stream, and auto-reconnect + resync (refetch on
+every SSE (re)connect and on tab focus/visibility, re-adopting the server's
+version so a restarted server doesn't strand clients). The "safe writes while
+degraded" item was already covered by the Phase 3 version/409 guard, and
+optimistic offline editing was deliberately left out. **All four phases are
+now implemented.** Supersedes the two `TODO.md` lines "Add authentication to the
+distributed instance" and (partly) the webhook item.
 
 Goal: let several referees edit **one** tournament simultaneously, from
 different machines, **over the public internet**, safely (only referees, and

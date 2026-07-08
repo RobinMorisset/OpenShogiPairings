@@ -55,6 +55,14 @@
     "signingIn": "Connexion…",
     "wrongPassword": "Mot de passe incorrect. Veuillez réessayer."
   },
+  "connection": {
+    "live": "En direct",
+    "liveTitle": "Connecté — les changements des autres arbitres apparaissent en direct",
+    "reconnecting": "Reconnexion…",
+    "reconnectingTitle": "Connexion en direct perdue ; nouvelle tentative automatique",
+    "offline": "Hors ligne",
+    "offlineTitle": "Non connecté au serveur"
+  },
   "localeSwitcher": {
     "label": "Langue"
   },

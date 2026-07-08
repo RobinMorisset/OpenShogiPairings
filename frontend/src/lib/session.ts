@@ -16,6 +16,16 @@ const TOKEN_KEY = "osp_auth_token";
  */
 export const authRequired = writable(false);
 
+/** Health of the live-update (SSE) connection to the server. */
+export type ConnectionStatus = "online" | "connecting" | "offline";
+
+/**
+ * Current live-connection health, driven by the SSE stream in `api.ts` and
+ * surfaced by the connection indicator. Starts "connecting" until the first
+ * successful open. Matters most against a hosted server on flaky venue wifi.
+ */
+export const connectionStatus = writable<ConnectionStatus>("connecting");
+
 /** The stored session token, or `null` if we've never logged in. */
 export function getToken(): string | null {
   try {

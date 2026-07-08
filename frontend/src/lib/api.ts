@@ -13,7 +13,13 @@ import type {
   Winner,
 } from "./types";
 import { isTauri } from "./platform";
-import { authRequired, clearToken, getToken, setToken } from "./session";
+import {
+  authRequired,
+  clearToken,
+  connectionStatus,
+  getToken,
+  setToken,
+} from "./session";
 
 // Where the API lives.
 //   - Tauri: the server is embedded and bound to an OS-assigned port, so we ask
@@ -126,16 +132,37 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 /**
  * Subscribe to server-pushed change notifications (SSE), calling `onChange`
- * whenever the tournament is modified by *another* client. Our own edits are
- * skipped (their version echoes what we already hold). Returns an unsubscribe
- * function. The browser's EventSource reconnects on its own if the stream drops.
+ * whenever the tournament is modified by *another* client, and on every
+ * (re)connect so a client that missed events while offline resyncs. Our own
+ * edits are skipped (their version echoes what we already hold). Also drives
+ * {@link connectionStatus}. Returns an unsubscribe function; the browser's
+ * EventSource reconnects on its own if the stream drops.
  */
 export function subscribeToChanges(onChange: () => void): () => void {
   let source: EventSource | null = null;
   let closed = false;
+  connectionStatus.set("connecting");
   void resolveApiBase().then((base) => {
     if (closed) return;
     source = new EventSource(`${base}/api/tournament/events`);
+    source.onopen = () => {
+      connectionStatus.set("online");
+      // Re-adopt the server's version on (re)connect: a restarted server resets
+      // its counter, so a stale-high knownVersion would otherwise make us ignore
+      // valid updates. Clearing it means the resync below sets it afresh from the
+      // server's response (or leaves it null if the server has no tournament).
+      knownVersion = null;
+      // Resync: catch up on anything missed while disconnected. Cheap and safe —
+      // refetch preserves any local "unsaved" state.
+      onChange();
+    };
+    source.onerror = () => {
+      // EventSource auto-reconnects (readyState CONNECTING) unless it has given
+      // up (CLOSED). Reflect that as reconnecting vs. offline.
+      connectionStatus.set(
+        source?.readyState === EventSource.CLOSED ? "offline" : "connecting",
+      );
+    };
     source.addEventListener("changed", (event) => {
       const version = Number((event as MessageEvent).data);
       // Refetch when the change is newer than what we hold, or on a resync
@@ -147,6 +174,7 @@ export function subscribeToChanges(onChange: () => void): () => void {
   });
   return () => {
     closed = true;
+    connectionStatus.set("offline");
     source?.close();
   };
 }
