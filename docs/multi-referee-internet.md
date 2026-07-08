@@ -50,7 +50,8 @@ keep that for V1: **one hosted instance = one live tournament**, and the
 instance password *is* the tournament password. Running two tournaments at once
 means running two instances (different subdomain/port). Multi-tournament routing
 (`/api/tournaments/{id}/…` with a password each) is a real feature but a large
-one — **V2**, only if demand appears.
+one — **V2**, only if demand appears. Now designed: see
+[`multi-tournament.md`](multi-tournament.md).
 
 ---
 

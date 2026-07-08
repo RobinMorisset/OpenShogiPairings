@@ -58,6 +58,12 @@ See [`docs/simulation-cli.md`](docs/simulation-cli.md) for the design.
 
 See [`docs/multi-referee-internet.md`](docs/multi-referee-internet.md) for the design.
 
+## Multi-tournament server
+
+Support several tournaments on one running server (hosted or Tauri-embedded),
+with clients picking which to connect to. Design:
+[`docs/multi-tournament.md`](docs/multi-tournament.md).
+
 ## Other
 
 - **Webhook for pushing results and pulling players** See https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification
