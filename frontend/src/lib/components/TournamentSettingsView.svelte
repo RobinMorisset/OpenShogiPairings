@@ -87,6 +87,7 @@
   // Local editable rows, kept in *entry* order (not sorted) so the row a referee
   // is editing never jumps or shows a stale value. The inputs bind to these.
   let thresholds = $state<ThresholdRow[]>([]);
+  let airtightRounds = $state<number | null>(null);
   let clubEnabled = $state(false);
   let clubRounds = $state<number | null>(null);
   let exemptClubs = $state<string[]>([]);
@@ -121,6 +122,7 @@
   // only, not our own writes.
   $effect(() => {
     const sThresholds = settings.macmahon_thresholds;
+    const sAirtight = settings.airtight_groups_rounds ?? null;
     const sEnabled = settings.club_protection_enabled;
     const sRounds = settings.club_protection_rounds ?? null;
     const sExempt = settings.club_protection_exempt_clubs;
@@ -134,6 +136,7 @@
     untrack(() => {
       const matches =
         eqThresholds(cleanThresholds(thresholds), sThresholds) &&
+        (airtightRounds ?? null) === sAirtight &&
         clubEnabled === sEnabled &&
         (clubRounds ?? null) === sRounds &&
         eqStr(normExempt(exemptClubs), sExempt) &&
@@ -149,6 +152,7 @@
           value: t.value,
           dropsAfterRound: t.drops_after_round ?? null,
         }));
+        airtightRounds = sAirtight;
         clubEnabled = sEnabled;
         clubRounds = sRounds;
         exemptClubs = [...sExempt];
@@ -168,6 +172,7 @@
     // MacMahon thresholds, trims/de-dups the exempt clubs).
     onUpdate({
       macmahon_thresholds: cleanThresholds(thresholds),
+      airtight_groups_rounds: airtightRounds,
       club_protection_enabled: clubEnabled,
       club_protection_rounds: clubRounds,
       club_protection_exempt_clubs: exemptClubs
@@ -309,6 +314,17 @@
   function editThresholdDropRound(i: number, raw: string) {
     const n = Math.round(Number(raw));
     thresholds[i].dropsAfterRound = Number.isFinite(n) && n >= 1 ? n : 1;
+    persist();
+  }
+
+  function setAirtightEnabled(on: boolean) {
+    airtightRounds = on ? (airtightRounds ?? 1) : null;
+    persist();
+  }
+
+  function editAirtightRounds(raw: string) {
+    const n = Math.round(Number(raw));
+    airtightRounds = Number.isFinite(n) && n >= 1 ? n : 1;
     persist();
   }
 
@@ -540,6 +556,35 @@
           </ul>
         </div>
       {/if}
+    </div>
+  {/if}
+
+  {#if thresholds.length > 0}
+    <div class="section">
+      <h3>{$_("settings.airtightGroupsTitle")}</h3>
+      <p class="desc">
+        {$_("settings.airtightGroupsDesc")}
+      </p>
+
+      <label class="check">
+        <input
+          type="checkbox"
+          checked={airtightRounds != null}
+          disabled={busy}
+          onchange={(e) => setAirtightEnabled(e.currentTarget.checked)}
+        />
+        {$_("settings.onlyFirstRoundsPrefix")}
+        <input
+          type="number"
+          min="1"
+          step="1"
+          class="threshold narrow"
+          value={airtightRounds ?? 1}
+          disabled={busy || airtightRounds == null}
+          onchange={(e) => editAirtightRounds(e.currentTarget.value)}
+        />
+        {$_("settings.onlyFirstRoundsSuffix")}
+      </label>
     </div>
   {/if}
 

@@ -24,6 +24,15 @@ export type TournamentSettings = {
  */
 macmahon_thresholds: Array<MacMahonThreshold>, 
 /**
+ * "Airtight groups": if `Some(n)`, an extra pairing rule — just below
+ * no-rematch, above the score-gap rule — forbids pairing players with a
+ * different number of MacMahon points during rounds `1..=n` (penalty grows
+ * with the square of the gap, like the other gap rules). `None` (the
+ * default) disables it. Meaningless without MacMahon thresholds, since
+ * every player has 0 MacMahon points otherwise.
+ */
+airtight_groups_rounds?: number | null, 
+/**
  * Whether the pairing engine avoids pairing players from the same club
  * ("club protection"). Off by default — enable it per tournament.
  */

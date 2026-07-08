@@ -12,21 +12,25 @@
 //!
 //! 1. **No rematch / no repeat bye** — two players never meet twice, and no one
 //!    takes the bye twice.
-//! 2. **Equal scores** — prefer opponents with the same number of points (each
+//! 2. **Airtight groups** (optional, off by default) — for the first N
+//!    configured rounds, avoid pairing players with a different number of
+//!    MacMahon points; the penalty grows with the *square* of the gap, same as
+//!    the score-gap rule below. Costs nothing when unset.
+//! 3. **Equal scores** — prefer opponents with the same number of points (each
 //!    player's MacMahon starting points plus their victories); the penalty grows
 //!    with the *square* of the points gap.
-//! 3. **No repeated float** — avoid making a player an ascending floater (meeting
+//! 4. **No repeated float** — avoid making a player an ascending floater (meeting
 //!    someone with more points) or a descending floater (fewer points, or a
 //!    bye) twice; the penalty fades with the number of rounds since the last such
 //!    float.
-//! 4. **Floater selection** — when a group has to pair across score groups, choose
+//! 5. **Floater selection** — when a group has to pair across score groups, choose
 //!    *who* floats: the descending floater should be the last (weakest) of the
 //!    upper group, and the ascending floater the first (classic Swiss) or the
 //!    median (median Swiss) of the lower group. The penalty rises with the
 //!    distance from that ideal in-group rank.
-//! 5. **Different clubs** — avoid pairing club-mates (ignored when a club is
+//! 6. **Different clubs** — avoid pairing club-mates (ignored when a club is
 //!    unknown).
-//! 6. **Fold within a score group** — sort a group (equal points) by rating
+//! 7. **Fold within a score group** — sort a group (equal points) by rating
 //!    (unrated = 1), descending; the Nth player of the top half should meet the
 //!    Nth of the bottom half, penalized by the *squared* deviation from that ideal.
 //!
@@ -102,6 +106,10 @@ where
 enum Rule {
     /// Never play the same opponent twice / never take the bye twice.
     Rematch,
+    /// (Optional, first N rounds) Avoid pairing players with a different number
+    /// of MacMahon points; penalty grows with the square of the gap. A no-op
+    /// outside its configured round window.
+    AirtightGroups,
     /// Prefer equal scores; penalty grows with the square of the points gap.
     ScoreGap,
     /// Avoid repeating a float in the same direction; decays with rounds since.
@@ -132,6 +140,7 @@ enum Rule {
 #[serde(rename_all = "snake_case")]
 pub enum RuleId {
     Rematch,
+    AirtightGroups,
     ScoreGap,
     FloatRepeat,
     FloaterSelection,
@@ -146,8 +155,9 @@ pub enum RuleId {
 /// score/float/fold/club family for a bye-selection rule and a squared-ELO-gap
 /// rule, keeping only no-rematch above them.
 fn active_rules(settings: &TournamentSettings) -> &'static [Rule] {
-    const SWISS: [Rule; 6] = [
+    const SWISS: [Rule; 7] = [
         Rule::Rematch,
+        Rule::AirtightGroups,
         Rule::ScoreGap,
         Rule::FloatRepeat,
         Rule::FloaterSelection,
@@ -173,6 +183,9 @@ struct Ctx<'a> {
     floater_style: FloaterStyle,
     /// Whether club protection applies this round (enabled and within its window).
     club_active: bool,
+    /// Whether "airtight groups" applies this round (see
+    /// [`TournamentSettings::airtight_groups_active`]).
+    airtight_active: bool,
     /// Clubs exempt from protection, in normalized form (see
     /// [`TournamentSettings::normalize_club`]).
     exempt_clubs: &'a HashSet<String>,
@@ -180,6 +193,9 @@ struct Ctx<'a> {
     edges: i128,
     /// Largest points gap between any two vertices (bounds the score rule).
     max_gap: i128,
+    /// Largest MacMahon-points gap between any two vertices (bounds the airtight
+    /// groups rule).
+    max_mm_gap: i128,
     /// Largest score-group size among the free players (bounds the fold rule).
     max_group: i128,
     /// Number of free players (bounds the bye-selection rule).
@@ -228,6 +244,7 @@ impl Rule {
     fn id(self) -> RuleId {
         match self {
             Rule::Rematch => RuleId::Rematch,
+            Rule::AirtightGroups => RuleId::AirtightGroups,
             Rule::ScoreGap => RuleId::ScoreGap,
             Rule::FloatRepeat => RuleId::FloatRepeat,
             Rule::FloaterSelection => RuleId::FloaterSelection,
@@ -245,12 +262,21 @@ impl Rule {
         match self {
             // Rule 1: never play the same opponent twice.
             Rule::Rematch => i128::from(sa.opponents.contains(&b)),
-            // Rule 2: prefer equal scores; penalty is the square of the gap.
+            // Rule 2 (optional, first N rounds): forbid crossing MacMahon groups;
+            // penalty is the square of the gap in MacMahon starting points.
+            Rule::AirtightGroups => {
+                if !ctx.airtight_active {
+                    return 0;
+                }
+                let gap = (sa.macmahon as i128 - sb.macmahon as i128).abs();
+                gap * gap
+            }
+            // Rule 3: prefer equal scores; penalty is the square of the gap.
             Rule::ScoreGap => {
                 let gap = (sa.points as i128 - sb.points as i128).abs();
                 gap * gap
             }
-            // Rule 3: the lower-scored player floats up, the higher-scored down.
+            // Rule 4: the lower-scored player floats up, the higher-scored down.
             Rule::FloatRepeat => match sa.points.cmp(&sb.points) {
                 Ordering::Less => {
                     float_units(sa.last_ascended, ctx.round)
@@ -262,7 +288,7 @@ impl Rule {
                 }
                 Ordering::Equal => 0,
             },
-            // Rule 4: on a cross-group (float) edge, prefer the right floaters —
+            // Rule 5: on a cross-group (float) edge, prefer the right floaters —
             // the weakest of the upper group down, the first/median of the lower
             // group up. Same-group edges aren't floats, so no penalty.
             Rule::FloaterSelection => match sa.points.cmp(&sb.points) {
@@ -276,7 +302,7 @@ impl Rule {
                     floater_units(ctx, descender, true) + floater_units(ctx, ascender, false)
                 }
             },
-            // Rule 5: avoid pairing club-mates — but only when protection is active
+            // Rule 6: avoid pairing club-mates — but only when protection is active
             // this round, ignoring unknown clubs and clubs on the exempt list. Club
             // names are matched case-insensitively.
             Rule::Club => {
@@ -292,7 +318,7 @@ impl Rule {
                     _ => 0,
                 }
             }
-            // Rule 6: fold within a score group — squared deviation from the ideal
+            // Rule 7: fold within a score group — squared deviation from the ideal
             // fold. Squaring (rather than |·|) spreads an unavoidable deviation across
             // boards instead of dumping it all on one, so no single player faces an
             // opponent far from the fold's intent — and it matches the squared
@@ -335,7 +361,7 @@ impl Rule {
             Rule::FloaterSelection => floater_units(ctx, player, true),
             // ELO mode: the weakest present player (lowest ELO rank) takes the bye.
             Rule::ByeSelection => ctx.elo_rank.get(&player).copied().unwrap_or(0),
-            Rule::ScoreGap | Rule::Club | Rule::Fold | Rule::EloGap => 0,
+            Rule::AirtightGroups | Rule::ScoreGap | Rule::Club | Rule::Fold | Rule::EloGap => 0,
         }
     }
 
@@ -349,6 +375,10 @@ impl Rule {
         }
         let per_edge = match self {
             Rule::Rematch => 1,
+            // 0 when off or out of its round window — no wasted tier.
+            Rule::AirtightGroups => {
+                i128::from(ctx.airtight_active) * ctx.max_mm_gap * ctx.max_mm_gap
+            }
             Rule::ScoreGap => ctx.max_gap * ctx.max_gap,
             Rule::FloatRepeat => 2 * FLOAT_BASE, // two directions, each ≤ FLOAT_BASE
             // A descender and an ascender term, each a rank distance ≤ group_size − 1.
@@ -469,8 +499,10 @@ struct PairingModel<'a> {
     round: u32,
     floater_style: FloaterStyle,
     club_active: bool,
+    airtight_active: bool,
     edges: i128,
     max_gap: i128,
+    max_mm_gap: i128,
     max_group: i128,
     free_count: i128,
     max_elo_gap: i128,
@@ -496,10 +528,13 @@ impl<'a> PairingModel<'a> {
         let fold = fold_ranks(&scores, &by_player, free);
 
         let (mut lo, mut hi) = (u32::MAX, 0u32);
+        let (mut mm_lo, mut mm_hi) = (u32::MAX, 0u32);
         for &id in free {
-            let p = scores.get(&id).points;
-            lo = lo.min(p);
-            hi = hi.max(p);
+            let s = scores.get(&id);
+            lo = lo.min(s.points);
+            hi = hi.max(s.points);
+            mm_lo = mm_lo.min(s.macmahon);
+            mm_hi = mm_hi.max(s.macmahon);
         }
         let exempt_clubs = settings.exempt_clubs_normalized();
 
@@ -546,8 +581,10 @@ impl<'a> PairingModel<'a> {
             round: number,
             floater_style: settings.floater_style,
             club_active: settings.club_protection_active(number),
+            airtight_active: settings.airtight_groups_active(number),
             edges: (vcount / 2) as i128,
             max_gap: hi.saturating_sub(lo) as i128,
+            max_mm_gap: mm_hi.saturating_sub(mm_lo) as i128,
             max_group,
             free_count: k as i128,
             max_elo_gap,
@@ -573,9 +610,11 @@ impl<'a> PairingModel<'a> {
             round: self.round,
             floater_style: self.floater_style,
             club_active: self.club_active,
+            airtight_active: self.airtight_active,
             exempt_clubs: &self.exempt_clubs,
             edges: self.edges,
             max_gap: self.max_gap,
+            max_mm_gap: self.max_mm_gap,
             max_group: self.max_group,
             free_count: self.free_count,
             elo: &self.elo,
@@ -1600,6 +1639,116 @@ mod tests {
         );
     }
 
+    /// Two MacMahon groups of 4 (threshold 1500), each already paired internally
+    /// in round 1 with an upset, so round 2's tied scores admit a cheaper
+    /// cross-group matching under score-gap alone: the group boundary is
+    /// otherwise avoidable (both groups have a same-group, non-rematch partner
+    /// available), so this isolates the airtight-groups rule rather than a
+    /// parity-forced float.
+    #[test]
+    fn airtight_groups_keeps_macmahon_groups_apart_when_scores_would_cross() {
+        let p: Vec<Player> = vec![
+            player(1, Some(2000), None),
+            player(2, Some(1950), None),
+            player(3, Some(1900), None),
+            player(4, Some(1850), None),
+            player(5, Some(1000), None),
+            player(6, Some(950), None),
+            player(7, Some(900), None),
+            player(8, Some(850), None),
+        ];
+        let settings_base = TournamentSettings {
+            macmahon_thresholds: vec![MacMahonThreshold::new(1500)],
+            ..Default::default()
+        };
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let r1 = completed_round(
+            1,
+            &[
+                (p[0].id, p[1].id, Winner::Player2), // p1 beats p0 (top group upset)
+                (p[2].id, p[3].id, Winner::Player1), // p2 beats p3
+                (p[4].id, p[5].id, Winner::Player2), // p5 beats p4 (bottom group upset)
+                (p[6].id, p[7].id, Winner::Player1), // p6 beats p7
+            ],
+            None,
+        );
+
+        // Without airtight groups, score-gap alone finds a cheaper matching that
+        // crosses the MacMahon boundary twice.
+        let round_off = pair_round_weighted(
+            2,
+            &p,
+            &settings_base,
+            std::slice::from_ref(&r1),
+            &present,
+            &[],
+            None,
+        );
+        let top: HashSet<Uuid> = [p[0].id, p[1].id, p[2].id, p[3].id].into_iter().collect();
+        let crosses = round_off
+            .boards
+            .iter()
+            .filter(|b| top.contains(&b.player1) != top.contains(&b.player2))
+            .count();
+        assert_eq!(crosses, 2, "score-gap alone crosses the MacMahon boundary");
+
+        // With airtight groups active for round 2, every board stays within its
+        // MacMahon group.
+        let settings_on = TournamentSettings {
+            airtight_groups_rounds: Some(2),
+            ..settings_base
+        };
+        let round_on = pair_round_weighted(2, &p, &settings_on, &[r1], &present, &[], None);
+        for b in &round_on.boards {
+            assert_eq!(
+                top.contains(&b.player1),
+                top.contains(&b.player2),
+                "airtight groups should keep every board within its MacMahon group"
+            );
+        }
+    }
+
+    #[test]
+    fn airtight_groups_only_applies_within_its_round_window() {
+        // Same setup as above, but the window only covers round 1: round 2 must
+        // ignore MacMahon groups again, so score-gap crosses the boundary.
+        let p: Vec<Player> = vec![
+            player(1, Some(2000), None),
+            player(2, Some(1950), None),
+            player(3, Some(1900), None),
+            player(4, Some(1850), None),
+            player(5, Some(1000), None),
+            player(6, Some(950), None),
+            player(7, Some(900), None),
+            player(8, Some(850), None),
+        ];
+        let settings = TournamentSettings {
+            macmahon_thresholds: vec![MacMahonThreshold::new(1500)],
+            airtight_groups_rounds: Some(1),
+            ..Default::default()
+        };
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let r1 = completed_round(
+            1,
+            &[
+                (p[0].id, p[1].id, Winner::Player2),
+                (p[2].id, p[3].id, Winner::Player1),
+                (p[4].id, p[5].id, Winner::Player2),
+                (p[6].id, p[7].id, Winner::Player1),
+            ],
+            None,
+        );
+
+        let round = pair_round_weighted(2, &p, &settings, &[r1], &present, &[], None);
+        let top: HashSet<Uuid> = [p[0].id, p[1].id, p[2].id, p[3].id].into_iter().collect();
+        let crosses = round
+            .boards
+            .iter()
+            .filter(|b| top.contains(&b.player1) != top.contains(&b.player2))
+            .count();
+        assert_eq!(crosses, 2, "past the window, score-gap crosses again");
+    }
+
     // --- ELO (non-Swiss) mode ---------------------------------------------
 
     fn elo_settings() -> TournamentSettings {
@@ -1804,10 +1953,13 @@ mod tests {
         let free: Vec<Uuid> = p.iter().map(|q| q.id).collect();
         let fold = fold_ranks(&scores, &by_player, &free);
         let (mut lo, mut hi) = (u32::MAX, 0u32);
+        let (mut mm_lo, mut mm_hi) = (u32::MAX, 0u32);
         for &pid in &free {
-            let pts = scores.get(&pid).points;
-            lo = lo.min(pts);
-            hi = hi.max(pts);
+            let s = scores.get(&pid);
+            lo = lo.min(s.points);
+            hi = hi.max(s.points);
+            mm_lo = mm_lo.min(s.macmahon);
+            mm_hi = mm_hi.max(s.macmahon);
         }
         let edges = 3i128; // 5 free + phantom bye = 6 vertices → 3 edges
         let exempt_clubs = HashSet::new();
@@ -1820,9 +1972,11 @@ mod tests {
             round: 2,
             floater_style: FloaterStyle::Median, // exercise the floater-selection bound
             club_active: true,                   // exercise the club rule's bound
+            airtight_active: true,               // exercise the airtight-groups bound
             exempt_clubs: &exempt_clubs,
             edges,
             max_gap: (hi - lo) as i128,
+            max_mm_gap: (mm_hi - mm_lo) as i128,
             max_group: fold.values().map(|f| f.group_size).max().unwrap_or(0) as i128,
             free_count: free.len() as i128,
             elo: &empty_elo,

@@ -115,6 +115,7 @@
       "byeBoard": "{name} (bye)",
       "rule": {
         "rematch": "rematch",
+        "airtight_groups": "airtight groups",
         "score_gap": "score gap",
         "float_repeat": "repeat float",
         "floater_selection": "floater choice",
@@ -246,6 +247,8 @@
     "upTo": "up to",
     "startingPointSingular": "starting point",
     "startingPointsPlural": "starting points",
+    "airtightGroupsTitle": "Airtight groups",
+    "airtightGroupsDesc": "For the first N rounds, an extra rule (just below no-rematch, above equal-scores) avoids pairing players with a different number of MacMahon points — penalty grows with the square of the gap, like the other gap rules. Off by default.",
     "clubProtectionTitle": "Club protection",
     "clubProtectionDesc": "Avoid pairing players from the same club. Off by default. Club names are matched case-insensitively; players with no club set are never protected.",
     "clubProtectionCheckbox": "Avoid pairing players from the same club",

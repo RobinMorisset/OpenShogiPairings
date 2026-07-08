@@ -115,6 +115,7 @@
       "byeBoard": "{name} (exempt)",
       "rule": {
         "rematch": "revanche",
+        "airtight_groups": "groupes étanches",
         "score_gap": "écart de points",
         "float_repeat": "flottement répété",
         "floater_selection": "choix du flotteur",
@@ -246,6 +247,8 @@
     "upTo": "jusqu'à",
     "startingPointSingular": "point de départ",
     "startingPointsPlural": "points de départ",
+    "airtightGroupsTitle": "Groupes étanches",
+    "airtightGroupsDesc": "Pour les N premiers rounds, une règle supplémentaire (juste sous l'anti-répétition, au-dessus de l'égalité des scores) évite d'apparier des joueurs ayant un nombre différent de points MacMahon — la pénalité augmente avec le carré de l'écart, comme les autres règles d'écart. Désactivé par défaut.",
     "clubProtectionTitle": "Protection de club",
     "clubProtectionDesc": "Évite d'apparier des joueurs du même club. Désactivé par défaut. Les noms de club sont comparés sans tenir compte de la casse ; les joueurs sans club renseigné ne sont jamais protégés.",
     "clubProtectionCheckbox": "Éviter d'apparier des joueurs du même club",

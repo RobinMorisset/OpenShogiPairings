@@ -159,6 +159,14 @@ pub struct TournamentSettings {
     /// degressive round (see [`MacMahonThreshold::drops_after_round`]).
     #[serde(default)]
     pub macmahon_thresholds: Vec<MacMahonThreshold>,
+    /// "Airtight groups": if `Some(n)`, an extra pairing rule — just below
+    /// no-rematch, above the score-gap rule — forbids pairing players with a
+    /// different number of MacMahon points during rounds `1..=n` (penalty grows
+    /// with the square of the gap, like the other gap rules). `None` (the
+    /// default) disables it. Meaningless without MacMahon thresholds, since
+    /// every player has 0 MacMahon points otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub airtight_groups_rounds: Option<u32>,
     /// Whether the pairing engine avoids pairing players from the same club
     /// ("club protection"). Off by default — enable it per tournament.
     #[serde(default)]
@@ -219,6 +227,7 @@ impl Default for TournamentSettings {
     fn default() -> Self {
         TournamentSettings {
             macmahon_thresholds: Vec::new(),
+            airtight_groups_rounds: None,
             club_protection_enabled: false,
             club_protection_rounds: None,
             club_protection_exempt_clubs: Vec::new(),
@@ -280,6 +289,12 @@ impl TournamentSettings {
         self.club_protection_enabled && self.club_protection_rounds.is_none_or(|n| round <= n)
     }
 
+    /// Whether "airtight groups" applies to the given (1-based) round: within
+    /// the configured window, if any.
+    pub fn airtight_groups_active(&self, round: u32) -> bool {
+        self.airtight_groups_rounds.is_some_and(|n| round <= n)
+    }
+
     /// The exempt clubs in canonical (normalized) form, for membership tests.
     pub fn exempt_clubs_normalized(&self) -> HashSet<String> {
         self.club_protection_exempt_clubs
@@ -297,6 +312,10 @@ impl TournamentSettings {
     /// stored settings.
     pub fn normalized(mut self) -> Self {
         self.macmahon_thresholds = Self::normalize_thresholds(self.macmahon_thresholds);
+        // A round count of 0 can't apply to any round, so it's the same as off.
+        if self.airtight_groups_rounds == Some(0) {
+            self.airtight_groups_rounds = None;
+        }
 
         // Exempt clubs: keep the first spelling of each, trimmed and non-empty.
         let mut seen = HashSet::new();
@@ -466,6 +485,30 @@ mod tests {
         assert!(limited.club_protection_active(1));
         assert!(limited.club_protection_active(2));
         assert!(!limited.club_protection_active(3)); // past the window
+    }
+
+    #[test]
+    fn airtight_groups_active_respects_its_round_window() {
+        let off = TournamentSettings::default();
+        assert!(!off.airtight_groups_active(1)); // disabled by default (no window)
+
+        let s = TournamentSettings {
+            airtight_groups_rounds: Some(2),
+            ..Default::default()
+        };
+        assert!(s.airtight_groups_active(1));
+        assert!(s.airtight_groups_active(2));
+        assert!(!s.airtight_groups_active(3)); // past the window
+    }
+
+    #[test]
+    fn normalized_zeroes_a_zero_airtight_groups_window() {
+        let s = TournamentSettings {
+            airtight_groups_rounds: Some(0),
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(s.airtight_groups_rounds, None);
     }
 
     #[test]
