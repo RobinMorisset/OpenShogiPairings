@@ -64,6 +64,14 @@ Support several tournaments on one running server (hosted or Tauri-embedded),
 with clients picking which to connect to. Design:
 [`docs/multi-tournament.md`](docs/multi-tournament.md).
 
+- **Make the Tauri desktop app's data directory configurable.** It's currently
+  hardcoded to `dirs::data_dir()/openshogipairings/tournaments/`
+  (`frontend/src-tauri/src/lib.rs`'s `local_data_dir`), matching where
+  `backup.rs` already puts its automatic backups. Some users may want it
+  redirected (a synced folder, a different drive, a portable-install layout)
+  — read it from an environment variable, falling back to the current default
+  when unset.
+
 ## Other
 
 - **Webhook for pushing results and pulling players** See https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification
