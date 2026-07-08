@@ -13,7 +13,11 @@ frontend/.vite/
 frontend/src-tauri/target/
 frontend/src-tauri/gen/
 
-# Claude Code runtime artifacts (keep .claude/launch.json, ignore locks)
+# Claude Code runtime artifacts. launch.json is machine-specific (absolute
+# paths to node/cargo vary per dev machine and the preview tool's spawn
+# environment doesn't inherit shell PATH customizations), so each developer
+# keeps their own local copy rather than sharing one through git.
+.claude/launch.json
 .claude/scheduled_tasks.lock
 
 # Editor / OS
