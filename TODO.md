@@ -19,11 +19,12 @@ Known limitations and future work, roughly ordered by area.
   table. This needs a way to mark a board as a no-show (a new board-result state,
   giving the opponent the win); not handled yet. Byes (`0+`, win) and absences
   (`0-`, loss) are already handled.
-- **Experimental ELO-based, non-swiss system** When that mode is active, all MacMahon and swiss option should
-  be disabled/greyed out. In it, OSP keeps track of an estimated ELO for each player throughout the tournament based on
-  Bayesian reasoning; and the constraints related to victories, floaters, fold, etc.. (everything but rematch and club)
-  get replaced by a constraint minimizing the square of ELO differences per game (sitting between rematch and club).
-  **Design:** [`docs/elo-pairing-mode.md`](docs/elo-pairing-mode.md).
+- **Airtight groups** Extra rule saying that for the first N rounds, players with different
+  MM points should not play each other. Priority: just below rematch.
+- **MM by rank** A new way to set thresholds, it requires updating the players list and fesa ratings parsing as well.
+- **Refine Fold rule** to better match the normal swiss rules. In particular, I think there
+  should be a separation between FoldUpper and FoldLower, with FoldUpper being higher priority.
+  Also the penalty should be fancier than what it is currently to support the right order of trying permutations.  
 
 
 ## FESA rating list
@@ -41,22 +42,18 @@ Known limitations and future work, roughly ordered by area.
 
 - **Add a button to load a CSV of player names in the players tab**
 
+- **Export settings as JSON from the Settings tab** A download button that
+  serializes the current `TournamentSettings`, to feed the simulation CLI's
+  `--configs` (see [`docs/simulation-cli.md`](docs/simulation-cli.md) §3.4).
+
 ## Simulations
 
-- **Add an API to get random game results** This API should not be surfaced in the UI, it is
-  to be used in tests, and for doing simulations of various pairing methods. For each undecided match
-  in the current round, it should pick a winner based on the respective ELOs, using the following formula:
-  Chance of victory for player with elo A playing against player with elo B: 1 / (1 + 10^((B - A) / 400))
-- **Add an API getting statistical results from a tournament** the one I'm interested in is specifically the distribution of
-  ELO differences between players of games, ideally taking not the ELO at the start of the tournament for each player, but allowing an updated player -> ELO mapping to be provided by the client for this request only.
+See [`docs/simulation-cli.md`](docs/simulation-cli.md) for the design.
+
+## Multi-referee setup
+
+See [`docs/multi-referee-internet.md`](docs/multi-referee-internet.md) for the design.
 
 ## Other
 
-- **Allow storing default properties** which apply to all new started tournament.
-  I'm not sure it is worthwhile, just a saved tournament with no players and just the properties set is equivalent.
-
-- **Add authentication to the distributed instance** So that only referees with the right password can access it.
-
 - **Webhook for pushing results and pulling players** See https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification
-
-- **Add some pairing explanation mechanism**
