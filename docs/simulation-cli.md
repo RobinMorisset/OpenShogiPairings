@@ -94,7 +94,7 @@ consistent.
 
 > **Engine-determinism risk to verify.** Reproducibility also requires the
 > *pairing* to be deterministic given identical inputs. The matching in
-> [`matching.rs`](../crates/core/src/matching.rs)/[`pairing.rs`](../crates/core/src/pairing.rs)
+> [`integer-blossom`](../crates/matching/src/lib.rs)/[`pairing.rs`](../crates/core/src/pairing.rs)
 > should be, but any incidental `HashMap` iteration order feeding a tie-break
 > would inject non-determinism. Audit this when implementing; sort where needed.
 

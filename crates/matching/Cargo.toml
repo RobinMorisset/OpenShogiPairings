@@ -1,0 +1,7 @@
+[package]
+name = "integer-blossom"
+description = "Minimum-weight perfect matching (blossom algorithm) on a general graph, with integer edge weights"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true

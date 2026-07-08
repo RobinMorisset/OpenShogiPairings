@@ -11,6 +11,7 @@ be added over time.
 | Piece | Location | Tech | Role |
 |-------|----------|------|------|
 | Domain / pairing engine | [`crates/core`](crates/core) | Rust | Correctness-critical logic + shared DTOs. Reused by every client. |
+| Matching solver | [`crates/matching`](crates/matching) | Rust | Standalone blossom (min-weight perfect matching) solver, self-contained and dependency-free. |
 | HTTP server | [`crates/server`](crates/server) | Rust + axum | Single source of truth; exposes the API. |
 | Web UI | [`frontend`](frontend) | TypeScript + Svelte 5 + Vite | Browser client; also the frontend embedded by Tauri. |
 | Desktop app | `frontend/src-tauri` | Tauri 2 (Rust + system webview) | Self-contained app: **embeds the server** (`osp-server` as a library) and runs it in-process. |
@@ -23,7 +24,7 @@ is what lets the packaged app ship as a single self-contained executable.
 
 The pairing engine models a round as a **minimum-weight perfect matching** over a
 complete player graph. The matching itself is an integer **blossom** solver
-([`crates/core/src/matching.rs`](crates/core/src/matching.rs), general graphs —
+([`crates/matching`](crates/matching/src/lib.rs), general graphs —
 Hungarian doesn't apply); the edge weights come from a set of Swiss rules
 ([`crates/core/src/pairing.rs`](crates/core/src/pairing.rs)) combined on a
 priority ladder of multipliers — most important first: never rematch or repeat a
