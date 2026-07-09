@@ -12,9 +12,18 @@
     standings: Standing[];
     /** The cup podium, once decided (adds medals; doesn't reorder the table). */
     cupPodium?: CupPodium | null;
+    /** Winner that counts for standings/pairing per board, server-computed
+     *  (respects the Wiel rule), indexed like `tournament.rounds[i].boards[j]`. */
+    effectiveWinners: (Winner | null)[][];
   }
 
-  let { tournament, standings, cupPodium = null }: Props = $props();
+  let { tournament, standings, cupPodium = null, effectiveWinners }: Props = $props();
+
+  // Round number → its index into `tournament.rounds` (and so into
+  // `effectiveWinners`), since that array isn't filtered to completed rounds.
+  const roundIndexByNumber = $derived(
+    new Map(tournament.rounds.map((r, i) => [r.number, i])),
+  );
 
   // The tie-break columns to show, in the referee-chosen order — resolved from
   // the settings to their label/field/tooltip. Unknown codes (from a newer save)
@@ -92,23 +101,23 @@
 
   function cellFor(player: Player, round: Round): Cell {
     if (round.bye === player.id) return { kind: "bye" };
-    const board = round.boards.find(
+    const boardIdx = round.boards.findIndex(
       (b) => b.player1 === player.id || b.player2 === player.id,
     );
-    if (!board) return { kind: "absent" };
+    if (boardIdx < 0) return { kind: "absent" };
+    const board = round.boards[boardIdx];
     const isP1 = board.player1 === player.id;
     const side: Winner = isP1 ? "player1" : "player2";
     const opponentId = numberOf.get(isP1 ? board.player2 : board.player1);
     const opponent = opponentId != null ? String(opponentId) : "?";
     if (!board.result) return { kind: "pending", opponent };
 
-    // With the Wiel rule on, the giver of a handicap game always counts as its
-    // winner, whoever won.
-    const { actualWon, effectiveWon, gave } = boardOutcome(
-      board,
-      side,
-      tournament.settings.handicap_wiel_rule ?? false,
-    );
+    const { actualWon, gave } = boardOutcome(board, side);
+    // Server-computed, Wiel-rule-aware winner for this board (see
+    // `TournamentResponse.effective_winners`).
+    const roundIdx = roundIndexByNumber.get(round.number);
+    const effectiveWon =
+      roundIdx != null ? effectiveWinners[roundIdx]?.[boardIdx] === side : actualWon;
     const handicap: PlayedCell["handicap"] = board.handicap
       ? { code: board.handicap.handicap, gave }
       : undefined;

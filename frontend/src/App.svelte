@@ -64,6 +64,9 @@
   let cupPodium = $state<CupPodium | null>(null);
   let draftCupPlayers = $state<string[]>([]);
   let suggestedHandicaps = $state<(Handicap | null)[][]>([]);
+  /** Winner that counts for standings/pairing per board, server-computed (see
+   *  `TournamentResponse.effective_winners`), indexed like `tournament.rounds`. */
+  let effectiveWinners = $state<(Winner | null)[][]>([]);
   let canUndo = $state(false);
   let initialLoad = $state<"loading" | "done">("loading");
   let busy = $state(false);
@@ -85,6 +88,7 @@
     cupPodium = res.cup_podium ?? null;
     draftCupPlayers = res.draft_cup_players ?? [];
     suggestedHandicaps = res.suggested_handicaps ?? [];
+    effectiveWinners = res.effective_winners ?? [];
     canUndo = res.can_undo;
     hasUnsavedChanges = true;
   }
@@ -335,6 +339,7 @@
     cupPodium = null;
     draftCupPlayers = [];
     suggestedHandicaps = [];
+    effectiveWinners = [];
     canUndo = false;
     hasUnsavedChanges = false;
     error = null;
@@ -792,7 +797,7 @@
             />
           </div>
         {:else if activeTab === "results"}
-          <ResultsView {tournament} {standings} {cupPodium} />
+          <ResultsView {tournament} {standings} {cupPodium} {effectiveWinners} />
         {:else if activeTab === "draft" && tournament.draft}
           <RoundDraftView
             draft={tournament.draft}

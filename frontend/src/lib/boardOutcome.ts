@@ -1,32 +1,24 @@
-// Board result helpers, shared by the Results cross-table and the round view so
-// the (subtly handicap-aware) "did this side win / who conceded the odds" logic
-// lives in exactly one place.
+// Board result helpers, shared by the Results cross-table and the round view.
+//
+// The "counts as a win for standings/pairing" (Wiel-rule-aware) outcome is
+// computed server-side only — see `TournamentResponse.effective_winners` — so
+// it isn't re-derived here. This file just resolves the plain, rule-agnostic
+// facts about a board: who actually won, and who conceded the odds.
 
 import type { Board, Winner } from "./types";
 
 export interface BoardOutcome {
   /** This side actually won the game — drives the +/− sign and win/loss colour. */
   actualWon: boolean;
-  /** This side counts as the winner in the standings. With the "Wiel" rule on,
-   *  a handicap game always credits the giver, whoever actually won; otherwise
-   *  it is the actual winner. */
-  effectiveWon: boolean;
   /** This side conceded the odds in a handicap game. */
   gave: boolean;
 }
 
-/**
- * The outcome of a board from one side's perspective. On an unplayed board
- * `actualWon`/`effectiveWon` are both false (`gave` still reflects the frozen
- * giver, if any). `wielRule` mirrors the server's
- * `TournamentSettings.handicap_wiel_rule`.
- */
-export function boardOutcome(board: Board, side: Winner, wielRule: boolean): BoardOutcome {
-  const decided = board.result != null;
+/** The plain (non-effective) outcome of a board from one side's perspective. */
+export function boardOutcome(board: Board, side: Winner): BoardOutcome {
   const actualWon = board.result === side;
   const gave = board.handicap?.giver === side;
-  const effectiveWon = board.handicap && wielRule ? decided && gave : actualWon;
-  return { actualWon, effectiveWon, gave };
+  return { actualWon, gave };
 }
 
 /** The id of the player who conceded the odds, or `null` if the board has no

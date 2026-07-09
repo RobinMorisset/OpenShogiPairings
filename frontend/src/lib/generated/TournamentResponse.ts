@@ -3,6 +3,7 @@ import type { CupPodium } from "./CupPodium";
 import type { Handicap } from "./Handicap";
 import type { Standing } from "./Standing";
 import type { Tournament } from "./Tournament";
+import type { Winner } from "./Winner";
 
 /**
  * API response: the current tournament, undo availability, and the derived
@@ -36,4 +37,12 @@ draft_cup_players: Array<string>,
  * frontend decides how to surface it. `None` = no suggestion (near-equal
  * strength, an unrated player, or a cup board).
  */
-suggested_handicaps: Array<Array<Handicap | null>>, };
+suggested_handicaps: Array<Array<Handicap | null>>, 
+/**
+ * The winner that counts for standings/pairing per board (see
+ * [`osp_core::round::Board::effective_winner`]), indexed like
+ * `tournament.rounds[i].boards[j]`. Computed here — using the tournament's
+ * `handicap_wiel_rule` setting — so the frontend never has to re-derive it.
+ * `None` while a board is undecided.
+ */
+effective_winners: Array<Array<Winner | null>>, };

@@ -169,6 +169,12 @@ struct TournamentView {
     /// frontend decides how to surface it. `None` = no suggestion (near-equal
     /// strength, an unrated player, or a cup board).
     suggested_handicaps: Vec<Vec<Option<Handicap>>>,
+    /// The winner that counts for standings/pairing per board (see
+    /// [`osp_core::round::Board::effective_winner`]), indexed like
+    /// `tournament.rounds[i].boards[j]`. Computed here — using the tournament's
+    /// `handicap_wiel_rule` setting — so the frontend never has to re-derive it.
+    /// `None` while a board is undecided.
+    effective_winners: Vec<Vec<Option<Winner>>>,
 }
 
 /// Build the view from the store, or 404 if no tournament exists.
@@ -188,6 +194,17 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
                 .collect()
         })
         .collect();
+    let effective_winners = tournament
+        .rounds
+        .iter()
+        .map(|round| {
+            round
+                .boards
+                .iter()
+                .map(|board| board.effective_winner(tournament.settings.handicap_wiel_rule))
+                .collect()
+        })
+        .collect();
     Ok(Json(TournamentView {
         tournament,
         can_undo: store.can_undo(),
@@ -196,6 +213,7 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
         cup_podium,
         draft_cup_players,
         suggested_handicaps,
+        effective_winners,
     }))
 }
 

@@ -309,7 +309,7 @@
     "handicapNone": "No handicap games — hide the column",
     "handicapAllowed": "Handicap games allowed — show the picker",
     "handicapSuggested": "Handicap games suggested — also show a suggested-handicap column",
-    "handicapWielCheckbox": ""Wiel" rule: the giver always counts as the winner",
+    "handicapWielCheckbox": "\"Wiel\" rule: the giver always counts as the winner",
     "handicapWielDesc": "When on, a handicap game always credits the giver as the winner in the standings and for pairing, whatever the actual result. When off (the default), handicap games score like any other game.",
     "rankingTitle": "Ranking criteria",
     "rankingDesc": "Players are ranked by these criteria in order (the tournament number breaks anything still level), and only these columns appear on the Standings tab. Points is one of them — normally first, but you can reorder it like the rest. Each opponent-sum metric comes in a MacMahon-inclusive (M) and a wins-only (W) flavour.",
