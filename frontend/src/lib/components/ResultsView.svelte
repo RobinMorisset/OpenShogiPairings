@@ -4,6 +4,7 @@
   import type { CupPodium, Player, Round, Standing, Tournament, Winner } from "../types";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
   import { boardOutcome } from "../boardOutcome";
+  import { printPage } from "../platform";
 
   interface Props {
     tournament: Tournament;
@@ -162,7 +163,7 @@
 {:else}
   <div class="results">
   <div class="results-toolbar print-hide">
-    <button type="button" class="ghost" onclick={() => window.print()}>🖨 {$_("roundView.print")}</button>
+    <button type="button" class="ghost" onclick={() => printPage(true)}>🖨 {$_("roundView.print")}</button>
   </div>
   {#if cupPodium}
     {@const nameOf = (id: string) => {

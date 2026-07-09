@@ -38,3 +38,11 @@ tokio = { version = "1", features = ["net", "rt"] }
 # use (see crates/server/src/backup.rs), so the embedded server's persisted
 # tournaments live alongside them.
 dirs = "5"
+
+# macOS-only: Tauri/wry's native print builds its NSPrintInfo from the *shared*
+# print info and never sets orientation, so the wide Results table would always
+# print portrait. We reach for AppKit to set the shared print info's orientation
+# just before printing. Versions pinned to what wry already resolves.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSPrintInfo"] }

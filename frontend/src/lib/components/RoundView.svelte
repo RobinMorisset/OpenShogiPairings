@@ -16,6 +16,7 @@
   } from "../types";
   import { sourceBadge } from "../pairingSource";
   import { handicapGiverId } from "../boardOutcome";
+  import { printPage } from "../platform";
 
   interface Props {
     round: Round;
@@ -325,7 +326,7 @@
 
 <div class="round">
   <div class="round-toolbar print-hide">
-    <button type="button" class="ghost" onclick={() => window.print()}>🖨 {$_("roundView.print")}</button>
+    <button type="button" class="ghost" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
   </div>
   {#if hasReport}
     <div class="report print-hide">

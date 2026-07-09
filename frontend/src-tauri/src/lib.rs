@@ -29,6 +29,43 @@ fn read_text_file(path: String) -> Result<String, String> {
   std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+/// Open the native print dialog for the calling webview window.
+///
+/// The webview's JavaScript `window.print()` is a no-op in WKWebView on macOS,
+/// so the print buttons must go through this native path instead, which
+/// delegates to the platform webview's own print operation.
+///
+/// `landscape` requests landscape paper. wry's macOS print builds its
+/// `NSPrintInfo` from `sharedPrintInfo()` and never touches orientation (and it
+/// ignores the CSS `@page { size: landscape }` the browser build relies on), so
+/// we set the shared print info's orientation ourselves just before printing —
+/// see [`set_mac_print_orientation`]. This runs on the main thread because
+/// synchronous Tauri commands do.
+#[tauri::command]
+fn print_window(webview_window: tauri::WebviewWindow, landscape: bool) -> Result<(), String> {
+  #[cfg(target_os = "macos")]
+  set_mac_print_orientation(landscape);
+  #[cfg(not(target_os = "macos"))]
+  let _ = landscape;
+  webview_window.print().map_err(|e| e.to_string())
+}
+
+/// Set the *shared* `NSPrintInfo`'s paper orientation, which wry's print
+/// operation then inherits. A global side effect that persists between print
+/// jobs, so every caller passes its intended orientation explicitly.
+#[cfg(target_os = "macos")]
+fn set_mac_print_orientation(landscape: bool) {
+  use objc2_app_kit::{NSPaperOrientation, NSPrintInfo};
+  let orientation = if landscape {
+    NSPaperOrientation::Landscape
+  } else {
+    NSPaperOrientation::Portrait
+  };
+  // `sharedPrintInfo` is the process-wide singleton; mutating it on the main
+  // thread (where sync commands run) is what AppKit expects.
+  NSPrintInfo::sharedPrintInfo().setOrientation(orientation);
+}
+
 /// Where the embedded server persists its tournaments, so the desktop app's
 /// registry (and picker) survives a restart — the same per-user data
 /// directory `osp-server`'s own automatic backups already use (see
@@ -46,7 +83,8 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       api_base,
       write_text_file,
-      read_text_file
+      read_text_file,
+      print_window
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {
