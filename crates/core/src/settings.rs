@@ -241,6 +241,13 @@ pub struct TournamentSettings {
     /// [`HandicapPolicy`]).
     #[serde(default)]
     pub handicap_policy: HandicapPolicy,
+    /// The "Wiel" rule: whether a handicap game always counts as a win for the
+    /// giver in the standings and for pairing, regardless of the actual result.
+    /// Off by default: handicap games then score like any other game (the
+    /// actual result counts). Enable it per tournament to have the giver always
+    /// count as the winner.
+    #[serde(default)]
+    pub handicap_wiel_rule: bool,
     /// The criteria used to rank the standings, in order of priority (the
     /// tournament number breaks anything still level). Points is one of these and
     /// can be reordered like any other. Only these columns are shown on the
@@ -283,6 +290,7 @@ impl Default for TournamentSettings {
             floater_style: FloaterStyle::default(),
             cup_enabled: false,
             handicap_policy: HandicapPolicy::default(),
+            handicap_wiel_rule: false,
             tiebreaks: default_tiebreaks(),
             elo_pairing_enabled: false,
             elo_k_multiplier_percent: default_elo_k_multiplier_percent(),
@@ -644,6 +652,14 @@ mod tests {
         // Omitted in the payload → the default (Allowed).
         let s: TournamentSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(s.handicap_policy, HandicapPolicy::Allowed);
+    }
+
+    #[test]
+    fn handicap_wiel_rule_defaults_to_off() {
+        assert!(!TournamentSettings::default().handicap_wiel_rule);
+        // Omitted in the payload (an old save) → still off.
+        let s: TournamentSettings = serde_json::from_str("{}").unwrap();
+        assert!(!s.handicap_wiel_rule);
     }
 
     #[test]

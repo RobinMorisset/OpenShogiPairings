@@ -7,8 +7,9 @@ import type { Board, Winner } from "./types";
 export interface BoardOutcome {
   /** This side actually won the game — drives the +/− sign and win/loss colour. */
   actualWon: boolean;
-  /** This side counts as the winner in the standings. In a handicap game that is
-   *  always the giver, whoever actually won; otherwise it is the actual winner. */
+  /** This side counts as the winner in the standings. With the "Wiel" rule on,
+   *  a handicap game always credits the giver, whoever actually won; otherwise
+   *  it is the actual winner. */
   effectiveWon: boolean;
   /** This side conceded the odds in a handicap game. */
   gave: boolean;
@@ -17,13 +18,14 @@ export interface BoardOutcome {
 /**
  * The outcome of a board from one side's perspective. On an unplayed board
  * `actualWon`/`effectiveWon` are both false (`gave` still reflects the frozen
- * giver, if any).
+ * giver, if any). `wielRule` mirrors the server's
+ * `TournamentSettings.handicap_wiel_rule`.
  */
-export function boardOutcome(board: Board, side: Winner): BoardOutcome {
+export function boardOutcome(board: Board, side: Winner, wielRule: boolean): BoardOutcome {
   const decided = board.result != null;
   const actualWon = board.result === side;
   const gave = board.handicap?.giver === side;
-  const effectiveWon = board.handicap ? decided && gave : actualWon;
+  const effectiveWon = board.handicap && wielRule ? decided && gave : actualWon;
   return { actualWon, effectiveWon, gave };
 }
 

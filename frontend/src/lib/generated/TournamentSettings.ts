@@ -67,6 +67,14 @@ cup_enabled: boolean,
  */
 handicap_policy: HandicapPolicy, 
 /**
+ * The "Wiel" rule: whether a handicap game always counts as a win for the
+ * giver in the standings and for pairing, regardless of the actual result.
+ * Off by default: handicap games then score like any other game (the
+ * actual result counts). Enable it per tournament to have the giver always
+ * count as the winner.
+ */
+handicap_wiel_rule: boolean, 
+/**
  * The criteria used to rank the standings, in order of priority (the
  * tournament number breaks anything still level). Points is one of these and
  * can be reordered like any other. Only these columns are shown on the

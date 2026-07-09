@@ -309,6 +309,8 @@
     "handicapNone": "Aucune partie avec handicap — masquer la colonne",
     "handicapAllowed": "Parties avec handicap autorisées — afficher le sélecteur",
     "handicapSuggested": "Parties avec handicap suggérées — afficher aussi une colonne de handicap suggéré",
+    "handicapWielCheckbox": "Règle "Wiel" : le donneur compte toujours comme vainqueur",
+    "handicapWielDesc": "Si activée, une partie avec handicap crédite toujours le donneur comme vainqueur au classement et pour l'appariement, quel que soit le résultat réel. Si désactivée (par défaut), les parties avec handicap comptent comme n'importe quelle autre partie.",
     "rankingTitle": "Critères de classement",
     "rankingDesc": "Les joueurs sont classés selon ces critères dans l'ordre (le numéro de tournoi départage ce qui reste à égalité), et seules ces colonnes apparaissent dans l'onglet Classement. Points en fait partie — normalement en premier, mais vous pouvez le réordonner comme les autres. Chaque métrique de somme des adversaires existe en version incluant MacMahon (M) et en version victoires seules (W).",
     "dragToReorder": "Glisser pour réordonner",

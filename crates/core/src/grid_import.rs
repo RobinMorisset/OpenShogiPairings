@@ -531,7 +531,7 @@ Nr Name          Nat Elo  1   2   Pts
         let b = board(&t, 0, "Alpha", "Beta");
         let alpha_is_p1 = b.player1 == player(&t, "Alpha").id;
         assert_eq!(
-            b.effective_winner(),
+            b.effective_winner(false),
             Some(if alpha_is_p1 {
                 Winner::Player1
             } else {
@@ -581,7 +581,7 @@ Nr Name       Nat Elo  1        Pts
             Winner::Player2
         };
         assert_eq!(game.giver, high_side);
-        assert_eq!(b.effective_winner(), Some(high_side));
+        assert_eq!(b.effective_winner(false), Some(high_side));
     }
 
     #[test]
@@ -675,7 +675,7 @@ Nr Name    Nat Elo  1   Pts
 ";
         let t = import_american_grid(grid).unwrap();
         let b = board(&t, 0, "A", "B");
-        assert_eq!(b.effective_winner(), Some(Winner::Player2));
+        assert_eq!(b.effective_winner(false), Some(Winner::Player2));
     }
 
     #[test]

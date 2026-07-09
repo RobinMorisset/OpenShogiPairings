@@ -146,6 +146,7 @@
   let floaterStyle = $state<"classic" | "median">("classic");
   let cupEnabled = $state(false);
   let handicapPolicy = $state<HandicapPolicy>("allowed");
+  let handicapWielRule = $state(false);
   let tiebreaks = $state<Tiebreak[]>([]);
   let eloEnabled = $state(false);
   let eloKPercent = $state(100);
@@ -181,6 +182,7 @@
     const sFloater = settings.floater_style;
     const sCup = settings.cup_enabled;
     const sHandicap = settings.handicap_policy;
+    const sHandicapWiel = settings.handicap_wiel_rule;
     const sTiebreaks = settings.tiebreaks ?? [];
     const sElo = settings.elo_pairing_enabled ?? false;
     const sEloK = settings.elo_k_multiplier_percent ?? 100;
@@ -195,6 +197,7 @@
         floaterStyle === sFloater &&
         cupEnabled === sCup &&
         handicapPolicy === sHandicap &&
+        handicapWielRule === sHandicapWiel &&
         eqStr(tiebreaks, sTiebreaks) &&
         eloEnabled === sElo &&
         eloKPercent === sEloK &&
@@ -214,6 +217,7 @@
         floaterStyle = sFloater;
         cupEnabled = sCup;
         handicapPolicy = sHandicap;
+        handicapWielRule = sHandicapWiel;
         tiebreaks = [...sTiebreaks];
         eloEnabled = sElo;
         eloKPercent = sEloK;
@@ -236,6 +240,7 @@
       floater_style: floaterStyle,
       cup_enabled: cupEnabled,
       handicap_policy: handicapPolicy,
+      handicap_wiel_rule: handicapWielRule,
       tiebreaks: [...tiebreaks],
       elo_pairing_enabled: eloEnabled,
       elo_k_multiplier_percent: eloKPercent,
@@ -311,6 +316,11 @@
 
   function setHandicapPolicy(v: HandicapPolicy) {
     handicapPolicy = v;
+    persist();
+  }
+
+  function setHandicapWielRule(v: boolean) {
+    handicapWielRule = v;
     persist();
   }
 
@@ -853,6 +863,18 @@
       />
       {$_("settings.handicapSuggested")}
     </label>
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={handicapWielRule}
+        disabled={busy}
+        onchange={(e) => setHandicapWielRule(e.currentTarget.checked)}
+      />
+      {$_("settings.handicapWielCheckbox")}
+    </label>
+    <p class="desc">
+      {$_("settings.handicapWielDesc")}
+    </p>
   </div>
 
   <div class="section">

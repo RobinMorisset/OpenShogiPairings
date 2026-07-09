@@ -125,11 +125,13 @@ impl Cup {
         };
         let final_board = stage_board(CupStage::Final)?;
         let small = stage_board(CupStage::SmallFinal)?;
+        // Cup boards can never carry a handicap (see `HandicapNotAllowedForCup`),
+        // so the Wiel-rule flag never actually applies here.
         Some(CupPodium {
-            champion: final_board.winner_id()?,
-            runner_up: final_board.effective_loser()?,
-            third: small.winner_id()?,
-            fourth: small.effective_loser()?,
+            champion: final_board.winner_id(true)?,
+            runner_up: final_board.effective_loser(true)?,
+            third: small.winner_id(true)?,
+            fourth: small.effective_loser(true)?,
         })
     }
 
@@ -174,7 +176,8 @@ fn decide(rounds: &[Round], k: u32, a: Uuid, b: Uuid) -> Option<(Uuid, Uuid)> {
         .boards
         .iter()
         .find(|bd| (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a))?;
-    Some((board.winner_id()?, board.effective_loser()?))
+    // Cup boards can never carry a handicap, so the Wiel-rule flag is moot here.
+    Some((board.winner_id(true)?, board.effective_loser(true)?))
 }
 
 #[cfg(test)]

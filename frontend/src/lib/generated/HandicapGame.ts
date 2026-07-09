@@ -5,7 +5,10 @@ import type { Winner } from "./Winner";
 /**
  * A handicap attached to a board. The `giver` (the higher-rated player) is
  * frozen when the handicap is set, so a later rating edit can't retroactively
- * flip who conceded the odds. A handicap game always counts as a win for the
- * giver in the standings, whatever the actual result.
+ * flip who conceded the odds. When the "Wiel" rule is on (off by default — see
+ * [`crate::settings::TournamentSettings::handicap_wiel_rule`]), a handicap
+ * game always counts as a win for the giver in the standings, whatever the
+ * actual result; when it's off (the default), the actual result counts as
+ * normal.
  */
 export type HandicapGame = { handicap: Handicap, giver: Winner, };

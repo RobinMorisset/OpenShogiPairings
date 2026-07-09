@@ -101,8 +101,13 @@
     const opponent = opponentId != null ? String(opponentId) : "?";
     if (!board.result) return { kind: "pending", opponent };
 
-    // The giver of a handicap game always counts as its winner, whoever won.
-    const { actualWon, effectiveWon, gave } = boardOutcome(board, side);
+    // With the Wiel rule on, the giver of a handicap game always counts as its
+    // winner, whoever won.
+    const { actualWon, effectiveWon, gave } = boardOutcome(
+      board,
+      side,
+      tournament.settings.handicap_wiel_rule ?? false,
+    );
     const handicap: PlayedCell["handicap"] = board.handicap
       ? { code: board.handicap.handicap, gave }
       : undefined;

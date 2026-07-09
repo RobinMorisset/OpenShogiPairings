@@ -93,8 +93,11 @@ impl Handicap {
 
 /// A handicap attached to a board. The `giver` (the higher-rated player) is
 /// frozen when the handicap is set, so a later rating edit can't retroactively
-/// flip who conceded the odds. A handicap game always counts as a win for the
-/// giver in the standings, whatever the actual result.
+/// flip who conceded the odds. When the "Wiel" rule is on (off by default — see
+/// [`crate::settings::TournamentSettings::handicap_wiel_rule`]), a handicap
+/// game always counts as a win for the giver in the standings, whatever the
+/// actual result; when it's off (the default), the actual result counts as
+/// normal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct HandicapGame {
@@ -197,28 +200,32 @@ impl Board {
         }
     }
 
-    /// The winner that counts for standings and pairing. For a handicap game
+    /// The winner that counts for standings and pairing. For a handicap game,
+    /// when the "Wiel" rule ([`TournamentSettings::handicap_wiel_rule`]) is on,
     /// that is always the giver (once the game is decided), regardless of who
-    /// actually won; otherwise it is the actual result.
-    pub fn effective_winner(&self) -> Option<Winner> {
+    /// actually won; otherwise — and for any non-handicap game — it is the
+    /// actual result.
+    ///
+    /// [`TournamentSettings::handicap_wiel_rule`]: crate::settings::TournamentSettings::handicap_wiel_rule
+    pub fn effective_winner(&self, wiel_rule: bool) -> Option<Winner> {
         match &self.handicap {
-            Some(h) => self.result.map(|_| h.giver),
-            None => self.result,
+            Some(h) if wiel_rule => self.result.map(|_| h.giver),
+            _ => self.result,
         }
     }
 
     /// The loser (effective) of a decided board, if any — the side that isn't the
     /// effective winner. `None` while the board is unplayed.
-    pub fn effective_loser(&self) -> Option<Uuid> {
-        self.effective_winner().map(|w| match w {
+    pub fn effective_loser(&self, wiel_rule: bool) -> Option<Uuid> {
+        self.effective_winner(wiel_rule).map(|w| match w {
             Winner::Player1 => self.player2,
             Winner::Player2 => self.player1,
         })
     }
 
     /// The player id of the effective winner, if the board is decided.
-    pub fn winner_id(&self) -> Option<Uuid> {
-        self.effective_winner().map(|w| match w {
+    pub fn winner_id(&self, wiel_rule: bool) -> Option<Uuid> {
+        self.effective_winner(wiel_rule).map(|w| match w {
             Winner::Player1 => self.player1,
             Winner::Player2 => self.player2,
         })

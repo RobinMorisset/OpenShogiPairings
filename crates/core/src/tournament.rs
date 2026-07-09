@@ -1593,12 +1593,12 @@ mod tests {
         assert!(board.drawn);
         assert_eq!(board.result, Some(Winner::Player1)); // result untouched
                                                          // Effective winner unaffected by the draw flag.
-        assert_eq!(board.effective_winner(), Some(Winner::Player1));
+        assert_eq!(board.effective_winner(false), Some(Winner::Player1));
         assert!(!t.set_board_drawn(1, 0, false).unwrap().drawn);
     }
 
     #[test]
-    fn handicap_freezes_giver_and_flips_effective_winner() {
+    fn handicap_freezes_giver_and_flips_effective_winner_with_wiel_rule_on() {
         let mut t = Tournament::new("Cup").unwrap();
         // High is rated above Low, so High is the giver.
         let high = t.add_player(rated("High", 2000)).unwrap().id;
@@ -1628,8 +1628,10 @@ mod tests {
             Winner::Player2
         };
         assert_eq!(board.handicap.unwrap().giver, giver_side);
-        // ...but the giver still counts as the effective winner.
-        assert_eq!(board.effective_winner(), Some(giver_side));
+        // ...but with the Wiel rule on, the giver still counts as the effective winner.
+        assert_eq!(board.effective_winner(true), Some(giver_side));
+        // With the Wiel rule off (the default), the actual result counts instead.
+        assert_eq!(board.effective_winner(false), Some(receiver_wins));
 
         // The frozen giver survives a later rating swap (Low now outrates High).
         let low_id = t.players.iter().find(|p| p.id != high).unwrap().id;
