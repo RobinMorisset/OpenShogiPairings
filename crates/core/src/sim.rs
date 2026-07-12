@@ -1,9 +1,9 @@
 //! Monte-Carlo tournament simulation.
 //!
 //! The pieces a statistical study of pairing settings needs, as pure functions
-//! reusing the real engine (`prepare_round` → `confirm_round` → result →
-//! `complete_current_round`) so a simulated tournament is paired exactly as a live
-//! one would be. The CLI ([`crates/sim`](../../sim)) links these directly and runs
+//! reusing the real engine (`prepare_round` → `confirm_round` → results, which
+//! complete the round automatically) so a simulated tournament is paired exactly
+//! as a live one would be. The CLI ([`crates/sim`](../../sim)) links these directly and runs
 //! the loop thousands of times in parallel; the design is written up in
 //! `docs/simulation-cli.md`.
 //!
@@ -308,8 +308,8 @@ pub fn simulate_run(
     for _ in 0..rounds {
         tournament.prepare_round()?;
         tournament.confirm_round()?;
+        // Filling in every board result completes the round automatically.
         autofill_last_round(&mut tournament, &strengths, rng)?;
-        tournament.complete_current_round()?;
     }
 
     let final_order = tournament

@@ -6,7 +6,6 @@
     addPointAdjustment,
     ApiError,
     cancelRound,
-    completeRound,
     confirmRound,
     editPlayer,
     fetchAmericanGrid,
@@ -157,9 +156,6 @@
           : "in_progress",
   );
   const enoughPlayers = $derived((tournament?.players.length ?? 0) >= 2);
-  const currentRoundAllPlayed = $derived(
-    currentRound ? currentRound.boards.every((b) => b.result != null) : false,
-  );
 
   // The active round can be re-paired (via "force this pairing") only if it is
   // the current, in-progress round with no results recorded yet.
@@ -188,24 +184,6 @@
     }
   });
   const cupReady = $derived(!cupEnabled || cupSizeChoice != null);
-
-  // "Advance" button (complete current round). Only shown once the tournament
-  // is underway; finalizing registration is folded into "Start round 1" below.
-  const advanceLabel = $derived(
-    phase === "in_progress"
-      ? $_("app.advanceInProgress", { values: { number: currentRound?.number } })
-      : (tournament?.rounds.length ?? 0) > 0
-        ? $_("app.advanceRoundComplete", { values: { number: tournament?.rounds.length } })
-        : $_("app.advanceRegistrationFinalized"),
-  );
-  const advanceEnabled = $derived(
-    !busy && phase === "in_progress" && currentRoundAllPlayed,
-  );
-  const advanceTitle = $derived(
-    phase === "in_progress" && !currentRoundAllPlayed
-      ? $_("app.advanceTitleNeedResults")
-      : "",
-  );
 
   // "Start round" button. In the "registration" phase it also finalizes
   // registration (a single undo step); from round 2 on, registration is already
@@ -468,12 +446,6 @@
     run(async () => {
       apply(await undoTournament());
     });
-  }
-
-  function handleAdvance() {
-    if (phase === "in_progress") {
-      run(async () => apply(await completeRound()));
-    }
   }
 
   function handlePrepareRound() {
@@ -739,17 +711,6 @@
                 <span class="cup-warn">{$_("app.cupNeedMoreEligible")}</span>
               {/if}
             </label>
-          {/if}
-          {#if phase !== "registration"}
-            <button
-              type="button"
-              class="ctrl"
-              onclick={handleAdvance}
-              disabled={!advanceEnabled}
-              title={advanceTitle}
-            >
-              {advanceLabel}
-            </button>
           {/if}
           <button
             type="button"

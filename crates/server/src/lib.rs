@@ -483,12 +483,13 @@ mod tests {
         let (status, _) = send(router(state.clone()), post_empty(&t(id, "/rounds"))).await;
         assert_eq!(status, StatusCode::CREATED);
 
-        // Can't complete before the game is played.
-        let (status, _) = send(router(state.clone()), post_empty(&t(id, "/complete-round"))).await;
+        // Round 1 isn't complete until its game is played, so round 2 can't
+        // start yet.
+        let (status, _) = send(router(state.clone()), post_empty(&t(id, "/rounds/prepare"))).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
 
-        // Play the game, then complete succeeds and marks the round completed.
-        send(
+        // Recording the game's result completes the round automatically.
+        let (status, body) = send(
             router(state.clone()),
             json_req(
                 "POST",
@@ -497,8 +498,6 @@ mod tests {
             ),
         )
         .await;
-        let (status, body) =
-            send(router(state.clone()), post_empty(&t(id, "/complete-round"))).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["tournament"]["rounds"][0]["completed"], true);
 

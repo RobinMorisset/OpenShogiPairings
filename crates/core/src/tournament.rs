@@ -107,15 +107,9 @@ pub enum TournamentError {
     /// The draft's constraints are inconsistent (see the message).
     #[error("invalid round setup: {0}")]
     InvalidDraft(String),
-    /// There is no round in progress to complete.
-    #[error("no round in progress to complete")]
-    NoRoundToComplete,
     /// There is no round (or draft) to cancel.
     #[error("no round to cancel")]
     NoRoundToCancel,
-    /// The round still has games without a result.
-    #[error("all games in the round must be played first")]
-    RoundHasUnplayedGames,
     /// A pairing can't be forced onto a round that already has recorded results.
     #[error("cannot re-pair a round that already has recorded results")]
     RoundHasResults,
@@ -436,35 +430,15 @@ impl Tournament {
             .unwrap_or_default()
     }
 
-    /// Complete the current (last, in-progress) round.
-    ///
-    /// Only possible once every game in the round has a result. Completing a
-    /// round locks it in and unlocks starting the next one.
-    pub fn complete_current_round(&mut self) -> Result<(), TournamentError> {
-        let round = self
-            .rounds
-            .last_mut()
-            .ok_or(TournamentError::NoRoundToComplete)?;
-        if round.completed {
-            return Err(TournamentError::NoRoundToComplete);
-        }
-        if round.boards.iter().any(|b| b.result.is_none()) {
-            return Err(TournamentError::RoundHasUnplayedGames);
-        }
-        round.completed = true;
-        Ok(())
-    }
-
     /// Cancel the most recent round, stepping the tournament back one stage.
     ///
     /// Peels off exactly one step: if a round is currently being drafted, the
-    /// draft is discarded; otherwise the last round is removed, and the
-    /// action that gated it is undone too, so the tournament lands just
-    /// *before* that gate rather than right after it:
-    /// - removing round 1 also undoes `finalize_registration` (tournament
-    ///   numbers and any cup bracket are cleared) — back to open registration;
-    /// - removing round N (N>1) also un-completes round N-1 — back to round
-    ///   N-1 in progress, before it was locked in.
+    /// draft is discarded; otherwise the last round is removed. Removing round 1
+    /// also undoes `finalize_registration` (tournament numbers and any cup
+    /// bracket are cleared) — back to open registration. Earlier rounds keep
+    /// their results, so a removed round N>1 simply lands back on round N-1,
+    /// which stays complete (its games are all still recorded) and ready to
+    /// re-prepare the next round.
     ///
     /// This makes it easy to re-pair and replay a round in simulations, and lets
     /// a referee undo a round in the rare cases that call for it. It is undoable
@@ -479,14 +453,13 @@ impl Tournament {
         if self.rounds.pop().is_none() {
             return Err(TournamentError::NoRoundToCancel);
         }
-        match self.rounds.last_mut() {
-            Some(previous) => previous.completed = false,
-            None => {
-                self.registration_finalized = false;
-                self.cup = None;
-                for player in &mut self.players {
-                    player.tournament_id = None;
-                }
+        // Removing the very first round reopens registration; later rounds leave
+        // the preceding one untouched (and thus still complete).
+        if self.rounds.is_empty() {
+            self.registration_finalized = false;
+            self.cup = None;
+            for player in &mut self.players {
+                player.tournament_id = None;
             }
         }
         Ok(())
@@ -881,19 +854,36 @@ impl Tournament {
     /// If `clicked` is already the recorded winner, the result is cleared (back
     /// to "not played"); otherwise `clicked` becomes the winner. This gives the
     /// three states — not played, player 1 won, player 2 won — from clicks alone.
+    ///
+    /// The round's `completed` flag is kept in sync automatically: a round is
+    /// complete exactly when every board has a result, so recording the last
+    /// game locks the round in (and clearing a result reopens it) with no
+    /// separate "complete round" step.
     pub fn toggle_board_winner(
         &mut self,
         round_number: u32,
         board_index: usize,
         clicked: Winner,
     ) -> Result<&Board, TournamentError> {
-        let board = self.board_mut(round_number, board_index)?;
+        let round = self
+            .rounds
+            .iter_mut()
+            .find(|r| r.number == round_number)
+            .ok_or(TournamentError::RoundNotFound(round_number))?;
+        let board = round
+            .boards
+            .get_mut(board_index)
+            .ok_or(TournamentError::BoardNotFound {
+                round: round_number,
+                board: board_index,
+            })?;
         board.result = if board.result == Some(clicked) {
             None
         } else {
             Some(clicked)
         };
-        Ok(board)
+        round.completed = round.boards.iter().all(|b| b.result.is_some());
+        Ok(&round.boards[board_index])
     }
 
     /// Set (or clear) the "a draw occurred" flag on a board. The game is still
@@ -1206,9 +1196,9 @@ mod tests {
             assert!(round.bye.is_some());
         }
 
-        // Play and complete round 1 before starting round 2.
+        // Playing the only board completes round 1 automatically, unlocking round 2.
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
-        t.complete_current_round().unwrap();
+        assert!(t.rounds[0].completed);
 
         start_next_round(&mut t);
         assert_eq!(t.rounds.last().unwrap().number, 2);
@@ -1271,18 +1261,13 @@ mod tests {
         // Can't prepare a second draft while one exists.
         assert_eq!(t.prepare_round(), Err(TournamentError::DraftAlreadyExists));
         t.confirm_round().unwrap();
-        // Can't prepare round 2 while round 1 is in progress.
+        // Can't prepare round 2 while round 1 is in progress (a game unplayed).
         assert_eq!(
             t.prepare_round(),
             Err(TournamentError::PreviousRoundNotComplete)
         );
-        // Can't complete while a game is unplayed.
-        assert_eq!(
-            t.complete_current_round(),
-            Err(TournamentError::RoundHasUnplayedGames)
-        );
+        // Playing the last game completes the round automatically.
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
-        t.complete_current_round().unwrap();
         assert!(t.rounds[0].completed);
         // Now round 2 can be prepared and started.
         start_next_round(&mut t);
@@ -1307,10 +1292,9 @@ mod tests {
         assert!(t.draft.is_none());
         assert!(t.rounds.is_empty());
 
-        // Play and complete round 1.
+        // Play round 1 (recording the game completes it).
         start_next_round(&mut t);
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
-        t.complete_current_round().unwrap();
         assert_eq!(t.rounds.len(), 1);
 
         // With a draft open for round 2, cancel drops the draft but keeps round 1.
@@ -1330,27 +1314,25 @@ mod tests {
     }
 
     #[test]
-    fn cancel_last_round_uncompletes_the_previous_round() {
+    fn cancel_last_round_keeps_the_previous_round_complete() {
         let mut t = Tournament::new("Cup").unwrap();
         for name in ["A", "B"] {
             t.add_player(named(name)).unwrap();
         }
         t.finalize_registration().unwrap();
 
-        // Play and complete rounds 1 and 2.
+        // Play rounds 1 and 2 (recording each game completes its round).
         start_next_round(&mut t);
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
-        t.complete_current_round().unwrap();
         start_next_round(&mut t);
         t.toggle_board_winner(2, 0, Winner::Player1).unwrap();
-        t.complete_current_round().unwrap();
         assert_eq!(t.rounds.len(), 2);
 
-        // Cancelling round 2 lands back on round 1, in progress (not completed) —
-        // just before it was locked in, not right after.
+        // Cancelling round 2 removes it but leaves round 1's recorded games
+        // intact — so round 1 stays complete, ready to re-prepare round 2.
         t.cancel_last_round().unwrap();
         assert_eq!(t.rounds.len(), 1);
-        assert!(!t.rounds[0].completed);
+        assert!(t.rounds[0].completed);
         assert!(t.registration_finalized);
     }
 
@@ -1443,7 +1425,6 @@ mod tests {
         assert_eq!(t.rounds[0].absent, vec![c]);
         assert_eq!(t.rounds[0].boards.len(), 1); // A vs B, no bye
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
-        t.complete_current_round().unwrap();
 
         // Round 2 draft defaults absent to the previous round's absentees.
         let draft = t.prepare_round().unwrap();
@@ -1827,8 +1808,7 @@ mod tests {
         for i in 0..4 {
             decide(&mut t, 1, s[i], s[7 - i]);
         }
-        decide_rest(&mut t, 1);
-        t.complete_current_round().unwrap();
+        decide_rest(&mut t, 1); // deciding the last board completes the round
 
         // Round 2 — semifinals fold [E0,E1,E2,E3]; the four QF losers drop to Swiss.
         t.prepare_round().unwrap();
@@ -1853,7 +1833,6 @@ mod tests {
         decide(&mut t, 2, s[0], s[3]); // E0 beats E3
         decide(&mut t, 2, s[1], s[2]); // E1 beats E2
         decide_rest(&mut t, 2);
-        t.complete_current_round().unwrap();
 
         // Round 3 — the final (E0 vs E1) and the small final (the SF losers E3 vs E2).
         t.prepare_round().unwrap();
@@ -1873,7 +1852,6 @@ mod tests {
         decide(&mut t, 3, s[0], s[1]); // champion E0, runner-up E1
         decide(&mut t, 3, s[3], s[2]); // third E3, fourth E2
         decide_rest(&mut t, 3);
-        t.complete_current_round().unwrap();
 
         let podium = t.cup_podium().unwrap();
         assert_eq!(podium.champion, s[0]);

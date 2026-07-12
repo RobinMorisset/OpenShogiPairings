@@ -237,7 +237,8 @@ fn rebuild_round(
         }
     }
 
-    tournament.complete_current_round()?;
+    // Every board was forced from `results` and just resolved, so recording the
+    // last one has already completed the round.
     Ok(())
 }
 

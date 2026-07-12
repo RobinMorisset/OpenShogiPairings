@@ -37,7 +37,6 @@ use crate::{auth, live};
 /// - `PUT    /american-grid` import a cross-table, rebuilding the tournament (text)
 /// - `PUT    /settings`      update tournament settings (MacMahon, …)
 /// - `POST   /finalize-registration`  finalize registration
-/// - `POST   /complete-round`         complete the current round
 /// - `POST   /cancel-round`           cancel the last round (or draft)
 /// - `POST   /rounds/prepare`         begin drafting the next round
 /// - `PUT    /draft`                  edit the draft
@@ -82,7 +81,6 @@ pub fn scope(state: AppState) -> Router<AppState> {
         )
         .route("/settings", put(update_settings))
         .route("/finalize-registration", post(finalize_registration))
-        .route("/complete-round", post(complete_round))
         .route("/cancel-round", post(cancel_round))
         .route("/rounds/prepare", post(prepare_round))
         .route("/draft", put(update_draft))
@@ -362,17 +360,6 @@ async fn finalize_registration(
     view(&store)
 }
 
-/// Complete the current (in-progress) round.
-async fn complete_round(
-    TournamentCtx(instance): TournamentCtx,
-) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.complete_current_round())?;
-    let label = round_label(&store, "round", "completed");
-    backup_after(&store, &label);
-    view(&store)
-}
-
 /// Cancel the last round (or the open draft), stepping the tournament back one
 /// stage. Undoable like any other mutation.
 async fn cancel_round(
@@ -557,17 +544,34 @@ struct SetResultRequest {
 }
 
 /// Toggle a board's winner in response to a clicked player.
+///
+/// Recording a board result can complete the round (once every board has one).
+/// A round no longer has an explicit "complete" step, so this is where the
+/// automatic "round N completed" backup is taken — but only on the transition
+/// into completed, so re-editing an already-complete round doesn't spam backups.
 async fn set_board_result(
     TournamentCtx(instance): TournamentCtx,
     Path(params): Path<BoardParams>,
     Json(req): Json<SetResultRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
+    let was_completed = round_completed(&store, params.round_number);
     store.mutate(|t| {
         t.toggle_board_winner(params.round_number, params.board_index, req.clicked)
             .map(|_| ())
     })?;
+    if !was_completed && round_completed(&store, params.round_number) {
+        backup_after(&store, &format!("round {} completed", params.round_number));
+    }
     view(&store)
+}
+
+/// Whether the numbered round exists and is currently completed.
+fn round_completed(store: &TournamentStore, round_number: u32) -> bool {
+    store
+        .current()
+        .and_then(|t| t.rounds.iter().find(|r| r.number == round_number))
+        .is_some_and(|r| r.completed)
 }
 
 /// Body of the draw-flag endpoint: whether the game was drawn before resolving.

@@ -47,9 +47,7 @@ impl From<TournamentError> for ApiError {
             | TournamentError::DraftAlreadyExists
             | TournamentError::NoDraft
             | TournamentError::InvalidDraft(_)
-            | TournamentError::NoRoundToComplete
             | TournamentError::NoRoundToCancel
-            | TournamentError::RoundHasUnplayedGames
             | TournamentError::RoundHasResults
             | TournamentError::HandicapNeedsRatingDifference
             | TournamentError::HandicapNotAllowedForCup

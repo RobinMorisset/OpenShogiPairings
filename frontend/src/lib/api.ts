@@ -393,13 +393,6 @@ export function updateSettings(
   });
 }
 
-/** Complete the current (in-progress) round. */
-export function completeRound(): Promise<TournamentResponse> {
-  return request<TournamentResponse>(scopedPath("/complete-round"), {
-    method: "POST",
-  });
-}
-
 /** Cancel the last round (or the open draft), stepping back one stage. */
 export function cancelRound(): Promise<TournamentResponse> {
   return request<TournamentResponse>(scopedPath("/cancel-round"), {
