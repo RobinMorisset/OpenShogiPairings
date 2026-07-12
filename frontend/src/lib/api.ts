@@ -521,6 +521,17 @@ export function addPlayer(player: NewPlayer): Promise<TournamentResponse> {
   });
 }
 
+/**
+ * Register many players at once (CSV import) as a single mutation, so one
+ * undo reverts the whole import rather than player-by-player.
+ */
+export function addPlayersBatch(players: NewPlayer[]): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath("/players/batch"), {
+    method: "POST",
+    body: JSON.stringify(players),
+  });
+}
+
 /** Edit an existing player's fields in place. */
 export function editPlayer(id: string, player: NewPlayer): Promise<TournamentResponse> {
   return request<TournamentResponse>(scopedPath(`/players/${id}`), {

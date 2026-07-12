@@ -81,7 +81,10 @@
     "nationality": "Nationality (optional)",
     "natPlaceholder": "Nat.",
     "club": "Club (optional)",
-    "addPlayer": "Add player"
+    "addPlayer": "Add player",
+    "importCsv": "Load CSV…",
+    "importCsvTitle": "Import players from a CSV file (Last name, First name required; ELO, Grade, Nationality, Club optional). Missing ELO/Grade is filled in from the FESA list when a name matches.",
+    "csvEmpty": "The CSV file has no players to import."
   },
   "playerList": {
     "clickToEdit": "Click to edit",

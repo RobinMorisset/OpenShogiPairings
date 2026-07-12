@@ -23,11 +23,6 @@ Known limitations and future work, roughly ordered by area.
 
 ## Frontend
 
-- **Add a button to load a CSV of player names in the players tab**
-
-- **Show 8th, 16th, 32nd, etc.. eligible players** when cup mode is enabled. I'm not sure whether this should live in Settings or Players.
-  Probably the latter, something next to the eligibility checkbox ?
-
 - **Replace the padlock icon by an open one for unlocked tournaments**
 
 ## Multi-tournament server

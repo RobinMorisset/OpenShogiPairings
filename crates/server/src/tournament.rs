@@ -49,6 +49,7 @@ use crate::{auth, live};
 /// - `POST   /rounds/{n}/boards/{i}/drawn`   set the draw flag
 /// - `PUT    /rounds/{n}/boards/{i}/handicap` set/clear the handicap
 /// - `POST   /players`       register a player
+/// - `POST   /players/batch` register many players as a single mutation (CSV import)
 /// - `PUT    /players/{player_id}`  edit a player
 /// - `DELETE /players/{player_id}`  remove a player
 /// - `POST   /players/{player_id}/eligible`  set cup eligibility
@@ -105,6 +106,7 @@ pub fn scope(state: AppState) -> Router<AppState> {
             put(set_board_handicap),
         )
         .route("/players", post(add_player))
+        .route("/players/batch", post(add_players_batch))
         .route(
             "/players/{player_id}",
             axum::routing::put(edit_player).delete(remove_player),
@@ -604,6 +606,23 @@ async fn add_player(
 ) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(|t| t.add_player(new_player).map(|_| ()))?;
+    Ok((StatusCode::CREATED, view(&store)?))
+}
+
+/// Register many players in one request (CSV import). All-or-nothing: the
+/// whole batch is one `mutate` call, so it lands as a single history entry —
+/// one undo reverts the entire import rather than one player at a time.
+async fn add_players_batch(
+    TournamentCtx(instance): TournamentCtx,
+    Json(new_players): Json<Vec<NewPlayer>>,
+) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
+    let mut store = instance.store.write().expect("store lock poisoned");
+    store.mutate(|t| {
+        for new_player in new_players {
+            t.add_player(new_player)?;
+        }
+        Ok(())
+    })?;
     Ok((StatusCode::CREATED, view(&store)?))
 }
 

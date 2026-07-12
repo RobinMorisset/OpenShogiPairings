@@ -81,7 +81,10 @@
     "nationality": "Nationalité (facultatif)",
     "natPlaceholder": "Nat.",
     "club": "Club (facultatif)",
-    "addPlayer": "Ajouter un joueur"
+    "addPlayer": "Ajouter un joueur",
+    "importCsv": "Charger un CSV…",
+    "importCsvTitle": "Importer des joueurs depuis un fichier CSV (Nom, Prénom requis ; ELO, Grade, Nationalité, Club facultatifs). L'ELO/Grade manquant est complété depuis la liste FESA si le nom correspond.",
+    "csvEmpty": "Le fichier CSV ne contient aucun joueur à importer."
   },
   "playerList": {
     "clickToEdit": "Cliquer pour modifier",

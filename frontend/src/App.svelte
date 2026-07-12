@@ -2,6 +2,7 @@
   import { _ } from "svelte-i18n";
   import {
     addPlayer,
+    addPlayersBatch,
     addPointAdjustment,
     ApiError,
     cancelRound,
@@ -45,6 +46,7 @@
     Winner,
   } from "./lib/types";
   import { saveAmericanGrid, saveTournament } from "./lib/tournamentFile";
+  import { parseCsvPlayers, pickCsvFile } from "./lib/csvImport";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
   import Login from "./lib/components/Login.svelte";
   import TournamentPicker from "./lib/components/TournamentPicker.svelte";
@@ -393,6 +395,27 @@
   function handleAddPlayer(player: NewPlayer) {
     run(async () => {
       apply(await addPlayer(player));
+    });
+  }
+
+  /**
+   * Import players from a CSV file, filling missing ELO/grade from the FESA
+   * list. Sent as a single batch request, so it lands as one undo-able step
+   * rather than one per imported player.
+   */
+  function handleImportCsv() {
+    run(async () => {
+      const text = await pickCsvFile();
+      if (text === null) return; // cancelled
+
+      const { players, errors } = parseCsvPlayers(text, ratings);
+      if (errors.length > 0) {
+        throw new Error(errors.join("\n"));
+      }
+      if (players.length === 0) {
+        throw new Error($_("playerRegistration.csvEmpty"));
+      }
+      apply(await addPlayersBatch(players));
     });
   }
 
@@ -780,6 +803,15 @@
               title={$_("app.refreshRatingsTitle")}
             >
               {$_("app.refreshRatings")}
+            </button>
+            <button
+              type="button"
+              class="ghost small"
+              onclick={handleImportCsv}
+              disabled={busy}
+              title={$_("playerRegistration.importCsvTitle")}
+            >
+              {$_("playerRegistration.importCsv")}
             </button>
           </div>
           <div class="players">
