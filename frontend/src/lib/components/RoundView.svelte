@@ -884,12 +884,16 @@
     border-color: var(--border-soft);
     background: var(--bg-hover);
   }
+  .player::before {
+    content: "✓ ";
+    visibility: hidden;
+  }
   .player.winner {
     color: var(--color-success);
     font-weight: 600;
   }
   .player.winner::before {
-    content: "✓ ";
+    visibility: visible;
   }
   .player.loser {
     color: var(--text-tertiary);
