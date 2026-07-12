@@ -47,6 +47,24 @@
 //! [`pair_round_weighted`] is the real pairing path; the bye is modeled as a
 //! phantom vertex.
 //!
+//! ## Determinism and tie-breaking
+//!
+//! Rule costs are coarse integers, so the minimum-weight matching is frequently
+//! achieved by several distinct pairings at once — e.g. two interchangeable
+//! players, or which of the equal-lowest scorers takes the bye. Because the scalar
+//! weight is an injective lexicographic encoding of the per-rule unit totals (see
+//! [`scale_ladder`]), two pairings tie on total cost *exactly* when they emit the
+//! same units on every rule — i.e. when the rules are genuinely indifferent
+//! between them.
+//!
+//! The choice among tied pairings is made deterministically and as a pure function
+//! of tournament *state*: the matching's vertices are ordered by tournament number
+//! (see [`PairingModel::seed_key`]), so the same field pairs identically no matter
+//! how its players were registered, imported, or reloaded, and within that
+//! canonical order the blossom solver returns one fixed optimum. No lower-priority
+//! "seniority" preference is layered on top — a tie means the rules do not care,
+//! and the seed order only fixes *a* stable, reproducible representative.
+//!
 //! An ILP/CP-SAT backend is still planned (see TODO.md) for very large fields and
 //! for formats needing hard constraints a plain matching can't express.
 
@@ -668,6 +686,26 @@ impl<'a> PairingModel<'a> {
         bye_cost(&self.ctx(), self.rules, &self.mult, player)
     }
 
+    /// Canonical seed key for a matching vertex. Ordering the vertices by this key
+    /// makes the pairing a pure function of tournament *state* rather than of the
+    /// order players were registered/imported in: a real player sorts by
+    /// tournament number (seed), while the [`PHANTOM`] bye and any not-yet-seeded
+    /// player sort last. The id is a final tie-break so the order is *total* even
+    /// before finalization or in the (guarded-against) event two players share a
+    /// number. See the module docs on determinism and tie-breaking.
+    fn seed_key(&self, id: Uuid) -> (u32, Uuid) {
+        if id == PHANTOM {
+            (u32::MAX, id)
+        } else {
+            let seed = self
+                .by_player
+                .get(&id)
+                .and_then(|p| p.tournament_id)
+                .unwrap_or(u32::MAX);
+            (seed, id)
+        }
+    }
+
     /// Per-rule penalty units (pre-multiplier) for pairing `a` against `b`, in
     /// priority order (aligned with [`Self::rules`]).
     fn edge_units(&self, a: Uuid, b: Uuid) -> Vec<i128> {
@@ -937,6 +975,10 @@ fn solve_stable(
     if n < 2 {
         return Vec::new();
     }
+    // Canonical vertex order by seed, matching `pair_round_weighted`, so the
+    // counterfactual re-solve breaks ties the same way the real pairing does.
+    let mut verts = verts.to_vec();
+    verts.sort_by_key(|&id| model.seed_key(id));
     let stab = (n / 2) as i128 + 1; // strictly above the largest stability total
     let base = |a: Uuid, b: Uuid| -> i128 {
         if a == PHANTOM {
@@ -1244,7 +1286,7 @@ pub fn pair_round_weighted(
     if let Some(bye) = forced_bye {
         placed.insert(bye);
     }
-    let free: Vec<Uuid> = present
+    let mut free: Vec<Uuid> = present
         .iter()
         .copied()
         .filter(|id| !placed.contains(id))
@@ -1280,6 +1322,12 @@ pub fn pair_round_weighted(
             &free,
             need_phantom,
         );
+
+        // Order the matching's vertices canonically by seed, so which of several
+        // equally-optimal pairings the solver returns depends only on tournament
+        // state — not on the order players were registered, imported, or reloaded
+        // (the model itself is order-independent, so this affects ties only).
+        free.sort_by_key(|&id| model.seed_key(id));
 
         let mut cost = vec![vec![0i128; vcount]; vcount];
         for i in 0..k {
@@ -1420,6 +1468,38 @@ mod tests {
             .iter()
             .map(|b| unord(b.player1, b.player2))
             .collect()
+    }
+
+    #[test]
+    fn pairing_is_independent_of_input_order() {
+        // A genuinely tied field: two blocks of three equal-rated players in ELO
+        // mode round 1. Any single cross-block board costs the same squared gap, so
+        // *which* players cross is a real tie the rules can't resolve. Presenting the
+        // exact same players (same ids, same tournament numbers) to the engine in a
+        // different vector order must not change the pairing — the round is a
+        // function of tournament state, not registration/import order.
+        let p: Vec<Player> = vec![
+            player(1, Some(2000), None),
+            player(2, Some(2000), None),
+            player(3, Some(2000), None),
+            player(4, Some(1000), None),
+            player(5, Some(1000), None),
+            player(6, Some(1000), None),
+        ];
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let settings = elo_settings();
+
+        let forward = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);
+
+        // Same players and tournament numbers, reversed order in both the players
+        // slice and the present list.
+        let mut p_rev = p.clone();
+        p_rev.reverse();
+        let present_rev: Vec<Uuid> = present.iter().rev().copied().collect();
+        let reversed = pair_round_weighted(1, &p_rev, &settings, &[], &present_rev, &[], None);
+
+        assert_eq!(board_pairs(&forward), board_pairs(&reversed));
+        assert_eq!(forward.bye, reversed.bye);
     }
 
     #[test]
