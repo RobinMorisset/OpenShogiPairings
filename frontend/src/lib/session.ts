@@ -49,6 +49,14 @@ function readStorage(key: string): string | null {
 export const currentTournamentId = writable<string | null>(
   readStorage(CURRENT_TOURNAMENT_KEY),
 );
+
+/**
+ * Tab to land on the next time `currentTournamentId` changes, consumed and
+ * reset by App.svelte. Lets the picker steer a freshly-created tournament to
+ * "settings" (it has no players yet) while switching between existing
+ * tournaments still defaults to "players".
+ */
+export const initialTab = writable<string | null>(null);
 currentTournamentId.subscribe((id) => {
   try {
     if (id) localStorage.setItem(CURRENT_TOURNAMENT_KEY, id);

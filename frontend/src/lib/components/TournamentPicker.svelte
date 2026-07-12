@@ -8,7 +8,7 @@
     loginAdmin,
     replaceTournament,
   } from "../api";
-  import { currentTournamentId } from "../session";
+  import { currentTournamentId, initialTab } from "../session";
   import { loadTournament } from "../tournamentFile";
   import CreateTournament from "./CreateTournament.svelte";
   import type { TournamentSummary } from "../types";
@@ -52,6 +52,7 @@
     try {
       const { id } = await createTournamentEntry(name, password);
       pendingCreate = null;
+      initialTab.set("settings");
       select(id);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
