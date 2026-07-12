@@ -890,7 +890,6 @@
   }
   .player.winner {
     color: var(--color-success);
-    font-weight: 600;
   }
   .player.winner::before {
     visibility: visible;
