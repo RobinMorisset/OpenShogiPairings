@@ -2,6 +2,7 @@
   import { _ } from "svelte-i18n";
   import type { NewPlayer, Player } from "../types";
   import { formatGrade, gradeRank, parseGrade } from "../grade";
+  import { printPage } from "../platform";
 
   interface Props {
     players: Player[];
@@ -331,10 +332,13 @@
   {/if}
 {/snippet}
 
+<div class="player-toolbar print-hide">
+  <button type="button" class="ghost" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
+</div>
 {#if showEligible}
   <p class="elig-count">{$_("playerList.eligibleCount", { values: { count: eligibleCount } })}</p>
   {#if !finalized && nationalities.length > 0}
-    <div class="elig-bulk">
+    <div class="elig-bulk print-hide">
       <span>{$_("playerList.eligibilityByNationality")}</span>
       <select bind:value={bulkNationality} disabled={busy}>
         <option value="">{$_("playerList.chooseNationality")}</option>
@@ -384,7 +388,7 @@
             </button>
           </th>
         {/if}
-        <th aria-label={$_("playerList.actions")}></th>
+        <th class="print-hide" aria-label={$_("playerList.actions")}></th>
       </tr>
     </thead>
     <tbody>
@@ -424,7 +428,7 @@
               {/if}
             </td>
           {/if}
-          <td class="actions">
+          <td class="actions print-hide">
             {#if adjustmentTotal(player) !== 0}
               <span class="adj-badge" title={adjustmentTitle(player)}>
                 {adjustmentTotal(player) > 0 ? "+" : ""}{adjustmentTotal(player)}
@@ -511,6 +515,11 @@
   .empty {
     color: var(--text-secondary);
     font-size: 0.9rem;
+  }
+  .player-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.5rem;
   }
   table {
     width: 100%;
@@ -763,5 +772,11 @@
   }
   .add-adj:hover:not(:disabled) {
     border-color: var(--border-accent);
+  }
+
+  @media print {
+    .print-hide {
+      display: none;
+    }
   }
 </style>
