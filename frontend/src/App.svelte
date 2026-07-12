@@ -16,7 +16,6 @@
     fetchRatings,
     fetchRoundExplanation,
     fetchTournament,
-    finalizeRegistration,
     prepareRound,
     refreshRatings,
     removePlayer,
@@ -50,7 +49,7 @@
   import ServerStatus from "./lib/components/ServerStatus.svelte";
   import Login from "./lib/components/Login.svelte";
   import TournamentPicker from "./lib/components/TournamentPicker.svelte";
-  import { authRequired, currentTournamentId } from "./lib/session";
+  import { authRequired, currentTournamentId, initialTab } from "./lib/session";
   import PlayerRegistration from "./lib/components/PlayerRegistration.svelte";
   import PlayerList from "./lib/components/PlayerList.svelte";
   import RoundView from "./lib/components/RoundView.svelte";
@@ -190,40 +189,41 @@
   });
   const cupReady = $derived(!cupEnabled || cupSizeChoice != null);
 
-  // "Advance" button (finalize registration / complete current round).
+  // "Advance" button (complete current round). Only shown once the tournament
+  // is underway; finalizing registration is folded into "Start round 1" below.
   const advanceLabel = $derived(
-    phase === "registration"
-      ? $_("app.advanceRegistration")
-      : phase === "in_progress"
-        ? $_("app.advanceInProgress", { values: { number: currentRound?.number } })
-        : (tournament?.rounds.length ?? 0) > 0
-          ? $_("app.advanceRoundComplete", { values: { number: tournament?.rounds.length } })
-          : $_("app.advanceRegistrationFinalized"),
+    phase === "in_progress"
+      ? $_("app.advanceInProgress", { values: { number: currentRound?.number } })
+      : (tournament?.rounds.length ?? 0) > 0
+        ? $_("app.advanceRoundComplete", { values: { number: tournament?.rounds.length } })
+        : $_("app.advanceRegistrationFinalized"),
   );
   const advanceEnabled = $derived(
-    !busy &&
-      ((phase === "registration" && enoughPlayers && cupReady) ||
-        (phase === "in_progress" && currentRoundAllPlayed)),
+    !busy && phase === "in_progress" && currentRoundAllPlayed,
   );
   const advanceTitle = $derived(
-    phase === "registration" && !enoughPlayers
-      ? $_("app.advanceTitleNeedPlayers")
-      : phase === "registration" && !cupReady
-        ? $_("app.advanceTitleNeedCup")
-        : phase === "in_progress" && !currentRoundAllPlayed
-          ? $_("app.advanceTitleNeedResults")
-          : "",
+    phase === "in_progress" && !currentRoundAllPlayed
+      ? $_("app.advanceTitleNeedResults")
+      : "",
   );
 
-  // "Start round" button.
+  // "Start round" button. In the "registration" phase it also finalizes
+  // registration (a single undo step); from round 2 on, registration is already
+  // finalized and it just prepares the next round.
   const nextRoundNumber = $derived((tournament?.rounds.length ?? 0) + 1);
-  const startEnabled = $derived(!busy && phase === "ready" && enoughPlayers);
+  const startEnabled = $derived(
+    !busy &&
+      enoughPlayers &&
+      ((phase === "registration" && cupReady) || phase === "ready"),
+  );
   const startTitle = $derived(
-    phase !== "ready"
+    phase === "draft" || phase === "in_progress"
       ? $_("app.startTitleNotReady")
       : !enoughPlayers
         ? $_("app.startTitleNeedPlayers")
-        : "",
+        : phase === "registration" && !cupReady
+          ? $_("app.advanceTitleNeedCup")
+          : "",
   );
 
   // "Export grid" button: available only in the "ready" phase (no draft, no
@@ -345,7 +345,8 @@
     canUndo = false;
     hasUnsavedChanges = false;
     error = null;
-    activeTab = "players";
+    activeTab = $initialTab ?? "players";
+    initialTab.set(null);
 
     void loadInitial();
     // Live sync: refetch on another referee's change and on every (re)connect.
@@ -470,17 +471,19 @@
   }
 
   function handleAdvance() {
-    if (phase === "registration") {
-      const size = cupEnabled ? (cupSizeChoice ?? undefined) : undefined;
-      run(async () => apply(await finalizeRegistration(size)));
-    } else if (phase === "in_progress") {
+    if (phase === "in_progress") {
       run(async () => apply(await completeRound()));
     }
   }
 
   function handlePrepareRound() {
+    // Starting round 1 also finalizes registration (folded into one undo step
+    // server-side); pass the chosen cup size along so that finalize can seed the
+    // bracket. From round 2 on this is ignored (already finalized).
+    const size =
+      phase === "registration" && cupEnabled ? (cupSizeChoice ?? undefined) : undefined;
     run(async () => {
-      apply(await prepareRound());
+      apply(await prepareRound(size));
       activeTab = "draft";
     });
   }
@@ -737,15 +740,17 @@
               {/if}
             </label>
           {/if}
-          <button
-            type="button"
-            class="ctrl"
-            onclick={handleAdvance}
-            disabled={!advanceEnabled}
-            title={advanceTitle}
-          >
-            {advanceLabel}
-          </button>
+          {#if phase !== "registration"}
+            <button
+              type="button"
+              class="ctrl"
+              onclick={handleAdvance}
+              disabled={!advanceEnabled}
+              title={advanceTitle}
+            >
+              {advanceLabel}
+            </button>
+          {/if}
           <button
             type="button"
             class="ctrl primary"

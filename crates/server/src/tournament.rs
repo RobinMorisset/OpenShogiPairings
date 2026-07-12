@@ -385,11 +385,23 @@ async fn cancel_round(
 }
 
 /// Begin drafting the next round (enters the round-draft state).
+///
+/// For the very first round, registration may not be finalized yet: rather than
+/// force the referee through a separate "finalize" step, we finalize (using the
+/// cup size from the body, if the cup is enabled) and prepare in the *same*
+/// mutation, so the pair is a single undo step.
 async fn prepare_round(
     TournamentCtx(instance): TournamentCtx,
+    body: Option<Json<FinalizeRequest>>,
 ) -> Result<Json<TournamentView>, ApiError> {
+    let cup_size = body.and_then(|Json(b)| b.cup_size);
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.prepare_round().map(|_| ()))?;
+    store.mutate(|t| {
+        if !t.registration_finalized {
+            t.finalize_registration_with(cup_size)?;
+        }
+        t.prepare_round().map(|_| ())
+    })?;
     let label = store
         .current()
         .and_then(|t| t.draft.as_ref())

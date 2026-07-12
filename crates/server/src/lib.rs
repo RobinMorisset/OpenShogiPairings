@@ -474,19 +474,12 @@ mod tests {
             .await;
         }
 
-        // Can't prepare a round before finalizing.
-        let (status, _) = send(router(state.clone()), post_empty(&t(id, "/rounds/prepare"))).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-
-        // Finalize, prepare, then confirm round 1.
-        let (status, _) = send(
-            router(state.clone()),
-            post_empty(&t(id, "/finalize-registration")),
-        )
-        .await;
+        // Preparing round 1 auto-finalizes registration in the same step, then
+        // confirm round 1.
+        let (status, body) =
+            send(router(state.clone()), post_empty(&t(id, "/rounds/prepare"))).await;
         assert_eq!(status, StatusCode::OK);
-        let (status, _) = send(router(state.clone()), post_empty(&t(id, "/rounds/prepare"))).await;
-        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tournament"]["registration_finalized"], true);
         let (status, _) = send(router(state.clone()), post_empty(&t(id, "/rounds"))).await;
         assert_eq!(status, StatusCode::CREATED);
 
@@ -513,6 +506,33 @@ mod tests {
         send(router(state.clone()), post_empty(&t(id, "/rounds/prepare"))).await;
         let (status, _) = send(router(state.clone()), post_empty(&t(id, "/rounds"))).await;
         assert_eq!(status, StatusCode::CREATED);
+    }
+
+    #[tokio::test]
+    async fn preparing_round_one_finalizes_as_a_single_undo_step() {
+        let state = AppState::default();
+        let id = create(&state, "Cup").await;
+        for name in ["Alice", "Bob"] {
+            send(
+                router(state.clone()),
+                json_req("POST", &t(id, "/players"), json!({ "last_name": name })),
+            )
+            .await;
+        }
+
+        // Preparing round 1 both finalizes registration and opens the draft.
+        let (status, body) =
+            send(router(state.clone()), post_empty(&t(id, "/rounds/prepare"))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tournament"]["registration_finalized"], true);
+        assert!(body["tournament"]["draft"].is_object());
+
+        // A single undo reverts *both*: back to open registration, no draft.
+        // (Were it two steps, one undo would leave registration still finalized.)
+        let (status, body) = send(router(state.clone()), post_empty(&t(id, "/undo"))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tournament"]["registration_finalized"], false);
+        assert!(body["tournament"]["draft"].is_null());
     }
 
     #[tokio::test]

@@ -393,17 +393,6 @@ export function updateSettings(
   });
 }
 
-/** Finalize registration (prerequisite for starting the first round). When the
- *  cup is enabled, pass the chosen bracket size (8/16/32/64). */
-export function finalizeRegistration(
-  cupSize?: number,
-): Promise<TournamentResponse> {
-  return request<TournamentResponse>(scopedPath("/finalize-registration"), {
-    method: "POST",
-    body: JSON.stringify({ cup_size: cupSize ?? null }),
-  });
-}
-
 /** Complete the current (in-progress) round. */
 export function completeRound(): Promise<TournamentResponse> {
   return request<TournamentResponse>(scopedPath("/complete-round"), {
@@ -418,10 +407,13 @@ export function cancelRound(): Promise<TournamentResponse> {
   });
 }
 
-/** Begin drafting the next round (enters the round-draft state). */
-export function prepareRound(): Promise<TournamentResponse> {
+/** Begin drafting the next round (enters the round-draft state). For the first
+ *  round this also finalizes registration in the same step; when the cup is
+ *  enabled, pass the chosen bracket size (8/16/32/64). */
+export function prepareRound(cupSize?: number): Promise<TournamentResponse> {
   return request<TournamentResponse>(scopedPath("/rounds/prepare"), {
     method: "POST",
+    body: JSON.stringify({ cup_size: cupSize ?? null }),
   });
 }
 
