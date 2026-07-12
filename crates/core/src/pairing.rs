@@ -29,9 +29,10 @@
 //!    bye) twice; the penalty fades with the number of rounds since the last such
 //!    float.
 //! 6. **Floater selection** — when a group has to pair across score groups, choose
-//!    *who* floats: the descending floater should be the last (weakest) of the
-//!    upper group, and the ascending floater the first (classic Swiss) or the
-//!    median (median Swiss) of the lower group. The penalty rises with the
+//!    *who* floats: in classic Swiss, the descending floater should be the last
+//!    (weakest) of the upper group and the ascending floater the first of the
+//!    lower group; in median Swiss, both floaters should be the median of their
+//!    respective group. The penalty rises with the
 //!    distance from that ideal in-group rank.
 //! 7. **Different clubs** — avoid pairing club-mates (ignored when a club is
 //!    unknown).
@@ -124,8 +125,8 @@ enum Rule {
     /// Avoid repeating a float in the same direction; decays with rounds since.
     FloatRepeat,
     /// When a pairing floats across groups, choose the right players to float:
-    /// the weakest of the upper group descends, and the first/median of the lower
-    /// group ascends.
+    /// classic Swiss sends the weakest of the upper group down and the first of
+    /// the lower group up; median Swiss sends the median of each group instead.
     FloaterSelection,
     /// Avoid pairing club-mates (ignored when a club is unknown).
     Club,
@@ -233,21 +234,23 @@ fn float_units(last: Option<u32>, round: u32) -> i128 {
 }
 
 /// Floater-selection units for one floater: how far its in-group rank is from the
-/// ideal position for its float direction. A descending floater ideally sits last
-/// (weakest) in its group; an ascending floater ideally sits first (classic) or at
-/// the median (median Swiss). 0 if the player has no fold info (shouldn't happen
-/// for free players) or its group is a singleton.
+/// ideal position for its float direction. In classic Swiss, a descending floater
+/// ideally sits last (weakest) in its group and an ascending floater first; in
+/// median Swiss, both ideally sit at the median. 0 if the player has no fold info
+/// (shouldn't happen for free players) or its group is a singleton.
 fn floater_units(ctx: &Ctx, id: Uuid, descending: bool) -> i128 {
     let Some(f) = ctx.fold.get(&id) else {
         return 0;
     };
-    let ideal = if descending {
-        f.group_size.saturating_sub(1)
-    } else {
-        match ctx.floater_style {
-            FloaterStyle::Classic => 0,
-            FloaterStyle::Median => f.group_size / 2,
+    let ideal = match ctx.floater_style {
+        FloaterStyle::Classic => {
+            if descending {
+                f.group_size.saturating_sub(1)
+            } else {
+                0
+            }
         }
+        FloaterStyle::Median => f.group_size / 2,
     };
     (f.rank as i128 - ideal as i128).abs()
 }
@@ -305,8 +308,9 @@ impl Rule {
                 Ordering::Equal => 0,
             },
             // Rule 5: on a cross-group (float) edge, prefer the right floaters —
-            // the weakest of the upper group down, the first/median of the lower
-            // group up. Same-group edges aren't floats, so no penalty.
+            // classic Swiss wants the weakest of the upper group down and the
+            // first of the lower group up; median Swiss wants the median of
+            // each group instead. Same-group edges aren't floats, so no penalty.
             Rule::FloaterSelection => match sa.points.cmp(&sb.points) {
                 Ordering::Equal => 0,
                 _ => {
@@ -379,7 +383,8 @@ impl Rule {
                 gap * gap
             }
             Rule::FloatRepeat => float_units(s.last_descended, ctx.round),
-            // A bye is a downfloat, so prefer the weakest of the group to take it.
+            // A bye is a downfloat, so prefer the weakest of the group (classic)
+            // or its median (median Swiss) to take it.
             Rule::FloaterSelection => floater_units(ctx, player, true),
             // ELO mode: the weakest present player (lowest ELO rank) takes the bye.
             Rule::ByeSelection => ctx.elo_rank.get(&player).copied().unwrap_or(0),
@@ -1965,6 +1970,81 @@ mod tests {
         assert!(
             board_pairs(&round).contains(&unord(p[0].id, p[2].id)),
             "median Swiss floats up the median of the group (L1)"
+        );
+    }
+
+    #[test]
+    fn floater_selection_median_descends_the_median_not_the_weakest() {
+        // Upper group (1 point): X0>X1>X2 by rating. Lower group (0 points): a
+        // single Y. One X must float down: classic sends the weakest (X2),
+        // median sends the middle (X1).
+        let p = vec![
+            player(1, Some(2000), None), // X0 (strongest)
+            player(2, Some(1900), None), // X1 (median)
+            player(3, Some(1800), None), // X2 (weakest)
+            player(4, Some(1000), None), // Y (lower group)
+        ];
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let base = TournamentSettings {
+            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
+            ..Default::default()
+        };
+
+        let classic = TournamentSettings {
+            floater_style: FloaterStyle::Classic,
+            ..base.clone()
+        };
+        let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], None);
+        assert!(
+            board_pairs(&round).contains(&unord(p[2].id, p[3].id)),
+            "classic Swiss floats down the weakest of the group (X2)"
+        );
+
+        let median = TournamentSettings {
+            floater_style: FloaterStyle::Median,
+            ..base
+        };
+        let round = pair_round_weighted(1, &p, &median, &[], &present, &[], None);
+        assert!(
+            board_pairs(&round).contains(&unord(p[1].id, p[3].id)),
+            "median Swiss floats down the median of the group (X1)"
+        );
+    }
+
+    #[test]
+    fn floater_selection_median_gives_the_bye_to_the_median_of_the_group() {
+        // 5 players, all in the same (single) score group in round 1, ranked
+        // P0 > P1 > P2 > P3 > P4 by rating. Classic sends the bye to the
+        // weakest (P4); median sends it to the middle of the group (P2).
+        let p = vec![
+            player(1, Some(2000), None), // P0
+            player(2, Some(1800), None), // P1
+            player(3, Some(1600), None), // P2 (median)
+            player(4, Some(1400), None), // P3
+            player(5, Some(1200), None), // P4 (weakest)
+        ];
+        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+
+        let classic = TournamentSettings {
+            floater_style: FloaterStyle::Classic,
+            ..Default::default()
+        };
+        let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], None);
+        assert_eq!(
+            round.bye,
+            Some(p[4].id),
+            "classic Swiss gives the bye to the weakest of the group (P4)"
+        );
+
+        let median = TournamentSettings {
+            floater_style: FloaterStyle::Median,
+            ..Default::default()
+        };
+        let round = pair_round_weighted(1, &p, &median, &[], &present, &[], None);
+        assert_eq!(
+            round.bye,
+            Some(p[2].id),
+            "median Swiss gives the bye to the median of the group (P2)"
         );
     }
 
