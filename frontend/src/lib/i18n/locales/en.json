@@ -131,6 +131,7 @@
     "alreadyCompletedWarning": "This round was already completed — changing a result here updates the recorded standings.",
     "clickToRecordWinner": "Click a player to record them as the winner.",
     "byeLabel": "Bye:",
+    "byeOpponent": "BYE",
     "explanation": {
       "reportTitle": "Why these pairings?",
       "compromiseOn": "Compromise on: {rules}",

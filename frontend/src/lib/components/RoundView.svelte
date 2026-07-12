@@ -374,7 +374,7 @@
       {/if}
     </div>
   {/if}
-  {#if round.boards.length === 0}
+  {#if round.boards.length === 0 && !round.bye}
     <p class="empty">{$_("roundView.noBoards")}</p>
   {:else}
     <table>
@@ -486,6 +486,30 @@
             {/if}
           </tr>
         {/each}
+        {#if round.bye}
+          <tr class="bye-row">
+            <td class="src-col"
+              >{#if isNoteworthy(byeLedger)}<span
+                  class="compromise print-hide"
+                  title={ledgerTooltip(byeLedger!)}>⚠</span
+                >{/if}</td
+            >
+            <td class="num">{round.boards.length + 1}</td>
+            <td class="p1-col">
+              <span class="player">{name(round.bye)}</span>
+            </td>
+            <td>
+              <span class="player bye-opponent">{$_("roundView.byeOpponent")}</span>
+            </td>
+            <td class="draw-col"></td>
+            {#if handicapPolicy !== "none"}
+              <td class="handicap-col"></td>
+              {#if handicapPolicy === "suggested"}
+                <td class="suggested-col"></td>
+              {/if}
+            {/if}
+          </tr>
+        {/if}
       </tbody>
     </table>
     {#if round.completed}
@@ -495,15 +519,6 @@
     {:else}
       <p class="hint">{$_("roundView.clickToRecordWinner")}</p>
     {/if}
-  {/if}
-
-  {#if round.bye}
-    <p class="bye">
-      <strong>{$_("roundView.byeLabel")}</strong> {name(round.bye)}
-      {#if isNoteworthy(byeLedger)}
-        <span class="compromise print-hide" title={ledgerTooltip(byeLedger!)}>⚠</span>
-      {/if}
-    </p>
   {/if}
 
   {#if onProbe && swissPlayers.length >= 4}
@@ -939,10 +954,9 @@
   .hint.warning {
     color: var(--color-warning);
   }
-  .bye {
-    margin-top: 1rem;
-    color: var(--text-secondary);
-    font-size: 0.9rem;
+  .bye-opponent {
+    color: var(--text-tertiary);
+    font-style: italic;
   }
 
   @media print {

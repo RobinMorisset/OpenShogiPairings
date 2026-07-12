@@ -131,6 +131,7 @@
     "alreadyCompletedWarning": "Cette ronde était déjà terminée — modifier un résultat ici met à jour le classement enregistré.",
     "clickToRecordWinner": "Cliquez sur un joueur pour l'enregistrer comme vainqueur.",
     "byeLabel": "Exempt :",
+    "byeOpponent": "EXEMPT",
     "explanation": {
       "reportTitle": "Pourquoi ces appariements ?",
       "compromiseOn": "Compromis sur : {rules}",
