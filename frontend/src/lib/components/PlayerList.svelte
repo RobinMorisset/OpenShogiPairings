@@ -39,6 +39,40 @@
 
   const eligibleCount = $derived(players.filter((p) => p.eligible).length);
 
+  const CUP_SIZES = [8, 16, 32, 64];
+
+  // Rank of each eligible player among all eligible players, using the same
+  // order the backend uses to seed the cup at finalization (rating
+  // descending, unrated last, ties by registration order — see
+  // `finalize_registration_with` in tournament.rs). This is independent of
+  // whatever column the table is currently sorted by, so the cutoff badges
+  // stay meaningful no matter how the referee has the table sorted.
+  const eligibleRank = $derived.by(() => {
+    const order = players
+      .map((p, i) => ({ p, i }))
+      .sort((a, b) => {
+        const ra = a.p.rating;
+        const rb = b.p.rating;
+        if (ra != null && rb != null && ra !== rb) return rb - ra;
+        if (ra != null && rb == null) return -1;
+        if (ra == null && rb != null) return 1;
+        return a.i - b.i;
+      });
+    const ranks = new Map<string, number>();
+    let rank = 0;
+    for (const { p } of order) {
+      if (p.eligible) ranks.set(p.id, ++rank);
+    }
+    return ranks;
+  });
+
+  /** The cup size this player's eligibility rank marks the cutoff for, if any. */
+  function cupCutoff(player: Player): number | null {
+    const rank = eligibleRank.get(player.id);
+    if (rank == null) return null;
+    return CUP_SIZES.includes(rank) ? rank : null;
+  }
+
   // Distinct nationalities present (non-empty), with a per-nationality count,
   // for the bulk "mark eligible" control. Sorted alphabetically.
   const nationalities = $derived.by(() => {
@@ -370,13 +404,23 @@
                   {player.eligible ? "✓" : ""}
                 </span>
               {:else}
-                <input
-                  type="checkbox"
-                  checked={player.eligible ?? false}
-                  disabled={busy}
-                  title={$_("playerList.eligibleForCupFull")}
-                  onchange={(e) => onToggleEligible?.(player.id, e.currentTarget.checked)}
-                />
+                <span class="elig-cell">
+                  <input
+                    type="checkbox"
+                    checked={player.eligible ?? false}
+                    disabled={busy}
+                    title={$_("playerList.eligibleForCupFull")}
+                    onchange={(e) => onToggleEligible?.(player.id, e.currentTarget.checked)}
+                  />
+                  {#if cupCutoff(player) !== null}
+                    <span
+                      class="cup-cutoff"
+                      title={$_("playerList.cupCutoffTitle", { values: { size: cupCutoff(player) } })}
+                    >
+                      {cupCutoff(player)}
+                    </span>
+                  {/if}
+                </span>
               {/if}
             </td>
           {/if}
@@ -534,6 +578,21 @@
   .elig-frozen {
     color: var(--color-success);
     font-weight: 700;
+  }
+  .elig-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  .cup-cutoff {
+    display: inline-block;
+    padding: 0 0.3rem;
+    border-radius: 0.6rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    background: var(--color-accent);
+    color: var(--text-on-accent);
   }
   .elig-count {
     color: var(--text-secondary);

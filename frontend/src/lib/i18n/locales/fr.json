@@ -102,6 +102,7 @@
     "cup": "Coupe",
     "actions": "Actions",
     "eligibleForCupFull": "Éligible pour la coupe à élimination directe",
+    "cupCutoffTitle": "Limite pour un tableau de coupe à {size} joueurs",
     "manualAdjustmentTitle": "Bonus/malus manuel de points",
     "removePlayer": "Retirer le joueur",
     "removeAdjustment": "Retirer cet ajustement",

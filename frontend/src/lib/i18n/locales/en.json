@@ -102,6 +102,7 @@
     "cup": "Cup",
     "actions": "Actions",
     "eligibleForCupFull": "Eligible for the direct-elimination cup",
+    "cupCutoffTitle": "Cutoff for a {size}-player cup bracket",
     "manualAdjustmentTitle": "Manual point bonus/penalty",
     "removePlayer": "Remove player",
     "removeAdjustment": "Remove this adjustment",
