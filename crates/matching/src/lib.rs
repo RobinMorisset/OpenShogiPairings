@@ -637,4 +637,90 @@ mod tests {
         assert_eq!(mate[0], 1);
         assert_eq!(mate[2], 3);
     }
+
+    #[test]
+    fn metamorphic_forbidding_edges_on_large_instances() {
+        // Brute force can't reach these sizes, so we check the solver against
+        // itself with two metamorphic relations. Forbid an edge (simulated by a
+        // penalty cost that dwarfs any real matching, so the optimizer avoids
+        // it whenever an alternative exists — always, on a complete graph) and
+        // re-solve:
+        //   * forbidding an edge the optimum *uses* can only make things worse
+        //     or equal — the feasible set shrank                (new_cost ≥ base)
+        //   * forbidding an edge the optimum *doesn't* use leaves the optimum
+        //     untouched — the old solution is still available   (new_cost = base)
+        // The equality case catches suboptimality in *either* run; the ≥ case
+        // catches a first run that missed a better edge-avoiding matching.
+        let mut seed: u64 = 0xD1B54A32D192ED03;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+
+        // Real costs are < 1000, so a matching's total is < (n/2)·1000 ≪ 1e9;
+        // a forbidden edge alone costs 1e9, so any alternative is preferred. And
+        // 1e9 sits far below i128's headroom (inf() = MAX/4 ≈ 4e37), so doubling
+        // weights in `e_delta` never overflows.
+        const PENALTY: i128 = 1_000_000_000;
+
+        for &n in &[50usize, 100, 200] {
+            let mut cost = vec![vec![0i128; n]; n];
+            #[allow(clippy::needless_range_loop)]
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let c = (next() % 1000) as i128;
+                    cost[i][j] = c;
+                    cost[j][i] = c;
+                }
+            }
+
+            let base_mate = min_weight_perfect_matching(&cost);
+            let base_cost = total_of(&cost, &base_mate);
+
+            // Forbid a handful of edges the solution uses: cost must not improve.
+            let solution_edges: Vec<(usize, usize)> =
+                (0..n).filter(|&i| i < base_mate[i]).map(|i| (i, base_mate[i])).collect();
+            for &(i, j) in solution_edges.iter().take(5) {
+                let mut c2 = cost.clone();
+                c2[i][j] = PENALTY;
+                c2[j][i] = PENALTY;
+                let m2 = min_weight_perfect_matching(&c2);
+                assert_ne!(m2[i], j, "n={n}: forbidden solution edge {i}-{j} was still used");
+                // Score with the *original* costs; the forbidden edge is unused,
+                // so the penalty never enters the total.
+                let new_cost = total_of(&cost, &m2);
+                assert!(
+                    new_cost >= base_cost,
+                    "n={n}: forbidding solution edge {i}-{j} improved cost {base_cost} -> {new_cost}"
+                );
+            }
+
+            // Forbid a handful of edges the solution doesn't use: cost is fixed.
+            let mut checked = 0;
+            'outer: for i in 0..n {
+                for j in (i + 1)..n {
+                    if base_mate[i] == j {
+                        continue;
+                    }
+                    let mut c2 = cost.clone();
+                    c2[i][j] = PENALTY;
+                    c2[j][i] = PENALTY;
+                    let m2 = min_weight_perfect_matching(&c2);
+                    assert_ne!(m2[i], j, "n={n}: forbidden unused edge {i}-{j} was used");
+                    let new_cost = total_of(&cost, &m2);
+                    assert_eq!(
+                        new_cost, base_cost,
+                        "n={n}: forbidding unused edge {i}-{j} changed optimum {base_cost} -> {new_cost}"
+                    );
+                    checked += 1;
+                    if checked >= 5 {
+                        break 'outer;
+                    }
+                    break; // spread the sample across distinct vertices
+                }
+            }
+        }
+    }
 }
