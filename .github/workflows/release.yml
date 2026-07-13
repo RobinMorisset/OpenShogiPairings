@@ -1,0 +1,92 @@
+name: Release desktop apps
+
+# Build the Windows .exe and the macOS app and publish them to a GitHub Release.
+#
+# Trigger by pushing a version tag, e.g.:
+#   git tag v0.1.0 && git push origin v0.1.0
+# You can also run it by hand from the Actions tab (workflow_dispatch) to test
+# without cutting a release.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write # needed to create the release and upload the installers
+
+jobs:
+  # Fail fast (before spinning up the build runners) if a release tag doesn't
+  # match the version the app actually reports. Skipped on manual dispatch,
+  # which has no tag.
+  check-version:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must match tauri.conf.json and package.json versions
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          conf=$(jq -r .version frontend/src-tauri/tauri.conf.json)
+          pkg=$(jq -r .version frontend/package.json)
+          echo "tag=$tag  tauri.conf.json=$conf  package.json=$pkg"
+          if [ "$tag" != "$conf" ] || [ "$tag" != "$pkg" ]; then
+            echo "::error::Tag v$tag does not match versions (tauri.conf.json=$conf, package.json=$pkg). Bump both and re-tag."
+            exit 1
+          fi
+
+  build:
+    needs: check-version
+    # Run once check-version passes, and also on manual dispatch where
+    # check-version is skipped (there's no tag to verify).
+    if: ${{ !cancelled() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # A single universal binary that runs on both Apple Silicon and Intel Macs.
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Both macOS arches so `--target universal-apple-darwin` can link them.
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: frontend
+          tagName: ${{ github.ref_name }}
+          releaseName: "OpenShogiPairings ${{ github.ref_name }}"
+          releaseBody: "See the assets below to download and install OpenShogiPairings."
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

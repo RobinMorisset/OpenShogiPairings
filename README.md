@@ -6,6 +6,30 @@ that multiple referees can edit the same tournament live, from their own
 machines — as a portable single-file desktop app, or hosted on the internet and
 reached from a browser.
 
+## Download
+
+Ready-to-run builds for **Windows** and **macOS** are on the
+[**Releases**](https://github.com/RobinMorisset/OpenShogiPairings/releases/latest)
+page:
+
+- **Windows** — download the `.exe` (or the `.msi` installer) and double-click.
+  No install or command line needed: the server, UI, and logic are all embedded
+  in the single file.
+- **macOS** — download the `.dmg`, open it, and drag OpenShogiPairings into
+  Applications. It's a universal build (both Apple Silicon and Intel Macs).
+
+> **You'll see an "unknown publisher" / "damaged" warning the first time.** These
+> builds are **not code-signed** — I haven't paid for the Apple and Windows
+> signing certificates — so the operating system shows a scary-looking warning on
+> first launch. The app is safe; here's how to get past it:
+> - **Windows**: on the blue SmartScreen popup, click **More info → Run anyway**.
+> - **macOS**: right-click (or Ctrl-click) the app and choose **Open**, then
+>   confirm in the dialog. If macOS insists the app is "damaged", run this once in
+>   Terminal and then open it normally:
+>   ```sh
+>   xattr -dr com.apple.quarantine /Applications/OpenShogiPairings.app
+>   ```
+
 ## Features
 
 A tour of what OpenShogiPairings does for the referee actually running a
@@ -343,6 +367,11 @@ alongside it — it starts its own API in-process.
 > and the second one will fail with "Port 5173 is already in use".
 
 ## Packaging (Windows)
+
+> To publish prebuilt Windows **and** macOS apps to the GitHub Releases page,
+> don't build by hand — push a version tag and let CI do it. See
+> [Cutting a release](docs/cutting-a-release.md). The rest of this section is for
+> producing a one-off local build.
 
 Build the self-contained portable executable:
 
