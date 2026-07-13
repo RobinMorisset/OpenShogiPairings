@@ -131,4 +131,23 @@ elo_k_multiplier_percent: number,
  * ≥ 100 so a provisional rating is never treated as *more* reliable than an
  * established one. Only meaningful when [`Self::elo_estimate_needed`].
  */
-elo_provisional_multiplier_percent: number, };
+elo_provisional_multiplier_percent: number, 
+/**
+ * The center (mean) of the Bayesian prior for an **unrated** player, on the
+ * ELO scale. Where their estimate sits before any game pulls it. Default
+ * `600` (the midpoint of the assumed `[1, 1200]` unrated range). Only
+ * meaningful when [`Self::elo_estimate_needed`] or
+ * [`Self::macmahon_from_estimate_active`].
+ */
+elo_unrated_prior_center: number, 
+/**
+ * The **K** setting the width of an unrated player's prior: its standard
+ * deviation is `√(K · s)`, the same law a rated player's K obeys, so this
+ * reads on the same familiar scale (a rated player's K is ~16–40; an unrated
+ * one is far wider). Bigger = a looser prior that lets results move the
+ * estimate faster. Default `705` (≈ the historical `σ 350`). Stored as an
+ * integer so the settings stay `Eq`; read via [`Self::elo_unrated_k`], which
+ * clamps it ≥ 1 (a zero-width prior would be degenerate). Only meaningful
+ * when [`Self::elo_estimate_needed`] or [`Self::macmahon_from_estimate_active`].
+ */
+elo_unrated_k: number, };

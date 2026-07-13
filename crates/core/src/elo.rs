@@ -3,7 +3,8 @@
 //! Each player has a latent strength `θ` on the ELO scale. Game outcomes follow
 //! the logistic (Bradley–Terry) model `P(i beats j) = σ((θᵢ − θⱼ)/s)` with
 //! `s = 400/ln 10`, and each player has a Gaussian prior anchoring `θ` to their
-//! registration rating (or, for an unrated player, to a wide `N(600, 350²)`). The
+//! registration rating (or, for an unrated player, to a wide, referee-tunable
+//! prior — by default `N(600, 350²)`). The
 //! estimated ELO is the **MAP** (maximum a-posteriori) point — the maximiser of
 //! the penalised log-likelihood — found by coordinate-ascent Newton. The whole
 //! thing is a **pure replay** of the completed rounds, recomputed from scratch
@@ -21,16 +22,22 @@ use crate::player::Player;
 use crate::round::{Handicap, Round, Winner};
 use crate::settings::TournamentSettings;
 
-/// ELO scale factor `s = 400 / ln 10`: a 400-point gap is 10:1 odds.
-const S: f64 = 173.717_792_761_565_8;
+/// ELO scale factor `s = 400 / ln 10`: a 400-point gap is 10:1 odds. Also the
+/// factor in the prior-width law `σ₀ = √(K · s)`, so it's `pub(crate)` for
+/// settings that reason about K.
+pub(crate) const S: f64 = 173.717_792_761_565_8;
 
-/// Prior mean for an unrated player — the midpoint of the assumed `[1, 1200]`
-/// strength range.
+/// Default prior mean for an unrated player — the midpoint of the assumed
+/// `[1, 1200]` strength range. The referee can override it
+/// ([`TournamentSettings::elo_unrated_prior_center`]); this is the fallback used
+/// where no settings are in hand (e.g. a player missing from an estimate map).
 pub const UNRATED_PRIOR_MEAN: f64 = 600.0;
 
-/// Prior standard deviation for an unrated player — the std of a uniform on
-/// `[1, 1200]` is `1199/√12 ≈ 346`, rounded to 350.
-const UNRATED_PRIOR_STD: f64 = 350.0;
+/// Default K for the unrated-player prior. Its width follows the same
+/// `σ₀ = √(K · s)` law as a rated player's, so referees tune one familiar
+/// quantity; `705` reproduces the historical `σ ≈ 350` (the std of a uniform on
+/// `[1, 1200]` is `1199/√12 ≈ 346`, rounded to 350: `350² / s ≈ 705`).
+pub const UNRATED_PRIOR_DEFAULT_K: f64 = 705.0;
 
 /// A rated player with at least this many FESA games is treated as reliably
 /// rated; fewer (or a rating not from the FESA list) makes it *provisional*, and
@@ -157,9 +164,19 @@ fn is_reliably_rated(player: &Player) -> bool {
 /// from `K = m · K_FESA(rating)` via `σ₀ = √(K · s)` (so `K` is literally their
 /// first-game K factor). A **provisionally**-rated player (see
 /// [`is_reliably_rated`]) has that `K` further multiplied by `provisional_mult`,
-/// widening the prior so their estimate drifts faster. An unrated player gets the
-/// wide `N(600, 350²)` prior.
-fn prior(player: &Player, k_multiplier: f64, provisional_mult: f64) -> (f64, f64) {
+/// widening the prior so their estimate drifts faster. An unrated player gets a
+/// referee-tunable prior centered on `unrated_center` with width `√(unrated_k · s)`
+/// — the same `K` law, so `unrated_k` reads on the same scale as a rated player's
+/// K (default `705 ≈ σ 350`). The unrated prior is independent of `m` and
+/// `provisional_mult`: an unrated player has no registration rating to drift from
+/// or be provisional about, so `unrated_k` is itself the only width knob.
+fn prior(
+    player: &Player,
+    k_multiplier: f64,
+    provisional_mult: f64,
+    unrated_center: f64,
+    unrated_k: f64,
+) -> (f64, f64) {
     match player.rating {
         Some(rating) => {
             // Multipliers are clamped ≥ 1%/100% by settings normalization, so K > 0.
@@ -171,7 +188,7 @@ fn prior(player: &Player, k_multiplier: f64, provisional_mult: f64) -> (f64, f64
             let k = k_multiplier * fesa_k(rating) * reliability;
             (f64::from(rating), (k * S).sqrt())
         }
-        None => (UNRATED_PRIOR_MEAN, UNRATED_PRIOR_STD),
+        None => (unrated_center, (unrated_k * S).sqrt()),
     }
 }
 
@@ -181,16 +198,29 @@ fn prior(player: &Player, k_multiplier: f64, provisional_mult: f64) -> (f64, f64
 /// raw FESA K). The oracle is the same physical world for every settings variant,
 /// so its width must never depend on a per-variant pairing knob
 /// (`elo_k_multiplier`); the simulator scales it globally via its own `jitter`
-/// instead. `provisional_mult` (its own oracle-level parameter, distinct from the
-/// pairing estimate's) widens the prior for a provisionally-rated player and is
-/// clamped to ≥ 1 so a provisional rating is never treated as *more* certain than
-/// an established one.
+/// instead. `provisional_mult` and the unrated prior (`unrated_center`,
+/// `unrated_k`) are its own oracle-level parameters, distinct from the pairing
+/// estimate's settings — the simulator sets them from its CLI so the true world
+/// can be studied independently of what a variant *believes*. `provisional_mult`
+/// is clamped to ≥ 1 so a provisional rating is never treated as *more* certain
+/// than an established one.
 ///
 /// Exposed for the simulator ([`crate::sim`]), which draws each player's
 /// ground-truth strength from this prior so the injected noise is rating-dependent
 /// and coherent with the estimator rather than a second, flat model.
-pub(crate) fn oracle_prior(player: &Player, provisional_mult: f64) -> (f64, f64) {
-    prior(player, 1.0, provisional_mult.max(1.0))
+pub(crate) fn oracle_prior(
+    player: &Player,
+    provisional_mult: f64,
+    unrated_center: f64,
+    unrated_k: f64,
+) -> (f64, f64) {
+    prior(
+        player,
+        1.0,
+        provisional_mult.max(1.0),
+        unrated_center,
+        unrated_k,
+    )
 }
 
 /// Expected score `σ(x) = 1/(1+e^−x)` for `x = (θself − θopp)/s`.
@@ -212,6 +242,8 @@ pub fn estimate_elos(
 ) -> HashMap<Uuid, f64> {
     let m = settings.elo_k_multiplier();
     let provisional = settings.elo_provisional_multiplier();
+    let unrated_center = settings.elo_unrated_prior_center();
+    let unrated_k = settings.elo_unrated_k();
     let n = players.len();
 
     let index: HashMap<Uuid, usize> = players.iter().enumerate().map(|(i, p)| (p.id, i)).collect();
@@ -219,7 +251,7 @@ pub fn estimate_elos(
     let mut mean = vec![0.0_f64; n];
     let mut precision = vec![0.0_f64; n]; // 1/σ₀² — the prior's weight
     for (i, p) in players.iter().enumerate() {
-        let (mu0, sigma0) = prior(p, m, provisional);
+        let (mu0, sigma0) = prior(p, m, provisional, unrated_center, unrated_k);
         mean[i] = mu0;
         theta[i] = mu0; // seed at the prior mean
         precision[i] = 1.0 / (sigma0 * sigma0);
@@ -440,6 +472,49 @@ mod tests {
             elos[&newcomer.id] > 1100.0,
             "unrated upset should swing far, got {}",
             elos[&newcomer.id]
+        );
+    }
+
+    #[test]
+    fn unrated_prior_center_is_configurable() {
+        // A no-games unrated player sits exactly at the configured center, not the
+        // default 600.
+        let unrated = player(None);
+        let settings = TournamentSettings {
+            elo_unrated_prior_center: 900,
+            ..Default::default()
+        };
+        let elos = estimate_elos(std::slice::from_ref(&unrated), &settings, &[]);
+        assert!(
+            (elos[&unrated.id] - 900.0).abs() < 1e-6,
+            "unrated seeds at the configured center, got {}",
+            elos[&unrated.id]
+        );
+    }
+
+    #[test]
+    fn unrated_prior_k_controls_the_drift() {
+        // Same upset (unrated beats a 1600), but a larger unrated K is a looser
+        // prior, so the estimate moves further. A tiny K barely moves it.
+        let newcomer = player(None);
+        let strong = player(Some(1600));
+        let r = decided(1, vec![win(newcomer.id, strong.id)]);
+        let shift = |k: u32| {
+            let settings = TournamentSettings {
+                elo_unrated_k: k,
+                ..Default::default()
+            };
+            estimate_elos(
+                &[newcomer.clone(), strong.clone()],
+                &settings,
+                std::slice::from_ref(&r),
+            )[&newcomer.id]
+        };
+        let tight = shift(20); // a rated-scale K → prior barely budges
+        let loose = shift(2000); // very loose → estimate chases the result
+        assert!(
+            loose > tight + 200.0,
+            "a looser unrated prior should drift much further: tight {tight}, loose {loose}"
         );
     }
 

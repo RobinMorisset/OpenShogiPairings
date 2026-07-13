@@ -192,6 +192,20 @@ fn default_elo_provisional_multiplier_percent() -> u32 {
     200
 }
 
+/// The default center of the unrated-player prior (ELO). Named so
+/// `#[serde(default = …)]` can fill it in for tournaments saved before the field
+/// existed. Matches [`crate::elo::UNRATED_PRIOR_MEAN`].
+fn default_elo_unrated_prior_center() -> u32 {
+    crate::elo::UNRATED_PRIOR_MEAN as u32
+}
+
+/// The default K for the unrated-player prior. Named so `#[serde(default = …)]`
+/// can fill it in for tournaments saved before the field existed. Matches
+/// [`crate::elo::UNRATED_PRIOR_DEFAULT_K`] (≈ the historical `σ 350`).
+fn default_elo_unrated_k() -> u32 {
+    crate::elo::UNRATED_PRIOR_DEFAULT_K as u32
+}
+
 /// Configuration that isn't tied to a single player or round.
 ///
 /// Kept as its own record so it can grow (time controls, tie-break choices, …)
@@ -305,6 +319,23 @@ pub struct TournamentSettings {
     /// established one. Only meaningful when [`Self::elo_estimate_needed`].
     #[serde(default = "default_elo_provisional_multiplier_percent")]
     pub elo_provisional_multiplier_percent: u32,
+    /// The center (mean) of the Bayesian prior for an **unrated** player, on the
+    /// ELO scale. Where their estimate sits before any game pulls it. Default
+    /// `600` (the midpoint of the assumed `[1, 1200]` unrated range). Only
+    /// meaningful when [`Self::elo_estimate_needed`] or
+    /// [`Self::macmahon_from_estimate_active`].
+    #[serde(default = "default_elo_unrated_prior_center")]
+    pub elo_unrated_prior_center: u32,
+    /// The **K** setting the width of an unrated player's prior: its standard
+    /// deviation is `√(K · s)`, the same law a rated player's K obeys, so this
+    /// reads on the same familiar scale (a rated player's K is ~16–40; an unrated
+    /// one is far wider). Bigger = a looser prior that lets results move the
+    /// estimate faster. Default `705` (≈ the historical `σ 350`). Stored as an
+    /// integer so the settings stay `Eq`; read via [`Self::elo_unrated_k`], which
+    /// clamps it ≥ 1 (a zero-width prior would be degenerate). Only meaningful
+    /// when [`Self::elo_estimate_needed`] or [`Self::macmahon_from_estimate_active`].
+    #[serde(default = "default_elo_unrated_k")]
+    pub elo_unrated_k: u32,
 }
 
 impl Default for TournamentSettings {
@@ -325,6 +356,8 @@ impl Default for TournamentSettings {
             macmahon_from_estimated_elo: false,
             elo_k_multiplier_percent: default_elo_k_multiplier_percent(),
             elo_provisional_multiplier_percent: default_elo_provisional_multiplier_percent(),
+            elo_unrated_prior_center: default_elo_unrated_prior_center(),
+            elo_unrated_k: default_elo_unrated_k(),
         }
     }
 }
@@ -442,6 +475,8 @@ impl TournamentSettings {
         // A provisional rating should never be treated as more reliable than an
         // established one, so the extra multiplier is at least ×1.
         self.elo_provisional_multiplier_percent = self.elo_provisional_multiplier_percent.max(100);
+        // A zero-width unrated prior would divide by zero in the solver — clamp K ≥ 1.
+        self.elo_unrated_k = self.elo_unrated_k.max(1);
 
         self
     }
@@ -477,6 +512,17 @@ impl TournamentSettings {
     /// (percent / 100).
     pub fn elo_provisional_multiplier(&self) -> f64 {
         self.elo_provisional_multiplier_percent as f64 / 100.0
+    }
+
+    /// The center (mean) of the unrated-player prior, as a float.
+    pub fn elo_unrated_prior_center(&self) -> f64 {
+        self.elo_unrated_prior_center as f64
+    }
+
+    /// The K for the unrated-player prior, as a float, clamped ≥ 1 (a zero-width
+    /// prior would divide by zero in the solver and freeze the estimate).
+    pub fn elo_unrated_k(&self) -> f64 {
+        self.elo_unrated_k.max(1) as f64
     }
 
     /// Sort thresholds (ELO ones by value, then grade ones by strength) and
@@ -875,6 +921,37 @@ mod tests {
         }
         .normalized();
         assert_eq!(grade_only.tiebreaks, vec![Tiebreak::Points]);
+    }
+
+    #[test]
+    fn unrated_prior_defaults_reproduce_the_historical_prior() {
+        let s = TournamentSettings::default();
+        assert_eq!(s.elo_unrated_prior_center, 600);
+        assert_eq!(s.elo_unrated_k, 705);
+        assert!((s.elo_unrated_prior_center() - 600.0).abs() < 1e-9);
+        // √(705·s) ≈ 350, the historical unrated std.
+        let std = (s.elo_unrated_k() * crate::elo::S).sqrt();
+        assert!((std - 350.0).abs() < 1.0, "unrated std ~350, got {std}");
+        // Omitted from an old save → the defaults.
+        let loaded: TournamentSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(loaded.elo_unrated_prior_center, 600);
+        assert_eq!(loaded.elo_unrated_k, 705);
+    }
+
+    #[test]
+    fn normalized_clamps_unrated_k_to_at_least_one() {
+        let s = TournamentSettings {
+            elo_unrated_k: 0,
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(s.elo_unrated_k, 1);
+        // And the accessor never yields a zero-width prior either.
+        let raw = TournamentSettings {
+            elo_unrated_k: 0,
+            ..Default::default()
+        };
+        assert!(raw.elo_unrated_k() >= 1.0);
     }
 
     #[test]

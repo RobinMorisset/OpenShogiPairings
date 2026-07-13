@@ -83,6 +83,8 @@ ratings.
 | `--seed S` | master seed; run *i* uses `seed + i`, shared across variants (§ Common random numbers) |
 | `--jitter J` | scale on the true-strength spread (§ The strength oracle); default 0 |
 | `--oracle-provisional M` | how much wider the true-strength prior is for a provisional player (default 2.0) |
+| `--oracle-unrated-center C` | center (mean ELO) of an unrated player's true-strength prior (default 600) |
+| `--oracle-unrated-k K` | K setting the width of an unrated player's true-strength prior, σ = √(K·s) (default 705 ≈ σ 350) |
 | `--cup-size N` | run the hybrid cup with a bracket of 8/16/32/64 (needs `--cup-nations`) |
 | `--cup-nations FR,BE,…` | nationalities eligible for the cup |
 | `--threshold T` | `|diff|` cut for `P(|diff|>T)`; repeatable; default 400 |
@@ -112,13 +114,17 @@ Each player's ground-truth strength for a run is drawn from
 
 - **center** — the player's override (the post-tournament strength from
   `--results`, a `--strength` value, or a matched FESA-list rating) if present,
-  otherwise their registration rating. With `--results`, *every* player has an
+  otherwise their registration rating (or, for an unrated player,
+  `--oracle-unrated-center`, default 600). With `--results`, *every* player has an
   override, so the center is their post-tournament ELO.
 - **σ₀** — the oracle prior width from
   [`oracle_prior`](../crates/core/src/elo.rs): the same rating-/reliability-
   dependent shape the ELO estimator uses, but pinned to the **raw FESA K** (×1),
   widened for a provisionally-rated player by `--oracle-provisional`. Tighter for
-  strong/established players, wider for weak/provisional/unrated ones.
+  strong/established players, wider for weak/provisional/unrated ones; an unrated
+  player's width follows `σ₀ = √(K·s)` at `--oracle-unrated-k` (default 705). These
+  oracle knobs are the truth-model counterparts of a variant's `elo_unrated_*`
+  settings, kept separate so the true world never depends on what a variant believes.
 - **jitter** — the global scale on that width. `0` pins each player to their
   center exactly; `1` samples at the oracle's own prior width; `>1` stress-tests
   worse-than-assumed ratings.

@@ -73,6 +73,8 @@
   let macmahonFromElo = $state(false);
   let eloKPercent = $state(100);
   let eloProvisionalPercent = $state(200);
+  let eloUnratedCenter = $state(600);
+  let eloUnratedK = $state(705);
 
   // Whether the "MacMahon from estimated ELO" option can apply: it compares the
   // estimate against ELO thresholds, so it's inert (and greyed out) with only
@@ -133,6 +135,8 @@
     const sMacmahonFromElo = settings.macmahon_from_estimated_elo ?? false;
     const sEloK = settings.elo_k_multiplier_percent ?? 100;
     const sEloProv = settings.elo_provisional_multiplier_percent ?? 200;
+    const sEloUnratedCenter = settings.elo_unrated_prior_center ?? 600;
+    const sEloUnratedK = settings.elo_unrated_k ?? 705;
     untrack(() => {
       const matches =
         eqThresholds(cleanThresholds(thresholds), sThresholds) &&
@@ -149,7 +153,9 @@
         mixedEloEnabled === sMixedElo &&
         macmahonFromElo === sMacmahonFromElo &&
         eloKPercent === sEloK &&
-        eloProvisionalPercent === sEloProv;
+        eloProvisionalPercent === sEloProv &&
+        eloUnratedCenter === sEloUnratedCenter &&
+        eloUnratedK === sEloUnratedK;
       if (!matches) {
         thresholds = sThresholds.map((t) => ({
           kind: t.criterion.kind,
@@ -172,6 +178,8 @@
         macmahonFromElo = sMacmahonFromElo;
         eloKPercent = sEloK;
         eloProvisionalPercent = sEloProv;
+        eloUnratedCenter = sEloUnratedCenter;
+        eloUnratedK = sEloUnratedK;
       }
     });
   });
@@ -197,6 +205,8 @@
       macmahon_from_estimated_elo: macmahonFromElo,
       elo_k_multiplier_percent: eloKPercent,
       elo_provisional_multiplier_percent: eloProvisionalPercent,
+      elo_unrated_prior_center: eloUnratedCenter,
+      elo_unrated_k: eloUnratedK,
     });
   }
 
@@ -232,6 +242,21 @@
     const m = Number(raw);
     const pct = Math.round((Number.isFinite(m) ? m : 2) * 100);
     eloProvisionalPercent = Math.max(100, pct);
+    persist();
+  }
+
+  function editEloUnratedCenter(raw: string) {
+    // The center (mean ELO) of the unrated prior. Kept ≥ 0.
+    const v = Math.round(Number(raw));
+    eloUnratedCenter = Math.max(0, Number.isFinite(v) ? v : 600);
+    persist();
+  }
+
+  function editEloUnratedK(raw: string) {
+    // K sets the unrated prior's width (σ = √(K·s)); never below 1 (a zero-width
+    // prior is degenerate — the server clamps this too).
+    const v = Math.round(Number(raw));
+    eloUnratedK = Math.max(1, Number.isFinite(v) ? v : 705);
     persist();
   }
 
@@ -947,7 +972,12 @@
     <p class="desc small-note">
       {$_("settings.eloModeDesc")}
     </p>
-    {#if eloEnabled || mixedEloEnabled}
+    {#if eloEstimateLive}
+      {#if !eloEnabled && !mixedEloEnabled}
+        <p class="desc small-note">
+          {$_("settings.eloEstimateKnobsMacmahonNote")}
+        </p>
+      {/if}
       <label class="check elo-k">
         {$_("settings.eloDriftMultiplier")}
         <input
@@ -977,6 +1007,33 @@
       </label>
       <p class="desc small-note">
         {$_("settings.eloProvisionalDesc")}
+      </p>
+      <label class="check elo-k">
+        {$_("settings.eloUnratedCenter")}
+        <input
+          type="number"
+          min="0"
+          step="50"
+          class="threshold narrow"
+          value={eloUnratedCenter}
+          disabled={busy}
+          onchange={(e) => editEloUnratedCenter(e.currentTarget.value)}
+        />
+      </label>
+      <label class="check elo-k">
+        {$_("settings.eloUnratedK")}
+        <input
+          type="number"
+          min="1"
+          step="5"
+          class="threshold narrow"
+          value={eloUnratedK}
+          disabled={busy}
+          onchange={(e) => editEloUnratedK(e.currentTarget.value)}
+        />
+      </label>
+      <p class="desc small-note">
+        {$_("settings.eloUnratedDesc")}
       </p>
     {/if}
   </div>

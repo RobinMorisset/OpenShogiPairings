@@ -23,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 use rand::Rng;
 use uuid::Uuid;
 
-use crate::elo::{estimate_elos, oracle_prior};
+use crate::elo::{estimate_elos, oracle_prior, UNRATED_PRIOR_DEFAULT_K, UNRATED_PRIOR_MEAN};
 use crate::player::Player;
 use crate::round::Winner;
 use crate::settings::TournamentSettings;
@@ -32,6 +32,41 @@ use crate::tournament::{Tournament, TournamentError, MIN_PLAYERS_PER_ROUND};
 /// Ground-truth strengths (ELO scale) keyed by player id — the "true" playing
 /// strength outcomes are drawn from, distinct from a registration rating.
 pub type StrengthMap = HashMap<Uuid, f64>;
+
+/// The settings-independent "truth model" the simulator draws each player's
+/// ground-truth strength from — the oracle-prior knobs, shared by every settings
+/// variant of a run (a variant's pairing knobs must never move the true world).
+/// The oracle counterparts of the estimator's `elo_*` settings, set from the CLI.
+#[derive(Debug, Clone, Copy)]
+pub struct OracleModel {
+    /// Global multiplier on every player's oracle-prior width: `0` pins each
+    /// player to their center, `>0` scatters them around it (`--jitter`).
+    pub jitter: f64,
+    /// Extra width multiplier for a provisionally-rated player, clamped ≥ 1 in
+    /// [`oracle_prior`] (`--oracle-provisional`).
+    pub provisional: f64,
+    /// Center (mean) of the oracle prior for an unrated player
+    /// (`--oracle-unrated-center`).
+    pub unrated_center: f64,
+    /// K setting the width of the unrated oracle prior, `σ = √(K·s)`
+    /// (`--oracle-unrated-k`).
+    pub unrated_k: f64,
+}
+
+impl OracleModel {
+    /// The oracle model with the default unrated prior (center
+    /// [`UNRATED_PRIOR_MEAN`], K [`UNRATED_PRIOR_DEFAULT_K`]) and the given global
+    /// jitter and provisional-width multiplier — the common case in tests and
+    /// when the unrated defaults are untouched.
+    pub fn new(jitter: f64, provisional: f64) -> Self {
+        OracleModel {
+            jitter,
+            provisional,
+            unrated_center: UNRATED_PRIOR_MEAN,
+            unrated_k: UNRATED_PRIOR_DEFAULT_K,
+        }
+    }
+}
 
 /// Errors from a simulation run.
 #[derive(Debug, thiserror::Error)]
@@ -111,30 +146,32 @@ fn sample_normal(rng: &mut impl Rng, mean: f64, std: f64) -> f64 {
 ///
 /// Crucially the width does **not** depend on any [`TournamentSettings`]: the true
 /// strengths are one physical world shared by every settings variant, so a
-/// per-variant pairing knob must never move them. `jitter` is the simulator's own
-/// global scale on that width — `jitter = 0` pins each player to their center
-/// exactly (the override, else the rating), and `jitter > 0` spreads them around it
+/// per-variant pairing knob must never move them. `oracle.jitter` is the
+/// simulator's own global scale on that width — `0` pins each player to their
+/// center exactly (the override, else the rating), and `>0` spreads them around it
 /// (around the post-tournament ELO when a results table supplied it, not the
-/// pre-tournament rating). Players are visited in slice order so the draws — and
-/// thus the whole run — are reproducible from the seed and identical across variants.
+/// pre-tournament rating). `oracle`'s provisional and unrated knobs shape the
+/// per-player width the same way the estimator's settings do. Players are visited
+/// in slice order so the draws — and thus the whole run — are reproducible from
+/// the seed and identical across variants.
 pub fn sample_strengths(
     players: &[Player],
     overrides: &StrengthMap,
-    jitter: f64,
-    provisional_mult: f64,
+    oracle: &OracleModel,
     rng: &mut impl Rng,
 ) -> StrengthMap {
     players
         .iter()
         .map(|p| {
-            let (prior_mean, std) = oracle_prior(p, provisional_mult);
+            let (prior_mean, std) =
+                oracle_prior(p, oracle.provisional, oracle.unrated_center, oracle.unrated_k);
             // The override (post-tournament / known) strength is the mean to jitter
             // around; fall back to the registration rating when there is none.
             let center = overrides.get(&p.id).copied().unwrap_or(prior_mean);
-            let strength = if jitter <= 0.0 {
+            let strength = if oracle.jitter <= 0.0 {
                 center
             } else {
-                sample_normal(rng, center, jitter * std)
+                sample_normal(rng, center, oracle.jitter * std)
             };
             (p.id, strength)
         })
@@ -493,22 +530,19 @@ fn order_by_estimate(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<U
 /// each paired by the real engine and auto-filled from the result model.
 ///
 /// `overrides` fixes specific players' true strength (see [`sample_strengths`]);
-/// `jitter` scales the oracle prior width and `oracle_provisional` widens it for
-/// provisional players — both belong to the settings-independent truth model, not
-/// to `settings` (which only drives pairing). `cup` runs the hybrid
-/// direct-elimination cup when `Some` (see [`CupConfig`]). `rng` seeds both the
-/// strength draws and, via a per-run key, the game outcomes, so the run is
-/// reproducible from its seed. Game outcomes are keyed on the *pairing* rather
-/// than drawn sequentially (see [`game_uniform`]), so two variants sharing this
-/// run's seed decide any shared matchup identically — genuine common random
-/// numbers, robust to the pairings diverging.
-#[allow(clippy::too_many_arguments)]
+/// `oracle` is the settings-independent truth model (jitter, provisional width,
+/// and the unrated prior), not part of `settings` (which only drives pairing).
+/// `cup` runs the hybrid direct-elimination cup when `Some` (see [`CupConfig`]).
+/// `rng` seeds both the strength draws and, via a per-run key, the game outcomes,
+/// so the run is reproducible from its seed. Game outcomes are keyed on the
+/// *pairing* rather than drawn sequentially (see [`game_uniform`]), so two variants
+/// sharing this run's seed decide any shared matchup identically — genuine common
+/// random numbers, robust to the pairings diverging.
 pub fn simulate_run(
     base: &Tournament,
     settings: &TournamentSettings,
     overrides: &StrengthMap,
-    jitter: f64,
-    oracle_provisional: f64,
+    oracle: &OracleModel,
     rounds: u32,
     cup: Option<&CupConfig>,
     rng: &mut impl Rng,
@@ -518,7 +552,7 @@ pub fn simulate_run(
     // so it depends only on the run's seed, not on how many players were jittered —
     // identical across variants of the same run.
     let run_seed = rng.gen::<u64>();
-    let strengths = sample_strengths(&tournament.players, overrides, jitter, oracle_provisional, rng);
+    let strengths = sample_strengths(&tournament.players, overrides, oracle, rng);
 
     for round_idx in 0..rounds {
         tournament.prepare_round()?;
@@ -614,7 +648,7 @@ mod tests {
         overrides.insert(a, 2222.0);
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         // At jitter 0 the override is the exact ground truth.
-        let s = sample_strengths(&t.players, &overrides, 0.0, 2.0, &mut rng);
+        let s = sample_strengths(&t.players, &overrides, &OracleModel::new(0.0, 2.0), &mut rng);
         assert_eq!(s[&a], 2222.0);
     }
 
@@ -630,7 +664,7 @@ mod tests {
         let mut rng = ChaCha8Rng::seed_from_u64(3);
         let mut samples = Vec::new();
         for _ in 0..4000 {
-            let s = sample_strengths(&t.players, &overrides, 1.0, 2.0, &mut rng);
+            let s = sample_strengths(&t.players, &overrides, &OracleModel::new(1.0, 2.0), &mut rng);
             samples.push(s[&real]);
         }
         let mean = samples.iter().sum::<f64>() / samples.len() as f64;
@@ -649,7 +683,7 @@ mod tests {
     fn zero_jitter_pins_strength_to_the_rating() {
         let t = tournament_with(&[("A", 1500), ("B", 1800)]);
         let mut rng = ChaCha8Rng::seed_from_u64(1);
-        let s = sample_strengths(&t.players, &StrengthMap::new(), 0.0, 2.0, &mut rng);
+        let s = sample_strengths(&t.players, &StrengthMap::new(), &OracleModel::new(0.0, 2.0), &mut rng);
         assert_eq!(s[&t.players[0].id], 1500.0);
         assert_eq!(s[&t.players[1].id], 1800.0);
     }
@@ -670,7 +704,7 @@ mod tests {
         let mut rng = ChaCha8Rng::seed_from_u64(7);
         let (mut ss, mut sw) = (Vec::new(), Vec::new());
         for _ in 0..2000 {
-            let s = sample_strengths(&t.players, &StrengthMap::new(), 1.0, 2.0, &mut rng);
+            let s = sample_strengths(&t.players, &StrengthMap::new(), &OracleModel::new(1.0, 2.0), &mut rng);
             ss.push(s[&strong_id]);
             sw.push(s[&weak_id]);
         }
@@ -707,7 +741,8 @@ mod tests {
             let mut rng = ChaCha8Rng::seed_from_u64(9);
             let (mut e, mut p) = (Vec::new(), Vec::new());
             for _ in 0..4000 {
-                let s = sample_strengths(&t.players, &StrengthMap::new(), 1.0, prov_mult, &mut rng);
+                let s =
+                    sample_strengths(&t.players, &StrengthMap::new(), &OracleModel::new(1.0, prov_mult), &mut rng);
                 e.push(s[&est_id]);
                 p.push(s[&prov_id]);
             }
@@ -723,6 +758,69 @@ mod tests {
     }
 
     #[test]
+    fn oracle_unrated_center_and_k_control_the_unrated_true_strength() {
+        use crate::player::NewPlayer;
+        let mut t = Tournament::new("Sim").unwrap();
+        let uid = t
+            .add_player(NewPlayer {
+                last_name: "New".into(),
+                rating: None, // unrated
+                ..Default::default()
+            })
+            .unwrap()
+            .id;
+
+        // Jitter 0 pins the unrated player to the oracle's unrated center, not 600.
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        let pinned = sample_strengths(
+            &t.players,
+            &StrengthMap::new(),
+            &OracleModel {
+                jitter: 0.0,
+                provisional: 2.0,
+                unrated_center: 900.0,
+                unrated_k: 705.0,
+            },
+            &mut rng,
+        );
+        assert!(
+            (pinned[&uid] - 900.0).abs() < 1e-6,
+            "unrated pinned to the oracle center, got {}",
+            pinned[&uid]
+        );
+
+        // At jitter 1, a bigger unrated K widens the true-strength spread (σ ∝ √K).
+        let std = |v: &[f64]| {
+            let m = v.iter().sum::<f64>() / v.len() as f64;
+            (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / v.len() as f64).sqrt()
+        };
+        let spread = |k: f64| {
+            let mut rng = ChaCha8Rng::seed_from_u64(9);
+            let vals: Vec<f64> = (0..4000)
+                .map(|_| {
+                    sample_strengths(
+                        &t.players,
+                        &StrengthMap::new(),
+                        &OracleModel {
+                            jitter: 1.0,
+                            provisional: 2.0,
+                            unrated_center: 600.0,
+                            unrated_k: k,
+                        },
+                        &mut rng,
+                    )[&uid]
+                })
+                .collect();
+            std(&vals)
+        };
+        // K ×4 → σ ×2 (√4). A generous margin keeps the sampling test robust.
+        assert!(
+            spread(2800.0) > spread(700.0) * 1.7,
+            "a larger unrated K should widen the spread"
+        );
+    }
+
+    #[test]
     fn a_run_decides_every_board_and_ranks_all_players() {
         let base = tournament_with(&[("A", 1600), ("B", 1500), ("C", 1400), ("D", 1300)]);
         let mut rng = ChaCha8Rng::seed_from_u64(42);
@@ -730,8 +828,7 @@ mod tests {
             &base,
             &base.settings,
             &StrengthMap::new(),
-            0.0,
-            2.0,
+            &OracleModel::new(0.0, 2.0),
             3,
             None,
             &mut rng,
@@ -848,8 +945,16 @@ Nr Name    Nat Elo  1   Pts
 
         let mut rng = ChaCha8Rng::seed_from_u64(7);
         let out =
-            simulate_run(&base, &base.settings, &StrengthMap::new(), 0.0, 2.0, 1, None, &mut rng)
-                .unwrap();
+            simulate_run(
+                &base,
+                &base.settings,
+                &StrengthMap::new(),
+                &OracleModel::new(0.0, 2.0),
+                1,
+                None,
+                &mut rng,
+            )
+            .unwrap();
         // All four are still ranked, but only the A–B board was actually played.
         assert_eq!(out.final_order.len(), 4);
         assert_eq!(out.game_diffs.len(), 1);
@@ -864,8 +969,7 @@ Nr Name    Nat Elo  1   Pts
                 &base,
                 &base.settings,
                 &StrengthMap::new(),
-                0.5,
-                2.0,
+                &OracleModel::new(0.5, 2.0),
                 3,
                 None,
                 &mut rng,
@@ -895,8 +999,7 @@ Nr Name    Nat Elo  1   Pts
                 &base,
                 &base.settings,
                 &StrengthMap::new(),
-                0.0,
-                2.0,
+                &OracleModel::new(0.0, 2.0),
                 3,
                 None,
                 &mut rng,
@@ -976,8 +1079,7 @@ Nr Name    Nat Elo  1   Pts
             &base,
             &base.settings,
             &StrengthMap::new(),
-            0.0,
-            2.0,
+            &OracleModel::new(0.0, 2.0),
             3,
             Some(&cup),
             &mut rng,
@@ -1037,8 +1139,7 @@ Nr Name    Nat Elo  1   Pts
             &base,
             &base.settings,
             &StrengthMap::new(),
-            0.0,
-            2.0,
+            &OracleModel::new(0.0, 2.0),
             1,
             Some(&cup),
             &mut rng,
@@ -1054,8 +1155,7 @@ Nr Name    Nat Elo  1   Pts
             &base,
             &base.settings,
             &StrengthMap::new(),
-            0.0,
-            2.0,
+            &OracleModel::new(0.0, 2.0),
             1,
             None,
             &mut rng,
@@ -1073,8 +1173,7 @@ Nr Name    Nat Elo  1   Pts
             &base,
             &base.settings,
             &StrengthMap::new(),
-            0.0,
-            2.0,
+            &OracleModel::new(0.0, 2.0),
             1,
             None,
             &mut rng,

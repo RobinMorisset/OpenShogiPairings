@@ -150,6 +150,19 @@ maximisation and buys three things over the box:
 estimates move fast — see §2.4 for exactly how fast, and the trade-off if it
 proves too jumpy in practice.
 
+Both ends of this prior are **referee-tunable** (defaults reproduce the above):
+`elo_unrated_prior_center` is the mean, and `elo_unrated_k` sets the width via the
+*same* `σ₀ = √(K · s)` law a rated player's K obeys — so the referee tunes one
+familiar quantity rather than a raw standard deviation (a rated K is ~16–40; the
+unrated default `705` gives `σ ≈ 350`). The center and K are stored as integers so
+the settings stay `Eq`; `elo_unrated_k()` clamps K ≥ 1. The estimator is unaffected
+by the overall multiplier `m` and the provisional multiplier for unrated players —
+an unrated player has no registration rating to drift from or be provisional about,
+so `elo_unrated_k` is itself the only width knob. The simulator's oracle mirrors
+these as `--oracle-unrated-center` / `--oracle-unrated-k` (its own truth-model
+knobs, distinct from a variant's settings), so the true world's newcomer spread can
+be studied independently of what a variant *believes* about newcomers.
+
 ### 2.3 Drift and auto-deceleration
 
 After `n` roughly-even games (`E ≈ ½`, so per-game Fisher information near its
@@ -396,9 +409,21 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   FESA list is often stale and referees routinely bump a known player's rating —
   and cleared only when the *last name* is edited (a possibly different entry) or
   the rating is removed entirely.
+- `elo_unrated_prior_center: u32` — the mean of the unrated prior (default `600`;
+  see §2.2). Read as a float via `settings.elo_unrated_prior_center()`.
+- `elo_unrated_k: u32` — the K setting the unrated prior's width via `σ₀ = √(K·s)`
+  (default `705 ≈ σ 350`; see §2.2). Read via `settings.elo_unrated_k()`, which
+  clamps K ≥ 1; normalization stores the clamped value. Unlike `m` and the
+  provisional multiplier, this is the *only* width knob for an unrated player.
 
-The unrated prior `N(600, 350²)`, the FESA K table, `s`, and the reliability
-threshold (18 games) are constants in `elo.rs`, not settings.
+The four `elo_*` estimate knobs (`elo_k_multiplier_percent`,
+`elo_provisional_multiplier_percent`, `elo_unrated_prior_center`, `elo_unrated_k`)
+surface in the Settings UI whenever a live estimate is actually maintained — either
+ELO pairing mode, or estimate-based MacMahon (§6b) with an ELO threshold. The FESA
+K table, `s`, and the reliability threshold (18 games) remain constants in
+`elo.rs`, not settings; `UNRATED_PRIOR_MEAN` / `UNRATED_PRIOR_DEFAULT_K` there are
+only the *defaults* for the two settings above (and the fallback where no settings
+are in hand).
 
 ## Ranking
 
