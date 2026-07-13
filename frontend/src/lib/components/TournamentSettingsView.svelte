@@ -3,6 +3,7 @@
   import { _ } from "svelte-i18n";
   import { TIEBREAKS } from "../types";
   import type {
+    EloPriorShape,
     GradeKind,
     HandicapPolicy,
     MacMahonThreshold,
@@ -75,6 +76,8 @@
   let eloProvisionalPercent = $state(200);
   let eloUnratedCenter = $state(600);
   let eloUnratedK = $state(705);
+  let eloPriorShape = $state<EloPriorShape>("gaussian");
+  let eloUpwardLoosenessPercent = $state(100);
 
   // Whether the "MacMahon from estimated ELO" option can apply: it compares the
   // estimate against ELO thresholds, so it's inert (and greyed out) with only
@@ -137,6 +140,8 @@
     const sEloProv = settings.elo_provisional_multiplier_percent ?? 200;
     const sEloUnratedCenter = settings.elo_unrated_prior_center ?? 600;
     const sEloUnratedK = settings.elo_unrated_k ?? 705;
+    const sEloPriorShape = settings.elo_prior_shape ?? "gaussian";
+    const sEloUpwardLooseness = settings.elo_upward_looseness_percent ?? 100;
     untrack(() => {
       const matches =
         eqThresholds(cleanThresholds(thresholds), sThresholds) &&
@@ -155,7 +160,9 @@
         eloKPercent === sEloK &&
         eloProvisionalPercent === sEloProv &&
         eloUnratedCenter === sEloUnratedCenter &&
-        eloUnratedK === sEloUnratedK;
+        eloUnratedK === sEloUnratedK &&
+        eloPriorShape === sEloPriorShape &&
+        eloUpwardLoosenessPercent === sEloUpwardLooseness;
       if (!matches) {
         thresholds = sThresholds.map((t) => ({
           kind: t.criterion.kind,
@@ -180,6 +187,8 @@
         eloProvisionalPercent = sEloProv;
         eloUnratedCenter = sEloUnratedCenter;
         eloUnratedK = sEloUnratedK;
+        eloPriorShape = sEloPriorShape;
+        eloUpwardLoosenessPercent = sEloUpwardLooseness;
       }
     });
   });
@@ -207,6 +216,8 @@
       elo_provisional_multiplier_percent: eloProvisionalPercent,
       elo_unrated_prior_center: eloUnratedCenter,
       elo_unrated_k: eloUnratedK,
+      elo_prior_shape: eloPriorShape,
+      elo_upward_looseness_percent: eloUpwardLoosenessPercent,
     });
   }
 
@@ -257,6 +268,20 @@
     // prior is degenerate — the server clamps this too).
     const v = Math.round(Number(raw));
     eloUnratedK = Math.max(1, Number.isFinite(v) ? v : 705);
+    persist();
+  }
+
+  function editEloPriorShape(raw: string) {
+    eloPriorShape = raw === "laplace" ? "laplace" : "gaussian";
+    persist();
+  }
+
+  function editEloUpwardLooseness(raw: string) {
+    // Decimal ratio stored as an integer percent; never below ×1 (an upward
+    // revision is never harder than a downward one — the server clamps this too).
+    const m = Number(raw);
+    const pct = Math.round((Number.isFinite(m) ? m : 1) * 100);
+    eloUpwardLoosenessPercent = Math.max(100, pct);
     persist();
   }
 
@@ -1035,6 +1060,38 @@
       <p class="desc small-note">
         {$_("settings.eloUnratedDesc")}
       </p>
+      <label class="check elo-k">
+        {$_("settings.eloPriorShape")}
+        <select
+          class="tb-select"
+          value={eloPriorShape}
+          disabled={busy}
+          onchange={(e) => editEloPriorShape(e.currentTarget.value)}
+        >
+          <option value="gaussian">{$_("settings.eloPriorShapeGaussian")}</option>
+          <option value="laplace">{$_("settings.eloPriorShapeLaplace")}</option>
+        </select>
+      </label>
+      <p class="desc small-note">
+        {$_("settings.eloPriorShapeDesc")}
+      </p>
+      {#if eloPriorShape === "laplace"}
+        <label class="check elo-k">
+          {$_("settings.eloUpwardLooseness")}
+          <input
+            type="number"
+            min="1"
+            step="0.5"
+            class="threshold narrow"
+            value={eloUpwardLoosenessPercent / 100}
+            disabled={busy}
+            onchange={(e) => editEloUpwardLooseness(e.currentTarget.value)}
+          />
+        </label>
+        <p class="desc small-note">
+          {$_("settings.eloUpwardLoosenessDesc")}
+        </p>
+      {/if}
     {/if}
   </div>
 

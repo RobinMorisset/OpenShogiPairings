@@ -42,7 +42,7 @@ pub use player::{Grade, GradeKind, NewPlayer, Player, PointAdjustment};
 pub use round::{
     Board, CupStage, Handicap, HandicapGame, NoShow, PairingSource, Round, RoundDraft, Winner,
 };
-pub use settings::{FloaterStyle, HandicapPolicy, Tiebreak, TournamentSettings};
+pub use settings::{EloPriorShape, FloaterStyle, HandicapPolicy, Tiebreak, TournamentSettings};
 pub use standings::{compute_standings, Standing};
 pub use tournament::{
     Tournament, TournamentError, MIN_PLAYERS_PER_ROUND, TOURNAMENT_FORMAT_VERSION,

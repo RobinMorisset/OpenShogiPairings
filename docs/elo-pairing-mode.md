@@ -77,9 +77,12 @@ Two properties make this the right fit for OSP:
   to its own seed, so there is no gauge freedom to fix. The prior is load-bearing,
   not just regularisation.
 
-The log-likelihood is concave and every prior is a concave (Gaussian) log-density,
-so the objective is smooth and strongly concave and the maximiser is **unique and
-deterministic**.
+The log-likelihood is concave and every prior is a **log-concave** density
+(Gaussian by default, or the optional Laplace of §2.5 — both log-concave), so the
+objective is concave and the maximiser is **unique and deterministic**. With the
+default Gaussian prior it is additionally smooth and *strongly* concave; the
+Laplace variant keeps concavity but is only piecewise-smooth, which §2.5 handles
+with a small Huber core.
 
 ### 2.1 Prior for rated players — FESA K × a single multiplier
 
@@ -214,13 +217,47 @@ If upsets should move estimates more across the board, raise **m** (bigger K →
 bigger cap). If the unrated jumps feel too large, shrink `σ_u` — a tighter, more
 informative unrated prior trades responsiveness for stability (the same knob).
 
+### 2.5 Optional fatter-tailed / asymmetric prior — `EloPriorShape`
+
+The Gaussian prior's restoring force is `(θ − μ₀)/σ₀²`, i.e. **linear and
+unbounded**: it fights back ever harder the further the estimate drifts, so a run
+of surprising results is capped near `K` per game (§2.4) and a genuinely
+mis-seeded player is corrected only slowly. A referee can instead select
+`EloPriorShape::Laplace`, a Huber-smoothed **asymmetric Laplace** prior of the
+*same width* but with a **constant** restoring force `1/b` — exponential (hence
+fatter) tails. A sustained streak against much-stronger opponents then moves the
+estimate much further before the prior reins it in, at the cost of a *dead zone*:
+below `≈ s/b` net surprise-wins the estimate does not move at all (the constant
+force isn't yet overcome), and past it the estimate tracks the evidence.
+
+- **Width mapping.** The Laplace scale is variance-matched to the Gaussian,
+  `b_down = σ₀/√2`, so the existing knobs (`m`, provisional multiplier,
+  `elo_unrated_k`) keep their meaning — they still set `σ₀`, which sets `b_down`.
+- **Asymmetry.** The upward arm is widened to `b_up = r · b_down`, where
+  `r = elo_upward_looseness ≥ 1`. `r > 1` makes an *upward* revision (the common
+  case — an under-rated improver) clear on less evidence than a downward one,
+  while the downward arm stays as tight as before. `r = 1` is symmetric, so the
+  Laplace prior stays neutral about direction until a referee opts in.
+- **Still log-concave.** `−|d|` is concave, so the objective stays concave and the
+  MAP unique. The only wrinkle is the kink at `d = 0`, where the Gaussian's finite
+  curvature (`−1/σ₀²`) that keeps the Newton step well-defined is absent. We round
+  it off with a two-piece linear Huber core of half-width `HUBER_DELTA` (a couple
+  of ELO points) **anchored at the origin** (`g(0) = 0`): this restores a strictly
+  negative curvature near the kink *and* keeps the penalty minimised exactly at
+  `μ₀`, so a player with no games still sits precisely at their registration
+  rating regardless of `r`.
+
+Default is `Gaussian`, `r = 1` — behaviour-neutral; nothing changes until a
+referee switches shape.
+
 ## 3. The solver
 
-With every prior Gaussian the objective is smooth, unconstrained and strongly
-concave, so its maximiser is unique. Use **coordinate ascent (Gauss–Seidel)** — no
-external LP/QP dependency, in keeping with the hand-written blossom matcher (a
-single dense Newton solve works too; coordinate ascent is just simpler and
-allocation-free).
+The objective is unconstrained and concave (strongly and smoothly so with the
+default Gaussian prior; still concave, with a piecewise-smooth Huber core, under
+the optional Laplace prior of §2.5), so its maximiser is unique. Use **coordinate
+ascent (Gauss–Seidel)** — no external LP/QP dependency, in keeping with the
+hand-written blossom matcher (a single dense Newton solve works too; coordinate
+ascent is just simpler and allocation-free).
 
 For each player `i`, holding the others fixed, take a 1-D Newton step on the
 concave 1-D objective:
@@ -233,7 +270,10 @@ hessian  H = Σ_games −Eᵢg(1−Eᵢg)/s²  − 1/σ₀ᵢ²
 
 where `Eᵢg = σ((θᵢ − θ_opp)/s)` and `(μᵢ₀, σ₀ᵢ)` is the rated prior (§2.1) or the
 unrated prior `(600, 350)` (§2.2) — every player now carries a prior term, so
-there is no special-cased branch. Sweep all players until the largest change in a
+there is no special-cased branch. The `−(θᵢ − μᵢ₀)/σ₀ᵢ²` / `−1/σ₀ᵢ²` terms above are
+the Gaussian prior's contribution; under the optional Laplace prior (§2.5) they are
+replaced by that prior's constant restoring force and its Huber-core curvature,
+computed by `PriorPenalty::grad_hess` — the rest of the sweep is identical. Sweep all players until the largest change in a
 sweep is below a tolerance (a few ELO-hundredths). Strong concavity guarantees
 convergence to the unique global maximum, so the result is deterministic given a
 fixed tolerance and max-iteration cap.
@@ -415,9 +455,19 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   (default `705 ≈ σ 350`; see §2.2). Read via `settings.elo_unrated_k()`, which
   clamps K ≥ 1; normalization stores the clamped value. Unlike `m` and the
   provisional multiplier, this is the *only* width knob for an unrated player.
+- `elo_prior_shape: EloPriorShape` — `Gaussian` (default) or the fatter-tailed,
+  optionally asymmetric `Laplace` (see §2.5). A plain enum (`#[serde(rename_all =
+  "snake_case")]`), default-`Gaussian`, so old saves and untouched tournaments keep
+  the historical behaviour exactly.
+- `elo_upward_looseness_percent: u32` — the asymmetry ratio `r` for the Laplace
+  prior, integer percent (`100` = ×1.0 = symmetric, the default). Read via
+  `settings.elo_upward_looseness()`; normalization clamps it ≥ 100 (an upward
+  revision is never harder than a downward one). Inert under the Gaussian prior;
+  the UI only shows its input when the shape is Laplace.
 
-The four `elo_*` estimate knobs (`elo_k_multiplier_percent`,
-`elo_provisional_multiplier_percent`, `elo_unrated_prior_center`, `elo_unrated_k`)
+The six `elo_*` estimate knobs (`elo_k_multiplier_percent`,
+`elo_provisional_multiplier_percent`, `elo_unrated_prior_center`, `elo_unrated_k`,
+`elo_prior_shape`, `elo_upward_looseness_percent`)
 surface in the Settings UI whenever a live estimate is actually maintained — either
 ELO pairing mode, or estimate-based MacMahon (§6b) with an ELO threshold. The FESA
 K table, `s`, and the reliability threshold (18 games) remain constants in

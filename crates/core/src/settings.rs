@@ -38,6 +38,34 @@ pub enum HandicapPolicy {
     Suggested,
 }
 
+/// The shape of every player's Bayesian ELO prior (see [`crate::elo`]).
+///
+/// `Gaussian` is the historical `N(rating, σ₀²)`: a thin-tailed penalty whose
+/// restoring force *grows* with the deviation, so it pulls the estimate back to
+/// the registration rating ever harder the further it drifts and caps a single
+/// result's effect near the player's K. `Laplace` is a Huber-smoothed
+/// asymmetric-Laplace penalty of the *same width* but with exponential — hence
+/// fatter — tails: its restoring force is *constant*, so a sustained run of
+/// surprising results (e.g. an under-rated improver beating stronger opponents)
+/// moves the estimate much further before the prior reins it in. The Laplace
+/// variant is also asymmetric via
+/// [`TournamentSettings::elo_upward_looseness`], which can make an *upward*
+/// revision clear on less evidence than a downward one. See
+/// `docs/elo-pairing-mode.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(rename_all = "snake_case")]
+pub enum EloPriorShape {
+    /// Thin-tailed `N(rating, σ₀²)` — the default, exactly the historical
+    /// estimator (behaviour-neutral).
+    #[default]
+    Gaussian,
+    /// Huber-smoothed asymmetric Laplace: same width, fatter (exponential) tails,
+    /// and an upward/downward asymmetry knob
+    /// ([`TournamentSettings::elo_upward_looseness`]).
+    Laplace,
+}
+
 /// What a MacMahon threshold compares against — an ELO rating or a dan/kyu
 /// grade. A tournament's thresholds can freely mix both kinds (e.g. some bands
 /// drawn from ELO, others from grade), each counted independently.
@@ -206,6 +234,13 @@ fn default_elo_unrated_k() -> u32 {
     crate::elo::UNRATED_PRIOR_DEFAULT_K as u32
 }
 
+/// The default upward-looseness ratio `r` for the Laplace prior, as an integer
+/// percent (100 = ×1.0 = symmetric). Named so `#[serde(default = …)]` can fill
+/// it in for tournaments saved before the field existed.
+fn default_elo_upward_looseness_percent() -> u32 {
+    100
+}
+
 /// Configuration that isn't tied to a single player or round.
 ///
 /// Kept as its own record so it can grow (time controls, tie-break choices, …)
@@ -336,6 +371,25 @@ pub struct TournamentSettings {
     /// when [`Self::elo_estimate_needed`] or [`Self::macmahon_from_estimate_active`].
     #[serde(default = "default_elo_unrated_k")]
     pub elo_unrated_k: u32,
+    /// The shape of every player's ELO prior — thin-tailed Gaussian (default,
+    /// behaviour-neutral) or the fatter-tailed, optionally asymmetric Laplace.
+    /// See [`EloPriorShape`]. Only meaningful when [`Self::elo_estimate_needed`]
+    /// or [`Self::macmahon_from_estimate_active`].
+    #[serde(default)]
+    pub elo_prior_shape: EloPriorShape,
+    /// How much *looser* an upward revision of the estimate is than a downward
+    /// one, as an integer percent (100 = ×1.0 = symmetric). Only affects the
+    /// [`EloPriorShape::Laplace`] prior, where it scales the upward arm's width
+    /// (`b_up = r · b_down`): `r > 1` lets an under-rated player (the common case
+    /// — e.g. a returning improver) climb on less evidence than a suspiciously
+    /// strong result pushes an established player down. `100` (symmetric) is the
+    /// default, so the prior stays behaviour-neutral until a referee opts in.
+    /// Stored as an integer so the settings stay `Eq`; read via
+    /// [`Self::elo_upward_looseness`], which clamps it ≥ 1.0 (an upward revision
+    /// is never *harder* than a downward one). Only meaningful when the prior
+    /// shape is Laplace and a live estimate is maintained.
+    #[serde(default = "default_elo_upward_looseness_percent")]
+    pub elo_upward_looseness_percent: u32,
 }
 
 impl Default for TournamentSettings {
@@ -358,6 +412,8 @@ impl Default for TournamentSettings {
             elo_provisional_multiplier_percent: default_elo_provisional_multiplier_percent(),
             elo_unrated_prior_center: default_elo_unrated_prior_center(),
             elo_unrated_k: default_elo_unrated_k(),
+            elo_prior_shape: EloPriorShape::default(),
+            elo_upward_looseness_percent: default_elo_upward_looseness_percent(),
         }
     }
 }
@@ -477,6 +533,8 @@ impl TournamentSettings {
         self.elo_provisional_multiplier_percent = self.elo_provisional_multiplier_percent.max(100);
         // A zero-width unrated prior would divide by zero in the solver — clamp K ≥ 1.
         self.elo_unrated_k = self.elo_unrated_k.max(1);
+        // An upward revision is never *harder* than a downward one, so r ≥ 1.
+        self.elo_upward_looseness_percent = self.elo_upward_looseness_percent.max(100);
 
         self
     }
@@ -523,6 +581,13 @@ impl TournamentSettings {
     /// prior would divide by zero in the solver and freeze the estimate).
     pub fn elo_unrated_k(&self) -> f64 {
         self.elo_unrated_k.max(1) as f64
+    }
+
+    /// The upward-looseness ratio `r` for the [`EloPriorShape::Laplace`] prior,
+    /// as a float, clamped ≥ 1.0 (an upward revision is never harder than a
+    /// downward one). `1.0` is symmetric.
+    pub fn elo_upward_looseness(&self) -> f64 {
+        self.elo_upward_looseness_percent.max(100) as f64 / 100.0
     }
 
     /// Sort thresholds (ELO ones by value, then grade ones by strength) and
@@ -952,6 +1017,42 @@ mod tests {
             ..Default::default()
         };
         assert!(raw.elo_unrated_k() >= 1.0);
+    }
+
+    #[test]
+    fn prior_shape_defaults_to_gaussian_and_is_behaviour_neutral() {
+        let s = TournamentSettings::default();
+        assert_eq!(s.elo_prior_shape, EloPriorShape::Gaussian);
+        assert_eq!(s.elo_upward_looseness_percent, 100);
+        assert!((s.elo_upward_looseness() - 1.0).abs() < 1e-9);
+        // Omitted from an old save → the (Gaussian, symmetric) defaults.
+        let loaded: TournamentSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(loaded.elo_prior_shape, EloPriorShape::Gaussian);
+        assert_eq!(loaded.elo_upward_looseness_percent, 100);
+        // A Laplace shape round-trips through JSON.
+        let laplace = TournamentSettings {
+            elo_prior_shape: EloPriorShape::Laplace,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&laplace).unwrap();
+        let back: TournamentSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.elo_prior_shape, EloPriorShape::Laplace);
+    }
+
+    #[test]
+    fn normalized_clamps_upward_looseness_to_at_least_symmetric() {
+        // An upward revision is never harder than a downward one, so r ≥ 1.
+        let s = TournamentSettings {
+            elo_upward_looseness_percent: 50,
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(s.elo_upward_looseness_percent, 100);
+        let raw = TournamentSettings {
+            elo_upward_looseness_percent: 0,
+            ..Default::default()
+        };
+        assert!(raw.elo_upward_looseness() >= 1.0);
     }
 
     #[test]

@@ -2,9 +2,12 @@
 //!
 //! Each player has a latent strength `θ` on the ELO scale. Game outcomes follow
 //! the logistic (Bradley–Terry) model `P(i beats j) = σ((θᵢ − θⱼ)/s)` with
-//! `s = 400/ln 10`, and each player has a Gaussian prior anchoring `θ` to their
+//! `s = 400/ln 10`, and each player has a prior anchoring `θ` to their
 //! registration rating (or, for an unrated player, to a wide, referee-tunable
-//! prior — by default `N(600, 350²)`). The
+//! prior — by default `N(600, 350²)`). The prior is Gaussian by default, but a
+//! referee can switch to a fatter-tailed, optionally asymmetric Huber-smoothed
+//! Laplace prior ([`EloPriorShape`]); both are log-concave, so the objective
+//! stays concave and the solver keeps its unique-maximum guarantee. The
 //! estimated ELO is the **MAP** (maximum a-posteriori) point — the maximiser of
 //! the penalised log-likelihood — found by coordinate-ascent Newton. The whole
 //! thing is a **pure replay** of the completed rounds, recomputed from scratch
@@ -20,7 +23,7 @@ use uuid::Uuid;
 
 use crate::player::Player;
 use crate::round::{Handicap, Round, Winner};
-use crate::settings::TournamentSettings;
+use crate::settings::{EloPriorShape, TournamentSettings};
 
 /// ELO scale factor `s = 400 / ln 10`: a 400-point gap is 10:1 odds. Also the
 /// factor in the prior-width law `σ₀ = √(K · s)`, so it's `pub(crate)` for
@@ -54,6 +57,15 @@ const CONVERGENCE_TOL: f64 = 1e-4;
 /// overshoot when a wide-prior player is far from the optimum; repeated sweeps
 /// then close the remaining distance.
 const MAX_STEP: f64 = 800.0;
+
+/// Half-width (ELO points) of the quadratic Huber core that rounds off the
+/// Laplace prior's kink at the registration rating. Small enough that its effect
+/// is negligible (a couple of points) yet it restores a finite, strictly
+/// negative curvature there so the Newton step is well-defined and can't chatter
+/// across the kink. The core is anchored at the mean (`g(0) = 0`), so a player
+/// with no games still sits *exactly* at their prior mean regardless of the
+/// asymmetry.
+const HUBER_DELTA: f64 = 2.0;
 
 // --- FESA handicap treatment ----------------------------------------------
 //
@@ -192,6 +204,76 @@ fn prior(
     }
 }
 
+/// A player's prior penalty on the log-posterior, in a form the coordinate-ascent
+/// solver can consume directly: given the current deviation `d = θ − μ₀` from the
+/// prior mean, it yields that term's contribution to the gradient and Hessian.
+///
+/// Both variants are **log-concave**, so adding them to the (concave)
+/// Bradley–Terry log-likelihood keeps the whole objective concave — the unique
+/// maximiser and deterministic convergence the solver relies on.
+enum PriorPenalty {
+    /// `N(μ₀, σ₀²)`: quadratic penalty, linear restoring force `d / σ₀²`. Held as
+    /// the precision `1/σ₀²`.
+    Gaussian { precision: f64 },
+    /// Huber-smoothed **asymmetric Laplace**: outside a `±HUBER_DELTA` core the
+    /// penalty is linear with a *constant* restoring force `1/b` — `1/b_up` above
+    /// the mean, `1/b_down` below — giving fatter (exponential) tails than the
+    /// Gaussian and, when `b_up > b_down`, an easier upward revision. Inside the
+    /// core the force is linearised through the origin so the penalty is `C¹`,
+    /// strictly convex, and minimised exactly at `d = 0`.
+    Laplace { b_down: f64, b_up: f64 },
+}
+
+impl PriorPenalty {
+    /// Build the penalty for one player from the chosen `shape`, their Gaussian
+    /// width `σ₀` (from [`prior`]), and the upward-looseness ratio `r`. The
+    /// Laplace scale is variance-matched to the Gaussian (`b_down = σ₀/√2`) so the
+    /// existing K / provisional / unrated-K knobs keep their meaning; the upward
+    /// arm is widened to `b_up = r · b_down`.
+    fn new(shape: EloPriorShape, sigma0: f64, r: f64) -> Self {
+        match shape {
+            EloPriorShape::Gaussian => PriorPenalty::Gaussian {
+                precision: 1.0 / (sigma0 * sigma0),
+            },
+            EloPriorShape::Laplace => {
+                let b_down = sigma0 / std::f64::consts::SQRT_2;
+                PriorPenalty::Laplace {
+                    b_down,
+                    b_up: r.max(1.0) * b_down,
+                }
+            }
+        }
+    }
+
+    /// The `(gradient, hessian)` contribution of this prior at deviation `d`.
+    /// Both are ≤ 0 curvature-wise (the Hessian term is `≤ 0`), and strictly
+    /// negative wherever it matters for a well-defined ascent step: the Gaussian
+    /// always, the Laplace inside its core (where a no-games player sits) — and
+    /// outside the core any moved player has games, whose likelihood supplies the
+    /// strictly negative curvature.
+    fn grad_hess(&self, d: f64) -> (f64, f64) {
+        match *self {
+            PriorPenalty::Gaussian { precision } => (-d * precision, -precision),
+            PriorPenalty::Laplace { b_down, b_up } => {
+                // g(d) = penalty'(d); the log-posterior takes −penalty, so the
+                // gradient contribution is −g and the Hessian is −g'. The core is
+                // two straight segments meeting at the origin (g(0) = 0), each
+                // running out to the constant ±1/b force at ±HUBER_DELTA.
+                let (g, g_prime) = if d >= HUBER_DELTA {
+                    (1.0 / b_up, 0.0)
+                } else if d <= -HUBER_DELTA {
+                    (-1.0 / b_down, 0.0)
+                } else if d >= 0.0 {
+                    (d / (b_up * HUBER_DELTA), 1.0 / (b_up * HUBER_DELTA))
+                } else {
+                    (d / (b_down * HUBER_DELTA), 1.0 / (b_down * HUBER_DELTA))
+                };
+                (-g, -g_prime)
+            }
+        }
+    }
+}
+
 /// The **simulation oracle's** prior `(mean, standard deviation)` for a player's
 /// *true* strength: the same rating- and reliability-dependent `N(rating, σ₀²)`
 /// shape as the estimator's [`prior`], but with the K multiplier fixed at ×1 (the
@@ -244,17 +326,19 @@ pub fn estimate_elos(
     let provisional = settings.elo_provisional_multiplier();
     let unrated_center = settings.elo_unrated_prior_center();
     let unrated_k = settings.elo_unrated_k();
+    let shape = settings.elo_prior_shape;
+    let looseness = settings.elo_upward_looseness();
     let n = players.len();
 
     let index: HashMap<Uuid, usize> = players.iter().enumerate().map(|(i, p)| (p.id, i)).collect();
     let mut theta = vec![0.0_f64; n];
     let mut mean = vec![0.0_f64; n];
-    let mut precision = vec![0.0_f64; n]; // 1/σ₀² — the prior's weight
+    let mut penalties: Vec<PriorPenalty> = Vec::with_capacity(n);
     for (i, p) in players.iter().enumerate() {
         let (mu0, sigma0) = prior(p, m, provisional, unrated_center, unrated_k);
         mean[i] = mu0;
         theta[i] = mu0; // seed at the prior mean
-        precision[i] = 1.0 / (sigma0 * sigma0);
+        penalties.push(PriorPenalty::new(shape, sigma0, looseness));
     }
 
     // Per-player incident games: (opponent index, this player's score in {0, ½, 1},
@@ -312,14 +396,14 @@ pub fn estimate_elos(
         let mut max_delta = 0.0_f64;
         for i in 0..n {
             // Prior term first, then each game's likelihood contribution.
-            let mut gradient = -(theta[i] - mean[i]) * precision[i];
-            let mut hessian = -precision[i];
+            let (mut gradient, mut hessian) = penalties[i].grad_hess(theta[i] - mean[i]);
             for &(j, score, offset) in &games[i] {
                 let e = expected((theta[i] - theta[j] + offset) / S);
                 gradient += (score - e) / S;
                 hessian -= e * (1.0 - e) / (S * S);
             }
-            // hessian ≤ −precision[i] < 0, so this is a well-defined ascent step.
+            // hessian < 0 (see `PriorPenalty::grad_hess`), so this is a
+            // well-defined ascent step.
             let step = (-gradient / hessian).clamp(-MAX_STEP, MAX_STEP);
             theta[i] += step;
             max_delta = max_delta.max(step.abs());
@@ -694,5 +778,116 @@ mod tests {
             prev = now;
             prev_gain = gain;
         }
+    }
+
+    fn laplace(looseness_percent: u32) -> TournamentSettings {
+        TournamentSettings {
+            elo_prior_shape: EloPriorShape::Laplace,
+            elo_upward_looseness_percent: looseness_percent,
+            ..Default::default()
+        }
+    }
+
+    /// `n` fresh equal-rated (1500) opponents.
+    fn equals(n: usize) -> Vec<Player> {
+        (0..n).map(|_| player(Some(1500))).collect()
+    }
+
+    #[test]
+    fn laplace_no_games_sits_at_registration_even_when_asymmetric() {
+        // The Huber core is anchored at the mean, so switching to a (strongly
+        // asymmetric) Laplace prior must not budge a player who has played nothing
+        // — rated or unrated. This is the invariant the kink-smoothing preserves.
+        let rated = player(Some(1800));
+        let unrated = player(None);
+        let elos = estimate_elos(&[rated.clone(), unrated.clone()], &laplace(300), &[]);
+        assert!((elos[&rated.id] - 1800.0).abs() < 1e-6);
+        assert!((elos[&unrated.id] - UNRATED_PRIOR_MEAN).abs() < 1e-6);
+    }
+
+    #[test]
+    fn laplace_upward_revision_is_easier_than_downward_when_asymmetric() {
+        // Mirror-image evidence past the Laplace dead zone: `riser` beats six
+        // equal-rated opponents (pushed up), `faller` loses to six (pushed down) by
+        // a symmetric amount. A symmetric Laplace prior moves them equally;
+        // loosening only the upward arm makes the rise exceed the fall — the
+        // "under-rating is more common" tilt.
+        let riser = player(Some(1500));
+        let faller = player(Some(1500));
+        let r_opps = equals(6);
+        let f_opps = equals(6);
+        let mut all = vec![riser.clone(), faller.clone()];
+        all.extend(r_opps.iter().cloned());
+        all.extend(f_opps.iter().cloned());
+        let rounds: Vec<Round> = (0..6)
+            .map(|i| {
+                decided(
+                    i as u32 + 1,
+                    vec![win(riser.id, r_opps[i].id), win(f_opps[i].id, faller.id)],
+                )
+            })
+            .collect();
+
+        let shift = |r_pct: u32| {
+            let elos = estimate_elos(&all, &laplace(r_pct), &rounds);
+            (elos[&riser.id] - 1500.0, 1500.0 - elos[&faller.id])
+        };
+
+        // Symmetric prior (r = 1): the mirrored setup rises and falls equally, and
+        // the streak clears the dead zone so the movement is substantial.
+        let (up_sym, down_sym) = shift(100);
+        assert!(
+            up_sym > 10.0,
+            "the streak should clear the dead zone: {up_sym}"
+        );
+        assert!(
+            (up_sym - down_sym).abs() < 1e-2,
+            "symmetric prior should be balanced: up {up_sym}, down {down_sym}"
+        );
+
+        // Looser upward (r = 3): the riser climbs further than under the symmetric
+        // prior, while the downward arm — untouched by r — never falls more.
+        let (up_asym, down_asym) = shift(300);
+        assert!(
+            up_asym > up_sym + 1.0,
+            "loosening the upward arm should raise more: sym {up_sym}, asym {up_asym}"
+        );
+        assert!(
+            down_asym <= down_sym + 1e-2,
+            "the downward arm is not loosened: sym {down_sym}, asym {down_asym}"
+        );
+        assert!(
+            up_asym > down_asym + 1.0,
+            "an upward revision should clear on less evidence than a downward one: \
+             up {up_asym}, down {down_asym}"
+        );
+    }
+
+    #[test]
+    fn laplace_swings_further_than_gaussian_on_a_sustained_upset_streak() {
+        // An established 1200 repeatedly beats much-stronger 1800s. Both priors
+        // climb, but the fatter-tailed Laplace (constant restoring force) yields to
+        // the sustained evidence more than the Gaussian, whose pull stiffens with
+        // distance — the motivating behaviour of the fatter tail.
+        let mut hero = player(Some(1200));
+        hero.fesa_games = Some(50); // established, so no provisional widening
+        let opps: Vec<Player> = (0..5).map(|_| player(Some(1800))).collect();
+        let mut all = vec![hero.clone()];
+        all.extend(opps.iter().cloned());
+        let rounds: Vec<Round> = opps
+            .iter()
+            .enumerate()
+            .map(|(i, o)| decided(i as u32 + 1, vec![win(hero.id, o.id)]))
+            .collect();
+
+        let est = |settings: &TournamentSettings| estimate_elos(&all, settings, &rounds)[&hero.id];
+        let gauss = est(&TournamentSettings::default());
+        let lap = est(&laplace(100)); // symmetric, so the gap is purely the tail
+        assert!(gauss > 1200.0 && lap > 1200.0, "both priors climb on wins");
+        assert!(
+            lap > gauss + 10.0,
+            "fatter tails should swing further on a sustained streak: \
+             gaussian {gauss}, laplace {lap}"
+        );
     }
 }
