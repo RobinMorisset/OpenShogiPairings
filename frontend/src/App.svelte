@@ -1,5 +1,6 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
+  import { untrack } from "svelte";
   import {
     addPlayer,
     addPlayersBatch,
@@ -323,7 +324,11 @@
     canUndo = false;
     hasUnsavedChanges = false;
     error = null;
-    activeTab = $initialTab ?? "players";
+    // Read (and clear) the requested tab *untracked*: this effect must depend
+    // only on `currentTournamentId`. Subscribing to `initialTab` here would let
+    // the `set(null)` below re-trigger the effect and immediately reset the tab
+    // back to "players", defeating the whole point.
+    activeTab = untrack(() => $initialTab) ?? "players";
     initialTab.set(null);
 
     void loadInitial();
