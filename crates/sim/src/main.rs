@@ -68,8 +68,9 @@ struct Args {
     seed: u64,
 
     /// Optional per-player true-strength overrides: a JSON object mapping
-    /// tournament number (as a string) to an ELO. Overridden players are treated
-    /// as known truth (never jittered).
+    /// tournament number (as a string) to an ELO. The override is the *center* of
+    /// that player's ground-truth strength: exact at `--jitter 0`, and the mean it
+    /// scatters around at higher jitter (rather than the registration rating).
     #[arg(long, value_name = "FILE")]
     strength: Option<PathBuf>,
 
@@ -84,8 +85,10 @@ struct Args {
     #[arg(long, value_name = "URL|PATH", conflicts_with = "strength")]
     strength_fesa_list: Option<String>,
 
-    /// Multiplier on each (non-overridden) player's prior width: 0 pins true
-    /// strength to the rating, 1 samples from the estimator's own prior.
+    /// Multiplier on each player's prior width: 0 pins true strength to its center
+    /// (the override — e.g. the post-tournament ELO — else the registration
+    /// rating), 1 samples at the estimator's own prior width around that center, >1
+    /// stress-tests worse-than-assumed ratings.
     #[arg(long, default_value_t = 0.0)]
     jitter: f64,
 
@@ -120,6 +123,13 @@ struct Args {
     /// significance tests across variants.
     #[arg(long, value_name = "FILE")]
     dump_runs: Option<PathBuf>,
+
+    /// Optional CSV of the sampled ground-truth ("source of truth") strength of
+    /// every player in every run (variant,run,player,strength), for inspecting the
+    /// strength model — e.g. that `--jitter` spreads each player around their
+    /// post-tournament ELO. Large: one row per variant × run × player.
+    #[arg(long, value_name = "FILE")]
+    dump_strengths: Option<PathBuf>,
 }
 
 fn main() {
@@ -207,6 +217,10 @@ fn run(args: Args) -> Result<(), String> {
     let mut dump = args.dump_runs.as_ref().map(|_| {
         String::from("variant,run,mean_diff,frac_exceed,fidelity,winner\n")
     });
+    let mut strengths_dump = args
+        .dump_strengths
+        .as_ref()
+        .map(|_| String::from("variant,run,player,strength\n"));
     for (name, settings) in &variants {
         let outcomes = simulate_variant(
             &base,
@@ -222,11 +236,18 @@ fn run(args: Args) -> Result<(), String> {
         if let Some(buf) = &mut dump {
             append_run_rows(buf, name, &outcomes, &args.thresholds, &names);
         }
+        if let Some(buf) = &mut strengths_dump {
+            append_strength_rows(buf, name, &outcomes, &names);
+        }
         reports.push(aggregate(name.clone(), &outcomes, &args.thresholds));
     }
     if let (Some(path), Some(buf)) = (&args.dump_runs, &dump) {
         std::fs::write(path, buf).map_err(|e| format!("writing {}: {e}", path.display()))?;
         eprintln!("wrote per-run metrics to {}", path.display());
+    }
+    if let (Some(path), Some(buf)) = (&args.dump_strengths, &strengths_dump) {
+        std::fs::write(path, buf).map_err(|e| format!("writing {}: {e}", path.display()))?;
+        eprintln!("wrote ground-truth strengths to {}", path.display());
     }
 
     print_report(
@@ -442,6 +463,22 @@ fn append_run_rows(
         buf.push_str(&format!(
             "{variant},{i},{mean_diff:.4},{frac_exceed:.4},{fidelity:.4},\"{winner}\"\n"
         ));
+    }
+}
+
+/// Append one CSV row per player per run with that run's sampled ground-truth
+/// strength — the "source of truth" the outcomes were generated from.
+fn append_strength_rows(
+    buf: &mut String,
+    variant: &str,
+    outcomes: &[RunOutcome],
+    names: &HashMap<Uuid, String>,
+) {
+    for (i, o) in outcomes.iter().enumerate() {
+        for (id, strength) in &o.strengths {
+            let player = names.get(id).map(String::as_str).unwrap_or("?");
+            buf.push_str(&format!("{variant},{i},\"{player}\",{strength:.2}\n"));
+        }
     }
 }
 

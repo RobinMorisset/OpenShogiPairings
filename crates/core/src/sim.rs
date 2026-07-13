@@ -100,13 +100,19 @@ fn sample_normal(rng: &mut impl Rng, mean: f64, std: f64) -> f64 {
 
 /// Sample each player's ground-truth strength for one run.
 ///
-/// An explicit `overrides` entry is taken as **known truth** (no jitter).
-/// Otherwise the strength is drawn from the player's `elo.rs` prior
-/// `N(rating, (jitter·σ₀)²)` — so `jitter = 0` pins truth to the registration
-/// rating, `jitter = 1` samples from the estimator's own prior (tighter for
-/// strong/established players, wider for provisional/unrated ones), and `>1`
-/// stress-tests worse-than-assumed ratings. Players are visited in slice order so
-/// the draws — and thus the whole run — are reproducible from the seed.
+/// The strength is drawn from `N(center, (jitter·σ₀)²)`, where the **center** is
+/// the player's `overrides` entry if present — the post-tournament strength from a
+/// `--results` table, or an explicit `--strength` value — otherwise the player's
+/// registration rating (the `elo.rs` prior mean). The **width** `σ₀` is always the
+/// player's rating-dependent prior width (tighter for strong/established players,
+/// wider for provisional/unrated ones), so `jitter = 1` samples at the estimator's
+/// own uncertainty and `> 1` stress-tests worse-than-assumed ratings.
+///
+/// So `jitter = 0` pins each player to their center exactly (the override, else the
+/// rating); any `jitter > 0` spreads them *around that center* — crucially around
+/// the post-tournament ELO when a results table supplied it, not the pre-tournament
+/// rating. Players are visited in slice order so the draws — and thus the whole run
+/// — are reproducible from the seed, and identical across settings variants.
 pub fn sample_strengths(
     players: &[Player],
     settings: &TournamentSettings,
@@ -117,16 +123,14 @@ pub fn sample_strengths(
     players
         .iter()
         .map(|p| {
-            let strength = match overrides.get(&p.id) {
-                Some(&known) => known,
-                None => {
-                    let (mean, std) = player_prior(p, settings);
-                    if jitter <= 0.0 {
-                        mean
-                    } else {
-                        sample_normal(rng, mean, jitter * std)
-                    }
-                }
+            let (prior_mean, std) = player_prior(p, settings);
+            // The override (post-tournament / known) strength is the mean to jitter
+            // around; fall back to the registration rating when there is none.
+            let center = overrides.get(&p.id).copied().unwrap_or(prior_mean);
+            let strength = if jitter <= 0.0 {
+                center
+            } else {
+                sample_normal(rng, center, jitter * std)
             };
             (p.id, strength)
         })
@@ -467,15 +471,42 @@ mod tests {
     }
 
     #[test]
-    fn overrides_are_taken_exactly_without_jitter() {
+    fn overrides_are_taken_exactly_at_zero_jitter() {
         let t = tournament_with(&[("A", 1500), ("B", 1500)]);
         let a = t.players[0].id;
         let mut overrides = StrengthMap::new();
         overrides.insert(a, 2222.0);
         let mut rng = ChaCha8Rng::seed_from_u64(1);
-        // Even with a huge jitter, an override is never perturbed.
-        let s = sample_strengths(&t.players, &t.settings, &overrides, 5.0, &mut rng);
+        // At jitter 0 the override is the exact ground truth.
+        let s = sample_strengths(&t.players, &t.settings, &overrides, 0.0, &mut rng);
         assert_eq!(s[&a], 2222.0);
+    }
+
+    #[test]
+    fn jitter_spreads_around_the_override_not_the_rating() {
+        // A player registered at 1259 whose post-tournament strength (the override)
+        // is 1480: with jitter on, the ground truth must scatter around 1480 (the
+        // post value), not the 1259 registration rating.
+        let t = tournament_with(&[("Real", 1259), ("B", 1500)]);
+        let real = t.players[0].id;
+        let mut overrides = StrengthMap::new();
+        overrides.insert(real, 1480.0);
+        let mut rng = ChaCha8Rng::seed_from_u64(3);
+        let mut samples = Vec::new();
+        for _ in 0..4000 {
+            let s = sample_strengths(&t.players, &t.settings, &overrides, 1.0, &mut rng);
+            samples.push(s[&real]);
+        }
+        let mean = samples.iter().sum::<f64>() / samples.len() as f64;
+        let spread = {
+            let m = mean;
+            (samples.iter().map(|x| (x - m).powi(2)).sum::<f64>() / samples.len() as f64).sqrt()
+        };
+        // Centered on the override (1480), clearly away from the rating (1259)...
+        assert!((mean - 1480.0).abs() < 15.0, "mean {mean} not ~1480");
+        assert!((mean - 1259.0).abs() > 150.0, "mean {mean} sits near the rating");
+        // ...with real, moderate spread (jitter actually applied to the override).
+        assert!(spread > 10.0, "override was effectively pinned: spread {spread}");
     }
 
     #[test]
