@@ -71,6 +71,7 @@ impl From<MutateError> for ApiError {
     fn from(err: MutateError) -> Self {
         match err {
             MutateError::NoTournament => ApiError::NoTournament,
+            MutateError::VersionConflict => ApiError::VersionConflict,
             MutateError::Domain(e) => ApiError::from(e),
         }
     }

@@ -53,6 +53,11 @@ pub struct TournamentStore {
     version: u32,
     /// Broadcasts the new version to connected clients after each change.
     notifier: broadcast::Sender<u32>,
+    /// Set once the tournament has been removed from the registry. A store can
+    /// still be reached by an in-flight request holding an `Arc` to its
+    /// instance; the flag makes [`persist`](Self::persist) and [`mutate`](Self::mutate)
+    /// no-op/refuse so a late write can't resurrect the deleted files on disk.
+    deleted: bool,
 }
 
 impl TournamentStore {
@@ -67,6 +72,7 @@ impl TournamentStore {
             persist_path,
             version: 0,
             notifier,
+            deleted: false,
         }
     }
 
@@ -120,6 +126,12 @@ impl TournamentStore {
     /// logged, never propagated — it must not break the referee's action, just
     /// as backups don't (see [`crate::backup`]).
     fn persist(&self) {
+        // A tournament removed from the registry must never be written back —
+        // otherwise a mutation still in flight when it was deleted would recreate
+        // its file after `remove` deleted it (see [`TournamentRegistry::remove`]).
+        if self.deleted {
+            return;
+        }
         let (Some(path), Some(current)) = (&self.persist_path, &self.current) else {
             return;
         };
@@ -167,10 +179,28 @@ impl TournamentStore {
     /// The mutation runs against a clone; only if it succeeds do we snapshot the
     /// previous state onto the history and swap in the new one. A failed
     /// mutation (e.g. validation error) leaves state and history untouched.
-    pub fn mutate<F>(&mut self, f: F) -> Result<(), MutateError>
+    ///
+    /// `expected` is the tournament version the client's edit was based on, or
+    /// `None` to skip the check. Comparing it here — under the same write lock the
+    /// mutation runs in — is what makes optimistic-concurrency detection actually
+    /// atomic: the [`crate::live::check_version`] middleware only pre-screens (it
+    /// reads the version and releases the lock before the handler runs), so two
+    /// edits racing from the same base version must be separated *here*, or the
+    /// later one would silently clobber the earlier one with no `409`.
+    pub fn mutate<F>(&mut self, expected: Option<u32>, f: F) -> Result<(), MutateError>
     where
         F: FnOnce(&mut Tournament) -> Result<(), TournamentError>,
     {
+        // A store removed from the registry is gone; refuse rather than mutate a
+        // clone whose `persist` would no-op anyway.
+        if self.deleted {
+            return Err(MutateError::NoTournament);
+        }
+        if let Some(expected) = expected {
+            if self.version != expected {
+                return Err(MutateError::VersionConflict);
+            }
+        }
         let mut next = match &self.current {
             Some(current) => current.clone(),
             None => return Err(MutateError::NoTournament),
@@ -181,6 +211,17 @@ impl TournamentStore {
         self.persist();
         self.bump_and_notify();
         Ok(())
+    }
+
+    /// Whether this store has been tombstoned by a registry [`remove`](TournamentRegistry::remove).
+    pub fn is_deleted(&self) -> bool {
+        self.deleted
+    }
+
+    /// Tombstone the store: it has been removed from the registry, so no further
+    /// mutation, persistence, or backup should touch it.
+    fn mark_deleted(&mut self) {
+        self.deleted = true;
     }
 
     /// Revert to the previous state, if any. No-op when history is empty.
@@ -198,6 +239,9 @@ impl TournamentStore {
 pub enum MutateError {
     /// No tournament exists to mutate.
     NoTournament,
+    /// The edit was based on a tournament version that is no longer current —
+    /// another writer changed it first (optimistic-concurrency conflict, `409`).
+    VersionConflict,
     /// The mutation itself violated a domain rule.
     Domain(TournamentError),
 }
@@ -345,7 +389,10 @@ impl TournamentRegistry {
         instances
             .iter()
             .filter_map(|(id, instance)| {
-                let store = instance.store.read().expect("store lock poisoned");
+                // Recover from a poisoned store lock rather than propagating the
+                // panic: one tournament whose mutation panicked must not take the
+                // whole picker down for every other tournament.
+                let store = instance.store.read().unwrap_or_else(|e| e.into_inner());
                 let tournament = store.current()?;
                 Some(TournamentSummary {
                     id: *id,
@@ -401,7 +448,18 @@ impl TournamentRegistry {
             .write()
             .expect("registry lock poisoned")
             .remove(&id);
-        if removed.is_some() {
+        if let Some(instance) = &removed {
+            // Tombstone the store *under its write lock* before deleting the
+            // files. A concurrent request may already hold an `Arc` to this same
+            // instance and be mid-mutation; serializing on the store lock and
+            // flipping `deleted` guarantees any such write either ran before this
+            // point (and is now deleted) or sees the tombstone and refuses to
+            // persist — so a late write can't resurrect the file on disk.
+            instance
+                .store
+                .write()
+                .unwrap_or_else(|e| e.into_inner())
+                .mark_deleted();
             if let Some(path) = self.tournament_path(id) {
                 let _ = fs::remove_file(path);
             }
@@ -445,7 +503,7 @@ mod tests {
             let mut store = TournamentStore::with_persistence(path.clone());
             store.set_current(Tournament::new("Persisted Cup").unwrap());
             store
-                .mutate(|t| {
+                .mutate(None, |t| {
                     t.add_player(NewPlayer {
                         last_name: "Bob".into(),
                         ..Default::default()
@@ -478,7 +536,7 @@ mod tests {
         assert_eq!(rx.recv().await.unwrap(), 1);
 
         store
-            .mutate(|t| {
+            .mutate(None, |t| {
                 t.add_player(NewPlayer {
                     last_name: "Bob".into(),
                     ..Default::default()
@@ -497,7 +555,7 @@ mod tests {
         let mut store = TournamentStore::with_persistence(path.clone());
         store.set_current(Tournament::new("Cup").unwrap());
         store
-            .mutate(|t| {
+            .mutate(None, |t| {
                 t.add_player(NewPlayer {
                     last_name: "Alice".into(),
                     ..Default::default()
@@ -538,7 +596,7 @@ mod tests {
             .store
             .write()
             .unwrap()
-            .mutate(|t| {
+            .mutate(None, |t| {
                 t.add_player(NewPlayer {
                     last_name: "Alice".into(),
                     ..Default::default()
@@ -598,5 +656,74 @@ mod tests {
         assert!(!auth.password_matches("wrong"));
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn add_named(name: &str) -> impl FnOnce(&mut Tournament) -> Result<(), TournamentError> + '_ {
+        move |t| {
+            t.add_player(NewPlayer {
+                last_name: name.into(),
+                ..Default::default()
+            })
+            .map(|_| ())
+        }
+    }
+
+    #[test]
+    fn mutate_with_the_wrong_expected_version_is_a_conflict_and_a_no_op() {
+        let mut store = TournamentStore::empty(None);
+        store.set_current(Tournament::new("Cup").unwrap()); // version → 1
+
+        // An edit based on a stale version is rejected atomically, changing nothing.
+        assert!(matches!(
+            store.mutate(Some(0), add_named("Alice")),
+            Err(MutateError::VersionConflict)
+        ));
+        assert_eq!(store.version(), 1);
+        assert!(store.current().unwrap().players.is_empty());
+
+        // Based on the current version it goes through and advances the version.
+        store.mutate(Some(1), add_named("Alice")).unwrap();
+        assert_eq!(store.version(), 2);
+        assert_eq!(store.current().unwrap().players.len(), 1);
+
+        // `None` opts out of the check entirely (the desktop/local path).
+        store.mutate(None, add_named("Bob")).unwrap();
+        assert_eq!(store.current().unwrap().players.len(), 2);
+    }
+
+    #[test]
+    fn a_tombstoned_store_refuses_mutations_and_never_rewrites_its_file() {
+        let path = std::env::temp_dir().join(format!("osp-tombstone-{}.json", uuid::Uuid::new_v4()));
+        let mut store = TournamentStore::with_persistence(path.clone());
+        store.set_current(Tournament::new("Cup").unwrap());
+        assert!(path.exists());
+
+        // Simulate the tombstone `remove` sets under the store's write lock, then
+        // delete the file as `remove` would.
+        store.mark_deleted();
+        std::fs::remove_file(&path).unwrap();
+
+        // A mutation still in flight against this store now refuses rather than
+        // recreating the deleted file — the delete/edit resurrection is closed.
+        assert!(matches!(
+            store.mutate(None, add_named("Alice")),
+            Err(MutateError::NoTournament)
+        ));
+        assert!(!path.exists(), "a tombstoned store must not rewrite its file");
+    }
+
+    #[test]
+    fn removing_a_tournament_tombstones_its_store() {
+        let registry = TournamentRegistry::default();
+        let id = registry.create("Cup", None).unwrap();
+        let instance = registry.get(id).expect("just created");
+
+        assert!(registry.remove(id));
+        // A request holding a stale `Arc` sees the tombstone and can't mutate.
+        assert!(matches!(
+            instance.store.write().unwrap().mutate(None, add_named("Alice")),
+            Err(MutateError::NoTournament)
+        ));
+        assert!(instance.store.read().unwrap().is_deleted());
     }
 }

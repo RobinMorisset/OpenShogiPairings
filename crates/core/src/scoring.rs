@@ -391,7 +391,7 @@ mod tests {
             absent: Vec::new(),
             completed: true,
         };
-        let scores = compute_scores(&[a.clone()], &TournamentSettings::default(), &[round]);
+        let scores = compute_scores(std::slice::from_ref(&a), &TournamentSettings::default(), &[round]);
         assert_eq!(scores.get(&a.id).points, 1);
         assert_eq!(scores.get(&a.id).victories, 1);
         assert!(scores.get(&a.id).had_bye);

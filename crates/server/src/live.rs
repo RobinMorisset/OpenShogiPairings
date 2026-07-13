@@ -15,7 +15,8 @@
 
 use std::convert::Infallible;
 
-use axum::extract::Request;
+use axum::extract::{FromRequestParts, Request};
+use axum::http::request::Parts;
 use axum::http::Method;
 use axum::middleware::Next;
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -30,15 +31,54 @@ use crate::scope::TournamentCtx;
 /// that is how `HeaderMap` stores and matches names.
 const VERSION_HEADER: &str = "x-tournament-version";
 
+/// Parse the [`VERSION_HEADER`] out of request parts.
+///
+/// `Ok(None)` when the header is absent (the client opts out of the check);
+/// `Err` when it is present but not a `u32` — a malformed value must be a hard
+/// error, not silently treated like "no header" (which would drop conflict
+/// detection for that request).
+fn parse_version_header(parts: &axum::http::HeaderMap) -> Result<Option<u32>, ApiError> {
+    match parts.get(VERSION_HEADER) {
+        None => Ok(None),
+        Some(value) => value
+            .to_str()
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .map(Some)
+            .ok_or_else(|| ApiError::BadRequest(format!("invalid {VERSION_HEADER} header"))),
+    }
+}
+
+/// Extractor yielding the version a mutating request declares it is based on
+/// (see [`VERSION_HEADER`]), so a handler can re-check it *inside* the write lock
+/// for an atomic conflict check (`store.mutate(expected, …)`). A malformed value
+/// is rejected 400 — the same way [`check_version`] treats it — so the extractor
+/// itself stays lenient about the absent case only.
+pub struct ExpectedVersion(pub Option<u32>);
+
+impl<S> FromRequestParts<S> for ExpectedVersion
+where
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        parse_version_header(&parts.headers).map(ExpectedVersion)
+    }
+}
+
 /// Reject a mutating request whose declared base version is stale, for the
 /// tournament addressed by the path.
 ///
 /// Only acts on `POST`/`PUT`/`DELETE` requests that opt in by sending
 /// [`VERSION_HEADER`]; everything else (reads, and clients that don't
-/// participate) passes straight through. This is a best-effort backstop — the
-/// check reads the version just before the handler takes the write lock, so a
-/// sub-millisecond race could slip a conflict past — but for human referees,
-/// backed by live updates, it turns real lost updates into visible 409s.
+/// participate) passes straight through. This is an early pre-screen that
+/// rejects an already-stale edit before running the handler at all; because it
+/// reads the version and releases the lock before the handler takes the write
+/// lock, the *authoritative* check for the fine-grained mutations is repeated
+/// atomically inside `store.mutate(expected, …)` (see
+/// [`crate::state::TournamentStore::mutate`]), which closes the sub-millisecond
+/// race two edits from the same base version would otherwise slip through.
 pub async fn check_version(
     TournamentCtx(instance): TournamentCtx,
     req: Request,
@@ -46,12 +86,11 @@ pub async fn check_version(
 ) -> Response {
     let mutating = matches!(*req.method(), Method::POST | Method::PUT | Method::DELETE);
     if mutating {
-        if let Some(expected) = req
-            .headers()
-            .get(VERSION_HEADER)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.parse::<u32>().ok())
-        {
+        let expected = match parse_version_header(req.headers()) {
+            Ok(expected) => expected,
+            Err(e) => return e.into_response(),
+        };
+        if let Some(expected) = expected {
             let current = instance
                 .store
                 .read()

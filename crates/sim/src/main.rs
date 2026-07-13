@@ -203,6 +203,7 @@ fn run(args: Args) -> Result<(), String> {
             rounds,
             cup.as_ref(),
             args.runs,
+            args.seed,
         )
         .map_err(|e| format!("variant '{name}': {e}"))?;
         reports.push(aggregate(name.clone(), &outcomes, &args.thresholds));
@@ -315,11 +316,15 @@ fn simulate_variant(
     rounds: u32,
     cup: Option<&CupConfig>,
     runs: u64,
+    seed: u64,
 ) -> Result<Vec<RunOutcome>, String> {
     (0..runs)
         .into_par_iter()
         .map(|i| {
-            let mut rng = ChaCha8Rng::seed_from_u64(i);
+            // Run i uses `seed + i`, so `--seed` actually changes the simulated
+            // worlds (not just the printed label), while every variant still sees
+            // the *same* seed per run — common random numbers, for a fair A/B.
+            let mut rng = ChaCha8Rng::seed_from_u64(seed.wrapping_add(i));
             simulate_run(base, settings, overrides, jitter, rounds, cup, &mut rng)
                 .map_err(|e| e.to_string())
         })

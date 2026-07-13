@@ -214,6 +214,18 @@
     resetProbe();
   });
 
+  // Changing either picker or the mode invalidates a previously computed result:
+  // clear it (and any error) so the stale preview — and the "apply" action that
+  // acts on the *current* selection — never outlives the pairing it was computed
+  // for (which would let "Apply" force a different pair than the one shown).
+  $effect(() => {
+    void probeA;
+    void probeB;
+    void probeMode;
+    probeResult = null;
+    probeError = "";
+  });
+
   // Each player's opponent in this round's Swiss boards (both directions). The
   // bye-taker has none.
   const opponentOf = $derived.by(() => {

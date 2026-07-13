@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use crate::backup;
 use crate::error::ApiError;
+use crate::live::ExpectedVersion;
 use crate::scope::TournamentCtx;
 use crate::state::{AppState, TournamentStore};
 use crate::{auth, live};
@@ -335,10 +336,11 @@ async fn import_american_grid(
 /// surface grows without changing the endpoint shape.
 async fn update_settings(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Json(settings): Json<TournamentSettings>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(move |t| {
+    store.mutate(expected, move |t| {
         t.update_settings(settings);
         Ok(())
     })?;
@@ -356,11 +358,12 @@ struct FinalizeRequest {
 /// cup is enabled the body carries the chosen size; otherwise the body is empty.
 async fn finalize_registration(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     body: Option<Json<FinalizeRequest>>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let cup_size = body.and_then(|Json(b)| b.cup_size);
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.finalize_registration_with(cup_size))?;
+    store.mutate(expected, |t| t.finalize_registration_with(cup_size))?;
     backup_after(&store, "registration finalized");
     view(&store)
 }
@@ -369,9 +372,10 @@ async fn finalize_registration(
 /// stage. Undoable like any other mutation.
 async fn cancel_round(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.cancel_last_round())?;
+    store.mutate(expected, |t| t.cancel_last_round())?;
     backup_after(&store, "round cancelled");
     view(&store)
 }
@@ -384,11 +388,12 @@ async fn cancel_round(
 /// mutation, so the pair is a single undo step.
 async fn prepare_round(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     body: Option<Json<FinalizeRequest>>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let cup_size = body.and_then(|Json(b)| b.cup_size);
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| {
+    store.mutate(expected, |t| {
         if !t.registration_finalized {
             t.finalize_registration_with(cup_size)?;
         }
@@ -416,6 +421,11 @@ fn round_label(store: &TournamentStore, noun: &str, verb: &str) -> String {
 /// failure (logged inside [`backup::take`]) — a backup problem must never
 /// surface as an API error.
 fn backup_after(store: &TournamentStore, label: &str) {
+    // A store tombstoned by a concurrent delete must not re-create its backups
+    // directory after `remove` cleared it.
+    if store.is_deleted() {
+        return;
+    }
     if let Some(tournament) = store.current() {
         backup::take(tournament, label);
     }
@@ -436,10 +446,11 @@ struct DraftUpdate {
 /// Edit the current draft (absent set, forced pairings, forced bye).
 async fn update_draft(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Json(req): Json<DraftUpdate>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| {
+    store.mutate(expected, |t| {
         t.update_draft(req.absent, req.forced_boards, req.forced_bye)
             .map(|_| ())
     })?;
@@ -449,9 +460,10 @@ async fn update_draft(
 /// Confirm the draft: pair the remaining players and start the round.
 async fn confirm_round(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
 ) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.confirm_round().map(|_| ()))?;
+    store.mutate(expected, |t| t.confirm_round().map(|_| ()))?;
     let label = round_label(&store, "round", "started");
     backup_after(&store, &label);
     Ok((StatusCode::CREATED, view(&store)?))
@@ -520,6 +532,7 @@ struct ForcePairingRequest {
 /// fixed). Mutates, so a backup is taken.
 async fn force_pairing(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Json(req): Json<ForcePairingRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     if req.a == req.b {
@@ -528,7 +541,7 @@ async fn force_pairing(
         ));
     }
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.force_pairing(req.a, req.b).map(|_| ()))?;
+    store.mutate(expected, |t| t.force_pairing(req.a, req.b).map(|_| ()))?;
     let label = round_label(&store, "round", "re-paired");
     backup_after(&store, &label);
     view(&store)
@@ -556,12 +569,13 @@ struct SetResultRequest {
 /// into completed, so re-editing an already-complete round doesn't spam backups.
 async fn set_board_result(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Path(params): Path<BoardParams>,
     Json(req): Json<SetResultRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
     let was_completed = round_completed(&store, params.round_number);
-    store.mutate(|t| {
+    store.mutate(expected, |t| {
         t.toggle_board_winner(params.round_number, params.board_index, req.clicked)
             .map(|_| ())
     })?;
@@ -588,11 +602,12 @@ struct SetDrawnRequest {
 /// Set (or clear) a board's "a draw occurred" flag.
 async fn set_board_drawn(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Path(params): Path<BoardParams>,
     Json(req): Json<SetDrawnRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| {
+    store.mutate(expected, |t| {
         t.set_board_drawn(params.round_number, params.board_index, req.drawn)
             .map(|_| ())
     })?;
@@ -613,12 +628,13 @@ struct SetNoShowRequest {
 /// only on the transition into completed.
 async fn set_board_no_show(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Path(params): Path<BoardParams>,
     Json(req): Json<SetNoShowRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
     let was_completed = round_completed(&store, params.round_number);
-    store.mutate(|t| {
+    store.mutate(expected, |t| {
         t.set_board_no_show(params.round_number, params.board_index, req.absent)
             .map(|_| ())
     })?;
@@ -638,11 +654,12 @@ struct SetHandicapRequest {
 /// players' current ratings.
 async fn set_board_handicap(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Path(params): Path<BoardParams>,
     Json(req): Json<SetHandicapRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| {
+    store.mutate(expected, |t| {
         t.set_board_handicap(params.round_number, params.board_index, req.handicap)
             .map(|_| ())
     })?;
@@ -652,10 +669,11 @@ async fn set_board_handicap(
 /// Register a player in the tournament.
 async fn add_player(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Json(new_player): Json<NewPlayer>,
 ) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.add_player(new_player).map(|_| ()))?;
+    store.mutate(expected, |t| t.add_player(new_player).map(|_| ()))?;
     Ok((StatusCode::CREATED, view(&store)?))
 }
 
@@ -664,10 +682,11 @@ async fn add_player(
 /// one undo reverts the entire import rather than one player at a time.
 async fn add_players_batch(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Json(new_players): Json<Vec<NewPlayer>>,
 ) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| {
+    store.mutate(expected, |t| {
         for new_player in new_players {
             t.add_player(new_player)?;
         }
@@ -686,21 +705,25 @@ struct PlayerParams {
 /// Edit an existing player's fields (in-place cell editing).
 async fn edit_player(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Path(params): Path<PlayerParams>,
     Json(new_player): Json<NewPlayer>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.edit_player(params.player_id, new_player).map(|_| ()))?;
+    store.mutate(expected, |t| {
+        t.edit_player(params.player_id, new_player).map(|_| ())
+    })?;
     view(&store)
 }
 
 /// Remove a player from the tournament by id.
 async fn remove_player(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Path(params): Path<PlayerParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| t.remove_player(params.player_id))?;
+    store.mutate(expected, |t| t.remove_player(params.player_id))?;
     view(&store)
 }
 
@@ -713,11 +736,12 @@ struct SetEligibleRequest {
 /// Set whether a player is eligible for the direct-elimination cup.
 async fn set_player_eligible(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Path(params): Path<PlayerParams>,
     Json(req): Json<SetEligibleRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| {
+    store.mutate(expected, |t| {
         t.set_player_eligible(params.player_id, req.eligible)
             .map(|_| ())
     })?;
@@ -734,11 +758,12 @@ struct AddAdjustmentRequest {
 /// Apply a manual point bonus/malus to a player.
 async fn add_point_adjustment(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Path(params): Path<PlayerParams>,
     Json(req): Json<AddAdjustmentRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| {
+    store.mutate(expected, |t| {
         t.add_point_adjustment(params.player_id, req.delta, req.reason)
             .map(|_| ())
     })?;
@@ -756,10 +781,11 @@ struct AdjustmentParams {
 /// Remove a previously applied point adjustment.
 async fn remove_point_adjustment(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Path(params): Path<AdjustmentParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
-    store.mutate(|t| {
+    store.mutate(expected, |t| {
         t.remove_point_adjustment(params.player_id, params.adjustment_id)
             .map(|_| ())
     })?;

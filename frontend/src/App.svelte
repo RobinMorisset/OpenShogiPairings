@@ -84,6 +84,13 @@
   // (including undo) sets it, via `apply`.
   let hasUnsavedChanges = $state(false);
 
+  // The version of the tournament state currently displayed. Used to reject a
+  // background resync that resolved out of order (older than what we already
+  // show), so it can't briefly revert a just-applied edit. Reset on a tournament
+  // switch; a reconnect resync applies unconditionally (the server may have
+  // restarted with a lower counter), see `refetch`.
+  let appliedVersion: number | null = null;
+
   /** Apply a tournament API response to local state. */
   function apply(res: TournamentResponse) {
     tournament = res.tournament;
@@ -93,6 +100,7 @@
     suggestedHandicaps = res.suggested_handicaps ?? [];
     effectiveWinners = res.effective_winners ?? [];
     canUndo = res.can_undo;
+    appliedVersion = res.version;
     hasUnsavedChanges = true;
   }
 
@@ -310,10 +318,17 @@
   // another referee, on reconnect, or after a rejected (conflicting) edit. Safe
   // because every edit already lives on the server; there is no unsaved local
   // state to lose.
-  async function refetch() {
+  async function refetch(force = false) {
     try {
       const res = await fetchTournament();
-      if (res) {
+      // Ignore a resync that resolved out of order — older than what we already
+      // display — so a slow GET racing an in-flight mutation can't momentarily
+      // revert the just-applied edit. A reconnect passes `force`, since a
+      // restarted server may legitimately report a *lower* version.
+      if (
+        res &&
+        (force || appliedVersion === null || res.version >= appliedVersion)
+      ) {
         // A resync/live update isn't a local edit, so don't let it flip the
         // "unsaved changes" flag — apply() sets that for genuine local edits.
         const wasUnsaved = hasUnsavedChanges;
@@ -338,6 +353,7 @@
     suggestedHandicaps = [];
     effectiveWinners = [];
     canUndo = false;
+    appliedVersion = null;
     hasUnsavedChanges = false;
     error = null;
     // Read (and clear) the requested tab *untracked*: this effect must depend
@@ -349,7 +365,11 @@
 
     void loadInitial();
     // Live sync: refetch on another referee's change and on every (re)connect.
-    const unsubscribe = subscribeToChanges(refetch);
+    // A reconnect forces the resync (the server may have restarted with a lower
+    // version counter); a live "changed" event stays order-guarded in refetch.
+    const unsubscribe = subscribeToChanges((reason) =>
+      void refetch(reason === "reconnect"),
+    );
     // Also resync when the tab regains focus/visibility, in case the SSE stream
     // was throttled or dropped while the tab was backgrounded.
     const onFocus = () => void refetch();

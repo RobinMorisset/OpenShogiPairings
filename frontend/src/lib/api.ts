@@ -187,7 +187,16 @@ async function request<T>(
   // mutation can declare the state it was based on.
   const versioned = body as { version?: unknown };
   if (versioned && typeof versioned.version === "number") {
-    knownVersion = versioned.version;
+    // Never move the known version *backward*. A slow GET (a background resync
+    // fired on focus/visibility) can resolve after a newer mutation already
+    // advanced the version; adopting its stale number would make the next edit
+    // send a too-low `X-Tournament-Version` and get a spurious 409. The version
+    // only ever legitimately drops on a tournament switch or an SSE (re)connect
+    // — both of which reset `knownVersion` to `null` explicitly, so the guard
+    // below re-adopts whatever the server reports next.
+    if (knownVersion === null || versioned.version >= knownVersion) {
+      knownVersion = versioned.version;
+    }
   }
   return body;
 }
@@ -201,8 +210,15 @@ async function request<T>(
  * function; the browser's EventSource reconnects on its own if the stream
  * drops. Callers must resubscribe (unsubscribe + call again) when the open
  * tournament changes — this snapshots the id at call time.
+ *
+ * `reason` tells the caller *why* it fired: `"reconnect"` on (re)connect — the
+ * server may have restarted and reset its version counter, so the caller should
+ * adopt whatever it now reports unconditionally — versus `"changed"` for a live
+ * edit, where a stale resync should not overwrite newer local state.
  */
-export function subscribeToChanges(onChange: () => void): () => void {
+export function subscribeToChanges(
+  onChange: (reason: "reconnect" | "changed") => void,
+): () => void {
   const id = currentId;
   if (!id) return () => {};
 
@@ -221,7 +237,7 @@ export function subscribeToChanges(onChange: () => void): () => void {
       knownVersion = null;
       // Resync: catch up on anything missed while disconnected. Cheap and safe —
       // refetch preserves any local "unsaved" state.
-      onChange();
+      onChange("reconnect");
     };
     source.onerror = () => {
       // EventSource auto-reconnects (readyState CONNECTING) unless it has given
@@ -235,7 +251,7 @@ export function subscribeToChanges(onChange: () => void): () => void {
       // Refetch when the change is newer than what we hold, or on a resync
       // signal ("reload" → NaN). Skip the echo of our own edits.
       if (!Number.isFinite(version) || knownVersion === null || version > knownVersion) {
-        onChange();
+        onChange("changed");
       }
     });
   });

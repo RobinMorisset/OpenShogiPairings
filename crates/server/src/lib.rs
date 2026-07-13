@@ -870,6 +870,31 @@ mod tests {
         assert!(body["version"].as_u64().unwrap() > version);
     }
 
+    #[tokio::test]
+    async fn a_malformed_version_header_is_a_400_not_a_skipped_check() {
+        let state = AppState::default();
+        let id = create(&state, "Cup").await;
+
+        // A present-but-unparseable version must be a hard error, not silently
+        // treated like "no header" (which would drop conflict detection).
+        let (status, _) = send(
+            router(state.clone()),
+            Request::builder()
+                .method("POST")
+                .uri(t(id, "/players"))
+                .header("content-type", "application/json")
+                .header("x-tournament-version", "not-a-number")
+                .body(Body::from(json!({ "last_name": "Nope" }).to_string()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // The rejected request changed nothing.
+        let (_, body) = send(router(state.clone()), get(&t(id, ""))).await;
+        assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
+    }
+
     /// Log in as admin, asserting success, and return the bearer token.
     async fn admin_login(state: &AppState, password: &str) -> String {
         let (status, body) = send(
