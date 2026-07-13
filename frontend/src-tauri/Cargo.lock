@@ -2451,6 +2451,7 @@ dependencies = [
  "rand_chacha",
  "serde",
  "thiserror 2.0.18",
+ "tracing",
  "ts-rs",
  "uuid",
 ]
