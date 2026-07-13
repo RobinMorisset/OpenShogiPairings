@@ -4,7 +4,7 @@ import type { CupStage, PairingSource } from "./types";
 
 /** A translate function, e.g. the `$_` store from svelte-i18n (its exact
  * parameter type isn't exported, so this is intentionally loose). */
-type Translate = (id: string, opts?: any) => string;
+type Translate = (id: string, opts?: Record<string, unknown>) => string;
 
 
 /** Human label for a cup stage, e.g. "Round of 32", "Semifinal", "3rd place". */

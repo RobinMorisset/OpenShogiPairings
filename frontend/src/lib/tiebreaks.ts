@@ -3,7 +3,7 @@
 
 import { TIEBREAKS, type Tiebreak } from "./types";
 
-type Translate = (id: string, opts?: any) => string;
+type Translate = (id: string, opts?: Record<string, unknown>) => string;
 
 // Most codes (SOSM, SOSW, ...) are standardized abbreviations kept as-is in
 // every language; only the two prose labels are actually translated.

@@ -112,6 +112,9 @@ pub enum TournamentError {
     /// There is no round (or draft) to cancel.
     #[error("no round to cancel")]
     NoRoundToCancel,
+    /// There is no current (in-progress) round to act on (e.g. to re-pair).
+    #[error("there is no current round")]
+    NoCurrentRound,
     /// A pairing can't be forced onto a round that already has recorded results.
     #[error("cannot re-pair a round that already has recorded results")]
     RoundHasResults,
@@ -817,7 +820,7 @@ impl Tournament {
     /// exactly like any referee-forced board (both must be present Swiss players,
     /// neither a cup player nor already forced elsewhere).
     pub fn force_pairing(&mut self, a: Uuid, b: Uuid) -> Result<&Round, TournamentError> {
-        let round = self.rounds.last().ok_or(TournamentError::NoRoundToCancel)?;
+        let round = self.rounds.last().ok_or(TournamentError::NoCurrentRound)?;
         if round.completed {
             return Err(TournamentError::RoundHasResults);
         }

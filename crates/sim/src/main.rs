@@ -336,8 +336,6 @@ fn simulate_variant(
 /// Aggregated metrics for one variant.
 struct VariantReport {
     name: String,
-    #[allow(dead_code)]
-    runs: usize,
     diff: DiffStats,
     /// Pooled absolute ELO diffs across all runs, sorted — retained for the CSV
     /// histogram so outputs need no re-simulation.
@@ -436,7 +434,6 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
 
     VariantReport {
         name,
-        runs,
         diff,
         pooled,
         fidelity_score: mean(&score_rhos),

@@ -414,8 +414,15 @@ impl TournamentRegistry {
 
     /// Create a new, empty tournament named `name`, optionally protected by
     /// `password`. Persists it (tournament + auth sidecar) if a data directory
-    /// is configured. Returns the new tournament's id.
-    pub fn create(&self, name: &str, password: Option<String>) -> Result<Uuid, TournamentError> {
+    /// is configured. Returns the new tournament's id and, when it has a
+    /// password, its session token — read from the freshly built `AuthConfig`,
+    /// so the caller needn't look the instance back up (and can't race a
+    /// concurrent delete doing so).
+    pub fn create(
+        &self,
+        name: &str,
+        password: Option<String>,
+    ) -> Result<(Uuid, Option<String>), TournamentError> {
         let tournament = Tournament::new(name)?;
         let id = tournament.id;
         if let Some(dir) = &self.data_dir {
@@ -424,6 +431,7 @@ impl TournamentRegistry {
         let mut store = TournamentStore::empty(self.tournament_path(id));
         store.set_current(tournament);
         let auth = password.map(AuthConfig::new);
+        let token = auth.as_ref().map(|a| a.token().to_string());
         if let Some(auth) = &auth {
             self.persist_auth(id, auth);
         }
@@ -437,7 +445,7 @@ impl TournamentRegistry {
                     auth,
                 }),
             );
-        Ok(id)
+        Ok((id, token))
     }
 
     /// Remove a tournament: its registry entry, its persisted file (+ auth
@@ -575,8 +583,8 @@ mod tests {
     #[test]
     fn registry_creates_lists_and_isolates_tournaments() {
         let registry = TournamentRegistry::default();
-        let a = registry.create("Cup A", None).unwrap();
-        let b = registry.create("Cup B", Some("secret".into())).unwrap();
+        let (a, _) = registry.create("Cup A", None).unwrap();
+        let (b, _) = registry.create("Cup B", Some("secret".into())).unwrap();
 
         let mut names: Vec<_> = registry
             .list()
@@ -643,6 +651,7 @@ mod tests {
             registry
                 .create("Persisted Cup", Some("secret".into()))
                 .unwrap()
+                .0
         };
 
         let reloaded = TournamentRegistry::new(Some(dir.clone()));
@@ -715,7 +724,7 @@ mod tests {
     #[test]
     fn removing_a_tournament_tombstones_its_store() {
         let registry = TournamentRegistry::default();
-        let id = registry.create("Cup", None).unwrap();
+        let (id, _) = registry.create("Cup", None).unwrap();
         let instance = registry.get(id).expect("just created");
 
         assert!(registry.remove(id));

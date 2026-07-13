@@ -55,14 +55,10 @@ async fn create_tournament(
     State(state): State<AppState>,
     Json(req): Json<CreateTournamentRequest>,
 ) -> Result<(StatusCode, Json<CreateTournamentResponse>), ApiError> {
-    let id = state
+    let (id, token) = state
         .registry
         .create(&req.name, req.password)
         .map_err(ApiError::from)?;
-    let token = state
-        .registry
-        .get(id)
-        .and_then(|instance| instance.auth.as_ref().map(|a| a.token().to_string()));
     Ok((
         StatusCode::CREATED,
         Json(CreateTournamentResponse { id, token }),
