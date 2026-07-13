@@ -124,6 +124,30 @@ async fn refresh_from_fesa(state: &AppState) -> Result<Vec<RatedPlayer>, ApiErro
     Ok(players)
 }
 
+/// The cached FESA list **without** ever fetching — in-memory, else on-disk
+/// (promoted into memory), else empty.
+///
+/// Used by CSV import to fill in missing ratings/grades: enrichment is
+/// best-effort, so a cold cache simply means no enrichment (the same as when the
+/// client's autocomplete list failed to load), never a blocking network round-trip
+/// or a failed import.
+pub(crate) fn cached_ratings(state: &AppState) -> Vec<RatedPlayer> {
+    if let Some(cached) = state
+        .ratings
+        .read()
+        .expect("ratings lock poisoned")
+        .as_ref()
+    {
+        return cached.players.clone();
+    }
+    if let Some(disk) = load_from_disk() {
+        let players = disk.players.clone();
+        *state.ratings.write().expect("ratings lock poisoned") = Some(disk);
+        return players;
+    }
+    Vec::new()
+}
+
 /// `GET /api/ratings` — cached FESA list (fetched once if nothing is cached yet).
 pub async fn ratings_handler(
     State(state): State<AppState>,

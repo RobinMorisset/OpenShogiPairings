@@ -77,8 +77,10 @@
     "club": "Club (facultatif)",
     "addPlayer": "Ajouter un joueur",
     "importCsv": "Charger un CSV…",
-    "importCsvTitle": "Importer des joueurs depuis un fichier CSV (Nom, Prénom requis ; ELO, Grade, Nationalité, Club facultatifs). L'ELO/Grade manquant est complété depuis la liste FESA si le nom correspond.",
-    "csvEmpty": "Le fichier CSV ne contient aucun joueur à importer."
+    "importCsvTitle": "Importer des joueurs depuis un fichier CSV (Nom, Prénom requis ; ELO, Grade, Nationalité, Club facultatifs). L'ELO/Grade/Nationalité manquant est complété depuis la liste FESA si le nom correspond.",
+    "csvErrorEmpty": "Le fichier CSV ne contient aucun joueur à importer.",
+    "csvErrorMissingColumns": "Le CSV doit comporter une colonne Nom et une colonne Prénom.",
+    "csvErrorRowsMissingLastName": "Ces lignes n'ont pas de nom de famille : {rows}"
   },
   "playerList": {
     "clickToEdit": "Cliquer pour modifier",

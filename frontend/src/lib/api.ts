@@ -101,11 +101,21 @@ function resolveToken(authKind: AuthKind): string | null {
   return id ? getToken(id) : null;
 }
 
-/** Error carrying the HTTP status, so callers can special-case e.g. 404. */
+/**
+ * Error carrying the HTTP status, so callers can special-case e.g. 404.
+ *
+ * `code` and `values` are set when the server tags an error for client-side
+ * localization (e.g. a CSV import failure): `code` is a stable machine string
+ * the UI maps to a translation key, and `values` holds its interpolation
+ * arguments. Both are absent for plain message-only errors — `message` is then
+ * the (server-provided, English) text to show directly.
+ */
 export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code?: string,
+    public values?: Record<string, string>,
   ) {
     super(message);
     this.name = "ApiError";
@@ -162,15 +172,20 @@ async function fetchOk(
   }
 
   if (!response.ok) {
-    // The server sends `{ "error": "..." }` for handled errors.
+    // The server sends `{ "error": "..." }`, optionally with a `code` (+ `values`)
+    // for errors the client localizes.
     let message = `${response.status} ${response.statusText}`;
+    let code: string | undefined;
+    let values: Record<string, string> | undefined;
     try {
       const body = await response.json();
       if (body && typeof body.error === "string") message = body.error;
+      if (body && typeof body.code === "string") code = body.code;
+      if (body && body.values && typeof body.values === "object") values = body.values;
     } catch {
       // Non-JSON error body; keep the status text.
     }
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, code, values);
   }
 
   return response;
@@ -540,13 +555,17 @@ export function addPlayer(player: NewPlayer): Promise<TournamentResponse> {
 }
 
 /**
- * Register many players at once (CSV import) as a single mutation, so one
- * undo reverts the whole import rather than player-by-player.
+ * Import players from a raw CSV file. The file's text is sent as-is to the
+ * server, which parses it (column detection, FESA enrichment) and registers the
+ * roster as a single all-or-nothing mutation — so one undo reverts the whole
+ * import. A malformed file comes back as a 400 {@link ApiError} whose message is
+ * shown to the referee.
  */
-export function addPlayersBatch(players: NewPlayer[]): Promise<TournamentResponse> {
-  return request<TournamentResponse>(scopedPath("/players/batch"), {
+export function importPlayersCsv(csv: string): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath("/players/import-csv"), {
     method: "POST",
-    body: JSON.stringify(players),
+    headers: { "content-type": "text/plain" },
+    body: csv,
   });
 }
 

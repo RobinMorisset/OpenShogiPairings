@@ -3,7 +3,6 @@
   import { untrack } from "svelte";
   import {
     addPlayer,
-    addPlayersBatch,
     addPointAdjustment,
     ApiError,
     cancelRound,
@@ -16,6 +15,7 @@
     fetchRatings,
     fetchRoundExplanation,
     fetchTournament,
+    importPlayersCsv,
     prepareRound,
     refreshRatings,
     removePlayer,
@@ -47,7 +47,7 @@
     Winner,
   } from "./lib/types";
   import { saveAmericanGrid, saveTournament } from "./lib/tournamentFile";
-  import { parseCsvPlayers, pickCsvFile } from "./lib/csvImport";
+  import { pickCsvFile } from "./lib/csvImport";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
   import Login from "./lib/components/Login.svelte";
   import TournamentPicker from "./lib/components/TournamentPicker.svelte";
@@ -385,9 +385,23 @@
     };
   });
 
+  // Server error `code` → translation key, for errors the UI localizes (rather
+  // than showing the server's English fallback message). The server also sends
+  // any interpolation `values` (e.g. the offending CSV rows).
+  const ERROR_CODE_KEYS: Record<string, string> = {
+    csv_empty: "playerRegistration.csvErrorEmpty",
+    csv_missing_name_columns: "playerRegistration.csvErrorMissingColumns",
+    csv_rows_missing_last_name: "playerRegistration.csvErrorRowsMissingLastName",
+  };
+
   function describe(err: unknown): string {
     if (err instanceof ApiError && err.status === 0) {
       return $_("app.cannotReachServer");
+    }
+    // A tagged, localizable server error: translate it (with its interpolation
+    // values) rather than showing the English fallback.
+    if (err instanceof ApiError && err.code && ERROR_CODE_KEYS[err.code]) {
+      return $_(ERROR_CODE_KEYS[err.code], { values: err.values ?? {} });
     }
     return err instanceof Error ? err.message : String(err);
   }
@@ -419,23 +433,15 @@
   }
 
   /**
-   * Import players from a CSV file, filling missing ELO/grade from the FESA
-   * list. Sent as a single batch request, so it lands as one undo-able step
-   * rather than one per imported player.
+   * Import players from a CSV file. The file's text is sent to the server, which
+   * parses it (column detection, FESA enrichment) and registers the roster as a
+   * single undo-able step. A malformed file surfaces as an error banner.
    */
   function handleImportCsv() {
     run(async () => {
       const text = await pickCsvFile();
       if (text === null) return; // cancelled
-
-      const { players, errors } = parseCsvPlayers(text, ratings);
-      if (errors.length > 0) {
-        throw new Error(errors.join("\n"));
-      }
-      if (players.length === 0) {
-        throw new Error($_("playerRegistration.csvEmpty"));
-      }
-      apply(await addPlayersBatch(players));
+      apply(await importPlayersCsv(text));
     });
   }
 
@@ -1126,6 +1132,9 @@
     border-radius: 0.5rem;
     font-size: 0.9rem;
     margin-bottom: 1rem;
+    /* Preserve newlines so a multi-line error (e.g. a list of bad rows) renders
+       as separate lines instead of running together. */
+    white-space: pre-line;
   }
   .muted {
     color: var(--text-secondary);

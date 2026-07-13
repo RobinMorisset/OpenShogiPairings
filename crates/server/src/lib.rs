@@ -227,6 +227,16 @@ mod tests {
             .unwrap()
     }
 
+    /// A `POST` carrying a raw text body (for the CSV import endpoint).
+    fn post_text(uri: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "text/plain")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
     /// Create a tournament named `name` (no password), returning its id.
     async fn create(state: &AppState, name: &str) -> Uuid {
         let (status, body) = send(
@@ -318,6 +328,67 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
+        assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn import_players_csv_registers_the_roster_as_one_undo_step() {
+        let state = AppState::default();
+        let id = create(&state, "Paris Open").await;
+
+        // Reordered columns, a semicolon delimiter, and a French header — all
+        // handled by the shared osp-core parser.
+        let csv = "Prénom;Nom;Classement;Club\n\
+                   Ann;Alpha;2000;Paris\n\
+                   Bo;Beta;;Lyon\n";
+        let (status, body) = send(
+            router(state.clone()),
+            post_text(&t(id, "/players/import-csv"), csv),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let players = body["tournament"]["players"].as_array().unwrap();
+        assert_eq!(players.len(), 2);
+        assert_eq!(players[0]["last_name"], "Alpha");
+        assert_eq!(players[0]["first_name"], "Ann");
+        assert_eq!(players[0]["rating"], 2000);
+        assert_eq!(players[0]["club"], "Paris");
+        // The whole import is a single mutation, so one undo clears all of it.
+        assert_eq!(body["can_undo"], true);
+        let (_, body) = send(router(state.clone()), post_empty(&t(id, "/undo"))).await;
+        assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn import_players_csv_rejects_a_malformed_file() {
+        let state = AppState::default();
+        let id = create(&state, "Paris Open").await;
+
+        // A header with no last-name/first-name column → 400, nothing imported.
+        let (status, body) = send(
+            router(state.clone()),
+            post_text(&t(id, "/players/import-csv"), "ELO,Club\n2000,Paris\n"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body["error"].as_str().unwrap().contains("last-name"));
+        // A stable machine code accompanies the message so the client localizes it.
+        assert_eq!(body["code"], "csv_missing_name_columns");
+
+        // A row with a blank last name → 400 with the offending rows for the client.
+        let (status, body) = send(
+            router(state.clone()),
+            post_text(
+                &t(id, "/players/import-csv"),
+                "Last name,First name\nAlpha,Ann\n,Bo\n",
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "csv_rows_missing_last_name");
+        assert_eq!(body["values"]["rows"], "3"); // the second data row (file row 3)
+        // All-or-nothing: nothing was imported.
+        let (_, body) = send(router(state.clone()), get(&t(id, ""))).await;
         assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
     }
 

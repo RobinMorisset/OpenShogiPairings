@@ -17,6 +17,7 @@ use uuid::Uuid;
 use crate::backup;
 use crate::error::ApiError;
 use crate::live::ExpectedVersion;
+use crate::ratings;
 use crate::scope::TournamentCtx;
 use crate::state::{AppState, TournamentStore};
 use crate::{auth, live};
@@ -111,6 +112,7 @@ pub fn scope(state: AppState) -> Router<AppState> {
         )
         .route("/players", post(add_player))
         .route("/players/batch", post(add_players_batch))
+        .route("/players/import-csv", post(import_players_csv))
         .route(
             "/players/{player_id}",
             axum::routing::put(edit_player).delete(remove_player),
@@ -685,6 +687,34 @@ async fn add_players_batch(
     ExpectedVersion(expected): ExpectedVersion,
     Json(new_players): Json<Vec<NewPlayer>>,
 ) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
+    let mut store = instance.store.write().expect("store lock poisoned");
+    store.mutate(expected, |t| {
+        for new_player in new_players {
+            t.add_player(new_player)?;
+        }
+        Ok(())
+    })?;
+    Ok((StatusCode::CREATED, view(&store)?))
+}
+
+/// Register players from a raw CSV file (text body), filling missing
+/// ELO/grade/nationality from the server's cached FESA list.
+///
+/// The CSV is parsed by `osp-core` ([`osp_core::parse_players_csv`]) so the
+/// column/format rules have a single tested implementation shared by every
+/// client. Like [`add_players_batch`] the whole roster lands as one
+/// all-or-nothing mutation (one undo reverts the entire import). Returns 400 on
+/// a malformed file (empty, missing name columns, or any row with no last name);
+/// enrichment is best-effort against whatever FESA list is cached.
+async fn import_players_csv(
+    State(state): State<AppState>,
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    body: String,
+) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
+    let ratings = ratings::cached_ratings(&state);
+    // A parse failure carries a machine code so the client can localize it.
+    let new_players = osp_core::parse_players_csv(&body, &ratings).map_err(ApiError::CsvImport)?;
     let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(expected, |t| {
         for new_player in new_players {

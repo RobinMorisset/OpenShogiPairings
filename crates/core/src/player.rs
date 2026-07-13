@@ -51,6 +51,29 @@ impl Grade {
             GradeKind::Kyu => 1 - self.level as i64,
         }
     }
+
+    /// Parse the compact free-text grade entry used in registration and CSV
+    /// import — `"3d"`, `"3 dan"`, `"5k"`, `"5 kyu"` (case-insensitive, optional
+    /// space) — into a [`Grade`], or `None` if it doesn't match. The level must
+    /// be a positive integer. Mirrors the frontend's `parseGrade`.
+    pub fn parse(raw: &str) -> Option<Grade> {
+        let s = raw.trim().to_lowercase();
+        // Split the leading digits from the dan/kyu suffix.
+        let digits_end = s.find(|c: char| !c.is_ascii_digit())?;
+        if digits_end == 0 {
+            return None; // must start with a level
+        }
+        let level: u32 = s[..digits_end].parse().ok()?;
+        if level < 1 {
+            return None;
+        }
+        let kind = match s[digits_end..].trim_start() {
+            "d" | "dan" => GradeKind::Dan,
+            "k" | "kyu" => GradeKind::Kyu,
+            _ => return None,
+        };
+        Some(Grade { kind, level })
+    }
 }
 
 /// Ordered by playing strength (see [`Grade::rank`]), not by field order —
@@ -147,7 +170,7 @@ pub struct PointAdjustment {
 ///
 /// This is the request shape clients send; the server turns it into a [`Player`]
 /// with a freshly minted [`Uuid`].
-#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct NewPlayer {
     pub last_name: String,
@@ -219,5 +242,24 @@ mod tests {
         assert!(Grade::dan(1) < Grade::dan(5));
         // Contiguous: 1 kyu sits directly below 1 dan.
         assert_eq!(Grade::kyu(1).rank() + 1, Grade::dan(1).rank());
+    }
+
+    #[test]
+    fn parse_grade_accepts_the_compact_and_spelled_out_forms() {
+        assert_eq!(Grade::parse("3d"), Some(Grade::dan(3)));
+        assert_eq!(Grade::parse("3 dan"), Some(Grade::dan(3)));
+        assert_eq!(Grade::parse("  5K "), Some(Grade::kyu(5)));
+        assert_eq!(Grade::parse("5 kyu"), Some(Grade::kyu(5)));
+        assert_eq!(Grade::parse("12DAN"), Some(Grade::dan(12)));
+    }
+
+    #[test]
+    fn parse_grade_rejects_junk() {
+        assert_eq!(Grade::parse(""), None);
+        assert_eq!(Grade::parse("dan"), None); // no level
+        assert_eq!(Grade::parse("5"), None); // no kind
+        assert_eq!(Grade::parse("0d"), None); // level must be ≥ 1
+        assert_eq!(Grade::parse("3 danger"), None); // suffix must be exact
+        assert_eq!(Grade::parse("3 d an"), None);
     }
 }
