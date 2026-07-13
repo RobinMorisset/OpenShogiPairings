@@ -25,14 +25,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Tag must match tauri.conf.json and package.json versions
+      - name: Tag must match every version-bearing file
         run: |
           tag="${GITHUB_REF_NAME#v}"
           conf=$(jq -r .version frontend/src-tauri/tauri.conf.json)
           pkg=$(jq -r .version frontend/package.json)
-          echo "tag=$tag  tauri.conf.json=$conf  package.json=$pkg"
-          if [ "$tag" != "$conf" ] || [ "$tag" != "$pkg" ]; then
-            echo "::error::Tag v$tag does not match versions (tauri.conf.json=$conf, package.json=$pkg). Bump both and re-tag."
+          # The Rust workspace version feeds osp_core::VERSION (the /api/health
+          # payload and the client's "server upgraded" check), so it must match
+          # the tag too. It's the first `version = "..."` under
+          # [workspace.package] in the root Cargo.toml.
+          ws=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/^version = "([^"]+)".*/\1/')
+          # The desktop crate is excluded from the workspace, so it carries its
+          # own [package] version — the first `version = "..."` in its manifest.
+          crate=$(grep -m1 '^version = ' frontend/src-tauri/Cargo.toml | sed -E 's/^version = "([^"]+)".*/\1/')
+          echo "tag=$tag  Cargo.toml=$ws  src-tauri/Cargo.toml=$crate  tauri.conf.json=$conf  package.json=$pkg"
+          if [ "$tag" != "$ws" ] || [ "$tag" != "$crate" ] || [ "$tag" != "$conf" ] || [ "$tag" != "$pkg" ]; then
+            echo "::error::Tag v$tag does not match versions (Cargo.toml=$ws, src-tauri/Cargo.toml=$crate, tauri.conf.json=$conf, package.json=$pkg). Bump all four and re-tag."
             exit 1
           fi
 

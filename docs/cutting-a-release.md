@@ -10,13 +10,19 @@ the rest.
 ## Steps
 
 1. **Bump the version** so the tag matches what the app reports. Update the
-   `version` field in both:
+   `version` field in all four:
+   - [`Cargo.toml`](../Cargo.toml) (`[workspace.package]` — feeds
+     `osp_core::VERSION`, i.e. the `/api/health` payload and the client's
+     "server upgraded" check)
+   - [`frontend/src-tauri/Cargo.toml`](../frontend/src-tauri/Cargo.toml) (the
+     desktop crate is excluded from the workspace, so it carries its own
+     `[package]` version)
    - [`frontend/src-tauri/tauri.conf.json`](../frontend/src-tauri/tauri.conf.json)
    - [`frontend/package.json`](../frontend/package.json)
 
-   Commit that on `main`. Both must equal the tag you're about to push — CI's
-   `check-version` job verifies this and fails the release before building if
-   either is out of sync.
+   Commit that on `main`. All four must equal the tag you're about to push —
+   CI's `check-version` job verifies this and fails the release before building
+   if any is out of sync.
 
 2. **Tag and push:**
 

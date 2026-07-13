@@ -1,7 +1,7 @@
 {
   "name": "osp-frontend",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Web UI for OpenShogiPairings, shared by the browser and the Tauri desktop client.",
   "scripts": {
