@@ -48,8 +48,8 @@ tournament. For how it's built, see [Architecture](#architecture) below.
   rating gap) suggested automatically, and draws-before-the-decisive-game
   recorded for ELO purposes.
 - **FESA rating list integration**: registration autocompletes name, ELO, and
-  grade from the federation's list, refreshable on demand; a completed round
-  can be exported as an **American Grid** cross-table for the federation's
+  grade from the federation's list, refreshable on demand; the tournament
+  cross-table can be exported as an **American Grid** for the federation's
   ELO update, and a grid can be imported back to rebuild a tournament.
 - **Manual point adjustments** (a bonus or penalty with a mandatory reason),
   for corrections outside the normal scoring.
@@ -101,9 +101,9 @@ tournament. For how it's built, see [Architecture](#architecture) below.
 - **Full undo history** and **automatic backups** at every round-lifecycle
   transition (finalize / prepare / start / complete / cancel), restorable
   from the UI.
-- **Guarded round lifecycle**: a round can't be completed with games still
-  unplayed, registration can't be skipped, and destructive actions (discard,
-  delete) always ask for confirmation first.
+- **Guarded round lifecycle**: the next round can't start until the current
+  one's games are all recorded, registration can't be skipped, and destructive
+  actions (discard, delete) always ask for confirmation first.
 
 ## Limitations
 
@@ -242,19 +242,21 @@ degressive schedule, club protection, floater style, pairing mode, hybrid cup),
 and one tab per round. Points are each player's wins plus their MacMahon
 starting points (one per threshold they reach — an ELO rating or a dan/kyu
 grade), and the pairing engine scores by total points. The round lifecycle is
-gated: **finalize registration** → **prepare round** (a draft state to mark
-players absent, force pairings, and force the bye) → **start round** (confirm)
-→ play games → **complete round** (only once every game is played) → prepare
-the next round; **cancel last round** peels back one stage (discarding an open
-draft, else removing the most recent round) to replay it or undo a mistake.
+gated: **prepare round** (a draft state to mark players absent, force pairings,
+and force the bye — for round 1 this also finalizes registration in the same
+step) → **start round** (confirm) → play games → the round **completes
+automatically** once every board has a result (or no-show), unlocking the next
+round; **cancel last round** peels back one stage (discarding an open draft,
+else removing the most recent round) to replay it or undo a mistake.
 Finalizing registration assigns each player a tournament number (by ELO,
 unrated last; later additions get the next free number). The Standings tab is
 a ranked table: a row per player (ordered by the referee-chosen criteria) with
 one column per completed round (`opponent-number` + `+`/`−`, or `0+` for a bye
 / `0-` for an absence), a win count, and one column per selected ranking
-criterion — Points plus twelve tie-break metrics (SOS / SODOS / SOSOS, the
+criterion — Points plus fourteen tie-break metrics (SOS / SODOS / SOSOS, the
 Buchholz cuts, and the cumulative score, each in a MacMahon-inclusive and a
-wins-only flavour), reorderable in Settings.
+wins-only flavour; direct confrontation; and the estimated ELO in the ELO
+pairing modes), reorderable in Settings.
 
 Mutations go through a `TournamentStore` that keeps the current tournament plus a
 stack of prior snapshots (the undo history); create/load/restore reset it.
@@ -296,10 +298,9 @@ that tournament's bearer token if it has a password (except `/login` and
 | `GET /american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
 | `PUT /american-grid` | Import an American Grid (raw `text/plain` body), rebuilding the tournament from it — registers the players, forces every round's pairings, and replays the results. Meant for seeding a non-trivial state in tests/simulations, not surfaced in the UI. |
 | `PUT /settings` | Update settings (the whole `TournamentSettings`): `{ "macmahon_thresholds": [{ "criterion": { "kind": "elo", "value": 1200 } }, { "criterion": { "kind": "grade", "grade": { "kind": "dan", "level": 1 } }, "drops_after_round": 3 }], "airtight_groups_rounds": 2, "club_protection_enabled": true, "club_protection_rounds": 3, "club_protection_exempt_clubs": ["Paris"], "mixed_elo_pairing_enabled": …, "elo_pairing_enabled": … }`. Each threshold's `criterion` is either an ELO rating (`{ "kind": "elo", "value": … }`) or a dan/kyu grade (`{ "kind": "grade", "grade": { "kind": "dan"｜"kyu", "level": … } }`) — a tournament can freely mix both kinds, each counted independently; `airtight_groups_rounds`, if set, forbids pairing players with a different number of MacMahon points during rounds `1..=n`; `floater_style` is `"classic"｜"median"`; `mixed_elo_pairing_enabled` / `elo_pairing_enabled` select the experimental mixed / pure ELO pairing modes (mutually exclusive; pure wins if both are set); `cup_enabled` toggles the hybrid direct-elimination cup (its size is chosen at finalization). |
-| `POST /finalize-registration` | Finalize registration (unlocks round 1). Body optional: `{ "cup_size": 8｜16｜32｜64 }` when the hybrid cup is enabled — seeds the top-N eligible players into a direct-elimination bracket. |
-| `POST /complete-round` | Complete the current round (all games must be played). |
+| `POST /finalize-registration` | Finalize registration (unlocks round 1). Body optional: `{ "cup_size": 8｜16｜32｜64 }` when the hybrid cup is enabled — seeds the top-N eligible players into a direct-elimination bracket. The UI usually skips this: `POST /rounds/prepare` finalizes round 1 in the same step. |
 | `POST /cancel-round` | Cancel the last round — discards the open draft if one is being prepared, otherwise removes the most recent round (undoable). |
-| `POST /rounds/prepare` | Begin drafting the next round. |
+| `POST /rounds/prepare` | Begin drafting the next round. For round 1, finalizes registration first (optional `{ "cup_size" }` body, as above) in the same undo step. A round completes automatically once every board has a result, so there is no separate "complete round" call. |
 | `PUT /draft` | Edit the draft (absent set, forced pairings, forced bye). |
 | `POST /rounds` | Confirm the draft: pair remaining players and start the round. |
 | `GET /rounds/{n}/explanation` | Explain a round's Swiss pairings: per-board rule ledger and round report. Read-only. |
@@ -307,8 +308,11 @@ that tournament's bearer token if it has a password (except `/login` and
 | `POST /rounds/force-pairing` | Re-pair the current round with board `{a, b}` fixed. |
 | `POST /rounds/{n}/boards/{i}/result` | Toggle a board's winner: `{ "clicked": "player1"｜"player2" }`. |
 | `POST /rounds/{n}/boards/{i}/drawn` | Set the "a draw occurred" flag: `{ "drawn": true｜false }`. |
+| `POST /rounds/{n}/boards/{i}/no-show` | Mark a board a no-show (or clear it): `{ "absent": "player1"｜"player2"｜"both"｜null }`. A no-show settles the board (counting toward auto-completing the round) and carries the absence into the next round's draft. |
 | `PUT /rounds/{n}/boards/{i}/handicap` | Set/clear the handicap: `{ "handicap": "4p"｜null }` (giver frozen from ratings; 400 if ratings equal). |
 | `POST /players` | Register a player: `{ "last_name", "first_name?", "rating?", "grade?", "nationality?", "club?" }` (`grade` is `{ "kind": "dan"｜"kyu", "level": … }`). |
+| `POST /players/batch` | Register several players at once (one undo step): a JSON array of player objects, each shaped like the `POST /players` body. |
+| `POST /players/import-csv` | Register a roster from a raw CSV text body (parsed server-side, ratings matched against the FESA cache), as a single undo step. |
 | `PUT /players/{id}` | Edit a player's fields in place. |
 | `DELETE /players/{id}` | Remove a player (400 if they are seeded in the cup bracket). |
 | `POST /players/{id}/eligible` | Set cup eligibility: `{ "eligible": true｜false }`. |
@@ -404,13 +408,15 @@ in [`tauri.conf.json`](frontend/src-tauri/tauri.conf.json).
 ## Testing
 
 ```sh
-cargo test          # Rust workspace (core + server)
+cargo test          # Rust workspace (core, server, sim, matching)
 cd frontend && npm run check   # Svelte / TypeScript type-check
+cd frontend && npm test        # frontend unit tests (vitest)
 ```
 
 Dev helpers (Windows/PowerShell) in [`scripts/`](scripts):
 
-- `scripts/check.ps1` — runs both of the above.
+- `scripts/check.ps1` — runs `cargo test` and the frontend type-check
+  (`npm run check`).
 - `scripts/restart-server.ps1` — restart `osp-server` and wait until it responds
   (the running server doesn't hot-reload, so restart it after backend changes).
 
@@ -424,10 +430,11 @@ git config core.hooksPath scripts/git-hooks
 ```
 
 - `pre-commit` — `cargo fmt --check`, `cargo clippy --workspace --all-targets
-  -- -D warnings`, and `svelte-check`. Fast; keeps the tree clean commit by
-  commit.
-- `pre-push` — `cargo test --workspace`. Slower, so it only runs before
-  sharing work.
+  -- -D warnings`, `svelte-check`, and an i18n locale-key check
+  (`scripts/check-i18n-keys.mjs`, catching keys that exist in one locale but
+  not the other). Fast; keeps the tree clean commit by commit.
+- `pre-push` — the full test suite: `cargo test --workspace` and the frontend
+  tests (`npm test`). Slower, so it only runs before sharing work.
 
 ### Coverage
 
@@ -441,5 +448,5 @@ cargo llvm-cov --workspace --summary-only      # both combined
 cargo llvm-cov --workspace --html              # HTML report in target/llvm-cov/html/index.html
 ```
 
-The frontend has no test framework set up yet (no vitest/jest), so there is
-nothing to measure coverage on there — see [TODO.md](TODO.md).
+The frontend uses [vitest](https://vitest.dev) (`npm test`) for unit tests, but
+has no coverage tooling wired up yet — see [TODO.md](TODO.md).
