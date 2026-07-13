@@ -29,20 +29,6 @@ Known limitations and future work, roughly ordered by area.
 
 - **Keep one backup on tournament deletion for a while** 1 month before losing a tournament backup sounds good
 
-## Simulation
-
-- **Game-keyed RNG for effective common random numbers.** `osp-sim` gives every
-  variant the same per-run seed (common random numbers) so a settings A/B is
-  measured on the same simulated worlds. But `autofill_last_round`
-  ([`crates/core/src/sim.rs`](crates/core/src/sim.rs)) draws each board's outcome
-  sequentially in board-visitation order, so as soon as two variants pair players
-  differently the RNG streams decouple — measured cross-variant correlation of
-  per-run metrics is only ~0.4–0.6, a modest variance reduction rather than the
-  tight coupling CRN can give. Seed each game's coin flip from
-  `hash(seed, player_lo, player_hi, number_of_repeat_matches)` instead, so the *same matchup* gets the
-  *same outcome* regardless of pairing order. Only matters for comparing subtle
-  settings (here the effects were tens of SEs out and significant either way).
-
 ## Other
 
 - **Webhook for pushing results and pulling players** See https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification

@@ -230,35 +230,106 @@ fn fresh_state(
     Ok(t)
 }
 
+/// The SplitMix64 finalizer — a fast, well-mixing bijection on `u64`, used to
+/// fold a game's identity into a pseudo-random draw.
+fn splitmix64(mut z: u64) -> u64 {
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+/// A deterministic uniform in `[0, 1)` for one game, keyed on the run and the
+/// game's *identity* rather than on when it is drawn.
+///
+/// The key is `(run_seed, low id, high id, rematch)` with the two player ids
+/// sorted, so the same pairing yields the same draw no matter which variant
+/// produced it or in what board order — that is what makes common random numbers
+/// actually couple variants (see the module's game-keyed-RNG note). `rematch`
+/// (how many times these two have already met this run) keeps a rare second
+/// meeting from reusing the first's outcome.
+fn game_uniform(run_seed: u64, lo: Uuid, hi: Uuid, rematch: u32) -> f64 {
+    let lo = lo.as_u128();
+    let hi = hi.as_u128();
+    let mut h = run_seed;
+    for part in [
+        lo as u64,
+        (lo >> 64) as u64,
+        hi as u64,
+        (hi >> 64) as u64,
+        rematch as u64,
+    ] {
+        h = splitmix64(h ^ part);
+    }
+    // Top 53 bits → a uniform double in [0, 1), like rand's StandardUniform.
+    (h >> 11) as f64 / (1u64 << 53) as f64
+}
+
+/// How many times `a` and `b` have already met in `prior` rounds (unordered).
+fn prior_meetings(prior: &[crate::round::Round], a: Uuid, b: Uuid) -> u32 {
+    prior
+        .iter()
+        .flat_map(|r| &r.boards)
+        .filter(|board| {
+            (board.player1 == a && board.player2 == b)
+                || (board.player1 == b && board.player2 == a)
+        })
+        .count() as u32
+}
+
+/// Decide one board's winner from the game-keyed uniform, expressed relative to
+/// the given `(p1, p2)` seating. The draw and the win probability are both taken
+/// in the canonical low→high orientation, so swapping `p1`/`p2` (and their
+/// strengths) names the *same* physical winner — the invariance that lets common
+/// random numbers survive a pairing reshuffle.
+fn decide_board(run_seed: u64, p1: Uuid, p2: Uuid, s1: f64, s2: f64, rematch: u32) -> Winner {
+    let (lo, hi, s_lo, s_hi) = if p1 <= p2 {
+        (p1, p2, s1, s2)
+    } else {
+        (p2, p1, s2, s1)
+    };
+    let p_lo = win_probability(s_lo, s_hi); // P(low id beats high id)
+    let lo_wins = game_uniform(run_seed, lo, hi, rematch) < p_lo;
+    if (lo == p1) == lo_wins {
+        Winner::Player1
+    } else {
+        Winner::Player2
+    }
+}
+
 /// Fill every undecided board in the last round by sampling each game's winner
 /// from the logistic model on the two players' ground-truth strengths.
+///
+/// Each game's coin flip comes from [`game_uniform`] keyed on `run_seed` and the
+/// pairing (not from a sequential stream), evaluated in the *canonical* low→high
+/// orientation, so the outcome depends only on who plays whom — independent of
+/// board order and of which side the pairer happened to seat as player 1.
 fn autofill_last_round(
     tournament: &mut Tournament,
     strengths: &StrengthMap,
-    rng: &mut impl Rng,
+    run_seed: u64,
 ) -> Result<(), SimError> {
-    let round_number = tournament
-        .rounds
-        .last()
-        .expect("a round was just confirmed")
-        .number;
+    let last_idx = tournament.rounds.len() - 1;
+    let round_number = tournament.rounds[last_idx].number;
 
-    // Decide winners first (immutable borrow), then write them (mutable borrow),
-    // so the `rng` and board mutations don't overlap the read.
+    // Decide winners first (immutable borrow), then write them (mutable borrow).
     let decisions: Vec<(usize, Winner)> = {
-        let round = tournament.rounds.last().expect("round present");
+        let (prior, rest) = tournament.rounds.split_at(last_idx);
+        let round = &rest[0];
         round
             .boards
             .iter()
             .enumerate()
             .filter(|(_, b)| b.result.is_none())
             .map(|(i, b)| {
-                let p = win_probability(strengths[&b.player1], strengths[&b.player2]);
-                let winner = if rng.gen::<f64>() < p {
-                    Winner::Player1
-                } else {
-                    Winner::Player2
-                };
+                let rematch = prior_meetings(prior, b.player1, b.player2);
+                let winner = decide_board(
+                    run_seed,
+                    b.player1,
+                    b.player2,
+                    strengths[&b.player1],
+                    strengths[&b.player2],
+                    rematch,
+                );
                 (i, winner)
             })
             .collect()
@@ -289,8 +360,12 @@ fn order_by_estimate(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<U
 ///
 /// `overrides` fixes specific players' true strength (see [`sample_strengths`]);
 /// `jitter` scales the prior width for the rest. `cup` runs the hybrid
-/// direct-elimination cup when `Some` (see [`CupConfig`]). `rng` drives both the
-/// strength draws and the game outcomes, so the run is reproducible from its seed.
+/// direct-elimination cup when `Some` (see [`CupConfig`]). `rng` seeds both the
+/// strength draws and, via a per-run key, the game outcomes, so the run is
+/// reproducible from its seed. Game outcomes are keyed on the *pairing* rather
+/// than drawn sequentially (see [`game_uniform`]), so two variants sharing this
+/// run's seed decide any shared matchup identically — genuine common random
+/// numbers, robust to the pairings diverging.
 pub fn simulate_run(
     base: &Tournament,
     settings: &TournamentSettings,
@@ -301,6 +376,10 @@ pub fn simulate_run(
     rng: &mut impl Rng,
 ) -> Result<RunOutcome, SimError> {
     let mut tournament = fresh_state(base, settings, cup)?;
+    // A per-run key for the game-keyed outcomes. Drawn before the strength jitter
+    // so it depends only on the run's seed, not on how many players were jittered —
+    // identical across variants of the same run.
+    let run_seed = rng.gen::<u64>();
     let strengths = sample_strengths(
         &tournament.players,
         &tournament.settings,
@@ -325,7 +404,7 @@ pub fn simulate_run(
         }
         tournament.confirm_round()?;
         // Filling in every board result completes the round automatically.
-        autofill_last_round(&mut tournament, &strengths, rng)?;
+        autofill_last_round(&mut tournament, &strengths, run_seed)?;
     }
 
     let final_order = tournament
@@ -540,6 +619,49 @@ Nr Name    Nat Elo  1   Pts
             wins as f64 / runs as f64 > 0.7,
             "dominant player won only {wins}/{runs}"
         );
+    }
+
+    #[test]
+    fn game_keyed_outcome_is_orientation_independent() {
+        // The whole point of game-keying: the same matchup decides the same way no
+        // matter which player the pairer seats first — so two variants that seat a
+        // shared pairing differently still agree. Check across many run keys.
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let (sa, sb) = (1600.0, 1500.0);
+        let concrete = |w: Winner, p1: Uuid, p2: Uuid| match w {
+            Winner::Player1 => p1,
+            Winner::Player2 => p2,
+        };
+        for seed in 0..1000u64 {
+            let w_ab = decide_board(seed, a, b, sa, sb, 0);
+            let w_ba = decide_board(seed, b, a, sb, sa, 0);
+            assert_eq!(
+                concrete(w_ab, a, b),
+                concrete(w_ba, b, a),
+                "orientation flip disagreed at seed {seed}"
+            );
+        }
+    }
+
+    #[test]
+    fn game_uniform_is_in_range_deterministic_and_keyed() {
+        let a = Uuid::from_u128(10);
+        let b = Uuid::from_u128(20);
+        let u0 = game_uniform(7, a, b, 0);
+        assert!((0.0..1.0).contains(&u0));
+        assert_eq!(u0, game_uniform(7, a, b, 0)); // deterministic
+        assert_ne!(u0, game_uniform(7, a, b, 1)); // rematch re-keys the draw
+        assert_ne!(u0, game_uniform(8, a, b, 0)); // run seed re-keys the draw
+        assert_ne!(u0, game_uniform(7, a, Uuid::from_u128(21), 0)); // opponent matters
+
+        // Roughly uniform across many distinct pairings (mean ≈ 0.5).
+        let n = 4000;
+        let mean: f64 = (0..n)
+            .map(|i| game_uniform(1, Uuid::from_u128(i), Uuid::from_u128(i + 1_000_000), 0))
+            .sum::<f64>()
+            / n as f64;
+        assert!((mean - 0.5).abs() < 0.03, "mean {mean} not ~0.5");
     }
 
     #[test]
