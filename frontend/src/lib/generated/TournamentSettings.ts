@@ -86,15 +86,27 @@ tiebreaks: Array<Tiebreak>,
  * Swiss-specific rules (score gap, float repeat, floater selection, fold) and
  * club protection are all disabled; pairing instead minimizes the squared
  * difference of a live Bayesian ELO estimate. See
- * `docs/elo-pairing-mode.md`. Off by default.
+ * `docs/elo-pairing-mode.md`. Off by default. Mutually exclusive with
+ * [`Self::mixed_elo_pairing_enabled`] (this one wins if both are set; see
+ * [`Self::normalized`]).
  */
 elo_pairing_enabled: boolean, 
+/**
+ * Mixed mode: keeps MacMahon and the Swiss score-group rules (score gap,
+ * float repeat, club protection, airtight groups) but replaces *only* the
+ * fold and floater-selection rules with the squared-ELO-gap rule, so
+ * within-group (and cross-group) ordering follows the live estimate instead
+ * of a static registration rating. Unlike [`Self::elo_pairing_enabled`], this
+ * stays fully compatible with MacMahon points. Off by default. Mutually
+ * exclusive with `elo_pairing_enabled` (see [`Self::normalized`]).
+ */
+mixed_elo_pairing_enabled: boolean, 
 /**
  * The multiplier `m` on each player's FESA K, as an integer percent
  * (100 = ×1.0), controlling how far the ELO estimate is allowed to drift from
  * the registration rating (bigger = faster drift). Stored as an integer so
  * the settings stay `Eq`; read as a float via [`Self::elo_k_multiplier`].
- * Only meaningful when `elo_pairing_enabled`; expected range ~100–400.
+ * Only meaningful when [`Self::elo_estimate_needed`]; expected range ~100–400.
  */
 elo_k_multiplier_percent: number, 
 /**
@@ -104,6 +116,6 @@ elo_k_multiplier_percent: number,
  * Widens their prior so their estimate drifts faster, since their seed rating
  * is less trustworthy. Stacks on top of `elo_k_multiplier_percent`. Clamped to
  * ≥ 100 so a provisional rating is never treated as *more* reliable than an
- * established one. Only meaningful when `elo_pairing_enabled`.
+ * established one. Only meaningful when [`Self::elo_estimate_needed`].
  */
 elo_provisional_multiplier_percent: number, };

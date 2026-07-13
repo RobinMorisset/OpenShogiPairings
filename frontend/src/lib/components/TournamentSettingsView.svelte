@@ -69,19 +69,30 @@
   let handicapWielRule = $state(false);
   let tiebreaks = $state<Tiebreak[]>([]);
   let eloEnabled = $state(false);
+  let mixedEloEnabled = $state(false);
   let eloKPercent = $state(100);
   let eloProvisionalPercent = $state(200);
 
-  // In the experimental ELO mode the Swiss knobs (MacMahon, degressive, club
-  // protection, floater selection) don't apply, so they're greyed out.
+  // Three-way pairing mode derived from the two (mutually exclusive) flags, for
+  // the radio group below.
+  const pairingMode = $derived(eloEnabled ? "elo" : mixedEloEnabled ? "mixed_elo" : "swiss");
+
+  // In the experimental (pure) ELO mode the Swiss knobs (MacMahon, degressive,
+  // club protection, floater selection) don't apply, so they're greyed out.
+  // Mixed ELO mode keeps MacMahon/club/degressive — only floater selection
+  // (see `floaterDisabled` below) stops applying, since it's replaced by the
+  // ELO-gap rule along with fold.
   const swissDisabled = $derived(eloEnabled);
+  // Floater selection is replaced by the ELO-gap rule in *either* ELO mode.
+  const floaterDisabled = $derived(eloEnabled || mixedEloEnabled);
 
   // Metrics not yet in the ranking order — the choices for the "add" dropdown.
-  // Estimated ELO is only meaningful in ELO pairing mode (otherwise it just sits
-  // at the registration rating), so it isn't offered while that mode is off.
+  // Estimated ELO is only meaningful when a live estimate is maintained (either
+  // ELO mode; otherwise it just sits at the registration rating), so it isn't
+  // offered while both are off.
   const availableTiebreaks = $derived(
     TIEBREAKS.filter(
-      (t) => !tiebreaks.includes(t.code) && (eloEnabled || t.code !== "est_elo"),
+      (t) => !tiebreaks.includes(t.code) && (eloEnabled || mixedEloEnabled || t.code !== "est_elo"),
     ),
   );
   const labelOf = (code: Tiebreak) => tiebreakLabel(code, $_);
@@ -105,6 +116,7 @@
     const sHandicapWiel = settings.handicap_wiel_rule;
     const sTiebreaks = settings.tiebreaks ?? [];
     const sElo = settings.elo_pairing_enabled ?? false;
+    const sMixedElo = settings.mixed_elo_pairing_enabled ?? false;
     const sEloK = settings.elo_k_multiplier_percent ?? 100;
     const sEloProv = settings.elo_provisional_multiplier_percent ?? 200;
     untrack(() => {
@@ -120,6 +132,7 @@
         handicapWielRule === sHandicapWiel &&
         eqStr(tiebreaks, sTiebreaks) &&
         eloEnabled === sElo &&
+        mixedEloEnabled === sMixedElo &&
         eloKPercent === sEloK &&
         eloProvisionalPercent === sEloProv;
       if (!matches) {
@@ -140,6 +153,7 @@
         handicapWielRule = sHandicapWiel;
         tiebreaks = [...sTiebreaks];
         eloEnabled = sElo;
+        mixedEloEnabled = sMixedElo;
         eloKPercent = sEloK;
         eloProvisionalPercent = sEloProv;
       }
@@ -163,16 +177,18 @@
       handicap_wiel_rule: handicapWielRule,
       tiebreaks: [...tiebreaks],
       elo_pairing_enabled: eloEnabled,
+      mixed_elo_pairing_enabled: mixedEloEnabled,
       elo_k_multiplier_percent: eloKPercent,
       elo_provisional_multiplier_percent: eloProvisionalPercent,
     });
   }
 
-  function setEloEnabled(v: boolean) {
-    eloEnabled = v;
-    // Estimated ELO isn't a valid ranking criterion without this mode, so drop
-    // it from the order when turning the mode off (mirrors the server).
-    if (!v) tiebreaks = tiebreaks.filter((c) => c !== "est_elo");
+  function setPairingMode(mode: "swiss" | "mixed_elo" | "elo") {
+    eloEnabled = mode === "elo";
+    mixedEloEnabled = mode === "mixed_elo";
+    // Estimated ELO isn't a valid ranking criterion in Swiss mode, so drop it
+    // from the order when switching back to it (mirrors the server).
+    if (mode === "swiss") tiebreaks = tiebreaks.filter((c) => c !== "est_elo");
     persist();
   }
 
@@ -649,6 +665,7 @@
     {/if}
   </div>
 
+  <fieldset class="floater-fieldset" disabled={floaterDisabled}>
   <div class="section">
     <h3>{$_("settings.floaterTitle")}</h3>
     <p class="desc">
@@ -677,6 +694,7 @@
       {$_("settings.floaterMedian")}
     </label>
   </div>
+  </fieldset>
   </fieldset>
 
   <div class="section">
@@ -841,20 +859,50 @@
   </div>
 
   <div class="section">
-    <h3>{$_("settings.eloModeTitle")}</h3>
+    <h3>{$_("settings.pairingModeTitle")}</h3>
     <p class="desc">
-      {$_("settings.eloModeDesc")}
+      {$_("settings.pairingModeDesc")}
     </p>
     <label class="check">
       <input
-        type="checkbox"
-        checked={eloEnabled}
+        type="radio"
+        name="pairing-mode"
+        value="swiss"
+        checked={pairingMode === "swiss"}
         disabled={busy}
-        onchange={(e) => setEloEnabled(e.currentTarget.checked)}
+        onchange={() => setPairingMode("swiss")}
       />
-      {$_("settings.eloModeCheckbox")}
+      {$_("settings.pairingModeSwiss")}
     </label>
-    {#if eloEnabled}
+    <label class="check">
+      <input
+        type="radio"
+        name="pairing-mode"
+        value="mixed_elo"
+        checked={pairingMode === "mixed_elo"}
+        disabled={busy}
+        onchange={() => setPairingMode("mixed_elo")}
+      />
+      {$_("settings.pairingModeMixedElo")}
+    </label>
+    <p class="desc small-note">
+      {$_("settings.pairingModeMixedEloDesc")}
+    </p>
+    <label class="check">
+      <input
+        type="radio"
+        name="pairing-mode"
+        value="elo"
+        checked={pairingMode === "elo"}
+        disabled={busy}
+        onchange={() => setPairingMode("elo")}
+      />
+      {$_("settings.pairingModeElo")}
+    </label>
+    <p class="desc small-note">
+      {$_("settings.eloModeDesc")}
+    </p>
+    {#if eloEnabled || mixedEloEnabled}
       <label class="check elo-k">
         {$_("settings.eloDriftMultiplier")}
         <input
@@ -909,7 +957,8 @@
       column-gap: 3rem;
     }
     .section,
-    fieldset.swiss-fieldset {
+    fieldset.swiss-fieldset,
+    fieldset.floater-fieldset {
       break-inside: avoid;
     }
   }
@@ -936,6 +985,17 @@
     min-width: 0;
   }
   fieldset.swiss-fieldset:disabled {
+    opacity: 0.5;
+  }
+  /* Floater selection alone is greyed out in mixed ELO mode (it's replaced by
+     the ELO-gap rule there, unlike the rest of the swiss-fieldset). */
+  fieldset.floater-fieldset {
+    border: none;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+  }
+  fieldset.floater-fieldset:disabled {
     opacity: 0.5;
   }
   .subsection {

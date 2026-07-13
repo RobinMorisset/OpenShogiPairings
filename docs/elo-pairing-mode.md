@@ -11,6 +11,14 @@ estimation math and how the mode plugs into the existing pairing engine
 ([`crates/core/src/pairing.rs`](../crates/core/src/pairing.rs)) and scoring
 replay ([`crates/core/src/scoring.rs`](../crates/core/src/scoring.rs)).
 
+There is also a **mixed mode** (`mixed_elo_pairing_enabled`), a middle ground
+between Swiss and this (pure) ELO mode: it keeps MacMahon and the Swiss
+score-group rules (score gap, float repeat, club, airtight groups, bye group)
+but replaces just `Rule::Fold` and `Rule::FloaterSelection` with `Rule::EloGap`,
+so within- and across-group ordering follows the live estimate instead of a
+static registration rating — unlike pure ELO mode, it stays fully compatible
+with MacMahon points. See §6a.
+
 Scope markers: **V1** = the first shippable version; **V2** = deferred, listed at
 the end.
 
@@ -287,14 +295,52 @@ EloGap, whose real-valued squared-gap costs are essentially never tied, so a clu
 tie-break would almost never change a pairing — not worth the tier. The
 `club_protection_*` settings are simply ignored when the ELO mode is on.
 
+### 6a. Mixed mode: `EloGap` as a drop-in replacement for `Fold` + `FloaterSelection`
+
+Mixed mode (`mixed_elo_pairing_enabled`) uses a different rule list, still built
+entirely from existing `Rule` variants — no new rule was needed:
+
+```
+Rematch, ByeGroup, AirtightGroups, ScoreGap, FloatRepeat, Club, EloGap
+```
+
+This is exactly the Swiss list with `FloaterSelection` and `Fold` removed and
+`EloGap` appended at the bottom (lowest priority — it's the finest-grained
+tiebreak, same role `Fold` played). Everything above it — MacMahon-derived
+score groups (`ScoreGap`, `AirtightGroups`, `ByeGroup`), no-repeat-float
+(`FloatRepeat`), and club protection — is untouched, so a group is still formed
+exactly as in Swiss; only *how players are ordered inside (and across) that
+group* changes, from a static fold-by-registration-rating to a live,
+result-reactive ELO estimate. Concretely: `EloGap`'s edge cost
+`(round(eloᵢ) − round(eloⱼ))²` fires on every edge regardless of score group
+(unlike `Fold`, which is zero across groups, and `FloaterSelection`, which is
+zero within one) — but since `ScoreGap` sits above it in priority, cross-group
+pairings are still only chosen when a float is unavoidable, same as Swiss;
+`EloGap` merely decides *which* players end up on each side of that float and
+how they're matched within a group.
+
+`PairingModel::build` computes the live ELO estimate (`elo`/`elo_rank`/
+`max_elo_gap`) whenever `TournamentSettings::elo_estimate_needed()` is true —
+i.e. either ELO mode — rather than gating on `elo_pairing_enabled` alone, so
+mixed mode gets the same estimator ([`crates/core/src/elo.rs`](../crates/core/src/elo.rs))
+feeding both the pairing rule and (optionally) the `Tiebreak::EstElo` ranking
+criterion. `elo_rank` (used only by pure ELO mode's `ByeSelection`) is simply
+unused in mixed mode, which keeps `ByeGroup` (the MacMahon-aware bye rule)
+instead.
+
 ## 7. Settings shape
 
 Add to `TournamentSettings` (additive, defaulted, so old saves still load):
 
-- `elo_pairing_enabled: bool` — the mode switch. Mutually exclusive with
+- `elo_pairing_enabled: bool` — the pure-ELO mode switch. Mutually exclusive with
   MacMahon in the UI (greys out thresholds, removals, floater style, fold, and the
   club-protection controls — implemented by wrapping those sections in a disabled
   `<fieldset>`). Off by default.
+- `mixed_elo_pairing_enabled: bool` — the mixed-mode switch (see §6a). Mutually
+  exclusive with `elo_pairing_enabled` (`normalized()` clears this one if both are
+  set, so pure ELO wins). Unlike pure ELO mode, it only greys out the
+  floater-selection section — MacMahon, degressive removals, airtight groups and
+  club protection stay active. Off by default.
 - `elo_k_multiplier_percent: u32` — the single knob `m`, stored as an integer
   percent (`100` = ×1.0) so `TournamentSettings` stays `Eq` (an `f64` field would
   break the derive, and the tournament `Eq` that the undo-snapshot store relies

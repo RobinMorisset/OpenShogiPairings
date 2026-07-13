@@ -29,25 +29,28 @@
   // The tie-break columns to show, in the referee-chosen order — resolved from
   // the settings to their label/field/tooltip. Unknown codes (from a newer save)
   // are skipped.
+  const eloEstimateNeeded = $derived(
+    (tournament.settings.elo_pairing_enabled ?? false) ||
+      (tournament.settings.mixed_elo_pairing_enabled ?? false),
+  );
+
   const tiebreakColumns = $derived(
     (tournament.settings.tiebreaks ?? [])
-      // Estimated ELO only ranks in ELO pairing mode; drop it as a column
-      // otherwise (defends against a loaded save that still lists it).
-      .filter(
-        (code) =>
-          code !== "est_elo" || (tournament.settings.elo_pairing_enabled ?? false),
-      )
+      // Estimated ELO only ranks when a live estimate is maintained (either ELO
+      // mode); drop it as a column otherwise (defends against a loaded save
+      // that still lists it).
+      .filter((code) => code !== "est_elo" || eloEstimateNeeded)
       .map((code) => TIEBREAKS.find((t) => t.code === code))
       .filter((t): t is (typeof TIEBREAKS)[number] => t != null),
   );
 
-  // The estimated-ELO column is only meaningful in the experimental ELO pairing
-  // mode. Show it as a dedicated column there — unless the referee already added
-  // it to the ranking criteria, in which case it appears as a tie-break column
-  // (with its ranking position) and this one would duplicate it.
+  // The estimated-ELO column is only meaningful when a live estimate is
+  // maintained (either ELO mode). Show it as a dedicated column there — unless
+  // the referee already added it to the ranking criteria, in which case it
+  // appears as a tie-break column (with its ranking position) and this one
+  // would duplicate it.
   const showEstimatedElo = $derived(
-    (tournament.settings.elo_pairing_enabled ?? false) &&
-      !(tournament.settings.tiebreaks ?? []).includes("est_elo"),
+    eloEstimateNeeded && !(tournament.settings.tiebreaks ?? []).includes("est_elo"),
   );
 
   // Player id → medal, from the cup podium (the table order stays pure-Swiss).

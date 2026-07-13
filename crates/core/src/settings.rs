@@ -263,14 +263,25 @@ pub struct TournamentSettings {
     /// Swiss-specific rules (score gap, float repeat, floater selection, fold) and
     /// club protection are all disabled; pairing instead minimizes the squared
     /// difference of a live Bayesian ELO estimate. See
-    /// `docs/elo-pairing-mode.md`. Off by default.
+    /// `docs/elo-pairing-mode.md`. Off by default. Mutually exclusive with
+    /// [`Self::mixed_elo_pairing_enabled`] (this one wins if both are set; see
+    /// [`Self::normalized`]).
     #[serde(default)]
     pub elo_pairing_enabled: bool,
+    /// Mixed mode: keeps MacMahon and the Swiss score-group rules (score gap,
+    /// float repeat, club protection, airtight groups) but replaces *only* the
+    /// fold and floater-selection rules with the squared-ELO-gap rule, so
+    /// within-group (and cross-group) ordering follows the live estimate instead
+    /// of a static registration rating. Unlike [`Self::elo_pairing_enabled`], this
+    /// stays fully compatible with MacMahon points. Off by default. Mutually
+    /// exclusive with `elo_pairing_enabled` (see [`Self::normalized`]).
+    #[serde(default)]
+    pub mixed_elo_pairing_enabled: bool,
     /// The multiplier `m` on each player's FESA K, as an integer percent
     /// (100 = ×1.0), controlling how far the ELO estimate is allowed to drift from
     /// the registration rating (bigger = faster drift). Stored as an integer so
     /// the settings stay `Eq`; read as a float via [`Self::elo_k_multiplier`].
-    /// Only meaningful when `elo_pairing_enabled`; expected range ~100–400.
+    /// Only meaningful when [`Self::elo_estimate_needed`]; expected range ~100–400.
     #[serde(default = "default_elo_k_multiplier_percent")]
     pub elo_k_multiplier_percent: u32,
     /// Extra K multiplier applied to a **provisionally-rated** player — one who is
@@ -279,7 +290,7 @@ pub struct TournamentSettings {
     /// Widens their prior so their estimate drifts faster, since their seed rating
     /// is less trustworthy. Stacks on top of `elo_k_multiplier_percent`. Clamped to
     /// ≥ 100 so a provisional rating is never treated as *more* reliable than an
-    /// established one. Only meaningful when `elo_pairing_enabled`.
+    /// established one. Only meaningful when [`Self::elo_estimate_needed`].
     #[serde(default = "default_elo_provisional_multiplier_percent")]
     pub elo_provisional_multiplier_percent: u32,
 }
@@ -298,6 +309,7 @@ impl Default for TournamentSettings {
             handicap_wiel_rule: false,
             tiebreaks: default_tiebreaks(),
             elo_pairing_enabled: false,
+            mixed_elo_pairing_enabled: false,
             elo_k_multiplier_percent: default_elo_k_multiplier_percent(),
             elo_provisional_multiplier_percent: default_elo_provisional_multiplier_percent(),
         }
@@ -383,6 +395,12 @@ impl TournamentSettings {
             self.airtight_groups_rounds = None;
         }
 
+        // The two ELO modes are mutually exclusive; pure ELO wins if both are
+        // somehow set (e.g. a stale client payload).
+        if self.elo_pairing_enabled {
+            self.mixed_elo_pairing_enabled = false;
+        }
+
         // Exempt clubs: keep the first spelling of each, trimmed and non-empty.
         let mut seen = HashSet::new();
         self.club_protection_exempt_clubs = self
@@ -396,10 +414,11 @@ impl TournamentSettings {
         // is meaningful and each metric appears at most once as a column).
         let mut seen_tb = HashSet::new();
         self.tiebreaks.retain(|&tb| seen_tb.insert(tb));
-        // The estimated-ELO tie-break is meaningless outside ELO pairing mode —
-        // the estimate just sits at each player's registration rating — so it is
-        // not a valid ranking criterion there.
-        if !self.elo_pairing_enabled {
+        // The estimated-ELO tie-break is meaningless unless a live estimate is
+        // actually maintained — outside both ELO modes it just sits at each
+        // player's registration rating — so it is not a valid ranking criterion
+        // there.
+        if !self.elo_estimate_needed() {
             self.tiebreaks.retain(|&tb| tb != Tiebreak::EstElo);
         }
 
@@ -412,6 +431,13 @@ impl TournamentSettings {
         self.elo_provisional_multiplier_percent = self.elo_provisional_multiplier_percent.max(100);
 
         self
+    }
+
+    /// Whether a live ELO estimate needs to be maintained for pairing purposes —
+    /// either ELO mode. Used to gate the (somewhat expensive) estimate computation
+    /// and to decide whether the estimated-ELO tiebreak is meaningful.
+    pub fn elo_estimate_needed(&self) -> bool {
+        self.elo_pairing_enabled || self.mixed_elo_pairing_enabled
     }
 
     /// The ELO-estimate K multiplier `m` as a float (percent / 100).
@@ -729,6 +755,59 @@ mod tests {
         assert_eq!(
             on.tiebreaks,
             vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM]
+        );
+
+        // Mixed ELO mode also keeps a live estimate, so it counts too.
+        let mixed = TournamentSettings {
+            tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM],
+            mixed_elo_pairing_enabled: true,
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(
+            mixed.tiebreaks,
+            vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM]
+        );
+    }
+
+    #[test]
+    fn the_two_elo_modes_are_mutually_exclusive() {
+        // Pure ELO wins if a stale payload somehow sets both.
+        let s = TournamentSettings {
+            elo_pairing_enabled: true,
+            mixed_elo_pairing_enabled: true,
+            ..Default::default()
+        }
+        .normalized();
+        assert!(s.elo_pairing_enabled);
+        assert!(!s.mixed_elo_pairing_enabled);
+
+        // Mixed alone is left untouched.
+        let s = TournamentSettings {
+            mixed_elo_pairing_enabled: true,
+            ..Default::default()
+        }
+        .normalized();
+        assert!(!s.elo_pairing_enabled);
+        assert!(s.mixed_elo_pairing_enabled);
+    }
+
+    #[test]
+    fn elo_estimate_needed_is_true_for_either_elo_mode() {
+        assert!(!TournamentSettings::default().elo_estimate_needed());
+        assert!(
+            TournamentSettings {
+                elo_pairing_enabled: true,
+                ..Default::default()
+            }
+            .elo_estimate_needed()
+        );
+        assert!(
+            TournamentSettings {
+                mixed_elo_pairing_enabled: true,
+                ..Default::default()
+            }
+            .elo_estimate_needed()
         );
     }
 

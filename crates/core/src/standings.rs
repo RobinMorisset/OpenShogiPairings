@@ -212,10 +212,11 @@ pub fn compute_standings(
     let mut groups: Vec<Vec<usize>> = vec![start];
 
     for &tb in &settings.tiebreaks {
-        // Estimated ELO only ranks in ELO pairing mode; otherwise the estimate is
-        // just the registration rating, so skip it (defends against a loaded
-        // save that predates normalization dropping it).
-        if tb == Tiebreak::EstElo && !settings.elo_pairing_enabled {
+        // Estimated ELO only ranks when a live estimate is maintained (either ELO
+        // mode); otherwise the estimate is just the registration rating, so skip
+        // it (defends against a loaded save that predates normalization dropping
+        // it).
+        if tb == Tiebreak::EstElo && !settings.elo_estimate_needed() {
             continue;
         }
         let mut next_groups: Vec<Vec<usize>> = Vec::new();
