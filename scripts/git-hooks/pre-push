@@ -4,3 +4,6 @@ set -e
 
 echo "== cargo test --workspace =="
 cargo test --workspace
+
+echo "== npm test (frontend) =="
+(cd frontend && npm test)
