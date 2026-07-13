@@ -26,6 +26,7 @@ export type { HandicapPolicy } from "./generated/HandicapPolicy";
 export type { HealthStatus } from "./generated/HealthStatus";
 export type { MacMahonThreshold } from "./generated/MacMahonThreshold";
 export type { NewPlayer } from "./generated/NewPlayer";
+export type { NoShow } from "./generated/NoShow";
 export type { PairingSource } from "./generated/PairingSource";
 export type { Player } from "./generated/Player";
 export type { PointAdjustment } from "./generated/PointAdjustment";

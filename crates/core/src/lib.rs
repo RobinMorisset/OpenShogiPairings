@@ -38,7 +38,7 @@ pub use pairing::{
 };
 pub use player::{Grade, GradeKind, NewPlayer, Player, PointAdjustment};
 pub use round::{
-    Board, CupStage, Handicap, HandicapGame, PairingSource, Round, RoundDraft, Winner,
+    Board, CupStage, Handicap, HandicapGame, NoShow, PairingSource, Round, RoundDraft, Winner,
 };
 pub use settings::{FloaterStyle, HandicapPolicy, Tiebreak, TournamentSettings};
 pub use standings::{compute_standings, Standing};

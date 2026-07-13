@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-use crate::round::{CupStage, PairingSource, Round};
+use crate::round::{CupStage, NoShow, Round};
 
 /// The valid cup sizes (top-N), each a power of two.
 pub const CUP_SIZES: [u32; 4] = [8, 16, 32, 64];
@@ -42,14 +42,32 @@ pub struct CupMatch {
     pub stage: CupStage,
 }
 
-/// The cup podium, once the final round is decided.
+/// The cup pairings for one round: the two-player bracket matches, plus any
+/// players who advance unopposed (a cup bye — see [`Round::cup_byes`]).
+#[derive(Debug, Clone, Default)]
+pub struct CupPairings {
+    pub matches: Vec<CupMatch>,
+    pub byes: Vec<Uuid>,
+}
+
+/// The cup podium, once the final round is decided. Each place is `None` when it
+/// couldn't be determined — e.g. both players of the final (or the small final)
+/// were no-shows, so there is no champion / third to award.
 #[derive(Debug, Clone, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct CupPodium {
-    pub champion: Uuid,
-    pub runner_up: Uuid,
-    pub third: Uuid,
-    pub fourth: Uuid,
+    pub champion: Option<Uuid>,
+    pub runner_up: Option<Uuid>,
+    pub third: Option<Uuid>,
+    pub fourth: Option<Uuid>,
+}
+
+/// The outcome of one decided cup match: a winner (a played result, or a single
+/// no-show forfeit), or both players absent (a double no-show), which advances
+/// nobody.
+enum CupResult {
+    Winner { winner: Uuid, loser: Uuid },
+    BothAbsent,
 }
 
 impl Cup {
@@ -63,16 +81,74 @@ impl Cup {
         r >= 1 && r <= self.cup_rounds()
     }
 
-    /// The bracket matches for cup round `r`, reading earlier results from
-    /// `rounds`. `None` if a needed earlier cup result is missing (shouldn't
-    /// happen for a properly gated round). Empty when `r` is past the cup.
-    pub fn matches_for_round(&self, rounds: &[Round], r: u32) -> Option<Vec<CupMatch>> {
+    /// The bracket pairings for cup round `r`, reading earlier results from
+    /// `rounds`: the two-player matches plus any unopposed advances (cup byes).
+    /// `None` if a needed earlier cup result is missing (shouldn't happen for a
+    /// properly gated round). Empty when `r` is past the cup.
+    ///
+    /// A slot goes empty when both players of the match that would fill it were
+    /// no-shows: that match advances nobody, so whoever was drawn to face its
+    /// winner advances unopposed as a bye.
+    pub fn matches_for_round(&self, rounds: &[Round], r: u32) -> Option<CupPairings> {
         if !self.is_cup_round(r) {
-            return Some(Vec::new());
+            return Some(CupPairings::default());
         }
         let cup_rounds = self.cup_rounds();
-        let mut frontier = self.seed_order.clone();
-        let mut semifinal_losers: Option<[Uuid; 2]> = None;
+        let (frontier, semifinal_losers) = self.replay_to(rounds, r)?;
+
+        let mut pairings = CupPairings::default();
+        if r < cup_rounds {
+            let stage = stage_before_final(frontier.len() as u32);
+            for pair in fold(&frontier) {
+                push_pairing(pair, stage, &mut pairings);
+            }
+        } else {
+            // The final round: the final, then the small final for third place.
+            for pair in fold(&frontier) {
+                push_pairing(pair, CupStage::Final, &mut pairings);
+            }
+            let losers = semifinal_losers.expect("semifinal replayed before the final round");
+            for pair in fold(&losers) {
+                push_pairing(pair, CupStage::SmallFinal, &mut pairings);
+            }
+        }
+        Some(pairings)
+    }
+
+    /// The podium, if the final round's matches are all decided; otherwise
+    /// `None`. Individual places are `None` when a double no-show left them
+    /// undetermined (no champion / third to award), so awarding medals never
+    /// panics on a missing winner.
+    pub fn podium(&self, rounds: &[Round]) -> Option<CupPodium> {
+        let cup_rounds = self.cup_rounds();
+        // The final round must have been reached (its boards generated).
+        rounds.iter().find(|r| r.number == cup_rounds)?;
+        let (frontier, semifinal_losers) = self.replay_to(rounds, cup_rounds)?;
+        let losers = semifinal_losers.expect("semifinal replayed before the final round");
+
+        let (champion, runner_up) = self.decide_slot(*fold(&frontier).first()?, rounds, cup_rounds)?;
+        let (third, fourth) = self.decide_slot(*fold(&losers).first()?, rounds, cup_rounds)?;
+        Some(CupPodium {
+            champion,
+            runner_up,
+            third,
+            fourth,
+        })
+    }
+
+    /// Replay the cup up to (but not including) round `r`, returning the frontier
+    /// entering round `r` (a slot is `None` where both feeding players were
+    /// no-shows) and the two semifinal losers (each `None` under the same). The
+    /// losers are only populated once the semifinal has been replayed.
+    #[allow(clippy::type_complexity)]
+    fn replay_to(
+        &self,
+        rounds: &[Round],
+        r: u32,
+    ) -> Option<(Vec<Option<Uuid>>, Option<[Option<Uuid>; 2]>)> {
+        let cup_rounds = self.cup_rounds();
+        let mut frontier: Vec<Option<Uuid>> = self.seed_order.iter().copied().map(Some).collect();
+        let mut semifinal_losers: Option<[Option<Uuid>; 2]> = None;
         for k in 1..r {
             let (winners, losers) = self.play_round(rounds, k, &frontier)?;
             if k == cup_rounds - 1 {
@@ -80,73 +156,42 @@ impl Cup {
             }
             frontier = winners;
         }
-
-        let matches = if r < cup_rounds {
-            let stage = stage_before_final(frontier.len() as u32);
-            fold(&frontier)
-                .into_iter()
-                .map(|(player1, player2)| CupMatch {
-                    player1,
-                    player2,
-                    stage,
-                })
-                .collect()
-        } else {
-            // The final round: the final, then the small final for third place.
-            let losers = semifinal_losers.expect("semifinal replayed before the final round");
-            let mut v = Vec::new();
-            for (player1, player2) in fold(&frontier) {
-                v.push(CupMatch {
-                    player1,
-                    player2,
-                    stage: CupStage::Final,
-                });
-            }
-            for (player1, player2) in fold(&losers) {
-                v.push(CupMatch {
-                    player1,
-                    player2,
-                    stage: CupStage::SmallFinal,
-                });
-            }
-            v
-        };
-        Some(matches)
+        Some((frontier, semifinal_losers))
     }
 
-    /// The podium, if the final round's boards are decided; otherwise `None`.
-    pub fn podium(&self, rounds: &[Round]) -> Option<CupPodium> {
-        let final_round = rounds.iter().find(|r| r.number == self.cup_rounds())?;
-        let stage_board = |want: CupStage| {
-            final_round
-                .boards
-                .iter()
-                .find(|b| matches!(b.source, PairingSource::Cup { stage } if stage == want))
-        };
-        let final_board = stage_board(CupStage::Final)?;
-        let small = stage_board(CupStage::SmallFinal)?;
-        // Cup boards can never carry a handicap (see `HandicapNotAllowedForCup`),
-        // so the Wiel-rule flag never actually applies here.
-        Some(CupPodium {
-            champion: final_board.winner_id(true)?,
-            runner_up: final_board.effective_loser(true)?,
-            third: small.winner_id(true)?,
-            fourth: small.effective_loser(true)?,
-        })
+    /// The (winner, loser) of a single bracket slot, each `Option` because a
+    /// double no-show or an empty feeding slot leaves it undetermined. `None`
+    /// (the outer option) when a real two-player match hasn't been decided yet.
+    fn decide_slot(
+        &self,
+        pair: (Option<Uuid>, Option<Uuid>),
+        rounds: &[Round],
+        k: u32,
+    ) -> Option<(Option<Uuid>, Option<Uuid>)> {
+        match pair {
+            (Some(a), Some(b)) => match decide(rounds, k, a, b)? {
+                CupResult::Winner { winner, loser } => Some((Some(winner), Some(loser))),
+                CupResult::BothAbsent => Some((None, None)),
+            },
+            // A lone player faces an empty slot: they advance unopposed (a bye).
+            (Some(a), None) | (None, Some(a)) => Some((Some(a), None)),
+            (None, None) => Some((None, None)),
+        }
     }
 
-    /// Replay one cup round: fold the frontier, look up each match's result, and
-    /// return the winners and losers in match order.
+    /// Replay one cup round: fold the frontier, resolve each slot, and return the
+    /// winners and losers in match order (each `None` where undetermined).
+    #[allow(clippy::type_complexity)]
     fn play_round(
         &self,
         rounds: &[Round],
         k: u32,
-        frontier: &[Uuid],
-    ) -> Option<(Vec<Uuid>, Vec<Uuid>)> {
+        frontier: &[Option<Uuid>],
+    ) -> Option<(Vec<Option<Uuid>>, Vec<Option<Uuid>>)> {
         let mut winners = Vec::new();
         let mut losers = Vec::new();
-        for (a, b) in fold(frontier) {
-            let (w, l) = decide(rounds, k, a, b)?;
+        for pair in fold(frontier) {
+            let (w, l) = self.decide_slot(pair, rounds, k)?;
             winners.push(w);
             losers.push(l);
         }
@@ -154,8 +199,21 @@ impl Cup {
     }
 }
 
+/// Record a folded bracket pair as a match, a bye, or nothing (both slots dead).
+fn push_pairing(pair: (Option<Uuid>, Option<Uuid>), stage: CupStage, out: &mut CupPairings) {
+    match pair {
+        (Some(player1), Some(player2)) => out.matches.push(CupMatch {
+            player1,
+            player2,
+            stage,
+        }),
+        (Some(p), None) | (None, Some(p)) => out.byes.push(p),
+        (None, None) => {}
+    }
+}
+
 /// Pair the first with the last, second with second-last, … — the bracket fold.
-fn fold(list: &[Uuid]) -> Vec<(Uuid, Uuid)> {
+fn fold<T: Copy>(list: &[T]) -> Vec<(T, T)> {
     let n = list.len();
     (0..n / 2).map(|i| (list[i], list[n - 1 - i])).collect()
 }
@@ -169,21 +227,35 @@ fn stage_before_final(alive: u32) -> CupStage {
     }
 }
 
-/// Find the board between `a` and `b` in round `k` and return (winner, loser).
-fn decide(rounds: &[Round], k: u32, a: Uuid, b: Uuid) -> Option<(Uuid, Uuid)> {
+/// Find the board between `a` and `b` in round `k` and resolve its outcome.
+/// `None` when the board is missing or not yet decided (neither a result nor a
+/// no-show). A single no-show is a forfeit — the player who showed up wins —
+/// while a double no-show advances nobody ([`CupResult::BothAbsent`]).
+fn decide(rounds: &[Round], k: u32, a: Uuid, b: Uuid) -> Option<CupResult> {
     let round = rounds.iter().find(|r| r.number == k)?;
     let board = round
         .boards
         .iter()
         .find(|bd| (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a))?;
+    if matches!(board.no_show, Some(NoShow::Both)) {
+        return Some(CupResult::BothAbsent);
+    }
+    // A single no-show: the player who showed up advances by forfeit.
+    if let Some(winner) = board.no_show_opponent() {
+        let loser = if winner == a { b } else { a };
+        return Some(CupResult::Winner { winner, loser });
+    }
     // Cup boards can never carry a handicap, so the Wiel-rule flag is moot here.
-    Some((board.winner_id(true)?, board.effective_loser(true)?))
+    Some(CupResult::Winner {
+        winner: board.winner_id(true)?,
+        loser: board.effective_loser(true)?,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::{Board, Winner};
+    use crate::round::{Board, PairingSource, Winner};
 
     fn ids(n: usize) -> Vec<Uuid> {
         (0..n).map(|_| Uuid::new_v4()).collect()
@@ -202,6 +274,7 @@ mod tests {
                 })
                 .collect(),
             bye: None,
+            cup_byes: Vec::new(),
             absent: Vec::new(),
             completed: true,
         }
@@ -214,7 +287,7 @@ mod tests {
             size: 8,
             seed_order: seeds.clone(),
         };
-        let m = cup.matches_for_round(&[], 1).unwrap();
+        let m = cup.matches_for_round(&[], 1).unwrap().matches;
         // 1v8, 2v7, 3v6, 4v5 — all quarterfinals.
         assert_eq!(m.len(), 4);
         assert_eq!((m[0].player1, m[0].player2), (seeds[0], seeds[7]));
@@ -241,7 +314,10 @@ mod tests {
             ],
         );
         // R2 (SF): fold [s0,s1,s2,s3] → (s0,s3) and (s1,s2). Say s0 and s1 win.
-        let sf = cup.matches_for_round(std::slice::from_ref(&r1), 2).unwrap();
+        let sf = cup
+            .matches_for_round(std::slice::from_ref(&r1), 2)
+            .unwrap()
+            .matches;
         assert_eq!((sf[0].player1, sf[0].player2), (s[0], s[3]));
         assert_eq!((sf[1].player1, sf[1].player2), (s[1], s[2]));
         assert!(matches!(sf[0].stage, CupStage::Semifinal));
@@ -253,7 +329,7 @@ mod tests {
             ],
         );
         // R3 (final round): final s0 vs s1, small final s3 vs s2.
-        let f = cup.matches_for_round(&[r1, r2], 3).unwrap();
+        let f = cup.matches_for_round(&[r1, r2], 3).unwrap().matches;
         assert_eq!(f.len(), 2);
         assert_eq!((f[0].player1, f[0].player2), (s[0], s[1]));
         assert!(matches!(f[0].stage, CupStage::Final));
@@ -269,7 +345,7 @@ mod tests {
         };
         assert_eq!(cup.cup_rounds(), 5);
         assert!(matches!(
-            cup.matches_for_round(&[], 1).unwrap()[0].stage,
+            cup.matches_for_round(&[], 1).unwrap().matches[0].stage,
             CupStage::RoundOf(32)
         ));
     }

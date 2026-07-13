@@ -665,6 +665,34 @@ Nr Name    Nat Elo  1   Pts
     }
 
     #[test]
+    fn imports_a_no_show_as_a_zero_score_absence() {
+        // A `0#` (a no-show) carries no reconstructable opponent, so — like `0-`
+        // — it imports as a zero-score absence, while the opponent's `0+` reads
+        // as the free point (a bye). B is the no-show; A takes the bye, C beats D.
+        let grid = "\
+[NoShow]
+Nr Name    Nat Elo  1   Pts
+1  [A] [a] FR  2000 [0+] 1
+2  [B] [b] FR  1900 [0#] 0
+3  [C] [c] FR  1800 [4+] 1
+4  [D] [d] FR  1700 [3-] 0
+";
+        let t = import_american_grid(grid).unwrap();
+        assert!(t.rounds[0].absent.contains(&player(&t, "B").id));
+        assert_eq!(t.rounds[0].bye, Some(player(&t, "A").id));
+        let of = |last| {
+            t.standings()
+                .into_iter()
+                .find(|s| s.player_id == player(&t, last).id)
+                .unwrap()
+                .points
+        };
+        assert_eq!(of("A"), 1); // the bye
+        assert_eq!(of("B"), 0); // the no-show
+        assert_eq!(of("C"), 1);
+    }
+
+    #[test]
     fn imports_a_loss_recorded_by_the_lower_numbered_player() {
         // The processing side (lower Nr) is the one who lost, not the winner —
         // exercises the `Outcome::Loss` arm of `Outcome::winner`.

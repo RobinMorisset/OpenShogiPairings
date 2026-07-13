@@ -139,7 +139,8 @@ fn row_for(
 /// `0-` for an absence, `0#` for a no-show, or `<opponent><marker><handicap?>`
 /// for a game. The opponent is their final rank.
 fn round_cell(player_id: Uuid, round: &Round, rank_of: &HashMap<Uuid, u32>) -> String {
-    if round.bye == Some(player_id) {
+    // The Swiss bye and the (rare) cup bye both read as a free point.
+    if round.bye == Some(player_id) || round.cup_byes.contains(&player_id) {
         return "0+".into();
     }
     let Some(board) = round
@@ -152,17 +153,22 @@ fn round_cell(player_id: Uuid, round: &Round, rank_of: &HashMap<Uuid, u32>) -> S
     };
 
     let is_player1 = board.player1 == player_id;
+    let side = if is_player1 {
+        Winner::Player1
+    } else {
+        Winner::Player2
+    };
 
-    // A no-show board renders distinctly: `0#` for the player who was absent,
-    // `0+` (a bye-equivalent free point) for the one who showed up.
+    // A no-show board renders distinctly: `0#` for a player who was absent (both,
+    // under a double no-show), `0+` (a bye-equivalent free point) for the one who
+    // showed up.
     if board.no_show.is_some() {
-        return if board.no_show_player() == Some(player_id) {
+        return if board.no_show_absent(side) {
             "0#".into()
         } else {
             "0+".into()
         };
     }
-
 
     let opponent_id = if is_player1 {
         board.player2
@@ -219,7 +225,7 @@ fn pad(s: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::{Handicap, HandicapGame, PairingSource};
+    use crate::round::{Handicap, HandicapGame, NoShow, PairingSource};
 
     /// Build a finalized two-player tournament (P1 rated 2000, P2 1000) plus one
     /// completed round whose single board is configured by `configure`.
@@ -256,6 +262,7 @@ mod tests {
             number: 1,
             boards: vec![board],
             bye: None,
+            cup_byes: Vec::new(),
             absent: Vec::new(),
             completed: true,
         });
@@ -338,6 +345,7 @@ mod tests {
                 ..Board::pending(a, b, None, PairingSource::Swiss)
             }],
             bye: Some(c),
+            cup_byes: Vec::new(),
             absent: Vec::new(),
             completed: true,
         });
@@ -353,6 +361,7 @@ mod tests {
                 ..Board::pending(a, b, None, PairingSource::Swiss)
             }],
             bye: None,
+            cup_byes: Vec::new(),
             absent: vec![c],
             completed: true,
         });
@@ -370,10 +379,11 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             boards: vec![Board {
-                no_show: Some(Winner::Player2), // P2 absent
+                no_show: Some(NoShow::Player2), // P2 absent
                 ..Board::pending(p1, p2, None, PairingSource::Swiss)
             }],
             bye: None,
+            cup_byes: Vec::new(),
             absent: Vec::new(),
             completed: true,
         });
@@ -381,6 +391,42 @@ mod tests {
         // P1 (rank 1) shows the free point `0+`; P2 (rank 2) the no-show `0#`.
         assert!(grid.contains("0+]"), "no-show opponent token missing: {grid}");
         assert!(grid.contains("0#]"), "no-show token missing: {grid}");
+    }
+
+    #[test]
+    fn double_no_show_marks_both_absent() {
+        // Neither player shows up: both cells read `0#`, nobody gets `0+`.
+        let (mut t, p1, p2) = one_board(|_| {});
+        t.rounds.push(Round {
+            number: 2,
+            boards: vec![Board {
+                no_show: Some(NoShow::Both),
+                ..Board::pending(p1, p2, None, PairingSource::Swiss)
+            }],
+            bye: None,
+            cup_byes: Vec::new(),
+            absent: Vec::new(),
+            completed: true,
+        });
+        let grid = to_grid(&t, &t.standings());
+        assert_eq!(grid.matches("0#").count(), 2, "both cells are no-shows: {grid}");
+        assert!(!grid.contains("0+"), "no free point on a double no-show: {grid}");
+    }
+
+    #[test]
+    fn cup_bye_reads_as_a_free_point() {
+        // A cup bye (an unopposed advance, no board) shows `0+`, like any bye.
+        let (mut t, p1, _p2) = one_board(|_| {});
+        t.rounds.push(Round {
+            number: 2,
+            boards: Vec::new(),
+            bye: None,
+            cup_byes: vec![p1],
+            absent: Vec::new(),
+            completed: true,
+        });
+        let grid = to_grid(&t, &t.standings());
+        assert!(grid.contains("0+"), "cup bye token missing: {grid}");
     }
 
     #[test]

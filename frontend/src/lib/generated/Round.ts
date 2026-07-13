@@ -11,6 +11,15 @@ export type Round = {
  */
 number: number, boards: Array<Board>, bye?: string | null, 
 /**
+ * Cup players who advance this round without an opponent — the rare cup bye
+ * that arises when the player they would have faced vanished (both players
+ * in a feeding bracket match were no-shows). Credited a point exactly like
+ * the Swiss [`bye`](Self::bye); empty in the overwhelmingly common case.
+ * Separate from `bye` because several can occur at once and a Swiss bye may
+ * coexist with them.
+ */
+cup_byes?: Array<string>, 
+/**
  * Players marked absent for this round (excluded from pairing). Recorded so
  * the next round's draft can default to the same absentees, and so a
  * deliberate absence is distinguishable from a late joiner.

@@ -1376,6 +1376,7 @@ pub fn pair_round_weighted(
         number,
         boards,
         bye,
+        cup_byes: Vec::new(),
         absent: Vec::new(),
         completed: false,
     }
@@ -1449,6 +1450,7 @@ mod tests {
                 })
                 .collect(),
             bye,
+            cup_byes: Vec::new(),
             absent: Vec::new(),
             completed: true,
         }

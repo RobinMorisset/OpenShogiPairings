@@ -37,6 +37,7 @@
     CupPodium,
     Handicap,
     NewPlayer,
+    NoShow,
     RatedPlayer,
     RoundExplanation,
     Standing,
@@ -544,7 +545,7 @@
     });
   }
 
-  function handleSetNoShow(roundNumber: number, boardIndex: number, absent: Winner | null) {
+  function handleSetNoShow(roundNumber: number, boardIndex: number, absent: NoShow | null) {
     run(async () => {
       apply(await setBoardNoShow(roundNumber, boardIndex, absent));
     });

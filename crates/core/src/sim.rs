@@ -552,6 +552,7 @@ mod tests {
             number: 1,
             boards: Vec::new(),
             bye: None,
+            cup_byes: Vec::new(),
             absent: vec![fr_absent],
             completed: true,
         });

@@ -12,13 +12,15 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-use crate::cup::{Cup, CupPodium, CUP_SIZES};
+use crate::cup::{Cup, CupPairings, CupPodium, CUP_SIZES};
 use crate::pairing::{
     counterfactual_forbid, counterfactual_force, explain_pairing, pair_round_weighted,
     Counterfactual, CounterfactualMode, RoundExplanation, ScopeReason,
 };
 use crate::player::{NewPlayer, Player, PointAdjustment};
-use crate::round::{Board, Handicap, HandicapGame, PairingSource, Round, RoundDraft, Winner};
+use crate::round::{
+    Board, Handicap, HandicapGame, NoShow, PairingSource, Round, RoundDraft, Winner,
+};
 use crate::settings::TournamentSettings;
 use crate::standings::{compute_standings, Standing};
 
@@ -421,10 +423,11 @@ impl Tournament {
             return Vec::new();
         };
         cup.matches_for_round(&self.rounds, draft.number)
-            .map(|matches| {
-                matches
-                    .into_iter()
+            .map(|p| {
+                p.matches
+                    .iter()
                     .flat_map(|m| [m.player1, m.player2])
+                    .chain(p.byes)
                     .collect()
             })
             .unwrap_or_default()
@@ -486,15 +489,27 @@ impl Tournament {
 
         let number = self.rounds.len() as u32 + 1;
         let existing: HashSet<Uuid> = self.players.iter().map(|p| p.id).collect();
+        // Default the new draft's absentees to the previous round's absentees,
+        // plus anyone who was a no-show there — a no-show reads as "didn't turn
+        // up", so it should carry over the same way an explicit absence does (the
+        // referee can still uncheck it).
         let default_absent: Vec<Uuid> = self
             .rounds
             .last()
             .map(|r| {
-                r.absent
-                    .iter()
-                    .copied()
-                    .filter(|id| existing.contains(id))
-                    .collect()
+                let mut absent: Vec<Uuid> = r.absent.clone();
+                for board in &r.boards {
+                    for (side, id) in [
+                        (Winner::Player1, board.player1),
+                        (Winner::Player2, board.player2),
+                    ] {
+                        if board.no_show_absent(side) && !absent.contains(&id) {
+                            absent.push(id);
+                        }
+                    }
+                }
+                absent.retain(|id| existing.contains(id));
+                absent
             })
             .unwrap_or_default();
 
@@ -567,25 +582,31 @@ impl Tournament {
         // Cup boards for this round (if it is a cup round). They bypass the engine
         // and are generated from the bracket regardless of the absent set — an
         // absent cup player still gets a board and the referee records the forfeit.
-        let cup_boards: Vec<Board> = match &self.cup {
+        // A cup *bye* arises only when a feeding match was a double no-show, so the
+        // player who would have faced its (non-existent) winner advances unopposed.
+        let cup_pairings = match &self.cup {
             Some(cup) => cup
                 .matches_for_round(&self.rounds, draft.number)
-                .ok_or(TournamentError::CupBracketInconsistent)?
-                .into_iter()
-                .map(|m| {
-                    Board::pending(
-                        m.player1,
-                        m.player2,
-                        None,
-                        PairingSource::Cup { stage: m.stage },
-                    )
-                })
-                .collect(),
-            None => Vec::new(),
+                .ok_or(TournamentError::CupBracketInconsistent)?,
+            None => CupPairings::default(),
         };
+        let cup_boards: Vec<Board> = cup_pairings
+            .matches
+            .iter()
+            .map(|m| {
+                Board::pending(
+                    m.player1,
+                    m.player2,
+                    None,
+                    PairingSource::Cup { stage: m.stage },
+                )
+            })
+            .collect();
+        let cup_byes = cup_pairings.byes;
         let cup_players: HashSet<Uuid> = cup_boards
             .iter()
             .flat_map(|b| [b.player1, b.player2])
+            .chain(cup_byes.iter().copied())
             .collect();
 
         // The Swiss pool: present players not taken by the cup this round.
@@ -684,6 +705,7 @@ impl Tournament {
             number: draft.number,
             boards,
             bye: swiss_round.bye,
+            cup_byes,
             absent: draft.absent,
             completed: false,
         };
@@ -893,9 +915,10 @@ impl Tournament {
 
     /// Mark a board as a no-show, or clear it.
     ///
-    /// `absent` names the side that failed to appear (`None` clears the flag,
-    /// back to a normal unplayed board). The player who showed up is credited a
-    /// free point exactly like a bye; the absentee takes a zero loss. A no-show
+    /// `absent` names the side(s) that failed to appear — one player, or
+    /// [`NoShow::Both`] — or `None` to clear the flag back to a normal unplayed
+    /// board. A single no-show credits the opponent a free point exactly like a
+    /// bye; [`NoShow::Both`] leaves no winner (both take a zero loss). A no-show
     /// isn't a played game, so recording one clears any actual result and draw
     /// flag on the board. Like recording a winner, this keeps the round's
     /// `completed` flag in sync — a no-show counts toward closing the round.
@@ -903,7 +926,7 @@ impl Tournament {
         &mut self,
         round_number: u32,
         board_index: usize,
-        absent: Option<Winner>,
+        absent: Option<NoShow>,
     ) -> Result<&Board, TournamentError> {
         let round = self
             .rounds
@@ -1431,8 +1454,8 @@ mod tests {
 
         // Marking a no-show settles the only board, so the round completes even
         // though no game was played.
-        let board = t.set_board_no_show(1, 0, Some(Winner::Player2)).unwrap();
-        assert_eq!(board.no_show, Some(Winner::Player2));
+        let board = t.set_board_no_show(1, 0, Some(NoShow::Player2)).unwrap();
+        assert_eq!(board.no_show, Some(NoShow::Player2));
         assert_eq!(board.result, None);
         assert!(t.rounds[0].completed);
 
@@ -1442,13 +1465,47 @@ mod tests {
         assert_eq!(board.no_show, None);
 
         // And marking a no-show again clears the recorded result.
-        let board = t.set_board_no_show(1, 0, Some(Winner::Player1)).unwrap();
+        let board = t.set_board_no_show(1, 0, Some(NoShow::Player1)).unwrap();
         assert_eq!(board.result, None);
-        assert_eq!(board.no_show, Some(Winner::Player1));
+        assert_eq!(board.no_show, Some(NoShow::Player1));
+
+        // Both players absent settles the board too, with no winner.
+        let board = t.set_board_no_show(1, 0, Some(NoShow::Both)).unwrap();
+        assert_eq!(board.no_show, Some(NoShow::Both));
+        assert!(t.rounds[0].completed);
 
         // Clearing it reopens the round.
         t.set_board_no_show(1, 0, None).unwrap();
         assert!(!t.rounds[0].completed);
+    }
+
+    #[test]
+    fn no_show_players_default_to_absent_in_the_next_draft() {
+        // Four players over one round. On board 0, player2 is a no-show; on board
+        // 1, both players are no-shows. Preparing round 2 should pre-mark all
+        // three as absent (as if they'd been marked absent this round).
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B", "C", "D"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+
+        let board0 = &t.rounds[0].boards[0];
+        let present = board0.player1; // showed up on board 0
+        let no_show0 = board0.player2;
+        let board1 = &t.rounds[0].boards[1];
+        let (both1, both2) = (board1.player1, board1.player2);
+        t.set_board_no_show(1, 0, Some(NoShow::Player2)).unwrap();
+        t.set_board_no_show(1, 1, Some(NoShow::Both)).unwrap();
+        assert!(t.rounds[0].completed);
+
+        let draft = t.prepare_round().unwrap();
+        assert!(draft.absent.contains(&no_show0));
+        assert!(draft.absent.contains(&both1));
+        assert!(draft.absent.contains(&both2));
+        // The player who showed up is not pre-marked.
+        assert!(!draft.absent.contains(&present));
     }
 
     #[test]
@@ -1841,13 +1898,24 @@ mod tests {
             .boards
             .len();
         for idx in 0..n {
-            let unplayed = t.rounds.iter().find(|r| r.number == rnum).unwrap().boards[idx]
-                .result
-                .is_none();
-            if unplayed {
+            let undecided = !t.rounds.iter().find(|r| r.number == rnum).unwrap().boards[idx].is_decided();
+            if undecided {
                 t.toggle_board_winner(rnum, idx, Winner::Player1).unwrap();
             }
         }
+    }
+
+    /// Mark the board pairing `a` and `b` in round `rnum` as a double no-show.
+    fn no_show_both(t: &mut Tournament, rnum: u32, a: Uuid, b: Uuid) {
+        let round = t.rounds.iter().find(|r| r.number == rnum).unwrap();
+        let idx = round
+            .boards
+            .iter()
+            .position(|bd| {
+                (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a)
+            })
+            .expect("board exists");
+        t.set_board_no_show(rnum, idx, Some(NoShow::Both)).unwrap();
     }
 
     #[test]
@@ -1926,10 +1994,118 @@ mod tests {
         decide_rest(&mut t, 3);
 
         let podium = t.cup_podium().unwrap();
-        assert_eq!(podium.champion, s[0]);
-        assert_eq!(podium.runner_up, s[1]);
-        assert_eq!(podium.third, s[3]);
-        assert_eq!(podium.fourth, s[2]);
+        assert_eq!(podium.champion, Some(s[0]));
+        assert_eq!(podium.runner_up, Some(s[1]));
+        assert_eq!(podium.third, Some(s[3]));
+        assert_eq!(podium.fourth, Some(s[2]));
+    }
+
+    #[test]
+    fn cup_double_no_show_drops_both_to_swiss_and_byes_the_next_opponent() {
+        let mut t = Tournament::new("Champ").unwrap();
+        enable_cup(&mut t);
+        let s: Vec<Uuid> = (0..8)
+            .map(|i| add_rated(&mut t, &format!("E{i}"), 2000 - i * 100, true))
+            .collect();
+        add_rated(&mut t, "N9", 1250, false);
+        add_rated(&mut t, "N10", 1200, false);
+        t.finalize_registration_with(Some(8)).unwrap();
+
+        // Round 1 (QF). The top match (s0 v s7) is a double no-show — neither
+        // shows up — so it produces no winner. The other three top seeds win.
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        no_show_both(&mut t, 1, s[0], s[7]);
+        decide(&mut t, 1, s[1], s[6]);
+        decide(&mut t, 1, s[2], s[5]);
+        decide(&mut t, 1, s[3], s[4]);
+        decide_rest(&mut t, 1);
+
+        // Both no-shows score nothing this round and drop into the Swiss open.
+        let scored = |t: &Tournament, id| {
+            t.standings()
+                .into_iter()
+                .find(|st| st.player_id == id)
+                .unwrap()
+                .points
+        };
+        assert_eq!(scored(&t, s[0]), 0);
+        assert_eq!(scored(&t, s[7]), 0);
+
+        // Round 2 (SF). The vanished winner's slot leaves s3 (drawn to face it) to
+        // advance unopposed — the one case a cup bye occurs — while s0 and s7 are
+        // now Swiss-paired. As no-shows they default to absent in the new draft,
+        // so clear that to keep them in the round (the referee's call).
+        let draft = t.prepare_round().unwrap();
+        assert!(draft.absent.contains(&s[0]) && draft.absent.contains(&s[7]));
+        t.update_draft(Vec::new(), Vec::new(), None).unwrap();
+        t.confirm_round().unwrap();
+        assert!(t.rounds[1].cup_byes.contains(&s[3]), "s3 gets the cup bye");
+        for dropped in [s[0], s[7]] {
+            let board = t.rounds[1]
+                .boards
+                .iter()
+                .find(|b| b.player1 == dropped || b.player2 == dropped)
+                .expect("dropped cup player is now Swiss-paired");
+            assert!(matches!(board.source, PairingSource::Swiss));
+        }
+        // The cup bye is worth a point, like any bye.
+        assert_eq!(scored(&t, s[3]), 1);
+        decide(&mut t, 2, s[1], s[2]); // the one real semifinal
+        decide_rest(&mut t, 2);
+
+        // Round 3. Final is s3 (via bye) vs s1; the small final has only one
+        // semifinal loser (s2), who takes third by walkover — no fourth.
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        decide(&mut t, 3, s[1], s[3]); // s1 wins the final
+        decide_rest(&mut t, 3);
+
+        let podium = t.cup_podium().unwrap();
+        assert_eq!(podium.champion, Some(s[1]));
+        assert_eq!(podium.runner_up, Some(s[3]));
+        assert_eq!(podium.third, Some(s[2]));
+        assert_eq!(podium.fourth, None); // the fourth-place slot never existed
+    }
+
+    #[test]
+    fn cup_double_no_show_final_awards_no_champion() {
+        let mut t = Tournament::new("Champ").unwrap();
+        enable_cup(&mut t);
+        let s: Vec<Uuid> = (0..8)
+            .map(|i| add_rated(&mut t, &format!("E{i}"), 2000 - i * 100, true))
+            .collect();
+        add_rated(&mut t, "N9", 1250, false);
+        add_rated(&mut t, "N10", 1200, false);
+        t.finalize_registration_with(Some(8)).unwrap();
+
+        // Play a clean bracket down to the final round.
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        for i in 0..4 {
+            decide(&mut t, 1, s[i], s[7 - i]);
+        }
+        decide_rest(&mut t, 1);
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        decide(&mut t, 2, s[0], s[3]);
+        decide(&mut t, 2, s[1], s[2]);
+        decide_rest(&mut t, 2);
+
+        // Both finalists no-show the final; the small final is played normally.
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        no_show_both(&mut t, 3, s[0], s[1]);
+        decide(&mut t, 3, s[3], s[2]);
+        decide_rest(&mut t, 3);
+
+        // The podium resolves without panicking: no champion or runner-up, but
+        // third and fourth from the small final stand.
+        let podium = t.cup_podium().unwrap();
+        assert_eq!(podium.champion, None);
+        assert_eq!(podium.runner_up, None);
+        assert_eq!(podium.third, Some(s[3]));
+        assert_eq!(podium.fourth, Some(s[2]));
     }
 
     #[test]

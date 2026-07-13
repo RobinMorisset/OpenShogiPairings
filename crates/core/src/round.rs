@@ -147,6 +147,21 @@ impl PairingSource {
     }
 }
 
+/// Which side(s) of a board failed to show up. A single side is a forfeit — the
+/// opponent takes the point exactly like a bye — while `Both` means neither
+/// player appeared, so no winner can be determined (both take a zero loss, and a
+/// cup game with this outcome advances nobody). Serialized snake_case, so the
+/// single-side variants stay wire-compatible with the earlier `Winner`-typed
+/// field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(rename_all = "snake_case")]
+pub enum NoShow {
+    Player1,
+    Player2,
+    Both,
+}
+
 /// A single board (game) in a round: two paired players and, once played, a
 /// result. `result` is `None` while the game hasn't been played yet.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -178,14 +193,15 @@ pub struct Board {
     /// Swiss for saves predating this field.
     #[serde(default, skip_serializing_if = "PairingSource::is_swiss")]
     pub source: PairingSource,
-    /// A player failed to show up. The variant names the player who was *absent*;
-    /// the other player is credited the point exactly as for a bye, while the
-    /// no-show takes a zero loss. Kept separate from [`result`](Self::result)
-    /// (which stays `None` — no game was actually played) so the cross-table and
-    /// American grid can show it distinctly (`0#` for the absentee, `0+` for the
-    /// player who showed up), and so it never feeds the ELO estimate.
+    /// A player (or both) failed to show up. A single side is a forfeit — the
+    /// opponent is credited the point exactly as for a bye — while `Both` means
+    /// neither appeared, so no winner exists. Kept separate from
+    /// [`result`](Self::result) (which stays `None` — no game was actually
+    /// played) so the cross-table and American grid can show it distinctly (`0#`
+    /// for an absentee, `0+` for a player who showed up), and so it never feeds
+    /// the ELO estimate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub no_show: Option<Winner>,
+    pub no_show: Option<NoShow>,
 }
 
 impl Board {
@@ -217,21 +233,26 @@ impl Board {
         self.result.is_some() || self.no_show.is_some()
     }
 
-    /// The id of the player who did not show up, if this board is a no-show.
-    pub fn no_show_player(&self) -> Option<Uuid> {
-        self.no_show.map(|w| match w {
-            Winner::Player1 => self.player1,
-            Winner::Player2 => self.player2,
-        })
+    /// Whether the given `side` failed to show up on this board (true for that
+    /// side under a single no-show, and for both sides under [`NoShow::Both`]).
+    pub fn no_show_absent(&self, side: Winner) -> bool {
+        match self.no_show {
+            Some(NoShow::Player1) => side == Winner::Player1,
+            Some(NoShow::Player2) => side == Winner::Player2,
+            Some(NoShow::Both) => true,
+            None => false,
+        }
     }
 
     /// The id of the player who *did* show up — the one credited the free point,
-    /// exactly like a bye — if this board is a no-show.
+    /// exactly like a bye — when exactly one side was a no-show. `None` when both
+    /// showed up or [`NoShow::Both`] (neither did, so nobody is credited).
     pub fn no_show_opponent(&self) -> Option<Uuid> {
-        self.no_show.map(|w| match w {
-            Winner::Player1 => self.player2,
-            Winner::Player2 => self.player1,
-        })
+        match self.no_show {
+            Some(NoShow::Player1) => Some(self.player2),
+            Some(NoShow::Player2) => Some(self.player1),
+            _ => None,
+        }
     }
 
     /// The winner that counts for standings and pairing. For a handicap game,
@@ -276,6 +297,14 @@ pub struct Round {
     pub boards: Vec<Board>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bye: Option<Uuid>,
+    /// Cup players who advance this round without an opponent — the rare cup bye
+    /// that arises when the player they would have faced vanished (both players
+    /// in a feeding bracket match were no-shows). Credited a point exactly like
+    /// the Swiss [`bye`](Self::bye); empty in the overwhelmingly common case.
+    /// Separate from `bye` because several can occur at once and a Swiss bye may
+    /// coexist with them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cup_byes: Vec<Uuid>,
     /// Players marked absent for this round (excluded from pairing). Recorded so
     /// the next round's draft can default to the same absentees, and so a
     /// deliberate absence is distinguishable from a late joiner.

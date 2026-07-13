@@ -50,12 +50,14 @@
   );
 
   // Player id → medal, from the cup podium (the table order stays pure-Swiss).
+  // A place can be null when a double no-show left it undetermined (e.g. both
+  // finalists absent), so each medal is awarded only if its winner exists.
   const medalOf = $derived.by(() => {
     const m = new Map<string, string>();
     if (cupPodium) {
-      m.set(cupPodium.champion, "🥇");
-      m.set(cupPodium.runner_up, "🥈");
-      m.set(cupPodium.third, "🥉");
+      if (cupPodium.champion) m.set(cupPodium.champion, "🥇");
+      if (cupPodium.runner_up) m.set(cupPodium.runner_up, "🥈");
+      if (cupPodium.third) m.set(cupPodium.third, "🥉");
     }
     return m;
   });
@@ -126,7 +128,9 @@
     | PlayedCell;
 
   function cellFor(player: Player, round: Round): Cell {
-    if (round.bye === player.id) return { kind: "bye" };
+    // The Swiss bye and the (rare) cup bye both read as a free point.
+    if (round.bye === player.id || (round.cup_byes ?? []).includes(player.id))
+      return { kind: "bye" };
     const boardIdx = round.boards.findIndex(
       (b) => b.player1 === player.id || b.player2 === player.id,
     );
@@ -139,7 +143,10 @@
     const opponent = opponentId != null ? String(opponentId) : "?";
     const opponentName = nameOf(opponentUuid);
     if (board.no_show) {
-      return board.no_show === side
+      // This side is a no-show for a single absence on their side, or when both
+      // players were absent; otherwise they are the one who showed up.
+      const iWasAbsent = board.no_show === side || board.no_show === "both";
+      return iWasAbsent
         ? { kind: "no-show", opponentName }
         : { kind: "no-show-win", opponentName };
     }
@@ -312,12 +319,18 @@
   <div class="results-toolbar print-hide">
     <button type="button" class="ghost" onclick={() => printPage(true)}>🖨 {$_("roundView.print")}</button>
   </div>
-  {#if cupPodium}
+  {#if cupPodium && (cupPodium.champion || cupPodium.runner_up || cupPodium.third)}
     <div class="podium">
       <span class="cup-title">{$_("resultsView.cup")}</span>
-      <span>🥇 <strong>{nameOf(cupPodium.champion)}</strong></span>
-      <span>🥈 {nameOf(cupPodium.runner_up)}</span>
-      <span>🥉 {nameOf(cupPodium.third)}</span>
+      {#if cupPodium.champion}
+        <span>🥇 <strong>{nameOf(cupPodium.champion)}</strong></span>
+      {/if}
+      {#if cupPodium.runner_up}
+        <span>🥈 {nameOf(cupPodium.runner_up)}</span>
+      {/if}
+      {#if cupPodium.third}
+        <span>🥉 {nameOf(cupPodium.third)}</span>
+      {/if}
     </div>
   {/if}
   <table onmousemove={trackTip} onmouseleave={clearTip}>

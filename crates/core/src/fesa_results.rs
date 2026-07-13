@@ -408,6 +408,35 @@ mod tests {
     }
 
     #[test]
+    fn recognizes_and_imports_a_no_show_cell() {
+        // `is_cell_token` must treat `0#` as a round cell (not the Pts/delta
+        // column), and it parses as a zero-score absence like `0-`.
+        assert!(is_cell_token("0#"));
+        assert_eq!(parse_cell("0#", 1).unwrap(), Cell::Absent);
+
+        // End to end: a small table where Beta is a no-show in round 2. The
+        // last-name column is positional, so build it with a fixed width.
+        let mut text = String::from("No-Show Open : 2026\nNr Name Nat Grade ELO R1 R2 Pts +/-\n");
+        let row = |nr: u32, last: &str, first: &str, c1: &str, c2: &str, pts: u32| {
+            format!("{nr:>2} {last:<15}{first} FR 1 Dan 1500 {c1} {c2} {pts} +0\n")
+        };
+        text.push_str(&row(1, "Alpha", "Ann", "2+", "0+", 2)); // beats Beta, then a bye
+        text.push_str(&row(2, "Beta", "Bob", "1-", "0#", 0)); // loses, then no-show
+        text.push_str(&row(3, "Gamma", "Cid", "4+", "4+", 2));
+        text.push_str(&row(4, "Delta", "Dan", "3-", "3-", 0));
+
+        let (t, _) = import_fesa_results(&text).unwrap();
+        assert_eq!(t.rounds.len(), 2);
+        assert!(t.rounds.iter().all(|r| r.completed));
+        // Beta's round-2 no-show landed them in the absent set and scored nothing.
+        let beta = find(&t, "Beta", "Bob").id;
+        assert!(t.rounds[1].absent.contains(&beta));
+        let points = |id| t.standings().into_iter().find(|s| s.player_id == id).unwrap().points;
+        assert_eq!(points(beta), 0);
+        assert_eq!(points(find(&t, "Alpha", "Ann").id), 2); // win + bye
+    }
+
+    #[test]
     fn the_grade_column_is_parsed_into_a_rank() {
         use crate::Grade;
         let (t, _) = wosc();

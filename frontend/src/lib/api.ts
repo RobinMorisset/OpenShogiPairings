@@ -5,6 +5,7 @@ import type {
   Handicap,
   HealthStatus,
   NewPlayer,
+  NoShow,
   RatedPlayer,
   RoundExplanation,
   Tournament,
@@ -487,13 +488,14 @@ export function setBoardDrawn(
 }
 
 /**
- * Mark (or clear) a board as a no-show. `absent` names the side that failed to
- * appear; `null` clears the flag back to a normal unplayed board.
+ * Mark (or clear) a board as a no-show. `absent` names the side(s) that failed
+ * to appear (one player or `"both"`); `null` clears the flag back to a normal
+ * unplayed board.
  */
 export function setBoardNoShow(
   roundNumber: number,
   boardIndex: number,
-  absent: Winner | null,
+  absent: NoShow | null,
 ): Promise<TournamentResponse> {
   return request<TournamentResponse>(
     scopedPath(`/rounds/${roundNumber}/boards/${boardIndex}/no-show`),

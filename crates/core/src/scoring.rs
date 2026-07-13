@@ -180,6 +180,13 @@ pub(crate) fn compute_scores(
                 }
             }
         }
+        // A cup bye (an unopposed bracket advance) is a bye all the same.
+        for &player in &round.cup_byes {
+            if let Some(s) = by_id.get_mut(&player) {
+                s.had_bye = true;
+                s.last_descended = Some(round.number);
+            }
+        }
 
         // Apply this round's results (effective winner scores).
         for board in &round.boards {
@@ -210,6 +217,13 @@ pub(crate) fn compute_scores(
                 }
             }
         }
+        // A cup bye scores the free point too — the player advanced unopposed.
+        for &player in &round.cup_byes {
+            if let Some(s) = by_id.get_mut(&player) {
+                s.points += 1;
+                s.victories += 1;
+            }
+        }
 
         // Cumulative tie-break: after this round is scored, add every player's
         // running total to their running sum. A round the player sat out still
@@ -229,7 +243,7 @@ pub(crate) fn compute_scores(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::{Board, CupStage};
+    use crate::round::{Board, CupStage, NoShow};
     use crate::settings::MacMahonThreshold;
 
     fn player(tid: u32, rating: Option<u32>) -> Player {
@@ -262,6 +276,7 @@ mod tests {
                 ..Board::pending(a.id, b.id, Some(2), PairingSource::Swiss)
             }],
             bye: None,
+            cup_byes: Vec::new(),
             absent: Vec::new(),
             completed: true,
         };
@@ -288,6 +303,7 @@ mod tests {
                 ..Board::pending(a.id, b.id, None, PairingSource::Swiss)
             }],
             bye: None,
+            cup_byes: Vec::new(),
             absent: Vec::new(),
             completed: true,
         };
@@ -310,10 +326,11 @@ mod tests {
         let round = Round {
             number: 1,
             boards: vec![Board {
-                no_show: Some(Winner::Player2), // player2 (B) is absent
+                no_show: Some(NoShow::Player2), // player2 (B) is absent
                 ..Board::pending(a.id, b.id, Some(0), PairingSource::Swiss)
             }],
             bye: None,
+            cup_byes: Vec::new(),
             absent: Vec::new(),
             completed: true,
         };
@@ -332,6 +349,52 @@ mod tests {
         assert_eq!(scores.get(&b.id).victories, 0);
         assert!(!scores.get(&b.id).had_bye);
         assert!(scores.get(&b.id).opponents.is_empty());
+    }
+
+    #[test]
+    fn double_no_show_scores_nothing_for_either_player() {
+        // Neither player showed up: both take a zero loss, nobody is credited.
+        let a = player(1, None);
+        let b = player(2, None);
+        let round = Round {
+            number: 1,
+            boards: vec![Board {
+                no_show: Some(NoShow::Both),
+                ..Board::pending(a.id, b.id, Some(0), PairingSource::Swiss)
+            }],
+            bye: None,
+            cup_byes: Vec::new(),
+            absent: Vec::new(),
+            completed: true,
+        };
+        let scores = compute_scores(
+            &[a.clone(), b.clone()],
+            &TournamentSettings::default(),
+            &[round],
+        );
+        for id in [a.id, b.id] {
+            assert_eq!(scores.get(&id).points, 0);
+            assert_eq!(scores.get(&id).victories, 0);
+            assert!(!scores.get(&id).had_bye);
+            assert!(scores.get(&id).opponents.is_empty());
+        }
+    }
+
+    #[test]
+    fn cup_bye_scores_a_point_like_a_bye() {
+        let a = player(1, None);
+        let round = Round {
+            number: 1,
+            boards: Vec::new(),
+            bye: None,
+            cup_byes: vec![a.id],
+            absent: Vec::new(),
+            completed: true,
+        };
+        let scores = compute_scores(&[a.clone()], &TournamentSettings::default(), &[round]);
+        assert_eq!(scores.get(&a.id).points, 1);
+        assert_eq!(scores.get(&a.id).victories, 1);
+        assert!(scores.get(&a.id).had_bye);
     }
 
     #[test]
@@ -376,6 +439,7 @@ mod tests {
                 )
             }],
             bye: None,
+            cup_byes: Vec::new(),
             absent: Vec::new(),
             completed: true,
         };

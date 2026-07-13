@@ -14,22 +14,24 @@ Known limitations and future work, roughly ordered by area.
   formats (MacMahon-beyond, hard multi-round constraints) that need constraints a
   plain matching can't express, and by very large fields. Plan: `good_lp` + HiGHS
   first, then CP-SAT.
-- **No-shows.** A player who was paired for a round but did not show up (distinct
-  from a game simply not yet recorded) should appear as `0#` in the results
-  table. This needs a way to mark a board as a no-show (a new board-result state,
-  giving the opponent the win); not handled yet. Byes (`0+`, win) and absences
-  (`0-`, loss) are already handled.
+
 - **Weak club protection** Intermediate between normal and exempt.
 
-## Frontend
-
-- **Replace the padlock icon by an open one for unlocked tournaments**
+- **Team tournaments**, basically a kind of very strong club protection
 
 ## Multi-tournament server
 
-Support several tournaments on one running server (hosted or Tauri-embedded),
-with clients picking which to connect to. Design:
-[`docs/multi-tournament.md`](docs/multi-tournament.md).
+- **OAuth authentication**
+
+- **Log of which user took which action**
+
+- **Read-only access to the pairings and standings**
+
+## Other
+
+- **Webhook for pushing results and pulling players** See https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification
+
+- **Standings by direct confrontation**
 
 - **Make the Tauri desktop app's data directory configurable.** It's currently
   hardcoded to `dirs::data_dir()/openshogipairings/tournaments/`
@@ -39,14 +41,5 @@ with clients picking which to connect to. Design:
   — read it from an environment variable, falling back to the current default
   when unset.
 
-- **OAuth authentication**
-
-- **Log of which user took which action**
-
-## Other
-
-- **Webhook for pushing results and pulling players** See https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification
-
-- **Team tournaments**
-
-- **Standings by direct confrontation**
+- **More complete american grid exporter** There should be fields in the settings with the dates
+  and time control of the tournament, so they can be reported in the header of the american grid;

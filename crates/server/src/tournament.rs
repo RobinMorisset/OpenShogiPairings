@@ -8,8 +8,8 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{
-    Board, Counterfactual, CounterfactualMode, CupPodium, Handicap, NewPlayer, RoundExplanation,
-    Standing, Tournament, TournamentSettings, Winner,
+    Board, Counterfactual, CounterfactualMode, CupPodium, Handicap, NewPlayer, NoShow,
+    RoundExplanation, Standing, Tournament, TournamentSettings, Winner,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -599,11 +599,11 @@ async fn set_board_drawn(
     view(&store)
 }
 
-/// Body of the no-show endpoint: which side failed to appear, or `null` to
-/// clear the flag back to a normal unplayed board.
+/// Body of the no-show endpoint: which side(s) failed to appear (one player or
+/// `both`), or `null` to clear the flag back to a normal unplayed board.
 #[derive(Debug, Deserialize)]
 struct SetNoShowRequest {
-    absent: Option<Winner>,
+    absent: Option<NoShow>,
 }
 
 /// Mark (or clear) a board as a no-show.

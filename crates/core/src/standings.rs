@@ -241,6 +241,7 @@ mod tests {
             number,
             boards,
             bye: None,
+            cup_byes: Vec::new(),
             absent: Vec::new(),
             completed: true,
         }
