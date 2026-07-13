@@ -233,11 +233,18 @@ force isn't yet overcome), and past it the estimate tracks the evidence.
 - **Width mapping.** The Laplace scale is variance-matched to the Gaussian,
   `b_down = σ₀/√2`, so the existing knobs (`m`, provisional multiplier,
   `elo_unrated_k`) keep their meaning — they still set `σ₀`, which sets `b_down`.
-- **Asymmetry.** The upward arm is widened to `b_up = r · b_down`, where
-  `r = elo_upward_looseness ≥ 1`. `r > 1` makes an *upward* revision (the common
-  case — an under-rated improver) clear on less evidence than a downward one,
-  while the downward arm stays as tight as before. `r = 1` is symmetric, so the
-  Laplace prior stays neutral about direction until a referee opts in.
+- **Asymmetry, per player category.** The upward arm is widened to
+  `b_up = r · b_down`, where `r ≥ 1`. `r > 1` makes an *upward* revision (the
+  common case — an under-rated improver) clear on less evidence than a downward
+  one, while the downward arm stays as tight as before. `r = 1` is symmetric. `r`
+  is set **separately for the three prior categories** — `elo_upward_looseness_
+  established`, `_provisional`, `_unrated` — because a global tilt is rarely what
+  you want: a reliable FESA rating deserves little upward bias, whereas a newcomer
+  who beats the field is far more likely genuinely strong than lucky, so the
+  unrated (and, to a lesser degree, provisional) categories are where the
+  asymmetry earns its keep. Each player reads the `r` of the same category that
+  set its width (§2.1/§2.2). All three default to `1`, so the prior stays neutral
+  about direction until a referee opts in.
 - **Still log-concave.** `−|d|` is concave, so the objective stays concave and the
   MAP unique. The only wrinkle is the kink at `d = 0`, where the Gaussian's finite
   curvature (`−1/σ₀²`) that keeps the Newton step well-defined is absent. We round
@@ -459,15 +466,18 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   optionally asymmetric `Laplace` (see §2.5). A plain enum (`#[serde(rename_all =
   "snake_case")]`), default-`Gaussian`, so old saves and untouched tournaments keep
   the historical behaviour exactly.
-- `elo_upward_looseness_percent: u32` — the asymmetry ratio `r` for the Laplace
-  prior, integer percent (`100` = ×1.0 = symmetric, the default). Read via
-  `settings.elo_upward_looseness()`; normalization clamps it ≥ 100 (an upward
-  revision is never harder than a downward one). Inert under the Gaussian prior;
-  the UI only shows its input when the shape is Laplace.
+- `elo_upward_looseness_{established,provisional,unrated}_percent: u32` — the
+  asymmetry ratio `r` for the Laplace prior, **one per player category**, integer
+  percent (`100` = ×1.0 = symmetric, the default for all three). Read via
+  `settings.elo_upward_looseness_{established,provisional,unrated}()`;
+  normalization clamps each ≥ 100 (an upward revision is never harder than a
+  downward one). Each player reads the knob for the category that set its prior
+  width. Inert under the Gaussian prior; the UI only shows the three inputs when
+  the shape is Laplace.
 
-The six `elo_*` estimate knobs (`elo_k_multiplier_percent`,
+The eight `elo_*` estimate knobs (`elo_k_multiplier_percent`,
 `elo_provisional_multiplier_percent`, `elo_unrated_prior_center`, `elo_unrated_k`,
-`elo_prior_shape`, `elo_upward_looseness_percent`)
+`elo_prior_shape`, and the three `elo_upward_looseness_*_percent`)
 surface in the Settings UI whenever a live estimate is actually maintained — either
 ELO pairing mode, or estimate-based MacMahon (§6b) with an ELO threshold. The FESA
 K table, `s`, and the reliability threshold (18 games) remain constants in

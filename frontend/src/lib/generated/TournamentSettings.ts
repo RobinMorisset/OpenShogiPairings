@@ -160,16 +160,34 @@ elo_unrated_k: number,
  */
 elo_prior_shape: EloPriorShape, 
 /**
- * How much *looser* an upward revision of the estimate is than a downward
- * one, as an integer percent (100 = ×1.0 = symmetric). Only affects the
- * [`EloPriorShape::Laplace`] prior, where it scales the upward arm's width
- * (`b_up = r · b_down`): `r > 1` lets an under-rated player (the common case
- * — e.g. a returning improver) climb on less evidence than a suspiciously
- * strong result pushes an established player down. `100` (symmetric) is the
- * default, so the prior stays behaviour-neutral until a referee opts in.
- * Stored as an integer so the settings stay `Eq`; read via
- * [`Self::elo_upward_looseness`], which clamps it ≥ 1.0 (an upward revision
- * is never *harder* than a downward one). Only meaningful when the prior
- * shape is Laplace and a live estimate is maintained.
+ * How much *looser* an upward revision is than a downward one for an
+ * **established** (reliably-rated) player, as an integer percent
+ * (100 = ×1.0 = symmetric). Only affects the [`EloPriorShape::Laplace`] prior,
+ * where it scales that player's upward arm width (`b_up = r · b_down`):
+ * `r > 1` lets a win revise the estimate up on less evidence than a loss
+ * revises it down. A reliable rating is the one we trust most, so this
+ * usually stays at `100` (symmetric) — asymmetry is most useful for the less
+ * certain players below. Read via [`Self::elo_upward_looseness_established`],
+ * which clamps it ≥ 1.0 (an upward revision is never *harder* than a downward
+ * one). Only meaningful when the prior shape is Laplace and a live estimate is
+ * maintained.
  */
-elo_upward_looseness_percent: number, };
+elo_upward_looseness_established_percent: number, 
+/**
+ * The upward-looseness ratio `r` for a **provisionally-rated** player (not in
+ * the FESA list, or with fewer than [`crate::PROVISIONAL_GAMES_THRESHOLD`]
+ * games), as an integer percent (100 = ×1.0 = symmetric). Same meaning as
+ * [`Self::elo_upward_looseness_established_percent`] but for the less-trusted
+ * provisional prior, where a modest upward tilt is often warranted. Read via
+ * [`Self::elo_upward_looseness_provisional`] (clamps ≥ 1.0).
+ */
+elo_upward_looseness_provisional_percent: number, 
+/**
+ * The upward-looseness ratio `r` for an **unrated** player, as an integer
+ * percent (100 = ×1.0 = symmetric). Same meaning as
+ * [`Self::elo_upward_looseness_established_percent`] but for the wide unrated
+ * prior — the case where an upward tilt helps most, since a newcomer beating
+ * the field is far more likely genuinely strong than a fluke. Read via
+ * [`Self::elo_upward_looseness_unrated`] (clamps ≥ 1.0).
+ */
+elo_upward_looseness_unrated_percent: number, };

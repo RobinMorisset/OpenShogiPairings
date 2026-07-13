@@ -77,7 +77,9 @@
   let eloUnratedCenter = $state(600);
   let eloUnratedK = $state(705);
   let eloPriorShape = $state<EloPriorShape>("gaussian");
-  let eloUpwardLoosenessPercent = $state(100);
+  let eloLoosenessEstablishedPercent = $state(100);
+  let eloLoosenessProvisionalPercent = $state(100);
+  let eloLoosenessUnratedPercent = $state(100);
 
   // Whether the "MacMahon from estimated ELO" option can apply: it compares the
   // estimate against ELO thresholds, so it's inert (and greyed out) with only
@@ -141,7 +143,9 @@
     const sEloUnratedCenter = settings.elo_unrated_prior_center ?? 600;
     const sEloUnratedK = settings.elo_unrated_k ?? 705;
     const sEloPriorShape = settings.elo_prior_shape ?? "gaussian";
-    const sEloUpwardLooseness = settings.elo_upward_looseness_percent ?? 100;
+    const sEloLooseEst = settings.elo_upward_looseness_established_percent ?? 100;
+    const sEloLooseProv = settings.elo_upward_looseness_provisional_percent ?? 100;
+    const sEloLooseUnr = settings.elo_upward_looseness_unrated_percent ?? 100;
     untrack(() => {
       const matches =
         eqThresholds(cleanThresholds(thresholds), sThresholds) &&
@@ -162,7 +166,9 @@
         eloUnratedCenter === sEloUnratedCenter &&
         eloUnratedK === sEloUnratedK &&
         eloPriorShape === sEloPriorShape &&
-        eloUpwardLoosenessPercent === sEloUpwardLooseness;
+        eloLoosenessEstablishedPercent === sEloLooseEst &&
+        eloLoosenessProvisionalPercent === sEloLooseProv &&
+        eloLoosenessUnratedPercent === sEloLooseUnr;
       if (!matches) {
         thresholds = sThresholds.map((t) => ({
           kind: t.criterion.kind,
@@ -188,7 +194,9 @@
         eloUnratedCenter = sEloUnratedCenter;
         eloUnratedK = sEloUnratedK;
         eloPriorShape = sEloPriorShape;
-        eloUpwardLoosenessPercent = sEloUpwardLooseness;
+        eloLoosenessEstablishedPercent = sEloLooseEst;
+        eloLoosenessProvisionalPercent = sEloLooseProv;
+        eloLoosenessUnratedPercent = sEloLooseUnr;
       }
     });
   });
@@ -217,7 +225,9 @@
       elo_unrated_prior_center: eloUnratedCenter,
       elo_unrated_k: eloUnratedK,
       elo_prior_shape: eloPriorShape,
-      elo_upward_looseness_percent: eloUpwardLoosenessPercent,
+      elo_upward_looseness_established_percent: eloLoosenessEstablishedPercent,
+      elo_upward_looseness_provisional_percent: eloLoosenessProvisionalPercent,
+      elo_upward_looseness_unrated_percent: eloLoosenessUnratedPercent,
     });
   }
 
@@ -276,12 +286,17 @@
     persist();
   }
 
-  function editEloUpwardLooseness(raw: string) {
+  function editEloUpwardLooseness(
+    category: "established" | "provisional" | "unrated",
+    raw: string,
+  ) {
     // Decimal ratio stored as an integer percent; never below ×1 (an upward
     // revision is never harder than a downward one — the server clamps this too).
     const m = Number(raw);
-    const pct = Math.round((Number.isFinite(m) ? m : 1) * 100);
-    eloUpwardLoosenessPercent = Math.max(100, pct);
+    const pct = Math.max(100, Math.round((Number.isFinite(m) ? m : 1) * 100));
+    if (category === "established") eloLoosenessEstablishedPercent = pct;
+    else if (category === "provisional") eloLoosenessProvisionalPercent = pct;
+    else eloLoosenessUnratedPercent = pct;
     persist();
   }
 
@@ -1077,15 +1092,39 @@
       </p>
       {#if eloPriorShape === "laplace"}
         <label class="check elo-k">
-          {$_("settings.eloUpwardLooseness")}
+          {$_("settings.eloUpwardLoosenessEstablished")}
           <input
             type="number"
             min="1"
             step="0.5"
             class="threshold narrow"
-            value={eloUpwardLoosenessPercent / 100}
+            value={eloLoosenessEstablishedPercent / 100}
             disabled={busy}
-            onchange={(e) => editEloUpwardLooseness(e.currentTarget.value)}
+            onchange={(e) => editEloUpwardLooseness("established", e.currentTarget.value)}
+          />
+        </label>
+        <label class="check elo-k">
+          {$_("settings.eloUpwardLoosenessProvisional")}
+          <input
+            type="number"
+            min="1"
+            step="0.5"
+            class="threshold narrow"
+            value={eloLoosenessProvisionalPercent / 100}
+            disabled={busy}
+            onchange={(e) => editEloUpwardLooseness("provisional", e.currentTarget.value)}
+          />
+        </label>
+        <label class="check elo-k">
+          {$_("settings.eloUpwardLoosenessUnrated")}
+          <input
+            type="number"
+            min="1"
+            step="0.5"
+            class="threshold narrow"
+            value={eloLoosenessUnratedPercent / 100}
+            disabled={busy}
+            onchange={(e) => editEloUpwardLooseness("unrated", e.currentTarget.value)}
           />
         </label>
         <p class="desc small-note">

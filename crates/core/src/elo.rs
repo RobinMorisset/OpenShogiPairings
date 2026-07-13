@@ -327,7 +327,9 @@ pub fn estimate_elos(
     let unrated_center = settings.elo_unrated_prior_center();
     let unrated_k = settings.elo_unrated_k();
     let shape = settings.elo_prior_shape;
-    let looseness = settings.elo_upward_looseness();
+    let looseness_established = settings.elo_upward_looseness_established();
+    let looseness_provisional = settings.elo_upward_looseness_provisional();
+    let looseness_unrated = settings.elo_upward_looseness_unrated();
     let n = players.len();
 
     let index: HashMap<Uuid, usize> = players.iter().enumerate().map(|(i, p)| (p.id, i)).collect();
@@ -338,7 +340,14 @@ pub fn estimate_elos(
         let (mu0, sigma0) = prior(p, m, provisional, unrated_center, unrated_k);
         mean[i] = mu0;
         theta[i] = mu0; // seed at the prior mean
-        penalties.push(PriorPenalty::new(shape, sigma0, looseness));
+                        // The upward-looseness ratio depends on how much the seed rating is
+                        // trusted — the same three categories `prior` distinguishes.
+        let r = match p.rating {
+            None => looseness_unrated,
+            Some(_) if is_reliably_rated(p) => looseness_established,
+            Some(_) => looseness_provisional,
+        };
+        penalties.push(PriorPenalty::new(shape, sigma0, r));
     }
 
     // Per-player incident games: (opponent index, this player's score in {0, ½, 1},
@@ -780,10 +789,14 @@ mod tests {
         }
     }
 
+    /// A Laplace prior with the same upward-looseness `r` for all three player
+    /// categories (so tests that don't care about the split can pass one number).
     fn laplace(looseness_percent: u32) -> TournamentSettings {
         TournamentSettings {
             elo_prior_shape: EloPriorShape::Laplace,
-            elo_upward_looseness_percent: looseness_percent,
+            elo_upward_looseness_established_percent: looseness_percent,
+            elo_upward_looseness_provisional_percent: looseness_percent,
+            elo_upward_looseness_unrated_percent: looseness_percent,
             ..Default::default()
         }
     }
@@ -888,6 +901,56 @@ mod tests {
             lap > gauss + 10.0,
             "fatter tails should swing further on a sustained streak: \
              gaussian {gauss}, laplace {lap}"
+        );
+    }
+
+    /// A Laplace prior with a distinct upward-looseness per player category.
+    fn laplace3(established: u32, provisional: u32, unrated: u32) -> TournamentSettings {
+        TournamentSettings {
+            elo_prior_shape: EloPriorShape::Laplace,
+            elo_upward_looseness_established_percent: established,
+            elo_upward_looseness_provisional_percent: provisional,
+            elo_upward_looseness_unrated_percent: unrated,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn each_player_category_reads_only_its_own_upward_looseness() {
+        // An *established* hero beats ten opponents. Its upward shift responds to
+        // the established looseness knob and is completely unmoved by the
+        // provisional/unrated ones — so the three knobs are applied per category,
+        // not globally.
+        let mut hero = player(Some(1500));
+        hero.fesa_games = Some(50); // established
+        let opps = equals(10);
+        let mut all = vec![hero.clone()];
+        all.extend(opps.iter().cloned());
+        let rounds: Vec<Round> = (0..10)
+            .map(|i| decided(i as u32 + 1, vec![win(hero.id, opps[i].id)]))
+            .collect();
+
+        let shift = |s: &TournamentSettings| estimate_elos(&all, s, &rounds)[&hero.id] - 1500.0;
+
+        let base = shift(&laplace3(100, 100, 100));
+        assert!(base > 10.0, "the streak should clear the dead zone: {base}");
+
+        // Loosening only the established knob raises the established hero further.
+        let est_loose = shift(&laplace3(300, 100, 100));
+        assert!(
+            est_loose > base + 5.0,
+            "an established hero should read its own knob: base {base}, loosened {est_loose}"
+        );
+
+        // Loosening the *other* categories' knobs leaves it where the symmetric
+        // prior put it (the hero is neither provisional nor unrated). Any residual
+        // is solver-convergence noise, orders of magnitude below the established
+        // knob's ~hundreds-of-points effect and below the sweep tolerance.
+        let others_loose = shift(&laplace3(100, 300, 300));
+        assert!(
+            (others_loose - base).abs() < CONVERGENCE_TOL,
+            "an established hero must ignore the provisional/unrated knobs: \
+             base {base}, others {others_loose}"
         );
     }
 }

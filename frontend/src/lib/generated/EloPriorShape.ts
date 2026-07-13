@@ -11,9 +11,8 @@
  * fatter — tails: its restoring force is *constant*, so a sustained run of
  * surprising results (e.g. an under-rated improver beating stronger opponents)
  * moves the estimate much further before the prior reins it in. The Laplace
- * variant is also asymmetric via
- * [`TournamentSettings::elo_upward_looseness`], which can make an *upward*
- * revision clear on less evidence than a downward one. See
- * `docs/elo-pairing-mode.md`.
+ * variant is also asymmetric via the per-category
+ * `elo_upward_looseness_*` knobs, which can make an *upward* revision clear on
+ * less evidence than a downward one. See `docs/elo-pairing-mode.md`.
  */
 export type EloPriorShape = "gaussian" | "laplace";
