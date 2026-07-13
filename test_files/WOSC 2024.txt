@@ -1,0 +1,142 @@
+World Open Shogi Championship, Barcelona : 2024-08-02/04
+Nr Name                          Nat  Grade  ELO    1   2   3   4   5   6   7   8   9  Pts   +/-
+ 1 Kobayashi          Taichi     JP   4 Dan  2567  28+ 15+ 10+  2+ 43+  4+  5+  3+  6+   9   +15
+ 2 Nishimoto          Kasey      JP   5 Dan  2378  25+  3+  7+  1-  8+ 14+  6+ 22+  5+   8   +16
+ 3 Shibutani          Kazushi    JP   3 Dan  2124  24+  2- 17+ 19+ 46+ 33+  9+  1- 20+   7   +45
+ 4 Fortin             Jean       FR   4 Dan  2206  36+ 31+ 11+ 27+ 16+  1-  7- 14+  8+   7   +14
+ 5 Shcheslionok       Peter      BY   4 Dan  2171  49+ 29+ 27- 10+ 26+ 43+  1-  7+  2-   6   +17
+ 6 Dziwoki            Adam       PL   3 Dan  2068  23+ 27- 35+ 15+ 20+ 65+  2-  9+  1-   6   +39
+ 7 Borysov            Anton      DE   3 Dan  2005  38+ 13-  2- 41+ 15+ 57+  4+  5- 28+   6   +48
+ 8 Constantinou       Peter      CZ   3 Dan  2007  39+ 14- 44+ 28+  2- 36+ 31+ 12+  4-   6   +41
+ 9 Leiter             Thomas     DE   4 Dan  2326  50+ 45+ 14- 11+ 30+ 16+  3-  6- 17+   6   -27
+10 Hayakawa           Akio       JP          2337* 37+ 12+  1-  5- 11+ 87+ 34+ 29+ 14+   7  
+11 Kruse              Janik      DE   3 Dan  2016  18+ 35+  4-  9- 10- 62+ 52+ 23+ 21+   6   +15
+12 Tomita             Keiji      la   4 Dan  2217  34+ 10- 24+ 43- 18+ 30+ 29+  8- 22+   6   -20
+13 Valkov             Pavel      BY   3 Dan  2088  41+  7+ 16- 30- 45- 54+ 39+ 26+ 18+   6   -14
+14 Mandalas           Stefanos   GR   3 Dan  2081  26+  8+  9+ 16- 27+  2- 17+  4- 10-   5   +23
+15 Hattori            Takuya     JP   2 Dan  2143  17+  1- 31+  6-  7- 64+ 46+ 20- 29+   5   -20
+16 Rövekamp           Frank      DE   3 Dan  1978  104+ 32+ 13+ 14+  4-  9- 22- 18- 49+   5   +12
+17 Tsutsui            Kensuke    JP   2 Dan  1958  15- 60+  3- 44+ 50+ 40+ 14- 41+  9-   5    +5
+18 Fichter            Fabian     DE   1 Dan  1789  11- 54+ 34+ 59+ 12- 74+ 25+ 16+ 13-   6   +72
+19 Pfaffel            Thomas     AT   3 Dan  2005  35- 57+ 32+  3- 21+ 58- 23- 30+ 33+   5   -13
+20 Dardour            Bilal      DE   2 Dan  1922  29- 40+ 37+ 63+  6- 82+ 28+ 15+  3-   6   +37
+21 Kamo               Dan        JP   1 Kyu  1715  44- 73+ 42+ 34+ 19- 27+ 24+ 31+ 11-   6  +102
+22 Rachkovsky         Mihail     BY   2 Dan  1890  45- 49+ 23- 53+ 59+ 71+ 16+  2- 12-   5    +4
+23 Rodyn              Dmytro     UA   1 Dan  1793   6- 62+ 22+ 31- 60+ 96+ 19+ 11- 27+   6   +56
+24 Hatatani           Kenta      JP          1946   3- 51+ 12- 57- 63+ 73+ 21- 44+ 32+   5    -6
+25 Tsubo              Kazuki     JP   3 Dan  2044   2- 44- 30- 100+ 48+ 88+ 18- 35+ 31+   5   -28
+26 Ruiz Lazaro        Jonatan    ES   2 Dan  1853  14- 100+ 60+ 87+  5- 72+ 32+ 13- 34+   6   +39
+27 Lysenka            Sergey     BY   3 Dan  1962  47+  6+  5+  4- 14- 21- 41- 37+ 23-   4    -1
+28 Kita               Masahiro   JP   4 Dan  2111   1- 52+ 45+  8- 29- 67+ 20- 38+  7-   4   -40
+29 McPeake            Felix      GB   2 Dan  1975  20+  5- 43- 48+ 28+ 51+ 12- 10- 15-   4    -3
+30 Arús               Daniel     ES   1 Dan  1790  32- 33+ 25+ 13+  9- 12- 43+ 19- 61+   5   +90
+31 van der Lubbe      Lex        NL   2 Dan  1929  46+  4- 15- 23+ 57+ 53+  8- 21- 25-   4   -13
+32 Pytalev            Nikita     BY   3 Dan  2097  30+ 16- 19- 52+ 35+ 41- 26- 39+ 24-   4   -52
+33 Belous             Dmitry     RU          1983* 42+ 30- 61+ 47+ 44+  3- 49+ 45+ 19-   6  
+34 Suzuki             Keigo      JP   2 Dan  1972  12- 58+ 18- 21- 61+ 89+ 10- 52+ 26-   4   -33
+35 Chernashevich      Dmitry     BY   2 Dan  1846  19+ 11-  6- 71+ 32- 91+ 58+ 25- 43+   5   +19
+36 Hellegaard         Dennis     DK   1 Kyu  1725   4- 67+ 46- 62+ 42+  8- 48- 66+ 45+   5   +26
+37 Posada Zuluaga     Victor     CO   1 Dan  1711  10- 89+ 20- 66+ 53- 76+ 45+ 27- 46+   5   +40
+38 Nguyen             Anh Tuan   FR   2 Dan  1881   7- 43- 48- 78+ 68+ 69+ 50+ 28- 44+   5   -20
+39 Rödel              Richard    DE   2 Dan  1947   8- 64+ 59- 88+ 65+ 75+ 13- 32- 48+   5   -28
+40 Weimann            Célestin   FR   1 Kyu  1633  70+ 20- 63- 69+ 62+ 17- 71+ 55+ 47+   6   +48
+41 Bozzali            Ermanno    BG   1 Dan  1759  13- 88+ 47+  7- 87+ 32+ 27+ 17-  0-   5   +67
+42 Wiethölter         Frederik   FR   1 Dan  1611  33- 85+ 21- 75+ 36- 90+ 57+ 58+ 52+   6   +42
+43 Oltarzewski        Michal     PL   2 Kyu  1667  63+ 38+ 29+ 12+  1-  5- 30- 46+ 35-   5  +138
+44 Kawaguchi          Yoshiyuki  JP          1848* 21+ 25+  8- 17- 33- 84+ 47+ 24- 38-   4  
+45 Jock               Hendrik    DE   2 Dan  1884  22+  9- 28- 58+ 13+ 80+ 37- 33- 36-   4    -3
+46 Kondratov          Yaroslav   BY   2 Dan  1910  31- 50+ 36+ 51+  3- 59+ 15- 43- 37-   4   -33
+47 Neumaier           Andreas    AT   2 Dan  1874  27- 61+ 41- 33- 55+ 68+ 44- 53+ 40-   4   -42
+48 Haas               Richard    DE   2 Kyu  1625  54- 81+ 38+ 29- 25- 97+ 36+ 50+ 39-   5   +50
+49 Kagawa             Subaru     SE   1 Kyu  1727   5- 22- 69- 83+ 91+ 78+ 33- 61+ 16-   4   -17
+50 Shvadronova        Ekaterina  BY   1 Dan  1707   9- 46- 92+ 70+ 17- 81+ 38- 48- 66+   4   -13
+51 Matmusaev          Sergey     BY   1 Dan  1707  56+ 24- 100+ 46- 77+ 29- 55- 64+ 59+   5    +4
+52 Chan               Chung Man  HK   1 Dan  1798   0+ 28- 56+ 32- 72+ 94+ 11- 34- 42-   4   -29
+53 Stanaszek          Mariusz    PL   1 Kyu  1618  64- 76+ 90+ 22- 37+ 31- 77+ 47- 84+   5   +13
+54 Makarov            Pavlo      UA   4 Kyu  1415  48+ 18- 58- 65- 93+ 13- 87+ 71+ 57+   5  +104
+55 Party              Eliot      FR   1 Kyu  1649  58- 59- 68+ 80+ 47- 95+ 51+ 40- 60+   5    -3
+56 Ostapenko          Nikoloz    GE   2 Kyu  1594  51- 79+ 52- 72- 76+ 99+ 61- 65+ 58+   5    +3
+57 Vyletel            Lukas      SK   1 Kyu  1670  77+ 19- 64+ 24+ 31-  7- 42- 67+ 54-   4   +14
+58 Dovetta            Philippe   FR   1 Dan  1682  55+ 34- 54+ 45- 64+ 19+ 35- 42- 56-   4   +19
+59 Narciso Dublan     Marc       ES   3 Kyu  1472  74+ 55+ 39+ 18- 22- 46- 94+ 77+ 51-   5  +110
+60 Weimann            Christophe FR   1 Dan  1678  71+ 17- 26- 67+ 23- 83- 75+ 63+ 55-   4   -24
+61 Tertre             Manuel     FR   1 Kyu  1624  67+ 47- 33- 89+ 34- 79+ 56+ 49- 30-   4    -1
+62 Gomez Ruiz         Juan       ES   4 Kyu  1396  82+ 23- 81+ 36- 40- 11- 76+ 75+ 74+   5   +49
+63 Nagy               Tivadar    HU   2 Kyu  1582  43- 84+ 40+ 20- 24- 101+ 66- 60- 80+   4    +4
+64 Lorente Munoz      Raul       ES   3 Kyu  1471  53+ 39- 57- 90+ 58- 15- 72+ 51- 81+   4   +36
+65 Ruf                Ken        US          1530* 98+ 86+ 78+ 54+ 39-  6- 80+ 56- 73+   6  
+66 Pagès              Jérémy     FR   1 Kyu  1623  100- 72- 76+ 37- 79+ 85+ 63+ 36- 50-   4   -37
+67 Osmont             Fabien     FR   3 Kyu  1470  61- 36- 91+ 60- 81+ 28- 74+ 57- 72+   4    +4
+68 Marek              Filip      CZ   3 Kyu  1415  79- 93+ 55- 86+ 38- 47- 85+ 83+ 71+   5   +26
+69 Skotnicki          Rikard     SE   3 Kyu  1343  72- 97+ 49+ 40- 74- 38- 93+ 87+ 77+   5   +70
+70 Karalchuk          Aliaksei   PL   2 Kyu  1570  40- 87- 79+ 50- 75- 105+ 83+ 80- 78+   4   -50
+71 Werner             Eduard     DE   1 Kyu  1602  60- 78+ 72+ 35- 88+ 22- 40- 54- 68-   3   -36
+72 Monte              Guillem    ES   7 Kyu  1205  69+ 66+ 71- 56+ 52- 26- 64- 89+ 67-   4  +164
+73 Simón Subiela      Manuel     ES   3 Kyu  1361  83+ 21- 75- 74- 98+ 24- 86+ 82+ 65-   4    +6
+74 Morisset           Robin      FR   7 Kyu  1125  59- 80- 101+ 73+ 69+ 18- 67- 91+ 62-   4  +120
+75 Fernandez Nogueira Anna       ES   6 Kyu  1221  88- 101+ 73+ 42- 70+ 39- 60- 62- 90+   4   +90
+76 van Beusekom       Raaf       NL   7 Kyu  1269  94+ 53- 66- 95+ 56- 37- 62- 98+ 87+   4   +30
+77 Shvadronov         Oleg       BY   2 Kyu  1599  57- 92+ 87- 84+ 51- 98+ 53- 59- 69-   3   -67
+78 Kaliszczack        Julien     FR   4 Kyu  1304  93+ 71- 65- 38- 95+ 49- 92+ 94+ 70-   4    +4
+79 Elsen              Joel       BE   8 Kyu  1184  68+ 56- 70- 97+ 66- 61- 89- 96+ 91+   4   +77
+80 Torrico Velazquez  Juan       ES   5 Kyu  1290   0- 74+ 95+ 55- 90+ 45- 65- 70+ 63-   4   +60
+81 Chabashvili        Lado       GE   6 Kyu  1245  107+ 48- 62- 99+ 67- 50- 88+ 106+ 64-   4   +29
+82 Frischmuth         Uwe        DE   3 Kyu  1233  62- 95- 107+ 92+ 89+ 20- 84- 73- 94+   4    -3
+83 Pous Garriga       Antoni     ES   7 Kyu  1189  73- 106+ 89- 49- 105+ 60+ 70- 68- 103+   4  +108
+84 Aragon             Jordi      ES          1454*  0- 63- 102+ 77- 103+ 44- 82+ 100+ 53-   4  
+85 Mojica Lopez       Alejandro  ES   7 Kyu  1179  103+ 42- 88- 98- 99+ 66- 68- 101+ 89+   4   +37
+86 Pujantell          Jaume      ES   6 Kyu  1202  89- 65- 105+ 68- 96- 107+ 73- 99+ 88+   4   +20
+87 Comas Castaño      Óscar      ES   9 Kyu  1088  91+ 70+ 77+ 26- 41- 10- 54- 69- 76-   3  +174
+88 Butchart           Kevin      GB   4 Kyu  1375  75+ 41- 85+ 39- 71- 25- 81- 93+ 86-   3    -9
+89 Fiser              Viktor     CZ   4 Kyu  1356  86+ 37- 83+ 61- 82- 34- 79+ 72- 85-   3   -30
+90 Scher              Chloé      FR           957  99+ 103+ 53- 64- 80- 42- 101+ 92+ 75-   4  +132
+91 Brufau Devesa      Eduard     ES   5 Kyu  1299  87- 102+ 67- 93+ 49- 35- 97+ 74- 79-   3   -21
+92 Garcia Mosquera    David      ES          1250  97+ 77- 50- 82- 94- 102+ 78- 90- 98+   3   -42
+93 Ecolan             Marc       FR   8 Kyu  1061  78- 68- 98+ 91- 54-  0+ 69- 88- 99+   3   +19
+94 Zgrebnakova        Maria      SK   8 Kyu  1003  76- 99-  0+ 101+ 92+ 52- 59- 78- 82-   3   +41
+95 Makarov            Yurii      DE  12 Kyu   851   0+ 82+ 80- 76- 78- 55- 99- 105+ 106+   4  +112
+96 Martín Sáez        Ruth       ES  14 Kyu   650   0- 107-  0- 102+ 86+ 23- 106+ 79- 97+   4  +255
+97 Gorshkov           Ignat      BY   7 Kyu  1044  92- 69- 106+ 79- 102+ 48- 91- 103- 96-   2   -41
+98 Canham             Matthew    FR           791  65- 105+ 93- 85+ 73- 77- 102+ 76- 92-   3  +150
+99 Gallego            Francisco  ES  12 Kyu   723  90- 94+  0+ 81- 85- 56- 95+ 86- 93-   3  +125
+100 Özal               Berke      DE   3 Kyu  1499  66+ 26- 51- 25-  0-  0-  0- 84-  0-   1    -3
+101 Attary             Imane      FR  12 Kyu   685  105+ 75- 74- 94-  0+ 63- 90- 85- 107+   3   +98
+102 Bouzeloc           Pierre     FR  10 Kyu   884   0+ 91- 84- 96- 97- 92- 98- 107+ 105+   3   +17
+103 Cervi              Luca       IT   5 Kyu  1329  85- 90-  0- 107+ 84- 106-  0- 97+ 83-   2   -66
+104 Christoffersen     Terje      NO   2 Dan  1870  16-  0-  0-  0-  0-  0-  0-  0-  0-   0    -8
+105 Zawadzka           Justyna    PL   9 Kyu   928  101- 98- 86- 106+ 83- 70- 107+ 95- 102-   2   -24
+106 Perez              Maria      ES  16 Kyu   554   0- 83- 97- 105- 107+ 103+ 96- 81- 95-   2  +222
+107 Gorshkov           Makar      RU  12 Kyu   735  81- 96+ 82- 103- 106- 86- 105- 102- 101-   1   +16
+
+Promoting Shibutani Kazushi to 4 Dan
+Promoting Hayakawa Akio to 3 Dan
+Promoting Hattori Takuya to 3 Dan
+Promoting Kamo Dan to 1 Dan
+Promoting Hatatani Kenta to 1 Dan
+Promoting Belous Dmitry to 1 Dan
+Promoting Hellegaard Dennis to 1 Dan
+Promoting Oltarzewski Michal to 1 Dan
+Promoting Kawaguchi Yoshiyuki to 1 Kyu
+Promoting Haas Richard to 1 Kyu
+Promoting Makarov Pavlo to 3 Kyu
+Promoting Narciso Dublan Marc to 2 Kyu
+Promoting Gomez Ruiz Juan to 3 Kyu
+Promoting Ruf Ken to 4 Kyu
+Promoting Monte Guillem to 4 Kyu
+Promoting Morisset Robin to 6 Kyu
+Promoting Fernandez Nogueira Anna to 5 Kyu
+Promoting van Beusekom Raaf to 5 Kyu
+Promoting Elsen Joel to 6 Kyu
+Promoting Torrico Velazquez Juan to 4 Kyu
+Promoting Chabashvili Lado to 5 Kyu
+Promoting Pous Garriga Antoni to 5 Kyu
+Promoting Mojica Lopez Alejandro to 6 Kyu
+Promoting Comas Castaño Óscar to 6 Kyu
+Promoting Scher Chloé to 9 Kyu
+Promoting Garcia Mosquera David to 7 Kyu
+Promoting Ecolan Marc to 7 Kyu
+Promoting Makarov Yurii to 9 Kyu
+Promoting Martín Sáez Ruth to 10 Kyu
+Promoting Canham Matthew to 11 Kyu
+Promoting Gallego Francisco to 11 Kyu
+Promoting Perez Maria to 12 Kyu
