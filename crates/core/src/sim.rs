@@ -169,6 +169,10 @@ pub struct RunOutcome {
     /// The ground-truth strengths used this run, so aggregation can score the
     /// finishing order against the truth it was generated from.
     pub strengths: StrengthMap,
+    /// The direct-elimination cup champion this run, when a cup was configured and
+    /// its final was decided. `None` for a pure-Swiss run, or if a double no-show
+    /// left the final undetermined.
+    pub cup_champion: Option<Uuid>,
 }
 
 impl RunOutcome {
@@ -305,8 +309,20 @@ pub fn simulate_run(
         rng,
     );
 
-    for _ in 0..rounds {
+    for round_idx in 0..rounds {
         tournament.prepare_round()?;
+        // Reproduce the base tournament's real attendance: whoever actually sat
+        // out the corresponding real round sits out here too. Without this, every
+        // registered player would play every simulated round — a fuller (and
+        // different) tournament than the one being studied — and a player who was
+        // absent during the cup window, hence *ineligible* for the cup, would
+        // silently reappear playing every round. Rounds beyond the base's recorded
+        // history carry no attendance, so everyone plays.
+        if let Some(real) = base.rounds.get(round_idx as usize) {
+            if !real.absent.is_empty() {
+                tournament.update_draft(real.absent.clone(), Vec::new(), None)?;
+            }
+        }
         tournament.confirm_round()?;
         // Filling in every board result completes the round automatically.
         autofill_last_round(&mut tournament, &strengths, rng)?;
@@ -324,12 +340,14 @@ pub fn simulate_run(
     );
     let estimated_order = order_by_estimate(&tournament.players, &estimate);
     let game_diffs = game_elo_diffs(&tournament, &strengths);
+    let cup_champion = tournament.cup_podium().and_then(|p| p.champion);
 
     Ok(RunOutcome {
         final_order,
         estimated_order,
         game_diffs,
         strengths,
+        cup_champion,
     })
 }
 
@@ -444,6 +462,32 @@ mod tests {
     }
 
     #[test]
+    fn simulation_reproduces_the_base_tournaments_absences() {
+        // Base round 1: A beats B while C and D sit out (`0-`). A faithful
+        // re-simulation must reproduce that attendance — pairing only A and B — so
+        // the round yields a single played game, not the two it would if every
+        // registered player were pulled back in.
+        let grid = "\
+[Abs]
+Nr Name    Nat Elo  1   Pts
+1  [A] [a] FR  2000 [2+] 1
+2  [B] [b] FR  1500 [1-] 0
+3  [C] [c] FR  1000 [0-] 0
+4  [D] [d] FR   900 [0-] 0
+";
+        let base = crate::import_american_grid(grid).unwrap();
+        assert_eq!(base.rounds.len(), 1);
+        assert_eq!(base.rounds[0].absent.len(), 2); // C and D really sat out
+
+        let mut rng = ChaCha8Rng::seed_from_u64(7);
+        let out =
+            simulate_run(&base, &base.settings, &StrengthMap::new(), 0.0, 1, None, &mut rng).unwrap();
+        // All four are still ranked, but only the A–B board was actually played.
+        assert_eq!(out.final_order.len(), 4);
+        assert_eq!(out.game_diffs.len(), 1);
+    }
+
+    #[test]
     fn same_seed_reproduces_the_run() {
         let base = tournament_with(&[("A", 1600), ("B", 1500), ("C", 1400), ("D", 1300)]);
         let run = |seed| {
@@ -528,6 +572,10 @@ mod tests {
         assert_eq!(out.final_order.len(), 8);
         // The cup's three rounds each have 4 boards → 12 decided cup games.
         assert!(out.game_diffs.len() >= 12);
+        // With every match decided, the bracket names a champion, and it is one of
+        // the eligible players.
+        let champion = out.cup_champion.expect("a decided cup has a champion");
+        assert!(base.players.iter().any(|p| p.id == champion));
     }
 
     #[test]

@@ -27,7 +27,9 @@ use osp_core::{
     decode_latin1, estimate_elos, import_fesa_results, Player, Tournament, TournamentSettings,
 };
 
-use stats::{diff_stats, mean, spearman, wilson, DiffStats, Proportion};
+use stats::{
+    diff_stats, mean, mean_ci95, paired_diff, spearman, wilson, DiffStats, Proportion,
+};
 
 /// Compare pairing-settings variants by simulating a tournament many times.
 #[derive(Debug, Parser)]
@@ -110,6 +112,14 @@ struct Args {
     /// Optional output directory for report.json and per-variant CSV histograms.
     #[arg(long, value_name = "DIR")]
     out: Option<PathBuf>,
+
+    /// Optional CSV of per-run metrics (one row per variant × run): the run's mean
+    /// |ELO diff|, fraction of games over the first `--threshold`, standings
+    /// fidelity, and Open winner. Because every variant shares a run's seed (common
+    /// random numbers), rows with the same `run` are paired — enabling paired
+    /// significance tests across variants.
+    #[arg(long, value_name = "FILE")]
+    dump_runs: Option<PathBuf>,
 }
 
 fn main() {
@@ -194,6 +204,9 @@ fn run(args: Args) -> Result<(), String> {
     let names = player_names(&base);
     let observed = observed_report(&base, &overrides, &args.thresholds);
     let mut reports = Vec::new();
+    let mut dump = args.dump_runs.as_ref().map(|_| {
+        String::from("variant,run,mean_diff,frac_exceed,fidelity,winner\n")
+    });
     for (name, settings) in &variants {
         let outcomes = simulate_variant(
             &base,
@@ -206,7 +219,14 @@ fn run(args: Args) -> Result<(), String> {
             args.seed,
         )
         .map_err(|e| format!("variant '{name}': {e}"))?;
+        if let Some(buf) = &mut dump {
+            append_run_rows(buf, name, &outcomes, &args.thresholds, &names);
+        }
         reports.push(aggregate(name.clone(), &outcomes, &args.thresholds));
+    }
+    if let (Some(path), Some(buf)) = (&args.dump_runs, &dump) {
+        std::fs::write(path, buf).map_err(|e| format!("writing {}: {e}", path.display()))?;
+        eprintln!("wrote per-run metrics to {}", path.display());
     }
 
     print_report(
@@ -344,8 +364,19 @@ struct VariantReport {
     fidelity_score: f64,
     /// Mean Spearman(ELO-estimate order, true-strength order) over runs.
     fidelity_estimate: f64,
-    /// Per-player top-1 probability (with CI) and top-3 rate, sorted best first.
+    /// Per-player top-1 probability (with CI) and top-3 rate for the Open (overall
+    /// standings), sorted best first.
     players: Vec<PlayerProb>,
+    /// Per-player probability (with CI) of taking the direct-elimination cup, over
+    /// all runs, sorted best first. Empty when no cup was configured.
+    cup_champions: Vec<(Uuid, Proportion)>,
+    /// Per-run mean |ELO diff| (one value per run) — the run-level replications the
+    /// CI and paired comparisons are computed from.
+    per_run_mean_diff: Vec<f64>,
+    /// Per-run fraction of games exceeding the first `--threshold`.
+    per_run_exceed: Vec<f64>,
+    /// Per-run standings fidelity (Spearman vs true strength).
+    per_run_fidelity: Vec<f64>,
 }
 
 struct PlayerProb {
@@ -383,6 +414,37 @@ fn estimate_order(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<Uuid
     ids.into_iter().map(|p| p.id).collect()
 }
 
+/// Append one CSV row per run: the run's mean |diff|, fraction of games over the
+/// first threshold, standings fidelity, and Open winner. Winners are written as
+/// the report's player label so paired analysis reads the same names as the table.
+fn append_run_rows(
+    buf: &mut String,
+    variant: &str,
+    outcomes: &[RunOutcome],
+    thresholds: &[f64],
+    names: &HashMap<Uuid, String>,
+) {
+    let first_t = thresholds.first().copied().unwrap_or(400.0);
+    for (i, o) in outcomes.iter().enumerate() {
+        let mean_diff = mean(&o.game_diffs);
+        let frac_exceed = if o.game_diffs.is_empty() {
+            0.0
+        } else {
+            o.game_diffs.iter().filter(|d| **d > first_t).count() as f64 / o.game_diffs.len() as f64
+        };
+        let fidelity = spearman(&o.final_order, &true_order(o));
+        let winner = o
+            .final_order
+            .first()
+            .and_then(|id| names.get(id))
+            .map(String::as_str)
+            .unwrap_or("?");
+        buf.push_str(&format!(
+            "{variant},{i},{mean_diff:.4},{frac_exceed:.4},{fidelity:.4},\"{winner}\"\n"
+        ));
+    }
+}
+
 fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> VariantReport {
     let runs = outcomes.len();
 
@@ -400,6 +462,23 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
     let est_rhos: Vec<f64> = outcomes
         .iter()
         .map(|o| spearman(&o.estimated_order, &true_order(o)))
+        .collect();
+
+    // Per-run replications for the inferential comparison: each run is one
+    // independent draw, so CIs and paired Δ are computed over these, not over the
+    // pooled per-game diffs (which are correlated within a run).
+    let first_t = thresholds.first().copied().unwrap_or(400.0);
+    let per_run_mean_diff: Vec<f64> = outcomes.iter().map(|o| mean(&o.game_diffs)).collect();
+    let per_run_exceed: Vec<f64> = outcomes
+        .iter()
+        .map(|o| {
+            if o.game_diffs.is_empty() {
+                0.0
+            } else {
+                o.game_diffs.iter().filter(|d| **d > first_t).count() as f64
+                    / o.game_diffs.len() as f64
+            }
+        })
         .collect();
 
     // Victory counts.
@@ -432,6 +511,26 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    // Cup champions: count each player's titles across the runs that produced one.
+    // The probability is over *all* runs (a run with no champion — no cup, or a
+    // double no-show final — simply isn't a win for anyone), so the column reads as
+    // "P(this player wins the cup)".
+    let mut cup_wins: HashMap<Uuid, usize> = HashMap::new();
+    for o in outcomes {
+        if let Some(c) = o.cup_champion {
+            *cup_wins.entry(c).or_default() += 1;
+        }
+    }
+    let mut cup_champions: Vec<(Uuid, Proportion)> = cup_wins
+        .into_iter()
+        .map(|(id, n)| (id, wilson(n, runs)))
+        .collect();
+    cup_champions.sort_by(|a, b| {
+        b.1.p
+            .partial_cmp(&a.1.p)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
     VariantReport {
         name,
         diff,
@@ -439,6 +538,10 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
         fidelity_score: mean(&score_rhos),
         fidelity_estimate: mean(&est_rhos),
         players,
+        cup_champions,
+        per_run_mean_diff,
+        per_run_exceed,
+        per_run_fidelity: score_rhos,
     }
 }
 
@@ -578,8 +681,109 @@ fn print_report(
         );
     }
 
-    // Victory probabilities: union of the top few players across variants, with an
-    // extra column for each player's real finishing rank.
+    // Inferential comparison, so the point estimates above are not read as exact.
+    // Column 1 is each metric's value ±95% CI (from run-to-run variation); the
+    // later columns are the paired Δ against the first variant — every variant
+    // shares a run's seed (common random numbers), so the difference is taken per
+    // run, which cancels shared variation.
+    if let Some((base, rest)) = reports.split_first() {
+        let star = |z: f64| {
+            let a = z.abs();
+            if a > 3.290_5 {
+                "***"
+            } else if a > 2.575_8 {
+                "**"
+            } else if a > 1.96 {
+                "*"
+            } else {
+                "ns"
+            }
+        };
+        println!(
+            "\nstatistical comparison — col 1: value ±95% CI; others: paired Δ vs '{}' ±95% CI",
+            trunc(&base.name, 20)
+        );
+        println!(
+            "  (*** p<.001  ** p<.01  * p<.05  ns=not significant; Δ uses common random numbers)"
+        );
+        print!("{:<16}", "metric");
+        print!("  {:>20}", trunc(&base.name, 20));
+        for r in rest {
+            print!("  {:>22}", trunc(&r.name, 22));
+        }
+        println!();
+
+        let first_t = base
+            .diff
+            .exceed
+            .first()
+            .map(|(t, _)| *t as i64)
+            .unwrap_or(400);
+        // (label, per-run accessor, display scale, decimals, base-unit, Δ-unit)
+        type Acc = fn(&VariantReport) -> &Vec<f64>;
+        let rows: [(String, Acc, f64, usize, &str, &str); 3] = [
+            (
+                "mean|d|".to_string(),
+                |r| &r.per_run_mean_diff,
+                1.0,
+                1,
+                "",
+                "",
+            ),
+            (
+                format!("P(|d|>{first_t})"),
+                |r| &r.per_run_exceed,
+                100.0,
+                1,
+                "%",
+                "pp",
+            ),
+            (
+                "fidelity(score)".to_string(),
+                |r| &r.per_run_fidelity,
+                1.0,
+                3,
+                "",
+                "",
+            ),
+        ];
+        for (label, acc, scale, dec, base_unit, delta_unit) in rows {
+            print!("{:<16}", trunc(&label, 16));
+            let c = mean_ci95(acc(base));
+            print!(
+                "  {:>20}",
+                format!(
+                    "{:.*}{} ±{:.*}",
+                    dec,
+                    c.mean * scale,
+                    base_unit,
+                    dec,
+                    c.ci * scale
+                )
+            );
+            for r in rest {
+                match paired_diff(acc(base), acc(r)) {
+                    Some(d) => print!(
+                        "  {:>22}",
+                        format!(
+                            "{:+.*}{} ±{:.*} {}",
+                            dec,
+                            d.delta * scale,
+                            delta_unit,
+                            dec,
+                            d.ci * scale,
+                            star(d.z)
+                        )
+                    ),
+                    None => print!("  {:>22}", "-"),
+                }
+            }
+            println!();
+        }
+    }
+
+    // Open winner: rank-1 in the overall standings. Union of the top few players
+    // across variants, with an extra column for each player's real finishing rank.
     let mut shown: Vec<Uuid> = Vec::new();
     for r in reports {
         for pp in r.players.iter().take(6) {
@@ -589,7 +793,7 @@ fn print_report(
         }
     }
     println!(
-        "\nvictory probability (top-1, 95% CI) — showing {} players",
+        "\nOpen winner probability (top-1 in final standings, 95% CI) — showing {} players",
         shown.len()
     );
     print!("{:<20}", "player");
@@ -625,6 +829,46 @@ fn print_report(
             print!("  {rank:>8}");
         }
         println!();
+    }
+
+    // Cup champion: winner of the direct-elimination bracket, when a cup was
+    // configured. Same layout, minus the observed column (the base has no cup).
+    let mut cup_shown: Vec<Uuid> = Vec::new();
+    for r in reports {
+        for (id, _) in r.cup_champions.iter().take(6) {
+            if !cup_shown.contains(id) {
+                cup_shown.push(*id);
+            }
+        }
+    }
+    if !cup_shown.is_empty() {
+        println!(
+            "\ncup champion probability (top-1, 95% CI) — showing {} players",
+            cup_shown.len()
+        );
+        print!("{:<20}", "player");
+        for r in reports {
+            print!("  {:>22}", trunc(&r.name, 22));
+        }
+        println!();
+        for id in &cup_shown {
+            print!(
+                "{:<20}",
+                trunc(names.get(id).map(String::as_str).unwrap_or("?"), 20)
+            );
+            for r in reports {
+                match r.cup_champions.iter().find(|(pid, _)| pid == id) {
+                    Some((_, p)) => print!(
+                        "  {:>6.1}% [{:>4.1},{:>4.1}]",
+                        p.p * 100.0,
+                        p.lo * 100.0,
+                        p.hi * 100.0
+                    ),
+                    None => print!("  {:>22}", "-"),
+                }
+            }
+            println!();
+        }
     }
 
     if let Some(o) = observed {
@@ -693,6 +937,8 @@ struct JsonVariant {
     fidelity_score: f64,
     fidelity_estimate: f64,
     victory: Vec<JsonVictory>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    cup_champions: Vec<JsonCupChampion>,
 }
 
 #[derive(Serialize)]
@@ -708,6 +954,14 @@ struct JsonVictory {
     top1_lo: f64,
     top1_hi: f64,
     top3: f64,
+}
+
+#[derive(Serialize)]
+struct JsonCupChampion {
+    player: String,
+    prob: f64,
+    prob_lo: f64,
+    prob_hi: f64,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -781,6 +1035,16 @@ fn write_outputs(
                         top1_lo: pp.top1.lo,
                         top1_hi: pp.top1.hi,
                         top3: pp.top3,
+                    })
+                    .collect(),
+                cup_champions: r
+                    .cup_champions
+                    .iter()
+                    .map(|(id, p)| JsonCupChampion {
+                        player: names.get(id).cloned().unwrap_or_else(|| id.to_string()),
+                        prob: p.p,
+                        prob_lo: p.lo,
+                        prob_hi: p.hi,
                     })
                     .collect(),
             })

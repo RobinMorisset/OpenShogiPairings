@@ -193,7 +193,13 @@ fn parse_results_row(
     if last_name.is_empty() {
         return Err(bad("empty last name"));
     }
+    // Strip FESA round-cell annotations — parenthetical forfeit/bye/handicap
+    // marks like `(-r )`, `(+b )`, `(-rl)`, `(-4p)` that trail a cell (e.g.
+    // `30+(-r )`). They carry no cross-table information (the cell's own sign
+    // already records the result), and some contain an internal space, which
+    // would otherwise split one cell across two whitespace tokens.
     let remainder: String = chars[name_start + width..].iter().collect();
+    let remainder = strip_cell_annotations(&remainder);
     let tokens: Vec<&str> = remainder.split_whitespace().collect();
 
     // ELO is the first 3-4 digit number, or any digits with a `*` (an unrated
@@ -279,6 +285,25 @@ fn parse_grade(level: &str, unit: &str) -> Option<Grade> {
     } else {
         None
     }
+}
+
+/// Remove parenthetical round-cell annotations (`(-r )`, `(+b )`, `(-rl)`,
+/// `(-4p)`, …) from a row's remainder. Each spans from a `(` to the next `)`
+/// inclusive; an unclosed `(` drops to the end of the string. Everything outside
+/// the parentheses — cells, ELO, Pts, `+/-` — is preserved verbatim, so cells
+/// still separate on their existing whitespace.
+fn strip_cell_annotations(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut depth: u32 = 0;
+    for c in s.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' if depth > 0 => depth -= 1,
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// A rating token: a 3-4 digit number, or any digits with a trailing `*` (the
@@ -434,6 +459,51 @@ mod tests {
         let points = |id| t.standings().into_iter().find(|s| s.player_id == id).unwrap().points;
         assert_eq!(points(beta), 0);
         assert_eq!(points(find(&t, "Alpha", "Ann").id), 2); // win + bye
+    }
+
+    #[test]
+    fn strips_parenthetical_round_cell_annotations() {
+        // Attached annotation removed, cell kept; internal space collapses so the
+        // cell stays a single whitespace token.
+        assert_eq!(strip_cell_annotations("30+(-r ) 32+"), "30+ 32+");
+        assert_eq!(strip_cell_annotations("34+(-rl) 26+(+b )"), "34+ 26+");
+        assert_eq!(strip_cell_annotations("48-(+4p)"), "48-");
+        // No annotation: untouched.
+        assert_eq!(strip_cell_annotations("14- 32+ 8-"), "14- 32+ 8-");
+        // Unclosed paren drops to the end rather than panicking.
+        assert_eq!(strip_cell_annotations("10+(-r"), "10+");
+    }
+
+    #[test]
+    fn round_cell_annotations_do_not_break_the_round_count() {
+        // A cross-table where one player's round-3 cell carries a forfeit
+        // annotation with an internal space (`3+(-r )`). Without stripping, the
+        // cell would split into `3+(-r` and `)`, truncating the row to 2 cells and
+        // making the rows disagree on the round count.
+        let mut text = String::from("Annotated Open : 2026\nNr Name Nat Grade ELO R1 R2 R3 Pts +/-\n");
+        let row = |nr: u32, last: &str, first: &str, cells: &str, pts: u32| {
+            format!("{nr:>2} {last:<15}{first} FR 1 Dan 1500 {cells} {pts} +0\n")
+        };
+        text.push_str(&row(1, "Alpha", "Ann", "2+      3+       4+", 3));
+        text.push_str(&row(2, "Beta", "Bob", "1-      4+       3+(-r )", 2));
+        text.push_str(&row(3, "Gamma", "Cid", "4+      1-       2-(+r )", 1));
+        text.push_str(&row(4, "Delta", "Dan", "3-      2-       1-", 0));
+
+        let (t, _) = import_fesa_results(&text).unwrap();
+        assert_eq!(t.rounds.len(), 3);
+        assert!(t.rounds.iter().all(|r| r.completed));
+        // Beta beat Gamma in round 3 despite the annotation.
+        let beta = find(&t, "Beta", "Bob").id;
+        let gamma = find(&t, "Gamma", "Cid").id;
+        let win = t.rounds[2]
+            .boards
+            .iter()
+            .find(|b| {
+                (b.player1 == beta && b.player2 == gamma)
+                    || (b.player1 == gamma && b.player2 == beta)
+            })
+            .expect("Beta vs Gamma paired in round 3");
+        assert!(win.result.is_some());
     }
 
     #[test]

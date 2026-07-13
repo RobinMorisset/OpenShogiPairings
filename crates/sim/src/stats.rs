@@ -131,6 +131,77 @@ pub fn mean(values: &[f64]) -> f64 {
     }
 }
 
+/// The sample standard deviation (Bessel-corrected), or 0.0 for fewer than two
+/// values.
+pub fn std_dev(values: &[f64]) -> f64 {
+    let n = values.len();
+    if n < 2 {
+        return 0.0;
+    }
+    let m = mean(values);
+    let var = values.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (n - 1) as f64;
+    var.sqrt()
+}
+
+/// A point estimate of a mean with its 95% confidence half-width (`1.96·SE`),
+/// treating the values as independent replications. The half-width is 0 for fewer
+/// than two values.
+#[derive(Debug, Clone, Copy)]
+pub struct MeanCi {
+    pub mean: f64,
+    /// Half-width of the 95% interval, i.e. the `±` term.
+    pub ci: f64,
+}
+
+const Z_95: f64 = 1.959_963_984_540_054_f64;
+
+/// Mean and 95% CI half-width of `values` (normal approximation).
+pub fn mean_ci95(values: &[f64]) -> MeanCi {
+    let n = values.len();
+    if n < 2 {
+        return MeanCi {
+            mean: mean(values),
+            ci: 0.0,
+        };
+    }
+    let se = std_dev(values) / (n as f64).sqrt();
+    MeanCi {
+        mean: mean(values),
+        ci: Z_95 * se,
+    }
+}
+
+/// A **paired** mean difference `mean(b − a)` with its 95% CI half-width and a
+/// z-statistic, for a common-random-numbers A/B where `a[i]` and `b[i]` come from
+/// the same run/seed. Pairing subtracts per-run first, so any shared run-to-run
+/// variation cancels. `None` if the slices differ in length or have fewer than two
+/// pairs.
+#[derive(Debug, Clone, Copy)]
+pub struct PairedDiff {
+    /// `mean(b − a)` — positive means `b` scores higher on the metric.
+    pub delta: f64,
+    /// Half-width of the 95% interval on `delta`.
+    pub ci: f64,
+    /// `delta / SE`; magnitude over ~1.96 is significant at p < 0.05.
+    pub z: f64,
+}
+
+/// Paired difference of `b` minus `a`, element-wise by run index.
+pub fn paired_diff(a: &[f64], b: &[f64]) -> Option<PairedDiff> {
+    if a.len() != b.len() || a.len() < 2 {
+        return None;
+    }
+    let diffs: Vec<f64> = a.iter().zip(b).map(|(x, y)| y - x).collect();
+    let delta = mean(&diffs);
+    let se = std_dev(&diffs) / (diffs.len() as f64).sqrt();
+    let z = if se > 0.0 { delta / se } else { 0.0 };
+    Some(PairedDiff {
+        delta,
+        ci: Z_95 * se,
+        z,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,6 +245,45 @@ mod tests {
         assert_eq!(wilson(0, 0).p, 0.0);
         let all = wilson(10, 10);
         assert!(all.hi <= 1.0 && all.p == 1.0);
+    }
+
+    #[test]
+    fn mean_ci_shrinks_with_more_samples() {
+        // Same spread, 4× the samples → half the CI (SE ∝ 1/√n).
+        let small: Vec<f64> = (0..10).map(|i| i as f64).collect();
+        let big: Vec<f64> = (0..10).flat_map(|i| [i as f64; 4]).collect();
+        let cs = mean_ci95(&small);
+        let cb = mean_ci95(&big);
+        assert!((cs.mean - cb.mean).abs() < 1e-9); // same mean
+        // ~2× tighter (not exactly, since Bessel's correction differs at n=10 vs 40).
+        let ratio = cs.ci / cb.ci;
+        assert!((1.9..2.3).contains(&ratio), "ratio {ratio}");
+        // Degenerate: fewer than two values has no interval.
+        assert_eq!(mean_ci95(&[42.0]).ci, 0.0);
+    }
+
+    #[test]
+    fn paired_diff_cancels_shared_variation() {
+        // b is a shifted-by-5 copy of a: every paired difference is exactly 5, so
+        // the delta is 5 with a zero-width interval even though a itself varies a lot.
+        let a = [1.0, 100.0, -30.0, 42.0, 7.0];
+        let b: Vec<f64> = a.iter().map(|x| x + 5.0).collect();
+        let d = paired_diff(&a, &b).unwrap();
+        assert!((d.delta - 5.0).abs() < 1e-9);
+        assert!(d.ci < 1e-9); // no residual variation once paired
+        // Mismatched lengths / too few pairs: undefined.
+        assert!(paired_diff(&a, &b[..3]).is_none());
+        assert!(paired_diff(&[1.0], &[2.0]).is_none());
+    }
+
+    #[test]
+    fn paired_diff_sign_and_significance() {
+        // A tiny but perfectly consistent improvement is significant; noise isn't.
+        let a = [10.0, 10.0, 10.0, 10.0, 10.0, 10.0];
+        let b = [10.5, 10.4, 10.6, 10.5, 10.5, 10.5]; // ~+0.5, low variance
+        let d = paired_diff(&a, &b).unwrap();
+        assert!(d.delta > 0.0);
+        assert!(d.z.abs() > 1.96); // significant at 5%
     }
 
     #[test]
