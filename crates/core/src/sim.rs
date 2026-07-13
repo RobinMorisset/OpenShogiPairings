@@ -160,6 +160,125 @@ pub fn game_elo_diffs(tournament: &Tournament, strengths: &StrengthMap) -> Vec<f
     diffs
 }
 
+/// Binary (Shannon) entropy of a Bernoulli(`p`) outcome, in bits — the "suspense"
+/// in a game the model gives win probability `p`: 1 bit at `p = 0.5` (a coin
+/// flip), 0 as `p → 0` or `1` (a foregone conclusion). Orientation-free, since
+/// `H(p) = H(1 − p)`.
+fn binary_entropy(p: f64) -> f64 {
+    if p <= 0.0 || p >= 1.0 {
+        return 0.0;
+    }
+    -(p * p.log2() + (1.0 - p) * (1.0 - p).log2())
+}
+
+/// Sen welfare `μ·(1 − Gini)` of non-negative `values`: a mean discounted by
+/// inequality, so it rewards *both* a higher level and a more even spread (bare
+/// Gini, being scale-free, ignores the level). With the values sorted ascending it
+/// is the rank-weighted mean `(1/n²)·Σ_k (2(n−k)+1)·x₍ₖ₎` — the smallest value
+/// weighted `2n−1` down to the largest weighted `1`. Returns 0 for an empty slice.
+/// See [`weighted_sen_welfare`] for the frequency-weighted generalization.
+pub fn sen_welfare(values: &[f64]) -> f64 {
+    weighted_sen_welfare(values, &vec![1.0; values.len()])
+}
+
+/// Frequency-weighted Sen welfare `μ_w·(1 − G_w)`: as [`sen_welfare`] but each
+/// value carries a `weight` (here, a player's game count), so lightly-observed —
+/// hence noisier — values are discounted. Exact for integer weights (equivalent to
+/// expanding each value into `weight` copies): with the values sorted ascending
+/// and `W_j` the cumulative weight through `j` (`W_0 = 0`, `M = ΣW`), it is
+/// `(1/M²)·Σ_j x₍ⱼ₎·[(2M+1)·w_j − (W_j(W_j+1) − W_{j-1}(W_{j-1}+1))]`. Reduces to
+/// [`sen_welfare`] at equal weights; the weighted mean `μ_w = Σw·x/Σw` here is
+/// exactly the mean per-game interest. Returns 0 for empty or zero total weight.
+pub fn weighted_sen_welfare(values: &[f64], weights: &[f64]) -> f64 {
+    let (brackets, total) = rank_brackets(values, weights);
+    if total <= 0.0 {
+        return 0.0;
+    }
+    let acc: f64 = values.iter().zip(&brackets).map(|(x, b)| x * b).sum();
+    acc / (total * total)
+}
+
+/// Each value's rank-slice weight in the [`weighted_sen_welfare`] sum, returned in
+/// *input* order, together with the total weight `M`. `Σ bracketⱼ = M²`, so
+/// `W = Σ xⱼ·bracketⱼ / M²`.
+fn rank_brackets(values: &[f64], weights: &[f64]) -> (Vec<f64>, f64) {
+    let n = values.len();
+    let total: f64 = weights.iter().sum();
+    let mut brackets = vec![0.0; n];
+    if n == 0 || total <= 0.0 {
+        return (brackets, total);
+    }
+    let mut idx: Vec<usize> = (0..n).collect();
+    idx.sort_by(|&a, &b| values[a].partial_cmp(&values[b]).unwrap_or(Ordering::Equal));
+    let mut cum = 0.0;
+    for &i in &idx {
+        let w = weights[i];
+        let prev = cum;
+        cum += w;
+        brackets[i] = (2.0 * total + 1.0) * w - (cum * (cum + 1.0) - prev * (prev + 1.0));
+    }
+    (brackets, total)
+}
+
+/// Each value's contribution to the welfare *shortfall* `1 − weighted_sen_welfare`,
+/// in input order: `dⱼ = bracketⱼ·(1 − xⱼ)/M²`, which sum to exactly `1 − W`. The
+/// largest `dⱼ` mark the values that most lowered the welfare — the lowest values,
+/// discounted by their weight (so at equal weights it is simply "lowest first").
+/// Assumes values in `[0, 1]`.
+pub fn welfare_shortfall(values: &[f64], weights: &[f64]) -> Vec<f64> {
+    let (brackets, total) = rank_brackets(values, weights);
+    if total <= 0.0 {
+        return vec![0.0; values.len()];
+    }
+    values
+        .iter()
+        .zip(&brackets)
+        .map(|(x, b)| b * (1.0 - x) / (total * total))
+        .collect()
+}
+
+/// Each player's game interest for one tournament: `(player, Σ entropy, #games)`,
+/// where a game's interest is its outcome entropy ([`binary_entropy`]) on the two
+/// true strengths. Byes are not games (skipped); a player with no games is absent
+/// from the result. The building block for [`interest_welfare`].
+pub fn player_game_interest(
+    tournament: &Tournament,
+    strengths: &StrengthMap,
+) -> Vec<(Uuid, f64, u32)> {
+    let mut sum: HashMap<Uuid, f64> = HashMap::new();
+    let mut count: HashMap<Uuid, u32> = HashMap::new();
+    for round in &tournament.rounds {
+        for board in &round.boards {
+            if board.result.is_none() {
+                continue;
+            }
+            if let (Some(&a), Some(&b)) =
+                (strengths.get(&board.player1), strengths.get(&board.player2))
+            {
+                let h = binary_entropy(win_probability(a, b));
+                for id in [board.player1, board.player2] {
+                    *sum.entry(id).or_default() += h;
+                    *count.entry(id).or_default() += 1;
+                }
+            }
+        }
+    }
+    sum.into_iter().map(|(id, s)| (id, s, count[&id])).collect()
+}
+
+/// The **game-interest** metric: the game-count-weighted Sen welfare of the
+/// players' mean game interest. It is 1 when every player's games are coin flips,
+/// and falls toward 0 as games become foregone conclusions *and* as that dullness
+/// concentrates on fewer players (the welfare's inequality aversion). Each player
+/// is weighted by their number of games, so someone who sat out most rounds — and
+/// so has a noisy interest — is discounted. Higher = better, like fidelity.
+pub fn interest_welfare(tournament: &Tournament, strengths: &StrengthMap) -> f64 {
+    let per_player = player_game_interest(tournament, strengths);
+    let values: Vec<f64> = per_player.iter().map(|&(_, s, c)| s / c as f64).collect();
+    let weights: Vec<f64> = per_player.iter().map(|&(_, _, c)| c as f64).collect();
+    weighted_sen_welfare(&values, &weights)
+}
+
 /// The outcome of one simulated tournament — everything the report aggregates.
 #[derive(Debug, Clone)]
 pub struct RunOutcome {
@@ -177,6 +296,13 @@ pub struct RunOutcome {
     /// its final was decided. `None` for a pure-Swiss run, or if a double no-show
     /// left the final undetermined.
     pub cup_champion: Option<Uuid>,
+    /// The game-interest metric for this run: the game-weighted Sen welfare of the
+    /// players' mean game interest (see [`interest_welfare`]). Higher = better.
+    pub interest: f64,
+    /// Per-player game interest this run — `(player, Σ entropy, #games)` — retained
+    /// so aggregation can pool it across runs and name the players whose dull games
+    /// most lowered `interest` (see [`player_game_interest`]).
+    pub player_interest: Vec<(Uuid, f64, u32)>,
 }
 
 impl RunOutcome {
@@ -424,6 +550,12 @@ pub fn simulate_run(
     let estimated_order = order_by_estimate(&tournament.players, &estimate);
     let game_diffs = game_elo_diffs(&tournament, &strengths);
     let cup_champion = tournament.cup_podium().and_then(|p| p.champion);
+    let player_interest = player_game_interest(&tournament, &strengths);
+    let interest = {
+        let values: Vec<f64> = player_interest.iter().map(|&(_, s, c)| s / c as f64).collect();
+        let weights: Vec<f64> = player_interest.iter().map(|&(_, _, c)| c as f64).collect();
+        weighted_sen_welfare(&values, &weights)
+    };
 
     Ok(RunOutcome {
         final_order,
@@ -431,6 +563,8 @@ pub fn simulate_run(
         game_diffs,
         strengths,
         cup_champion,
+        interest,
+        player_interest,
     })
 }
 
@@ -569,6 +703,90 @@ mod tests {
         // 4 players × 3 rounds = 2 boards/round × 3 = 6 played games, no byes.
         assert_eq!(out.game_diffs.len(), 6);
         assert!(out.game_diffs.iter().all(|d| *d >= 0.0));
+    }
+
+    #[test]
+    fn binary_entropy_peaks_at_a_coin_flip() {
+        assert!((binary_entropy(0.5) - 1.0).abs() < 1e-12);
+        assert_eq!(binary_entropy(1.0), 0.0);
+        assert_eq!(binary_entropy(0.0), 0.0);
+        assert!((binary_entropy(0.1) - binary_entropy(0.9)).abs() < 1e-12); // H(p)=H(1−p)
+        assert!(binary_entropy(0.9) < binary_entropy(0.6)); // more lopsided → less suspense
+    }
+
+    #[test]
+    fn sen_welfare_rewards_level_and_equality() {
+        // All-equal returns the plain mean (Gini 0).
+        assert!((sen_welfare(&[0.5, 0.5, 0.5, 0.5]) - 0.5).abs() < 1e-12);
+        // Maximum inequality for two points: (0,1) → 0.25 = 0.5·(1−0.5).
+        assert!((sen_welfare(&[0.0, 1.0]) - 0.25).abs() < 1e-12);
+        // Level: a uniformly higher set scores higher.
+        assert!(sen_welfare(&[0.4, 0.4]) < sen_welfare(&[0.6, 0.6]));
+        // Equality: same mean, but concentration is penalized.
+        let spread = sen_welfare(&[0.5, 0.5, 0.5, 0.5]);
+        let concentrated = sen_welfare(&[0.0, 0.5, 0.5, 1.0]); // same mean 0.5
+        assert!(concentrated < spread);
+    }
+
+    #[test]
+    fn weighted_sen_welfare_matches_unweighted_and_discounts_light_weights() {
+        // Equal weights ≡ the unweighted Sen welfare.
+        assert!((weighted_sen_welfare(&[0.0, 1.0], &[1.0, 1.0]) - 0.25).abs() < 1e-12);
+        // Integer weights ≡ expanding into copies: (0 w1, 1 w3) ≡ [0,1,1,1] → 0.5625.
+        assert!((weighted_sen_welfare(&[0.0, 1.0], &[1.0, 3.0]) - 0.5625).abs() < 1e-12);
+        // A low value carrying little weight is discounted: welfare rises as the
+        // weight on the low (noisy) value shrinks.
+        let heavy_low = weighted_sen_welfare(&[0.0, 1.0], &[3.0, 1.0]);
+        let light_low = weighted_sen_welfare(&[0.0, 1.0], &[1.0, 3.0]);
+        assert!(light_low > heavy_low);
+    }
+
+    #[test]
+    fn welfare_shortfall_sums_to_the_deficit_and_blames_the_lowest() {
+        let vals = [0.2, 0.9, 0.5, 0.1];
+        let wts = [1.0; 4];
+        let d = welfare_shortfall(&vals, &wts);
+        // The deficits sum to exactly 1 − W.
+        let w = weighted_sen_welfare(&vals, &wts);
+        assert!((d.iter().sum::<f64>() - (1.0 - w)).abs() < 1e-12);
+        // At equal weights the biggest shortfall is the lowest value (index 3 = 0.1).
+        let worst = (0..4).max_by(|&a, &b| d[a].partial_cmp(&d[b]).unwrap()).unwrap();
+        assert_eq!(worst, 3);
+        // A low value with a tiny weight is discounted below a mid value with a big
+        // weight: shortfall blame shifts off the noisy player.
+        let d2 = welfare_shortfall(&[0.05, 0.4], &[1.0, 20.0]);
+        assert!(d2[1] > d2[0]);
+    }
+
+    #[test]
+    fn interest_welfare_is_one_for_coin_flips_and_falls_with_blowouts() {
+        // 4 players, one round: A–B and C–D.
+        let grid = "\
+[Dull]
+Nr Name    Nat Elo  1   Pts
+1  [A] [a] FR  1500 [2+] 1
+2  [B] [b] FR  1500 [1-] 0
+3  [C] [c] FR  1500 [4+] 1
+4  [D] [d] FR  1500 [3-] 0
+";
+        let t = crate::import_american_grid(grid).unwrap();
+        let id = |last| t.players.iter().find(|p| p.last_name == last).unwrap().id;
+
+        // Equal strengths → every game a coin flip → perfect interest (1).
+        let mut equal = StrengthMap::new();
+        for p in &t.players {
+            equal.insert(p.id, 1500.0);
+        }
+        assert!((interest_welfare(&t, &equal) - 1.0).abs() < 1e-9);
+
+        // A–B a blowout while C–D stays even: interest falls below 1.
+        let mut mixed = StrengthMap::new();
+        mixed.insert(id("A"), 2200.0);
+        mixed.insert(id("B"), 1000.0);
+        mixed.insert(id("C"), 1500.0);
+        mixed.insert(id("D"), 1500.0);
+        let w = interest_welfare(&t, &mixed);
+        assert!(w > 0.0 && w < 1.0, "interest {w} out of range");
     }
 
     #[test]

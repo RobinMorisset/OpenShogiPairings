@@ -20,8 +20,8 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use osp_core::sim::{
-    cup_eligibility, game_elo_diffs, sample_strengths, simulate_run, CupConfig, RunOutcome,
-    StrengthMap,
+    cup_eligibility, game_elo_diffs, interest_welfare, sample_strengths, simulate_run,
+    welfare_shortfall, CupConfig, RunOutcome, StrengthMap,
 };
 use osp_core::{
     decode_latin1, estimate_elos, import_fesa_results, Player, Tournament, TournamentSettings,
@@ -215,7 +215,7 @@ fn run(args: Args) -> Result<(), String> {
     let observed = observed_report(&base, &overrides, &args.thresholds);
     let mut reports = Vec::new();
     let mut dump = args.dump_runs.as_ref().map(|_| {
-        String::from("variant,run,mean_diff,frac_exceed,fidelity,winner\n")
+        String::from("variant,run,mean_diff,frac_exceed,fidelity,interest,winner\n")
     });
     let mut strengths_dump = args
         .dump_strengths
@@ -398,6 +398,15 @@ struct VariantReport {
     per_run_exceed: Vec<f64>,
     /// Per-run standings fidelity (Spearman vs true strength).
     per_run_fidelity: Vec<f64>,
+    /// Mean game-interest metric (game-weighted Sen welfare) over runs.
+    interest: f64,
+    /// Per-run game-interest metric.
+    per_run_interest: Vec<f64>,
+    /// Each player's pooled game interest across runs: (mean interest, mean games
+    /// per tournament).
+    interest_by_player: HashMap<Uuid, (f64, f64)>,
+    /// The (up to) 5 players whose dull games most lowered `interest`, worst first.
+    worst_interest: Vec<Uuid>,
 }
 
 struct PlayerProb {
@@ -461,7 +470,8 @@ fn append_run_rows(
             .map(String::as_str)
             .unwrap_or("?");
         buf.push_str(&format!(
-            "{variant},{i},{mean_diff:.4},{frac_exceed:.4},{fidelity:.4},\"{winner}\"\n"
+            "{variant},{i},{mean_diff:.4},{frac_exceed:.4},{fidelity:.4},{:.4},\"{winner}\"\n",
+            o.interest
         ));
     }
 }
@@ -568,6 +578,37 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    let per_run_interest: Vec<f64> = outcomes.iter().map(|o| o.interest).collect();
+
+    // Pool each player's game interest across all runs (sum of entropies / games),
+    // then rank players by their contribution to the welfare shortfall — the ones
+    // whose consistently dull games most lowered `interest`.
+    let mut pool: HashMap<Uuid, (f64, u64)> = HashMap::new();
+    for o in outcomes {
+        for &(id, sum_h, games) in &o.player_interest {
+            let e = pool.entry(id).or_insert((0.0, 0));
+            e.0 += sum_h;
+            e.1 += games as u64;
+        }
+    }
+    let ids: Vec<Uuid> = pool.keys().copied().collect();
+    let values: Vec<f64> = ids.iter().map(|id| pool[id].0 / pool[id].1 as f64).collect();
+    let weights: Vec<f64> = ids.iter().map(|id| pool[id].1 as f64).collect();
+    let shortfall = welfare_shortfall(&values, &weights);
+    let mut order: Vec<usize> = (0..ids.len()).collect();
+    order.sort_by(|&a, &b| {
+        shortfall[b]
+            .partial_cmp(&shortfall[a])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let runs_f = runs.max(1) as f64;
+    let interest_by_player: HashMap<Uuid, (f64, f64)> = ids
+        .iter()
+        .enumerate()
+        .map(|(i, &id)| (id, (values[i], pool[&id].1 as f64 / runs_f)))
+        .collect();
+    let worst_interest: Vec<Uuid> = order.iter().take(5).map(|&i| ids[i]).collect();
+
     VariantReport {
         name,
         diff,
@@ -579,6 +620,10 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
         per_run_mean_diff,
         per_run_exceed,
         per_run_fidelity: score_rhos,
+        interest: mean(&per_run_interest),
+        per_run_interest,
+        interest_by_player,
+        worst_interest,
     }
 }
 
@@ -592,6 +637,7 @@ struct ObservedReport {
     pooled: Vec<f64>,
     fidelity_score: f64,
     fidelity_estimate: f64,
+    interest: f64,
     /// Finishing rank (0-based) of each player in the real standings.
     rank_of: HashMap<Uuid, usize>,
     winner: Option<Uuid>,
@@ -633,6 +679,7 @@ fn observed_report(
         pooled,
         fidelity_score: spearman(&final_order, &true_ord),
         fidelity_estimate: spearman(&est_ord, &true_ord),
+        interest: interest_welfare(base, &strengths),
         rank_of: final_order
             .iter()
             .enumerate()
@@ -700,21 +747,22 @@ fn print_report(
     }
 
     println!(
-        "\n{:<14} {:>16} {:>16}",
-        "variant", "fidelity(score)", "fidelity(est)"
+        "\n{:<14} {:>16} {:>16} {:>12}",
+        "variant", "fidelity(score)", "fidelity(est)", "interest(W)"
     );
     for r in reports {
         println!(
-            "{:<14} {:>16.3} {:>16.3}",
+            "{:<14} {:>16.3} {:>16.3} {:>12.3}",
             trunc(&r.name, 14),
             r.fidelity_score,
-            r.fidelity_estimate
+            r.fidelity_estimate,
+            r.interest,
         );
     }
     if let Some(o) = observed {
         println!(
-            "{:<14} {:>16.3} {:>16.3}",
-            "observed*", o.fidelity_score, o.fidelity_estimate
+            "{:<14} {:>16.3} {:>16.3} {:>12.3}",
+            "observed*", o.fidelity_score, o.fidelity_estimate, o.interest,
         );
     }
 
@@ -758,7 +806,7 @@ fn print_report(
             .unwrap_or(400);
         // (label, per-run accessor, display scale, decimals, base-unit, Δ-unit)
         type Acc = fn(&VariantReport) -> &Vec<f64>;
-        let rows: [(String, Acc, f64, usize, &str, &str); 3] = [
+        let rows: [(String, Acc, f64, usize, &str, &str); 4] = [
             (
                 "mean|d|".to_string(),
                 |r| &r.per_run_mean_diff,
@@ -778,6 +826,14 @@ fn print_report(
             (
                 "fidelity(score)".to_string(),
                 |r| &r.per_run_fidelity,
+                1.0,
+                3,
+                "",
+                "",
+            ),
+            (
+                "interest(W)".to_string(),
+                |r| &r.per_run_interest,
                 1.0,
                 3,
                 "",
@@ -908,6 +964,50 @@ fn print_report(
         }
     }
 
+    // Least-interesting players: the union of each variant's 5 biggest interest
+    // shortfalls, with each player's pooled mean game interest per variant (`*`
+    // marks that variant's own worst-5). `g` is the player's mean games per
+    // tournament — a low count (absences) is why the metric discounts them.
+    let mut dull_shown: Vec<Uuid> = Vec::new();
+    for r in reports {
+        for id in &r.worst_interest {
+            if !dull_shown.contains(id) {
+                dull_shown.push(*id);
+            }
+        }
+    }
+    if !dull_shown.is_empty() {
+        println!("\nleast-interesting players (pooled mean interest I; * = variant's 5 biggest shortfalls)");
+        print!("{:<22}", "player");
+        for r in reports {
+            print!("  {:>16}", trunc(&r.name, 16));
+        }
+        println!();
+        for id in &dull_shown {
+            let games = reports
+                .iter()
+                .find_map(|r| r.interest_by_player.get(id))
+                .map(|&(_, g)| g)
+                .unwrap_or(0.0);
+            let label = format!(
+                "{} ({:.0}g)",
+                trunc(names.get(id).map(String::as_str).unwrap_or("?"), 15),
+                games
+            );
+            print!("{label:<22}");
+            for r in reports {
+                match r.interest_by_player.get(id) {
+                    Some(&(i, _)) => {
+                        let mark = if r.worst_interest.contains(id) { "*" } else { " " };
+                        print!("  {:>15.3}{mark}", i);
+                    }
+                    None => print!("  {:>16}", "-"),
+                }
+            }
+            println!();
+        }
+    }
+
     if let Some(o) = observed {
         let winner = o
             .winner
@@ -958,6 +1058,7 @@ struct JsonObserved {
     exceed: Vec<JsonExceed>,
     fidelity_score: f64,
     fidelity_estimate: f64,
+    interest: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     winner: Option<String>,
 }
@@ -973,6 +1074,7 @@ struct JsonVariant {
     exceed: Vec<JsonExceed>,
     fidelity_score: f64,
     fidelity_estimate: f64,
+    interest: f64,
     victory: Vec<JsonVictory>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     cup_champions: Vec<JsonCupChampion>,
@@ -1038,6 +1140,7 @@ fn write_outputs(
                 .collect(),
             fidelity_score: o.fidelity_score,
             fidelity_estimate: o.fidelity_estimate,
+            interest: o.interest,
             winner: o.winner.and_then(|id| names.get(&id).cloned()),
         }),
         variants: reports
@@ -1060,6 +1163,7 @@ fn write_outputs(
                     .collect(),
                 fidelity_score: r.fidelity_score,
                 fidelity_estimate: r.fidelity_estimate,
+                interest: r.interest,
                 victory: r
                     .players
                     .iter()
