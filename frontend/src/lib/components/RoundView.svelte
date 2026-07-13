@@ -482,7 +482,7 @@
                   title={$_("roundView.noShowTitle", { values: { name: name(board.player1) } })}
                   onclick={() => toggleNoShow(index, board, "player1")}
                 >
-                  ◄
+                  ◀
                 </button>
                 <button
                   type="button"
@@ -493,7 +493,7 @@
                   title={$_("roundView.noShowTitle", { values: { name: name(board.player2) } })}
                   onclick={() => toggleNoShow(index, board, "player2")}
                 >
-                  ►
+                  ▶
                 </button>
               </div>
             </td>
@@ -550,7 +550,7 @@
             >
             <td class="num">{round.boards.length + 1}</td>
             <td class="p1-col">
-              <span class="player">{name(round.bye)}</span>
+              <span class="player winner">{name(round.bye)}</span>
             </td>
             <td>
               <span class="player bye-opponent">{$_("roundView.byeOpponent")}</span>
@@ -570,7 +570,7 @@
             <td class="src-col">🏆</td>
             <td class="num">{round.boards.length + (round.bye ? 1 : 0) + i + 1}</td>
             <td class="p1-col">
-              <span class="player">{name(byePlayer)}</span>
+              <span class="player winner">{name(byePlayer)}</span>
             </td>
             <td>
               <span class="player bye-opponent">{$_("roundView.cupByeOpponent")}</span>
@@ -725,6 +725,12 @@
     padding: 0.3rem 0.6rem;
     border-bottom: 1px solid var(--border-divider);
     text-align: left;
+  }
+  /* Match every body cell to the height of the tallest control (the 1.9rem
+     draw/no-show buttons), so the bye and cup-bye rows — which have no such
+     controls — are the same height as the game rows. */
+  tbody td {
+    height: 1.9rem;
   }
   th {
     color: var(--text-secondary);
@@ -955,7 +961,9 @@
     font: inherit;
     cursor: pointer;
   }
-  .player:hover:not(:disabled) {
+  /* Only the clickable player buttons get the hover affordance; the bye and
+     cup-bye rows render the player as a plain (non-interactive) span. */
+  button.player:hover:not(:disabled) {
     border-color: var(--border-soft);
     background: var(--bg-hover);
   }
@@ -1078,6 +1086,15 @@
     .noshow-col,
     .handicap-col {
       display: none;
+    }
+    /* On screen the table fills the width; in print, size columns to their
+       content so the visible columns (board #, players, suggested handicap)
+       sit close together instead of being stretched apart. */
+    table {
+      width: auto;
+    }
+    .player {
+      width: auto;
     }
     /* Only the forced-pairing lock is dropped from print — the cup trophy stays. */
     .src-forced {
