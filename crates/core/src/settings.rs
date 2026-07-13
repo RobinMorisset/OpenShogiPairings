@@ -277,6 +277,18 @@ pub struct TournamentSettings {
     /// exclusive with `elo_pairing_enabled` (see [`Self::normalized`]).
     #[serde(default)]
     pub mixed_elo_pairing_enabled: bool,
+    /// Award MacMahon starting points from the **live ELO estimate** rather than
+    /// the static registration rating: each ELO-based threshold is compared
+    /// against the same Bayesian estimate that drives the ELO pairing modes,
+    /// recomputed each round, so a player's MacMahon points can rise or fall as
+    /// their estimated strength moves (grade-based thresholds are unaffected —
+    /// they still read the player's grade). Independent of the pairing mode:
+    /// this can be combined with plain Swiss or mixed-ELO pairing. Inert unless
+    /// there is at least one ELO threshold to compare against (see
+    /// [`Self::macmahon_from_estimate_active`]); the UI greys it out until then.
+    /// Off by default.
+    #[serde(default)]
+    pub macmahon_from_estimated_elo: bool,
     /// The multiplier `m` on each player's FESA K, as an integer percent
     /// (100 = ×1.0), controlling how far the ELO estimate is allowed to drift from
     /// the registration rating (bigger = faster drift). Stored as an integer so
@@ -310,6 +322,7 @@ impl Default for TournamentSettings {
             tiebreaks: default_tiebreaks(),
             elo_pairing_enabled: false,
             mixed_elo_pairing_enabled: false,
+            macmahon_from_estimated_elo: false,
             elo_k_multiplier_percent: default_elo_k_multiplier_percent(),
             elo_provisional_multiplier_percent: default_elo_provisional_multiplier_percent(),
         }
@@ -415,10 +428,10 @@ impl TournamentSettings {
         let mut seen_tb = HashSet::new();
         self.tiebreaks.retain(|&tb| seen_tb.insert(tb));
         // The estimated-ELO tie-break is meaningless unless a live estimate is
-        // actually maintained — outside both ELO modes it just sits at each
-        // player's registration rating — so it is not a valid ranking criterion
-        // there.
-        if !self.elo_estimate_needed() {
+        // actually maintained — outside both ELO pairing modes *and* estimate-
+        // based MacMahon it just sits at each player's registration rating — so
+        // it is not a valid ranking criterion there.
+        if !self.elo_estimate_needed() && !self.macmahon_from_estimate_active() {
             self.tiebreaks.retain(|&tb| tb != Tiebreak::EstElo);
         }
 
@@ -433,11 +446,26 @@ impl TournamentSettings {
         self
     }
 
-    /// Whether a live ELO estimate needs to be maintained for pairing purposes —
-    /// either ELO mode. Used to gate the (somewhat expensive) estimate computation
-    /// and to decide whether the estimated-ELO tiebreak is meaningful.
+    /// Whether a live ELO estimate needs to be maintained for **pairing**
+    /// purposes — either ELO mode. Used to gate the pairing model's ELO context
+    /// (edge weights, bye ranks). Note this is *not* the only place a live
+    /// estimate is maintained: [`Self::macmahon_from_estimate_active`] maintains
+    /// one for scoring even in plain Swiss.
     pub fn elo_estimate_needed(&self) -> bool {
         self.elo_pairing_enabled || self.mixed_elo_pairing_enabled
+    }
+
+    /// Whether MacMahon starting points are actually drawn from the live ELO
+    /// estimate: the [`Self::macmahon_from_estimated_elo`] toggle is on *and*
+    /// there is at least one ELO-based threshold for the estimate to be compared
+    /// against (with only grade thresholds, or none, the estimate would change
+    /// nothing, so the (non-trivial) estimate computation is skipped).
+    pub fn macmahon_from_estimate_active(&self) -> bool {
+        self.macmahon_from_estimated_elo
+            && self
+                .macmahon_thresholds
+                .iter()
+                .any(|t| matches!(t.criterion, ThresholdCriterion::Elo { .. }))
     }
 
     /// The ELO-estimate K multiplier `m` as a float (percent / 100).
@@ -790,6 +818,63 @@ mod tests {
         .normalized();
         assert!(!s.elo_pairing_enabled);
         assert!(s.mixed_elo_pairing_enabled);
+    }
+
+    #[test]
+    fn macmahon_from_estimate_active_needs_the_toggle_and_an_elo_threshold() {
+        // Toggle off: never active, regardless of thresholds.
+        let off = TournamentSettings {
+            macmahon_thresholds: vec![mmt(1500)],
+            ..Default::default()
+        };
+        assert!(!off.macmahon_from_estimate_active());
+
+        // Toggle on but no ELO threshold (grade only): inert, so not active.
+        let grade_only = TournamentSettings {
+            macmahon_thresholds: vec![MacMahonThreshold::grade(Grade::dan(1))],
+            macmahon_from_estimated_elo: true,
+            ..Default::default()
+        };
+        assert!(!grade_only.macmahon_from_estimate_active());
+
+        // Toggle on with no thresholds at all: also inert.
+        let none = TournamentSettings {
+            macmahon_from_estimated_elo: true,
+            ..Default::default()
+        };
+        assert!(!none.macmahon_from_estimate_active());
+
+        // Toggle on with an ELO threshold (even alongside a grade one): active.
+        let on = TournamentSettings {
+            macmahon_thresholds: vec![mmt(1500), MacMahonThreshold::grade(Grade::dan(1))],
+            macmahon_from_estimated_elo: true,
+            ..Default::default()
+        };
+        assert!(on.macmahon_from_estimate_active());
+    }
+
+    #[test]
+    fn estimate_based_macmahon_keeps_the_est_elo_tiebreak_valid() {
+        // Plain Swiss pairing, but MacMahon is drawn from the estimate: a live
+        // estimate is maintained, so the estimated-ELO tie-break survives.
+        let s = TournamentSettings {
+            macmahon_thresholds: vec![mmt(1500)],
+            macmahon_from_estimated_elo: true,
+            tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo],
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(s.tiebreaks, vec![Tiebreak::Points, Tiebreak::EstElo]);
+
+        // But with only a grade threshold the estimate isn't used, so it's dropped.
+        let grade_only = TournamentSettings {
+            macmahon_thresholds: vec![MacMahonThreshold::grade(Grade::dan(1))],
+            macmahon_from_estimated_elo: true,
+            tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo],
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(grade_only.tiebreaks, vec![Tiebreak::Points]);
     }
 
     #[test]

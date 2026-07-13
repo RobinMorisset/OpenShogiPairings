@@ -328,6 +328,37 @@ criterion. `elo_rank` (used only by pure ELO mode's `ByeSelection`) is simply
 unused in mixed mode, which keeps `ByeGroup` (the MacMahon-aware bye rule)
 instead.
 
+### 6b. Estimate-based MacMahon (`macmahon_from_estimated_elo`)
+
+A third, orthogonal way to hybridize — this one touches **scoring**, not the
+pairing rule list, so it composes with *any* pairing mode (plain Swiss or mixed
+ELO; it's moot under pure ELO, which ignores MacMahon). When
+`macmahon_from_estimated_elo` is on, `compute_scores`
+([`crates/core/src/scoring.rs`](../crates/core/src/scoring.rs)) awards each
+player's MacMahon starting points from the **live ELO estimate** instead of their
+registration rating: it calls `estimate_elos(...)` once and, for each player,
+passes `round(estimate)` in place of `Player.rating` to
+`macmahon_points_at(...)`. Only ELO-based thresholds are affected — grade
+thresholds still read `Player.grade` — and because the estimate is a pure replay
+recomputed every round, a player's MacMahon points can rise or fall between
+rounds as their estimated strength moves (the score/standings architecture
+already recomputes MacMahon each round via `rounds_played`, so this needed no new
+plumbing).
+
+`TournamentSettings::macmahon_from_estimate_active()` gates it: the toggle *and*
+at least one ELO threshold to compare against (with only grade thresholds, or
+none, the estimate would change nothing, so the estimator call is skipped, and
+the UI greys the checkbox out). This is deliberately kept separate from
+`elo_estimate_needed()` (§6a) — the latter still gates only the *pairing* model's
+ELO context, so plain Swiss + estimate-based MacMahon doesn't pay for the pairing
+ELO context it wouldn't use. The `Tiebreak::EstElo` ranking criterion becomes
+valid here too (a live estimate is maintained), so `normalized()` keeps it
+whenever either `elo_estimate_needed()` **or** `macmahon_from_estimate_active()`.
+
+Note this uses the same `elo_k_multiplier_percent` / `elo_provisional_multiplier_percent`
+knobs as the pairing modes; their inputs live in the pairing-mode section of the
+settings UI, so under plain Swiss the estimator runs with the stored defaults.
+
 ## 7. Settings shape
 
 Add to `TournamentSettings` (additive, defaulted, so old saves still load):
@@ -341,6 +372,11 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   set, so pure ELO wins). Unlike pure ELO mode, it only greys out the
   floater-selection section — MacMahon, degressive removals, airtight groups and
   club protection stay active. Off by default.
+- `macmahon_from_estimated_elo: bool` — award MacMahon from the live estimate
+  rather than the registration rating (see §6b). Independent of the pairing-mode
+  switches (composes with Swiss or mixed ELO). Inert unless there's an ELO
+  threshold (`macmahon_from_estimate_active()`); the UI greys the checkbox out
+  until then. Off by default.
 - `elo_k_multiplier_percent: u32` — the single knob `m`, stored as an integer
   percent (`100` = ×1.0) so `TournamentSettings` stays `Eq` (an `f64` field would
   break the derive, and the tournament `Eq` that the undo-snapshot store relies

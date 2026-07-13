@@ -40,6 +40,9 @@ tournament. For how it's built, see [Architecture](#architecture) below.
 - **MacMahon groups**, with thresholds on either ELO rating or dan/kyu grade
   (freely mixed), and an optional **degressive ("accelerated") schedule** that
   lets a starting-point head start fade out over the first few rounds.
+  Optionally, MacMahon can be awarded from a **live ELO estimate** rather than
+  the registration rating, so a player's starting points track their estimated
+  strength round by round (see the pairing options below).
 - **Hybrid direct-elimination cup** alongside the Swiss (the French / European
   Championship format): top 8/16/32/64 eligible players play a seeded bracket
   over the first rounds, eliminated players drop back into the Swiss, and the
@@ -66,6 +69,10 @@ tournament. For how it's built, see [Architecture](#architecture) below.
   MacMahon and Swiss score groups entirely and pairs each round purely to
   minimize the estimated ELO gap, a "continuous Swiss" for fields where a smooth
   strength axis fits better than integer points.
+- **Estimate-based MacMahon**: a lighter hybrid that leaves pairing alone and
+  instead awards MacMahon starting points from the same live ELO estimate — so
+  the groups themselves react to results, while Swiss (or mixed-ELO) pairing runs
+  as usual. Enabled from the MacMahon settings; needs at least one ELO threshold.
 - **Club protection**, avoiding pairing players from the same club, optionally
   limited to the first N rounds and with specific clubs (e.g. the host club)
   exempted.

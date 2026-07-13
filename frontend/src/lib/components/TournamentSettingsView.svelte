@@ -70,8 +70,14 @@
   let tiebreaks = $state<Tiebreak[]>([]);
   let eloEnabled = $state(false);
   let mixedEloEnabled = $state(false);
+  let macmahonFromElo = $state(false);
   let eloKPercent = $state(100);
   let eloProvisionalPercent = $state(200);
+
+  // Whether the "MacMahon from estimated ELO" option can apply: it compares the
+  // estimate against ELO thresholds, so it's inert (and greyed out) with only
+  // grade thresholds, or none. Mirrors the server's `macmahon_from_estimate_active`.
+  const hasEloThreshold = $derived(thresholds.some((t) => t.kind === "elo"));
 
   // Three-way pairing mode derived from the two (mutually exclusive) flags, for
   // the radio group below.
@@ -86,13 +92,20 @@
   // Floater selection is replaced by the ELO-gap rule in *either* ELO mode.
   const floaterDisabled = $derived(eloEnabled || mixedEloEnabled);
 
+  // Whether a live ELO estimate is maintained, so the estimated-ELO tie-break is
+  // meaningful: either ELO pairing mode, or estimate-based MacMahon with an ELO
+  // threshold to compare against. Mirrors the server's normalization gate.
+  const eloEstimateLive = $derived(
+    eloEnabled || mixedEloEnabled || (macmahonFromElo && hasEloThreshold),
+  );
+
   // Metrics not yet in the ranking order — the choices for the "add" dropdown.
-  // Estimated ELO is only meaningful when a live estimate is maintained (either
-  // ELO mode; otherwise it just sits at the registration rating), so it isn't
-  // offered while both are off.
+  // Estimated ELO is only meaningful when a live estimate is maintained
+  // (otherwise it just sits at the registration rating), so it isn't offered
+  // otherwise.
   const availableTiebreaks = $derived(
     TIEBREAKS.filter(
-      (t) => !tiebreaks.includes(t.code) && (eloEnabled || mixedEloEnabled || t.code !== "est_elo"),
+      (t) => !tiebreaks.includes(t.code) && (eloEstimateLive || t.code !== "est_elo"),
     ),
   );
   const labelOf = (code: Tiebreak) => tiebreakLabel(code, $_);
@@ -117,6 +130,7 @@
     const sTiebreaks = settings.tiebreaks ?? [];
     const sElo = settings.elo_pairing_enabled ?? false;
     const sMixedElo = settings.mixed_elo_pairing_enabled ?? false;
+    const sMacmahonFromElo = settings.macmahon_from_estimated_elo ?? false;
     const sEloK = settings.elo_k_multiplier_percent ?? 100;
     const sEloProv = settings.elo_provisional_multiplier_percent ?? 200;
     untrack(() => {
@@ -133,6 +147,7 @@
         eqStr(tiebreaks, sTiebreaks) &&
         eloEnabled === sElo &&
         mixedEloEnabled === sMixedElo &&
+        macmahonFromElo === sMacmahonFromElo &&
         eloKPercent === sEloK &&
         eloProvisionalPercent === sEloProv;
       if (!matches) {
@@ -154,6 +169,7 @@
         tiebreaks = [...sTiebreaks];
         eloEnabled = sElo;
         mixedEloEnabled = sMixedElo;
+        macmahonFromElo = sMacmahonFromElo;
         eloKPercent = sEloK;
         eloProvisionalPercent = sEloProv;
       }
@@ -178,6 +194,7 @@
       tiebreaks: [...tiebreaks],
       elo_pairing_enabled: eloEnabled,
       mixed_elo_pairing_enabled: mixedEloEnabled,
+      macmahon_from_estimated_elo: macmahonFromElo,
       elo_k_multiplier_percent: eloKPercent,
       elo_provisional_multiplier_percent: eloProvisionalPercent,
     });
@@ -186,9 +203,17 @@
   function setPairingMode(mode: "swiss" | "mixed_elo" | "elo") {
     eloEnabled = mode === "elo";
     mixedEloEnabled = mode === "mixed_elo";
-    // Estimated ELO isn't a valid ranking criterion in Swiss mode, so drop it
-    // from the order when switching back to it (mirrors the server).
-    if (mode === "swiss") tiebreaks = tiebreaks.filter((c) => c !== "est_elo");
+    // Estimated ELO is only a valid ranking criterion while a live estimate is
+    // maintained; drop it from the order otherwise (mirrors the server).
+    if (!eloEstimateLive) tiebreaks = tiebreaks.filter((c) => c !== "est_elo");
+    persist();
+  }
+
+  function setMacmahonFromElo(on: boolean) {
+    macmahonFromElo = on;
+    // Turning it off (in plain Swiss) may leave no live estimate, so the
+    // estimated-ELO tie-break is no longer valid — mirror the server and drop it.
+    if (!eloEstimateLive) tiebreaks = tiebreaks.filter((c) => c !== "est_elo");
     persist();
   }
 
@@ -574,6 +599,26 @@
       />
       {$_("settings.onlyFirstRoundsSuffix")}
     </label>
+  </div>
+
+  <div class="subsection">
+    <h4>{$_("settings.macmahonFromEloTitle")}</h4>
+    <p class="desc">
+      {$_("settings.macmahonFromEloDesc")}
+    </p>
+
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={macmahonFromElo}
+        disabled={busy || !hasEloThreshold}
+        onchange={(e) => setMacmahonFromElo(e.currentTarget.checked)}
+      />
+      {$_("settings.macmahonFromEloCheckbox")}
+    </label>
+    {#if !hasEloThreshold}
+      <p class="hint muted">{$_("settings.macmahonFromEloNeedsEloThreshold")}</p>
+    {/if}
   </div>
   </div>
 

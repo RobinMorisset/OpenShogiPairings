@@ -102,6 +102,19 @@ elo_pairing_enabled: boolean,
  */
 mixed_elo_pairing_enabled: boolean, 
 /**
+ * Award MacMahon starting points from the **live ELO estimate** rather than
+ * the static registration rating: each ELO-based threshold is compared
+ * against the same Bayesian estimate that drives the ELO pairing modes,
+ * recomputed each round, so a player's MacMahon points can rise or fall as
+ * their estimated strength moves (grade-based thresholds are unaffected —
+ * they still read the player's grade). Independent of the pairing mode:
+ * this can be combined with plain Swiss or mixed-ELO pairing. Inert unless
+ * there is at least one ELO threshold to compare against (see
+ * [`Self::macmahon_from_estimate_active`]); the UI greys it out until then.
+ * Off by default.
+ */
+macmahon_from_estimated_elo: boolean, 
+/**
  * The multiplier `m` on each player's FESA K, as an integer percent
  * (100 = ×1.0), controlling how far the ELO estimate is allowed to drift from
  * the registration rating (bigger = faster drift). Stored as an integer so

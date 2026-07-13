@@ -92,10 +92,31 @@ pub(crate) fn compute_scores(
     // tournament goes on. Which round each player floated in is read separately
     // from the frozen `points_diff`, so a later removal can't rewrite history.
     let rounds_played = rounds.iter().filter(|r| r.completed).count() as u32;
+    // When MacMahon is awarded from the live estimate, compute it once here and
+    // feed the rounded estimate in place of each player's registration rating
+    // for the ELO-based thresholds. Grade thresholds read the player's grade and
+    // so are unaffected. Skipped (and left `None`) whenever the toggle is off or
+    // there is no ELO threshold to compare against.
+    let estimated_elos = settings
+        .macmahon_from_estimate_active()
+        .then(|| crate::elo::estimate_elos(players, settings, rounds));
     let mut by_id: HashMap<Uuid, PlayerScore> = players
         .iter()
         .map(|p| {
-            let macmahon = settings.macmahon_points_at(p.rating, p.grade, rounds_played);
+            // The rating the ELO thresholds see: the rounded live estimate when
+            // estimate-based MacMahon is active, else the static registration
+            // rating. A player with no counted games sits at their prior mean, so
+            // every player has an estimate.
+            let mm_rating = match &estimated_elos {
+                Some(est) => Some(
+                    est.get(&p.id)
+                        .copied()
+                        .unwrap_or(crate::elo::UNRATED_PRIOR_MEAN)
+                        .round() as u32,
+                ),
+                None => p.rating,
+            };
+            let macmahon = settings.macmahon_points_at(mm_rating, p.grade, rounds_played);
             // Manual bonuses/maluses are folded in alongside MacMahon starting
             // points, before any round is replayed, so they shape both the
             // standings and the score-gap pairing weight from here on. The
@@ -456,5 +477,67 @@ mod tests {
         // ...but the cup game left no float history.
         assert_eq!(scores.get(&a.id).last_descended, None);
         assert_eq!(scores.get(&b.id).last_ascended, None);
+    }
+
+    #[test]
+    fn macmahon_can_be_awarded_from_the_live_estimate() {
+        // A registers at 1400 — below the single 1450 ELO threshold, so 0
+        // MacMahon points on paper — but beats three ~2000 opponents, so their
+        // estimated strength climbs well above the threshold. Estimate-based
+        // MacMahon then earns them the point; the static rating does not.
+        let a = player(1, Some(1400));
+        let opps: Vec<Player> = (0..3).map(|i| player(10 + i, Some(2000))).collect();
+        let mut all = vec![a.clone()];
+        all.extend(opps.iter().cloned());
+        let rounds: Vec<Round> = opps
+            .iter()
+            .enumerate()
+            .map(|(i, o)| Round {
+                number: i as u32 + 1,
+                boards: vec![Board {
+                    result: Some(Winner::Player1), // A wins every game
+                    ..Board::pending(a.id, o.id, Some(0), PairingSource::Swiss)
+                }],
+                bye: None,
+                cup_byes: Vec::new(),
+                absent: Vec::new(),
+                completed: true,
+            })
+            .collect();
+
+        let base = TournamentSettings {
+            macmahon_thresholds: vec![MacMahonThreshold::elo(1450)],
+            ..Default::default()
+        };
+        // Static registration rating: A is below 1450, so no MacMahon points.
+        let off = compute_scores(&all, &base, &rounds);
+        assert_eq!(off.get(&a.id).macmahon, 0);
+
+        // Estimate-based: A's estimate has climbed past 1450, earning the point
+        // (and lifting total points to 1 MacMahon + 3 wins = 4).
+        let on = TournamentSettings {
+            macmahon_from_estimated_elo: true,
+            ..base
+        };
+        let on = compute_scores(&all, &on, &rounds);
+        assert_eq!(on.get(&a.id).macmahon, 1);
+        assert_eq!(on.get(&a.id).points, 4);
+    }
+
+    #[test]
+    fn estimate_based_macmahon_is_inert_without_an_elo_threshold() {
+        // The toggle is on, but the only threshold is grade-based, so the
+        // estimate has nothing to compare against and scoring is unchanged.
+        use crate::player::Grade;
+        let mut a = player(1, Some(1400));
+        a.grade = Some(Grade::dan(1));
+        let settings = TournamentSettings {
+            macmahon_thresholds: vec![MacMahonThreshold::grade(Grade::dan(1))],
+            macmahon_from_estimated_elo: true,
+            ..Default::default()
+        };
+        let scores = compute_scores(std::slice::from_ref(&a), &settings, &[]);
+        // Meets the 1-dan grade threshold on grade, exactly as with the toggle off.
+        assert_eq!(scores.get(&a.id).macmahon, 1);
     }
 }
