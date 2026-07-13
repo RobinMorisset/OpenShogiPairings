@@ -10,9 +10,10 @@
 //! Three layers:
 //! - a **result model** — sample a board's winner from the logistic law
 //!   `P(A beats B) = 1/(1+10^((elo_B−elo_A)/400))`;
-//! - a **strength model** — each player's ground-truth strength for a run is an
-//!   explicit override (treated as known) or a draw from their own `elo.rs`
-//!   prior, so injected noise is rating-dependent;
+//! - a **strength model** — each player's ground-truth strength for a run is drawn
+//!   from `N(center, (jitter·σ₀)²)`, the `center` being an override else the
+//!   registration rating and `σ₀` the oracle prior width, so the noise is
+//!   rating-dependent (see [`sample_strengths`]);
 //! - a **run driver** — reset a base tournament, play `rounds` auto-filled rounds,
 //!   and return the finishing order plus the per-game strength gaps.
 

@@ -1,367 +1,277 @@
-# Tournament simulation & pairing-quality analysis — design
+# `osp-sim` — pairing-settings simulator
 
-Status: **Not started** — design only. Fleshes out the **Simulations** section of
-[`TODO.md`](../TODO.md) (the two endpoint lines) into a full tool.
-
-Goal: answer, with numbers, two questions a referee has when tuning pairing
+`osp-sim` answers, with numbers, two questions a referee has when tuning pairing
 settings:
 
 1. **Fewer boring games?** Does a settings change reduce *mismatched* games —
-   boards where the two players are far apart in strength, so the result is a
-   foregone conclusion?
-2. **Same likely winner?** Does it meaningfully change *who* tends to win the
-   tournament, or how faithfully the final ranking reflects real strength?
+   boards where one player is far stronger, so the result is a foregone
+   conclusion?
+2. **Same likely winner, fair ranking?** Does it change *who* tends to win, or
+   how faithfully the final ranking reflects real strength?
 
-The vehicle is a Monte-Carlo simulator: replay a tournament many times under a
-probabilistic result model, once per settings variant, and compare the resulting
-distributions. Two prerequisites already exist — loading a tournament from an
-American Grid ([`import_american_grid`](../crates/core/src/grid_import.rs), for
-historical baselines) and cancelling rounds ([`cancel_last_round`](../crates/core/src/tournament.rs))
-— so this design covers the rest.
-
-Scope markers: **V1** = first shippable slice; **V2** = deferred.
-
----
-
-## 0. Architecture — where the work runs
-
-The statistics tool wants to run the pairing→result→pairing loop *thousands* of
-times. Driving that over HTTP against the single in-memory tournament
-([`TournamentStore.current`](../crates/server/src/state.rs)) would be serial,
-slow, and would clobber whatever tournament that server holds — and would buy
-nothing, because the HTTP handlers only wrap core functions the loop can call
-directly.
-
-The decision (see §7): **put all the logic in `osp_core` as pure functions** and
-have the CLI **link `osp_core` directly**, running its loop in-process — parallel
-across runs, seeded, touching no live server state. The same core functions
-(`prepare_round` → `confirm_round` → result → `complete_current_round`) that the
-referee's actions ultimately call are reused verbatim, so the simulation has full
-fidelity with the real engine while staying fast and isolated. **No REST
-endpoints are added** — see §2 for why, including the two `TODO.md` lines that
-proposed them.
-
-```
-osp_core::sim   (pure: outcome model, elo-diff stats, single-run driver)
-   └── crates/sim   → CLI: K×N loop in parallel, seeded, comparative report
-```
-
----
-
-## 1. Phase 1 — Core building blocks (`osp_core`)
-
-All three are pure functions with no I/O, unit-tested in isolation. They live in a
-new `crates/core/src/sim.rs` (outcome model + drivers) reusing the existing ELO
-scale constant from [`elo.rs`](../crates/core/src/elo.rs).
-
-### 1.1 The result model — probabilistic auto-fill
-
-Model (from `TODO.md`, the standard logistic/Bradley–Terry expected score):
-
-```
-P(A beats B) = 1 / (1 + 10^((elo_B − elo_A) / 400))
-```
-
-This is the same law `elo.rs` already fits; we now *sample* from it. For each
-**undecided** board in a round: draw `u ~ Uniform(0,1)`, set the winner to
-player 1 iff `u < P(p1 beats p2)`, and write it through the existing
-[`toggle_board_winner`](../crates/core/src/tournament.rs) path so standings stay
-consistent.
-
-- **Strength source** (see §7). Each player's ground-truth strength for a run is:
-  - if the client supplied an **override** for them, that value **exactly** — an
-    override is a known truth and is never jittered;
-  - otherwise a draw from the player's own **prior**,
-    `strength_i ~ N(rating_i, (jitter · σ₀_i)²)`, where `σ₀_i` is the prior
-    standard deviation [`elo.rs`'s `prior()`](../crates/core/src/elo.rs) already
-    computes (rating gives the mean, `600 / 350` for an unrated player). The
-    `jitter` multiplier scales that width: `0` pins truth to the registration
-    rating, `1` samples from the very prior the estimator assumes (automatically
-    tighter for strong/established players, wider for provisional/unrated ones),
-    `>1` stress-tests worse-than-assumed ratings.
-  - The draw happens once per player per run, so each run is a slightly different
-    "world" and victory probabilities marginalise over them. This reuses the
-    existing rating-dependent widths instead of a second, flat noise model.
-- **Byes** are not boards and not games — skipped, and excluded from every game
-  statistic. (A bye already scores as a win in standings.)
-- **Handicaps**: the simulator pairs even games only, so boards never carry a
-  handicap. If one somehow does, fall back to `effective_winner` semantics; not a
-  V1 concern.
-- **Draws**: shogi draws (sennichite) are rare. V1 models none (a pure win/loss
-  Bernoulli). A small fixed draw probability is a trivial **V2** knob.
-- **Determinism**: the function takes an `&mut impl Rng` (e.g. `rand_chacha`
-  `ChaCha8Rng`). The caller seeds it, so a run is byte-for-byte reproducible.
-
-> **Engine-determinism risk to verify.** Reproducibility also requires the
-> *pairing* to be deterministic given identical inputs. The matching in
-> [`integer-blossom`](../crates/matching/src/lib.rs)/[`pairing.rs`](../crates/core/src/pairing.rs)
-> should be, but any incidental `HashMap` iteration order feeding a tie-break
-> would inject non-determinism. Audit this when implementing; sort where needed.
-
-### 1.2 The ELO-difference distribution
-
-A pure function over a `Tournament` (+ optional strength override map) returning
-the per-game strength gaps:
-
-```
-for each completed board (excluding byes):
-    diff = | strength(p1) − strength(p2) |
-```
-
-Why the optional map: as a tournament progresses a player's *effective* strength
-drifts from their registration rating (the point of the `TODO.md` "updated
-player→ELO mapping" note). Passing the [`estimate_elos`](../crates/core/src/elo.rs)
-output, or the simulator's ground-truth map, measures mismatch against a more
-realistic strength than the frozen seed rating.
-
-The function returns the **raw list** of diffs (cheap, composable); summarising
-into histograms/quantiles happens one level up (§3) so the same primitive serves
-both a single-tournament endpoint and a multi-run aggregation.
-
-### 1.3 The single-run driver
-
-```
-fn simulate_run(base: &Tournament, settings: &TournamentSettings,
-                strength: &StrengthMap, rounds: u32, rng: &mut impl Rng)
-    -> RunOutcome
-```
-
-Clone `base` reset to *registration-finalized, zero rounds* (the reset the
-American-grid + `cancel_last_round` steps already enable), apply `settings`, then
-loop `rounds` times: `prepare_round` → `confirm_round` → auto-fill the new round's
-boards (§1.1) → `complete_current_round`. `RunOutcome` collects what the report
-needs: the final [`standings()`](../crates/core/src/tournament.rs) order, every
-board's ELO diff (§1.2), and enough pairing facts for the secondary metrics
-(§4) — rematches avoided/forced, floats, etc.
-
-Cloning the base per run (rather than cancelling rounds over REST between runs)
-is what makes the loop embarrassingly parallel.
-
----
-
-## 2. Why no REST endpoints (the two `TODO.md` lines)
-
-`TODO.md` proposed both building blocks as server endpoints ("Add an API to get
-random game results", "Add an API getting statistical results"). With the loop
-in-process, they earn nothing here:
-
-- **Auto-fill** — the `TODO.md` line itself scopes it to "tests, and for doing
-  simulations," explicitly "not surfaced in the UI." Both consumers are now
-  in-process (core unit tests + the CLI). An endpoint would have **no caller
-  left**, and — since it writes real results — would be a footgun on the
-  [remote-mode](multi-referee-internet.md) server. Dropped entirely.
-- **ELO-diff** — as a *simulation* input it is just a core function the CLI calls.
-  The endpoint would only matter for a different, product-side feature: showing
-  the mismatch spread of a referee's **live** tournament in the app UI. That is a
-  real feature, but it needs a UI to consume it (none exists today) and is
-  independent of this tool. **Deferred** to whenever that stats panel is designed;
-  the §1.2 core function is its natural backend when it is.
-
-No HTTP layer adds fidelity — the endpoints would only re-wrap the same core
-functions the in-process loop already calls. So this project ships as **core +
-CLI**, nothing on the server.
-
----
-
-## 3. Phase 3 — The CLI (`crates/sim`)
-
-A new binary crate linking `osp_core`. It is the actual analysis tool.
-
-### 3.1 Inputs
+It takes a historical tournament as the baseline, then for each **settings
+variant** replays it thousands of times under a probabilistic result model and
+compares the resulting distributions — side by side, with confidence intervals
+and paired significance.
 
 ```
 osp-sim \
-  --base CdF2026.osp            # or --grid AmericanGrid.txt, or --results results_WOSC.txt
-  --configs base.json a.json b.json   # each: a full TournamentSettings JSON (see §3.4)
-  --runs 1000                   # K
-  --rounds 7                    # N (default: the base's configured/observed count)
-  --seed 42                     # master seed → per-run seeds (seed + run index)
-  --strength elos.json          # optional override map (treated as known truth)
-  --strength-fesa-after DATE    # true strength = first FESA list after this tournament date
-  --strength-fesa-list URL|PATH # true strength = a specific FESA list (matched by name)
-  --jitter 0                    # multiplier on each player's prior σ₀ (0 = truth == rating)
-  --threshold 400               # |diff| cut for P(|diff|>T); repeatable; default 400
-  --out report/                 # JSON + human table + per-config CSV histograms
+  --results "test_files/CdF 2025.txt" \   # baseline (also supplies true strengths)
+  --cup-size 16 --cup-nations FR \        # optional hybrid cup
+  --jitter 1 \                            # uncertainty in the true strengths
+  --configs a.json b.json c.json          # each a full TournamentSettings JSON
 ```
 
-**Base sources.** `--base` loads an `.osp` save; `--grid` an American Grid; and
-`--results` a **FESA post-tournament result table** (the artefact tournaments
-usually publish instead of the raw grid — see
-[`fesa_results`](../crates/core/src/fesa_results.rs)). `--results` is special: it
-reconstructs the rounds *and*, from each row's pre-ELO + points gained (or the
-assigned rating for a pre-unrated player), supplies every player's true strength
-directly — so it needs no `--strength*` flag and covers 100% of players (no
-name-matching gaps). It reuses the American-grid round-rebuild machinery; because
-that model holds one bye per round, extra `0+` walkover wins in a round are
-demoted to absences, a tail-only rounding in the *observed* standings that leaves
-the real games and the simulation untouched.
+## Architecture
 
-**True strength from the post-tournament FESA list.** When you only have a grid
-(not a result table), the first FESA rating list *after* the event also reflects
-its results. `--strength-fesa-after 2025-12-01` resolves the first
-list published after that date (FESA publishes on 1 Jan and 1 Jun), fetches
-`…/ratinglists/YYYY-MM-DD.txt`, and matches players by name; `--strength-fesa-list`
-points at a specific list (URL or local file) instead. Matched players become
-known-truth overrides (un-jittered); unmatched players (unrated, or a name the
-list spells differently) keep their grid rating. Note the grid has no date field,
-so the tournament date is supplied on the command line. These flags and
-`--strength` are mutually exclusive, and none of them changes the ratings the
-engine *pairs* on — those always come from the grid (§0-style: pairing uses the
-tournament's own ratings; strength only drives outcomes and the mismatch metric).
+All the logic lives in [`osp_core::sim`](../crates/core/src/sim.rs) as pure
+functions; the [`crates/sim`](../crates/sim) CLI links `osp_core` directly and
+runs the replay loop **in-process, in parallel** (`rayon`), seeded, touching no
+live server state. The same engine functions the referee's actions ultimately
+call — `prepare_round` → `confirm_round` → record results — are reused verbatim,
+so a simulated tournament is paired exactly as a live one. There is **no server
+involvement and no REST endpoint**: the loop would only re-wrap the same core
+functions it already calls.
 
-Each `--configs` file is a complete [`TournamentSettings`](../crates/core/src/settings.rs)
-JSON object (not a patch) — the same shape the server's
-`PUT /api/tournament/settings` already accepts and `normalized()` cleans up. To
-make producing one painless, the Settings tab in the UI gains an **"Export
-settings"** button that downloads the current `TournamentSettings` as JSON, so a
-referee tweaks the knobs in the app they already know and drops the file straight
-into `--configs` (see §3.4).
+```
+osp_core::sim   pure: strength oracle, result model, single-run driver, metrics
+   └── crates/sim   CLI: variants × runs loop, comparative report, JSON/CSV output
+```
 
-### 3.2 Execution
+## Inputs
 
-For each config × each run index `i`: seed a fresh RNG with `seed + i`, call
-`simulate_run` (§1.3). Runs are independent → parallelise with `rayon`
-(`into_par_iter`), collect `RunOutcome`s, then aggregate into the metrics of §4.
-K=1000, N=7, ~40 players completes in well under a second per config on a laptop.
+### Base sources (exactly one)
 
-### 3.3 Output
+- `--base FILE.osp` — an `.osp` save (JSON).
+- `--grid FILE.txt` — an American Grid cross-table
+  ([`import_american_grid`](../crates/core/src/grid_import.rs)).
+- `--results FILE.txt` — a **FESA post-tournament result table** (the artefact
+  tournaments usually publish; see
+  [`fesa_results`](../crates/core/src/fesa_results.rs)). This source is special:
+  it reconstructs the rounds *and* supplies every player's **true strength**
+  directly — pre-ELO + points gained for a rated player, or the assigned `*`
+  rating for a pre-unrated one — so it needs no separate `--strength*` flag and
+  covers 100% of players with no name-matching gaps. Round-cell annotations
+  (`(-r )`, `(+b )`, handicap marks, …) are stripped; because the round model
+  holds one bye per round, extra `0+` walkover wins are demoted to absences — a
+  tail-only rounding in the *observed* standings that leaves the games and the
+  simulation untouched.
 
-- **Human table** to stdout: one row per config, columns for the headline metrics
-  (§4) with Monte-Carlo confidence intervals, so an A-vs-B gap is visibly
-  distinguishable from sampling noise.
-- **`report.json`**: the full aggregates, for scripting / plotting.
-- **`elo-diff-<config>.csv`**: the pooled diff histogram per config, for a quick
-  external plot.
+### True-strength overrides (when not using `--results`)
 
-### 3.4 Producing config files (UI export)
+The "true strength" is what outcomes are actually drawn from, distinct from the
+rating the engine *pairs* on (which always comes from the base). Supply it via:
 
-A small frontend addition, so referees never hand-write JSON: the Settings tab
-gains an **"Export settings"** button that serializes the current
-`TournamentSettings` to a `.json` download. Configuring a variant is then "adjust
-the knobs in the UI → export → pass to `--configs`." Round-trips cleanly because
-the CLI feeds the file through the same `TournamentSettings` deserialize +
-`normalized()` the server uses. (A matching "Import settings" is a natural
-companion but not required by this tool.)
+- `--strength FILE` — a JSON object mapping tournament number (as a string) to an
+  ELO.
+- `--strength-fesa-after YYYY-MM-DD` — use the first FESA rating list published
+  *after* the event (it already reflects the results), fetched from fesashogi.eu
+  and matched by name. FESA publishes on 1 Jan / 1 Jun.
+- `--strength-fesa-list URL|PATH` — a specific FESA list instead.
 
----
+These are mutually exclusive. Unmatched players (unrated, or a differently-spelled
+name) fall back to their registration rating. None of them changes the pairing
+ratings.
 
-## 4. Metrics & statistics (the substance)
+### Other flags
 
-Aggregated across the K runs of a config:
+| flag | meaning |
+|---|---|
+| `--configs A.json …` | one or more variants, each a full `TournamentSettings` JSON (§ Config files) |
+| `--runs N` | simulated tournaments per variant (default 1000) |
+| `--rounds N` | rounds per run (default: the base's round count) |
+| `--seed S` | master seed; run *i* uses `seed + i`, shared across variants (§ Common random numbers) |
+| `--jitter J` | scale on the true-strength spread (§ The strength oracle); default 0 |
+| `--oracle-provisional M` | how much wider the true-strength prior is for a provisional player (default 2.0) |
+| `--cup-size N` | run the hybrid cup with a bracket of 8/16/32/64 (needs `--cup-nations`) |
+| `--cup-nations FR,BE,…` | nationalities eligible for the cup |
+| `--threshold T` | `|diff|` cut for `P(|diff|>T)`; repeatable; default 400 |
+| `--out DIR` | write `report.json` + per-variant ELO-diff CSV histograms |
+| `--dump-runs FILE` | per-run metrics CSV, for ad-hoc paired analysis |
+| `--dump-strengths FILE` | per-player sampled true strength for every run |
 
-### 4.1 Mismatch ("boring games") — the first question
+### Config files
 
-- Pooled ELO-diff distribution: **mean & median |diff|**, the 90th/95th
-  percentiles, and **`P(|diff| > T)`** for each referee-chosen `T` (`--threshold`,
-  repeatable; **default 400**, ≈ a 90% win chance for the favourite). The last is
-  the headline "fraction of games that were foregone conclusions."
-- Reported as a histogram (CSV) plus those summary scalars.
+Each `--configs` file is a complete
+[`TournamentSettings`](../crates/core/src/settings.rs) JSON object (not a patch) —
+the same shape the server accepts and `normalized()` cleans up. Unset fields take
+their defaults, so a minimal variant is small, e.g. a single ELO MacMahon band:
 
-### 4.2 Who wins & how fair — the second question
+```json
+{ "macmahon_thresholds": [ { "criterion": { "kind": "elo", "value": 1486 } } ] }
+```
 
-- **Victory probability** per player: fraction of runs finishing rank 1
-  (standings order already applies the configured tie-breaks, so rank 1 is
-  well-defined). Also **top-3 / podium** rates, since the format has a cup podium.
-  Each with a **Wilson confidence interval** (`SE ≈ √(p(1−p)/K)`), so "config A
-  makes player X 8%±2% more likely to win" is stated honestly.
-- **Ranking fidelity**: **Spearman rank-correlation** between the final standings
-  order and the *true-strength* order, averaged over runs — a single number for
-  "does this format sort players by real strength?" Plus a **"strongest player
-  won"** rate.
+The Settings tab in the app has an **"Export settings"** button that downloads
+the current settings as such a JSON file, so a referee can tune the knobs in the
+UI and drop the file straight into `--configs`.
 
-### 4.3 Interestingness vs ranking fidelity — measure, don't assume
+## The strength oracle
 
-4.1 and 4.2 need not move together, but the reason is subtler than "close games
-are uninformative" — they are not. What a game reveals depends on what you do with
-the result:
+Each player's ground-truth strength for a run is drawn from
+`N(center, (jitter·σ₀)²)`:
 
-- For the **strength estimates**, an even game (`p ≈ 0.5`) is the *most*
-  informative: the Fisher information about the gap is `p(1−p)`, maximal at 0.5.
-  The estimator uses exactly this — each game adds `e(1−e)` into its curvature
-  ([`elo.rs:257`](../crates/core/src/elo.rs)) — which is why the ELO-pairing mode
-  pairs closest-in-strength.
-- The **score standings** (metric 4.2 as first defined) rank by accumulated wins,
-  *not* by that estimate. Win-counts recover a **global** order only from
-  *decisive* results; a card of near-coin-flips gives noisy scores, and pairing
-  only near-equals also means far-apart players never meet — so no global order
-  emerges. The information is in the results, but the score statistic discards it.
+- **center** — the player's override (the post-tournament strength from
+  `--results`, a `--strength` value, or a matched FESA-list rating) if present,
+  otherwise their registration rating. With `--results`, *every* player has an
+  override, so the center is their post-tournament ELO.
+- **σ₀** — the oracle prior width from
+  [`oracle_prior`](../crates/core/src/elo.rs): the same rating-/reliability-
+  dependent shape the ELO estimator uses, but pinned to the **raw FESA K** (×1),
+  widened for a provisionally-rated player by `--oracle-provisional`. Tighter for
+  strong/established players, wider for weak/provisional/unrated ones.
+- **jitter** — the global scale on that width. `0` pins each player to their
+  center exactly; `1` samples at the oracle's own prior width; `>1` stress-tests
+  worse-than-assumed ratings.
 
-So whether minimizing mismatch (4.1) costs ranking fidelity (4.2) is **contingent**
-— on the ranking statistic and the pairing structure — not a law. The tool should
-therefore report ranking fidelity **both** ways: against the score standings *and*
-against the [`estimate_elos`](../crates/core/src/elo.rs) posterior. If pushing
-mismatch toward zero hurts the score-based Spearman but not the estimate-based
-one, that is the real, measurable finding — and it turns on exactly the
-information an even game carries. Putting all of this in one table lets the referee
-*measure* whether a setting traded one for the other, instead of assuming it.
+Two properties matter:
 
-### 4.4 Secondary pairing-health metrics (V2)
+- **Centered on the truth we have.** At `jitter > 0` a `--results` player scatters
+  around their *post-tournament* ELO (which already reflects the event), not their
+  pre-tournament rating.
+- **Settings-independent.** The true strengths are one physical world shared by
+  every variant, so the oracle width never depends on a per-variant pairing knob
+  (`elo_k_multiplier`, `elo_provisional_multiplier`); the simulator scales it
+  globally with `jitter` and `--oracle-provisional` instead. Players are sampled
+  in slice order, so the draws — and the whole run — are reproducible from the
+  seed and identical across variants.
 
-Rematch rate, float-repeat rate, same-club pairings, score-group integrity — all
-already computed by the engine's rule ledger
-([`RoundExplanation`](../crates/server/src/tournament.rs)); surface them as extra
-columns once the core loop exists.
+## How a run works
 
----
+[`simulate_run`](../crates/core/src/sim.rs) clones the base, resets it to
+*registration-finalized, zero rounds* under the variant's settings, samples the
+true strengths, then for each round: `prepare_round` → apply that round's
+attendance → `confirm_round` → auto-fill the boards.
 
-## 5. Risks, caveats & things easy to miss
+- **Absence reproduction.** Each simulated round sits out exactly the players who
+  were absent in the *corresponding real round* of the base. Without this every
+  registered player would play every round — a fuller, different tournament — and
+  a player absent during the cup window (hence cup-ineligible) would silently
+  reappear. Rounds past the base's recorded history have no attendance, so
+  everyone plays.
+- **Result model.** A board's winner is sampled from the logistic law
+  `P(A beats B) = 1/(1 + 10^((elo_B − elo_A)/400))` on the two true strengths —
+  the same law the estimator fits. Draws are not modelled (a win/loss Bernoulli);
+  byes are not boards and are excluded from every game statistic.
+- **The cup.** With `--cup-size`, a hybrid direct-elimination cup runs alongside
+  the Swiss. Eligibility is computed once from the base: nationality in
+  `--cup-nations` **and** present through the first `log₂(size)` rounds. The
+  bracket seeds the top `size` eligible players by rating; MacMahon and floater
+  settings don't touch it, so its outcome distribution is the same across
+  variants (given common random numbers).
 
-- **Self-consistency caveat.** If ground-truth strength *equals* the ratings the
-  engine pairs on, the simulation measures the format under a *known, correct*
-  world — it cannot reveal how the format copes when ratings are wrong. That is
-  precisely what the optional strength-override map and the `--jitter` knob are
-  for; the doc should steer users toward using them for robustness questions.
-- **Victory-probability interpretation.** With zero jitter, upsets come only from
-  the logistic model's inherent noise; a strong favourite will win most runs.
-  That is realistic, but means "who wins" moves slowly between configs — small
-  differences need the CIs of §4.2 to interpret, hence Monte-Carlo error bars are
-  not optional polish.
-- **Byes** must be excluded from every game statistic (they are wins, not games).
-- **Draws** are unmodelled in V1 — fine for shogi, but note it in the report so a
-  reader doesn't mistake it for a claim that draws never happen.
-- **Determinism** depends on both the RNG seed *and* a deterministic pairing
-  engine (§1.1 risk note).
-- **Rounds count `N`.** Default it from the base, but a stale default silently
-  changes results; make the effective `N` explicit in the report header.
+## Common random numbers
 
----
+Every variant sees the same per-run seed (`seed + i`), so a settings A/B is
+measured on the *same simulated worlds*. To make that coupling real rather than
+incidental, each game's coin flip is **keyed on the game's identity** —
+`hash(run_seed, low player id, high player id, rematch count)`, evaluated in a
+canonical low→high orientation — instead of being drawn from a sequential stream.
+So the *same matchup decides the same way* regardless of board order, which side
+was seated first, or which variant produced it. Combined with the
+settings-independent strengths, two variants that happen to pair the same players
+resolve those games identically; the difference between variants is then only the
+pairings the settings actually changed.
 
-## 6. Suggested cut & sequencing
+## Metrics
 
-All of the following are **V1**:
+Reported per variant, aggregated over the runs.
 
-1. **Core (§1)** — the outcome model, ELO-diff function, and single-run driver,
-   with unit tests. Nothing else is possible without this.
-2. **CLI (§3–4)** — multi-config comparison with the ELO-diff, victory-probability
-   and ranking-fidelity metrics; the settings-export button (§3.4); and the
-   historical **"observed"** column (§3.3), since the base can already load a
-   completed grid and the referee wants the model checked against real events.
-3. **Secondary pairing-health metrics (§4.4)** — cheap extra columns once the loop
-   exists; the one genuinely deferrable piece, so **V2**.
+### Mismatch — "boring games"
 
-Recommended order: **1 → 2 → 3**. (No server work — see §2.)
+Pooled `|Δstrength|` over every played game: **mean & median**, the **90th/95th
+percentiles**, and **`P(|Δ| > T)`** for each `--threshold` (default 400 ≈ a 90%
+favourite) — the headline "fraction of games that were foregone conclusions."
 
----
+### Ranking fidelity
 
-## 7. Settled decisions
+Two Spearman rank-correlations against the true-strength order, averaged over
+runs: **fidelity(score)** for the final standings, and **fidelity(est)** for the
+[`estimate_elos`](../crates/core/src/elo.rs) posterior order. Reporting both
+matters because they need not move together: for the *estimate*, an even game
+(`p ≈ 0.5`) is the **most** informative (Fisher information `p(1−p)` peaks at
+0.5), whereas the score standings recover a global order only from *decisive*
+results. So whether minimizing mismatch costs ranking fidelity is contingent on
+which statistic you rank by — the two columns let you measure it rather than
+assume it.
 
-- **Logic in `osp_core`; CLI runs the loop in-process; no REST endpoints.** Fast,
-  isolated from live server state, and reuses the real engine code paths (§0). The
-  two `TODO.md` endpoint proposals are dropped/deferred (§2).
-- **True strength** = an explicit override (known, un-jittered) else a per-run
-  draw from the player's own `elo.rs` prior, `N(rating, (jitter·σ₀)²)`, so the
-  noise is rating-dependent and coherent with the estimator (§1.1).
-- **One CLI invocation compares multiple settings configs** and emits a
-  side-by-side report with Monte-Carlo confidence intervals (§3–4).
-- **Outcome law** is the logistic `1/(1+10^((B−A)/400))` from `TODO.md` — the same
-  model `elo.rs` fits.
-- **Auto-fill endpoint is gated off** on hosted/remote instances (§2).
-- **Winner = the single rank-1 finisher**, using the tournament's existing
-  tie-break chain to resolve the order — no special fractional-win handling for
-  points-ties (§4.2).
-- **`--configs` takes full `TournamentSettings` JSON**, not patches; the UI grows
-  an "Export settings" button to produce them (§3.4).
-- **`P(|diff| > T)` thresholds are referee-set** (`--threshold`, repeatable),
-  defaulting to 400 ≈ a 90% favourite (§4.1).
-- **Historical "observed" column is V1** — validating the model against real grids
-  is a first-class goal, not a nice-to-have (§3.3, §6).
+### Game interest — `interest(W)`
+
+A distributional view of boring games that the mean can't see: are the foregone
+games *spread out* or *dumped on a few players*? For each game, its **interest**
+is the outcome entropy `H₂(p)` of its win probability (1 bit at a coin flip, 0 for
+a foregone conclusion — threshold-free). Per player, average their games'
+interest; then combine across players with the **game-count-weighted Sen welfare**
+`μ_w·(1 − Gini)`, which rewards *both* a higher level (fewer foregone games) *and*
+a more even spread (Gini penalizes concentration). Weighting by games discounts a
+player who sat out most rounds (their interest is noisy), and makes the level term
+exactly the mean per-game suspense. `interest(W)` runs 0…1, **higher is better**
+(like fidelity).
+
+The report also lists the **least-interesting players** — the union of each
+variant's five biggest contributions to the welfare shortfall (`1 − W`, which
+decomposes exactly per player), with their pooled mean interest and mean games.
+This surfaces effects the aggregate hides — e.g. that a threshold-MacMahon variant
+buys a better average by burying strong *unrated* players (who meet no ELO/grade
+threshold) in foregone games.
+
+### Who wins
+
+- **Open winner** probability per player: fraction of runs finishing rank 1 in the
+  final standings, with a **Wilson 95% CI**, plus each player's real finishing
+  rank in the observed event.
+- **Cup champion** probability per player (Wilson CI), when a cup is configured.
+
+## Statistical comparison
+
+Point estimates are not exact, so a dedicated block reports, for the decision
+metrics (mean|d|, `P(|d|>T)`, fidelity, interest): each metric's value **±95% CI**
+(from run-to-run variation), and for every other variant the **paired Δ** against
+the first variant, starred by significance. The pairing uses common random numbers
+— the difference is taken per run, cancelling shared variation — so it is a
+genuinely paired test, most powerful for player-level outcomes (e.g. who wins) and
+weaker for pairing-structure metrics, where the variants genuinely pair different
+people. `--dump-runs` writes the per-run values if you want a different baseline,
+exact non-parametric tests, or multiplicity control in Python.
+
+## The observed column
+
+When the base has real played rounds, the report adds an **`observed*`** row: the
+same metrics computed on the base's actual results (nominal strengths, no jitter)
+— a real-world yardstick beside the simulated variants. It is a single realization,
+so it typically tracks true strength less tightly than the run-averaged variants;
+at `jitter > 0` its mismatch uses registration ratings, so compare it loosely.
+
+## Outputs
+
+- **stdout** — the human report: the metric tables, the statistical comparison,
+  the winner / cup-champion / least-interesting-players tables.
+- **`--out DIR`** — `report.json` (all aggregates, for scripting/plotting) and one
+  `elo-diff-<variant>.csv` histogram per variant.
+- **`--dump-runs FILE`** — one row per variant × run (`mean_diff`, `frac_exceed`,
+  `fidelity`, `interest`, `winner`); rows sharing a `run` are paired.
+- **`--dump-strengths FILE`** — the sampled true strength of every player in every
+  run, for inspecting the oracle (e.g. that `--jitter` scatters a player around
+  their post-tournament ELO).
+
+## Caveats
+
+- **Self-consistency.** With `--jitter 0` the true strengths *equal* the pairing
+  ratings, so the run measures the format in a known-correct world — it cannot
+  reveal how the format copes when ratings are wrong. Use `--jitter` (and
+  `--oracle-provisional`) for robustness questions.
+- **Slow-moving winners.** At low jitter a strong favourite wins most runs, so
+  "who wins" shifts little between variants — read it through the CIs.
+- **Draws** are unmodelled (fine for shogi, but note it before reading the tables
+  as a claim that draws never happen).
+- **Determinism** requires both the seed and a deterministic pairing engine; the
+  matching in [`pairing.rs`](../crates/core/src/pairing.rs) /
+  [`integer-blossom`](../crates/matching/src/lib.rs) is deterministic.
+- **Rounds `N`** defaults from the base; the effective `N` is printed in the report
+  header so a stale default can't silently change results.
+
+## Possible extensions
+
+- **Secondary pairing-health columns** — rematch rate, float-repeat rate,
+  same-club pairings, score-group integrity — are already computed by the engine's
+  rule ledger and could be surfaced as extra columns.
+- **A small draw probability** would be a trivial knob in the result model.
