@@ -702,7 +702,10 @@ mod tests {
         let standings = compute_standings(&players, &settings, &rounds);
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
 
-        assert_eq!((of(a.id).points, of(b.id).points, of(c.id).points), (2, 2, 2));
+        assert_eq!(
+            (of(a.id).points, of(b.id).points, of(c.id).points),
+            (2, 2, 2)
+        );
         assert_eq!((of(a.id).dc, of(b.id).dc, of(c.id).dc), (2, 1, 0));
 
         let pos = |id| standings.iter().position(|s| s.player_id == id).unwrap();

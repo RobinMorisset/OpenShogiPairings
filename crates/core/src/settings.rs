@@ -957,20 +957,16 @@ mod tests {
     #[test]
     fn elo_estimate_needed_is_true_for_either_elo_mode() {
         assert!(!TournamentSettings::default().elo_estimate_needed());
-        assert!(
-            TournamentSettings {
-                elo_pairing_enabled: true,
-                ..Default::default()
-            }
-            .elo_estimate_needed()
-        );
-        assert!(
-            TournamentSettings {
-                mixed_elo_pairing_enabled: true,
-                ..Default::default()
-            }
-            .elo_estimate_needed()
-        );
+        assert!(TournamentSettings {
+            elo_pairing_enabled: true,
+            ..Default::default()
+        }
+        .elo_estimate_needed());
+        assert!(TournamentSettings {
+            mixed_elo_pairing_enabled: true,
+            ..Default::default()
+        }
+        .elo_estimate_needed());
     }
 
     #[test]

@@ -61,7 +61,10 @@ enum Field {
 /// (so `"Nat."` matches `"nat"`, `"Dan/Kyu"` matches `"dan kyu"`, and accents /
 /// casing don't matter).
 const ALIASES: &[(Field, &[&str])] = &[
-    (Field::LastName, &["last name", "lastname", "nom", "surname"]),
+    (
+        Field::LastName,
+        &["last name", "lastname", "nom", "surname"],
+    ),
     (
         Field::FirstName,
         &["first name", "firstname", "prenom", "given name"],
@@ -132,7 +135,11 @@ fn detect_delimiter(header_line: &str) -> char {
 /// A minimal RFC-4180-ish parser: quoted fields, embedded delimiters/newlines,
 /// and `""` escapes. Rows that are entirely blank are dropped.
 fn parse_rows(text: &str, delimiter: char) -> Vec<Vec<String>> {
-    let chars: Vec<char> = text.replace("\r\n", "\n").replace('\r', "\n").chars().collect();
+    let chars: Vec<char> = text
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .chars()
+        .collect();
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut row: Vec<String> = Vec::new();
     let mut field = String::new();
@@ -201,7 +208,9 @@ pub fn parse_players_csv(
 
     // FESA lookup by accent-folded name, for filling missing ELO/grade.
     let cell = |row: &[String], idx: Option<usize>| -> String {
-        idx.and_then(|i| row.get(i)).map(|s| s.trim().to_string()).unwrap_or_default()
+        idx.and_then(|i| row.get(i))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
     };
 
     let mut players = Vec::new();
@@ -283,7 +292,13 @@ mod tests {
     use crate::player::GradeKind;
 
     /// A FESA entry, for enrichment tests.
-    fn rated(last: &str, first: &str, rating: u32, games: u32, grade: Option<Grade>) -> RatedPlayer {
+    fn rated(
+        last: &str,
+        first: &str,
+        rating: u32,
+        games: u32,
+        grade: Option<Grade>,
+    ) -> RatedPlayer {
         RatedPlayer {
             last_name: last.to_string(),
             first_name: first.to_string(),
@@ -352,7 +367,13 @@ mod tests {
     fn fesa_fills_missing_rating_and_grade_by_folded_name() {
         // The row has neither ELO nor grade; the FESA list supplies both, matched
         // across an accent difference ("Frederic" row vs "Frédéric" list).
-        let ratings = vec![rated("Rô\u{0301}vekamp", "Frederic", 1800, 42, Some(Grade::dan(2)))];
+        let ratings = vec![rated(
+            "Rô\u{0301}vekamp",
+            "Frederic",
+            1800,
+            42,
+            Some(Grade::dan(2)),
+        )];
         // Row name is the plain-ASCII spelling with a different accent style.
         let csv = "Last name,First name\nRóvekamp,Frédéric\n";
         let players = parse_players_csv(csv, &ratings).unwrap();
@@ -405,7 +426,10 @@ mod tests {
     #[test]
     fn empty_file_and_header_only_are_empty_errors() {
         assert_eq!(parse_players_csv("", &[]), Err(CsvImportError::Empty));
-        assert_eq!(parse_players_csv("   \n\n", &[]), Err(CsvImportError::Empty));
+        assert_eq!(
+            parse_players_csv("   \n\n", &[]),
+            Err(CsvImportError::Empty)
+        );
         assert_eq!(
             parse_players_csv("Last name,First name\n", &[]),
             Err(CsvImportError::Empty)

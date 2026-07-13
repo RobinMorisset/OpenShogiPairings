@@ -126,7 +126,8 @@ impl Cup {
         let (frontier, semifinal_losers) = self.replay_to(rounds, cup_rounds)?;
         let losers = semifinal_losers.expect("semifinal replayed before the final round");
 
-        let (champion, runner_up) = self.decide_slot(*fold(&frontier).first()?, rounds, cup_rounds)?;
+        let (champion, runner_up) =
+            self.decide_slot(*fold(&frontier).first()?, rounds, cup_rounds)?;
         let (third, fourth) = self.decide_slot(*fold(&losers).first()?, rounds, cup_rounds)?;
         Some(CupPodium {
             champion,

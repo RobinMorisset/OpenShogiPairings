@@ -680,14 +680,19 @@ mod tests {
             let base_cost = total_of(&cost, &base_mate);
 
             // Forbid a handful of edges the solution uses: cost must not improve.
-            let solution_edges: Vec<(usize, usize)> =
-                (0..n).filter(|&i| i < base_mate[i]).map(|i| (i, base_mate[i])).collect();
+            let solution_edges: Vec<(usize, usize)> = (0..n)
+                .filter(|&i| i < base_mate[i])
+                .map(|i| (i, base_mate[i]))
+                .collect();
             for &(i, j) in solution_edges.iter().take(5) {
                 let mut c2 = cost.clone();
                 c2[i][j] = PENALTY;
                 c2[j][i] = PENALTY;
                 let m2 = min_weight_perfect_matching(&c2);
-                assert_ne!(m2[i], j, "n={n}: forbidden solution edge {i}-{j} was still used");
+                assert_ne!(
+                    m2[i], j,
+                    "n={n}: forbidden solution edge {i}-{j} was still used"
+                );
                 // Score with the *original* costs; the forbidden edge is unused,
                 // so the penalty never enters the total.
                 let new_cost = total_of(&cost, &m2);

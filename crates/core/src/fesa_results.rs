@@ -456,7 +456,13 @@ mod tests {
         // Beta's round-2 no-show landed them in the absent set and scored nothing.
         let beta = find(&t, "Beta", "Bob").id;
         assert!(t.rounds[1].absent.contains(&beta));
-        let points = |id| t.standings().into_iter().find(|s| s.player_id == id).unwrap().points;
+        let points = |id| {
+            t.standings()
+                .into_iter()
+                .find(|s| s.player_id == id)
+                .unwrap()
+                .points
+        };
         assert_eq!(points(beta), 0);
         assert_eq!(points(find(&t, "Alpha", "Ann").id), 2); // win + bye
     }
@@ -480,7 +486,8 @@ mod tests {
         // annotation with an internal space (`3+(-r )`). Without stripping, the
         // cell would split into `3+(-r` and `)`, truncating the row to 2 cells and
         // making the rows disagree on the round count.
-        let mut text = String::from("Annotated Open : 2026\nNr Name Nat Grade ELO R1 R2 R3 Pts +/-\n");
+        let mut text =
+            String::from("Annotated Open : 2026\nNr Name Nat Grade ELO R1 R2 R3 Pts +/-\n");
         let row = |nr: u32, last: &str, first: &str, cells: &str, pts: u32| {
             format!("{nr:>2} {last:<15}{first} FR 1 Dan 1500 {cells} {pts} +0\n")
         };

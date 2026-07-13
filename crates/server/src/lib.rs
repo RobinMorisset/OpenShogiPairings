@@ -387,7 +387,7 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["code"], "csv_rows_missing_last_name");
         assert_eq!(body["values"]["rows"], "3"); // the second data row (file row 3)
-        // All-or-nothing: nothing was imported.
+                                                 // All-or-nothing: nothing was imported.
         let (_, body) = send(router(state.clone()), get(&t(id, ""))).await;
         assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
     }

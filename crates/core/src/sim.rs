@@ -163,8 +163,12 @@ pub fn sample_strengths(
     players
         .iter()
         .map(|p| {
-            let (prior_mean, std) =
-                oracle_prior(p, oracle.provisional, oracle.unrated_center, oracle.unrated_k);
+            let (prior_mean, std) = oracle_prior(
+                p,
+                oracle.provisional,
+                oracle.unrated_center,
+                oracle.unrated_k,
+            );
             // The override (post-tournament / known) strength is the mean to jitter
             // around; fall back to the registration rating when there is none.
             let center = overrides.get(&p.id).copied().unwrap_or(prior_mean);
@@ -441,8 +445,7 @@ fn prior_meetings(prior: &[crate::round::Round], a: Uuid, b: Uuid) -> u32 {
         .iter()
         .flat_map(|r| &r.boards)
         .filter(|board| {
-            (board.player1 == a && board.player2 == b)
-                || (board.player1 == b && board.player2 == a)
+            (board.player1 == a && board.player2 == b) || (board.player1 == b && board.player2 == a)
         })
         .count() as u32
 }
@@ -588,7 +591,10 @@ pub fn simulate_run(
     let cup_champion = tournament.cup_podium().and_then(|p| p.champion);
     let player_interest = player_game_interest(&tournament, &strengths);
     let interest = {
-        let values: Vec<f64> = player_interest.iter().map(|&(_, s, c)| s / c as f64).collect();
+        let values: Vec<f64> = player_interest
+            .iter()
+            .map(|&(_, s, c)| s / c as f64)
+            .collect();
         let weights: Vec<f64> = player_interest.iter().map(|&(_, _, c)| c as f64).collect();
         weighted_sen_welfare(&values, &weights)
     };
@@ -648,7 +654,12 @@ mod tests {
         overrides.insert(a, 2222.0);
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         // At jitter 0 the override is the exact ground truth.
-        let s = sample_strengths(&t.players, &overrides, &OracleModel::new(0.0, 2.0), &mut rng);
+        let s = sample_strengths(
+            &t.players,
+            &overrides,
+            &OracleModel::new(0.0, 2.0),
+            &mut rng,
+        );
         assert_eq!(s[&a], 2222.0);
     }
 
@@ -664,7 +675,12 @@ mod tests {
         let mut rng = ChaCha8Rng::seed_from_u64(3);
         let mut samples = Vec::new();
         for _ in 0..4000 {
-            let s = sample_strengths(&t.players, &overrides, &OracleModel::new(1.0, 2.0), &mut rng);
+            let s = sample_strengths(
+                &t.players,
+                &overrides,
+                &OracleModel::new(1.0, 2.0),
+                &mut rng,
+            );
             samples.push(s[&real]);
         }
         let mean = samples.iter().sum::<f64>() / samples.len() as f64;
@@ -674,16 +690,27 @@ mod tests {
         };
         // Centered on the override (1480), clearly away from the rating (1259)...
         assert!((mean - 1480.0).abs() < 15.0, "mean {mean} not ~1480");
-        assert!((mean - 1259.0).abs() > 150.0, "mean {mean} sits near the rating");
+        assert!(
+            (mean - 1259.0).abs() > 150.0,
+            "mean {mean} sits near the rating"
+        );
         // ...with real, moderate spread (jitter actually applied to the override).
-        assert!(spread > 10.0, "override was effectively pinned: spread {spread}");
+        assert!(
+            spread > 10.0,
+            "override was effectively pinned: spread {spread}"
+        );
     }
 
     #[test]
     fn zero_jitter_pins_strength_to_the_rating() {
         let t = tournament_with(&[("A", 1500), ("B", 1800)]);
         let mut rng = ChaCha8Rng::seed_from_u64(1);
-        let s = sample_strengths(&t.players, &StrengthMap::new(), &OracleModel::new(0.0, 2.0), &mut rng);
+        let s = sample_strengths(
+            &t.players,
+            &StrengthMap::new(),
+            &OracleModel::new(0.0, 2.0),
+            &mut rng,
+        );
         assert_eq!(s[&t.players[0].id], 1500.0);
         assert_eq!(s[&t.players[1].id], 1800.0);
     }
@@ -704,7 +731,12 @@ mod tests {
         let mut rng = ChaCha8Rng::seed_from_u64(7);
         let (mut ss, mut sw) = (Vec::new(), Vec::new());
         for _ in 0..2000 {
-            let s = sample_strengths(&t.players, &StrengthMap::new(), &OracleModel::new(1.0, 2.0), &mut rng);
+            let s = sample_strengths(
+                &t.players,
+                &StrengthMap::new(),
+                &OracleModel::new(1.0, 2.0),
+                &mut rng,
+            );
             ss.push(s[&strong_id]);
             sw.push(s[&weak_id]);
         }
@@ -741,8 +773,12 @@ mod tests {
             let mut rng = ChaCha8Rng::seed_from_u64(9);
             let (mut e, mut p) = (Vec::new(), Vec::new());
             for _ in 0..4000 {
-                let s =
-                    sample_strengths(&t.players, &StrengthMap::new(), &OracleModel::new(1.0, prov_mult), &mut rng);
+                let s = sample_strengths(
+                    &t.players,
+                    &StrengthMap::new(),
+                    &OracleModel::new(1.0, prov_mult),
+                    &mut rng,
+                );
                 e.push(s[&est_id]);
                 p.push(s[&prov_id]);
             }
@@ -751,10 +787,16 @@ mod tests {
         let (e1, p1) = spreads(1.0);
         let (e4, p4) = spreads(4.0);
         // Established player: reliability is 1.0 regardless, so spread is unchanged.
-        assert!((e4 - e1).abs() < 0.08 * e1, "established moved: {e1} vs {e4}");
+        assert!(
+            (e4 - e1).abs() < 0.08 * e1,
+            "established moved: {e1} vs {e4}"
+        );
         // Provisional player: variance scales with the multiplier, so std ∝ √mult —
         // ×4 should roughly double it (√4 = 2).
-        assert!(p4 > p1 * 1.7, "provisional did not widen enough: {p1} → {p4}");
+        assert!(
+            p4 > p1 * 1.7,
+            "provisional did not widen enough: {p1} → {p4}"
+        );
     }
 
     #[test]
@@ -886,7 +928,9 @@ mod tests {
         let w = weighted_sen_welfare(&vals, &wts);
         assert!((d.iter().sum::<f64>() - (1.0 - w)).abs() < 1e-12);
         // At equal weights the biggest shortfall is the lowest value (index 3 = 0.1).
-        let worst = (0..4).max_by(|&a, &b| d[a].partial_cmp(&d[b]).unwrap()).unwrap();
+        let worst = (0..4)
+            .max_by(|&a, &b| d[a].partial_cmp(&d[b]).unwrap())
+            .unwrap();
         assert_eq!(worst, 3);
         // A low value with a tiny weight is discounted below a mid value with a big
         // weight: shortfall blame shifts off the noisy player.
@@ -944,17 +988,16 @@ Nr Name    Nat Elo  1   Pts
         assert_eq!(base.rounds[0].absent.len(), 2); // C and D really sat out
 
         let mut rng = ChaCha8Rng::seed_from_u64(7);
-        let out =
-            simulate_run(
-                &base,
-                &base.settings,
-                &StrengthMap::new(),
-                &OracleModel::new(0.0, 2.0),
-                1,
-                None,
-                &mut rng,
-            )
-            .unwrap();
+        let out = simulate_run(
+            &base,
+            &base.settings,
+            &StrengthMap::new(),
+            &OracleModel::new(0.0, 2.0),
+            1,
+            None,
+            &mut rng,
+        )
+        .unwrap();
         // All four are still ranked, but only the A–B board was actually played.
         assert_eq!(out.final_order.len(), 4);
         assert_eq!(out.game_diffs.len(), 1);

@@ -72,7 +72,10 @@ fn csv_error_payload(err: &CsvImportError) -> (&'static str, BTreeMap<String, St
                 .map(usize::to_string)
                 .collect::<Vec<_>>()
                 .join(", ");
-            ("csv_rows_missing_last_name", BTreeMap::from([("rows".to_string(), joined)]))
+            (
+                "csv_rows_missing_last_name",
+                BTreeMap::from([("rows".to_string(), joined)]),
+            )
         }
     }
 }

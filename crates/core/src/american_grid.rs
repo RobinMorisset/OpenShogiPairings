@@ -389,7 +389,10 @@ mod tests {
         });
         let grid = to_grid(&t, &t.standings());
         // P1 (rank 1) shows the free point `0+`; P2 (rank 2) the no-show `0#`.
-        assert!(grid.contains("0+]"), "no-show opponent token missing: {grid}");
+        assert!(
+            grid.contains("0+]"),
+            "no-show opponent token missing: {grid}"
+        );
         assert!(grid.contains("0#]"), "no-show token missing: {grid}");
     }
 
@@ -409,8 +412,15 @@ mod tests {
             completed: true,
         });
         let grid = to_grid(&t, &t.standings());
-        assert_eq!(grid.matches("0#").count(), 2, "both cells are no-shows: {grid}");
-        assert!(!grid.contains("0+"), "no free point on a double no-show: {grid}");
+        assert_eq!(
+            grid.matches("0#").count(),
+            2,
+            "both cells are no-shows: {grid}"
+        );
+        assert!(
+            !grid.contains("0+"),
+            "no free point on a double no-show: {grid}"
+        );
     }
 
     #[test]

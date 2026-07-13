@@ -255,7 +255,7 @@ mod tests {
         let cs = mean_ci95(&small);
         let cb = mean_ci95(&big);
         assert!((cs.mean - cb.mean).abs() < 1e-9); // same mean
-        // ~2× tighter (not exactly, since Bessel's correction differs at n=10 vs 40).
+                                                   // ~2× tighter (not exactly, since Bessel's correction differs at n=10 vs 40).
         let ratio = cs.ci / cb.ci;
         assert!((1.9..2.3).contains(&ratio), "ratio {ratio}");
         // Degenerate: fewer than two values has no interval.
@@ -271,7 +271,7 @@ mod tests {
         let d = paired_diff(&a, &b).unwrap();
         assert!((d.delta - 5.0).abs() < 1e-9);
         assert!(d.ci < 1e-9); // no residual variation once paired
-        // Mismatched lengths / too few pairs: undefined.
+                              // Mismatched lengths / too few pairs: undefined.
         assert!(paired_diff(&a, &b[..3]).is_none());
         assert!(paired_diff(&[1.0], &[2.0]).is_none());
     }

@@ -702,7 +702,8 @@ mod tests {
 
     #[test]
     fn a_tombstoned_store_refuses_mutations_and_never_rewrites_its_file() {
-        let path = std::env::temp_dir().join(format!("osp-tombstone-{}.json", uuid::Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("osp-tombstone-{}.json", uuid::Uuid::new_v4()));
         let mut store = TournamentStore::with_persistence(path.clone());
         store.set_current(Tournament::new("Cup").unwrap());
         assert!(path.exists());
@@ -718,7 +719,10 @@ mod tests {
             store.mutate(None, add_named("Alice")),
             Err(MutateError::NoTournament)
         ));
-        assert!(!path.exists(), "a tombstoned store must not rewrite its file");
+        assert!(
+            !path.exists(),
+            "a tombstoned store must not rewrite its file"
+        );
     }
 
     #[test]
@@ -730,7 +734,11 @@ mod tests {
         assert!(registry.remove(id));
         // A request holding a stale `Arc` sees the tombstone and can't mutate.
         assert!(matches!(
-            instance.store.write().unwrap().mutate(None, add_named("Alice")),
+            instance
+                .store
+                .write()
+                .unwrap()
+                .mutate(None, add_named("Alice")),
             Err(MutateError::NoTournament)
         ));
         assert!(instance.store.read().unwrap().is_deleted());

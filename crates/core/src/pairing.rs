@@ -2758,7 +2758,9 @@ mod tests {
 
         assert!(cf.scoped_out.is_none());
         assert!(
-            !cf.changed.iter().any(|b| b.player1 == bye && b.player2.is_none()),
+            !cf.changed
+                .iter()
+                .any(|b| b.player1 == bye && b.player2.is_none()),
             "the old bye-taker no longer sits out"
         );
         assert!(

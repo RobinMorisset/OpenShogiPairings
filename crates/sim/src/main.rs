@@ -27,9 +27,7 @@ use osp_core::{
     decode_latin1, estimate_elos, import_fesa_results, Player, Tournament, TournamentSettings,
 };
 
-use stats::{
-    diff_stats, mean, mean_ci95, paired_diff, spearman, wilson, DiffStats, Proportion,
-};
+use stats::{diff_stats, mean, mean_ci95, paired_diff, spearman, wilson, DiffStats, Proportion};
 
 /// Compare pairing-settings variants by simulating a tournament many times.
 #[derive(Debug, Parser)]
@@ -277,9 +275,10 @@ fn run(args: Args) -> Result<(), String> {
     let names = player_names(&base);
     let observed = observed_report(&base, &overrides, &oracle, &args.thresholds);
     let mut reports = Vec::new();
-    let mut dump = args.dump_runs.as_ref().map(|_| {
-        String::from("variant,run,mean_diff,frac_exceed,fidelity,interest,winner\n")
-    });
+    let mut dump = args
+        .dump_runs
+        .as_ref()
+        .map(|_| String::from("variant,run,mean_diff,frac_exceed,fidelity,interest,winner\n"));
     let mut strengths_dump = args
         .dump_strengths
         .as_ref()
@@ -665,7 +664,10 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
         }
     }
     let ids: Vec<Uuid> = pool.keys().copied().collect();
-    let values: Vec<f64> = ids.iter().map(|id| pool[id].0 / pool[id].1 as f64).collect();
+    let values: Vec<f64> = ids
+        .iter()
+        .map(|id| pool[id].0 / pool[id].1 as f64)
+        .collect();
     let weights: Vec<f64> = ids.iter().map(|id| pool[id].1 as f64).collect();
     let shortfall = welfare_shortfall(&values, &weights);
     let mut order: Vec<usize> = (0..ids.len()).collect();
@@ -1059,7 +1061,11 @@ fn print_report(
             for r in reports {
                 match r.interest_by_player.get(id) {
                     Some(&(i, _)) => {
-                        let mark = if r.worst_interest.contains(id) { "*" } else { " " };
+                        let mark = if r.worst_interest.contains(id) {
+                            "*"
+                        } else {
+                            " "
+                        };
                         print!("  {:>15.3}{mark}", i);
                     }
                     None => print!("  {:>16}", "-"),

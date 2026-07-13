@@ -1691,7 +1691,10 @@ mod tests {
         assert_eq!(round.number, 1, "the same round is re-paired");
         assert_eq!(round.bye, Some(playing), "the forced player now byes");
         assert!(
-            round.boards.iter().any(|bd| bd.player1 == bye || bd.player2 == bye),
+            round
+                .boards
+                .iter()
+                .any(|bd| bd.player1 == bye || bd.player2 == bye),
             "the old bye-taker now plays"
         );
     }
@@ -1970,7 +1973,8 @@ mod tests {
             .boards
             .len();
         for idx in 0..n {
-            let undecided = !t.rounds.iter().find(|r| r.number == rnum).unwrap().boards[idx].is_decided();
+            let undecided =
+                !t.rounds.iter().find(|r| r.number == rnum).unwrap().boards[idx].is_decided();
             if undecided {
                 t.toggle_board_winner(rnum, idx, Winner::Player1).unwrap();
             }
