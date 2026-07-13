@@ -85,6 +85,20 @@ struct Args {
     #[arg(long, value_name = "URL|PATH", conflicts_with = "strength")]
     strength_fesa_list: Option<String>,
 
+    /// Fill each player's FESA game count from the first rating list after this
+    /// date (YYYY-MM-DD), matched by name (fetched from fesashogi.eu). A result
+    /// table carries no game counts, so without this every player is treated as
+    /// provisional; this restores the established/provisional distinction (the
+    /// reliability signal) while leaving strengths untouched. Ideally a list just
+    /// before the event, so the counts reflect ratings going *into* it.
+    #[arg(long, value_name = "YYYY-MM-DD", conflicts_with = "games_fesa_list")]
+    games_fesa_after: Option<String>,
+
+    /// Fill each player's FESA game count from a specific rating list (https URL or
+    /// local file path), matched by name. See `--games-fesa-after`.
+    #[arg(long, value_name = "URL|PATH")]
+    games_fesa_list: Option<String>,
+
     /// Multiplier on each player's prior width: 0 pins true strength to its center
     /// (the override — e.g. the post-tournament ELO — else the registration
     /// rating), 1 samples at the raw-FESA-K prior width around that center, >1
@@ -149,10 +163,29 @@ fn main() {
 }
 
 fn run(args: Args) -> Result<(), String> {
-    let (base, results_strengths) = load_base(&args)?;
+    let (mut base, results_strengths) = load_base(&args)?;
     let rounds = args.rounds.unwrap_or(base.rounds.len() as u32);
     if rounds == 0 {
         return Err("no rounds to simulate: pass --rounds (the base has none)".into());
+    }
+
+    // Enrich the (game-count-less) result-table players with FESA game counts, so
+    // the established/provisional reliability signal is real rather than "everyone
+    // provisional". Strengths are untouched.
+    if let Some(source) = &args.games_fesa_list {
+        let (games, matched) = fesa::games_from_list(source, &base)?;
+        apply_games(&mut base, &games);
+        eprintln!(
+            "fesa game counts from {source} — matched {matched}/{} players",
+            base.players.len()
+        );
+    } else if let Some(date) = &args.games_fesa_after {
+        let (games, url, matched) = fesa::games_after(date, &base)?;
+        apply_games(&mut base, &games);
+        eprintln!(
+            "fesa game counts from list {url} — matched {matched}/{} players",
+            base.players.len()
+        );
     }
 
     let overrides = if let Some(strengths) = results_strengths {
@@ -326,6 +359,16 @@ fn load_settings(path: &Path) -> Result<TournamentSettings, String> {
     let text =
         std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
     serde_json::from_str(&text).map_err(|e| format!("parsing {} as settings: {e}", path.display()))
+}
+
+/// Write the matched FESA game counts onto the base players (unmatched keep their
+/// `None`, i.e. stay provisional).
+fn apply_games(base: &mut Tournament, games: &HashMap<Uuid, u32>) {
+    for p in &mut base.players {
+        if let Some(&g) = games.get(&p.id) {
+            p.fesa_games = Some(g);
+        }
+    }
 }
 
 /// Parse `{ "<tournament_number>": <elo>, ... }` and resolve to player ids.

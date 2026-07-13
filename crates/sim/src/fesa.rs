@@ -9,6 +9,8 @@
 use std::collections::HashMap;
 use std::io::Read;
 
+use uuid::Uuid;
+
 use osp_core::sim::StrengthMap;
 use osp_core::{decode_latin1, parse_rating_list, RatedPlayer, Tournament};
 
@@ -107,6 +109,47 @@ pub fn match_fesa(rated: &[RatedPlayer], base: &Tournament) -> (StrengthMap, usi
     }
     let matched = map.len();
     (map, matched)
+}
+
+/// Match base players to FESA entries by folded `(last, first)` name and return
+/// each matched player's FESA **game count** (plus how many matched). A result
+/// table carries no game counts, so every player imports as provisional; filling
+/// `fesa_games` from a rating list restores the established/provisional distinction
+/// *without* touching strengths (the oracle still uses the results' post-ELO).
+pub fn match_games(rated: &[RatedPlayer], base: &Tournament) -> (HashMap<Uuid, u32>, usize) {
+    let by_name: HashMap<(String, String), u32> = rated
+        .iter()
+        .map(|r| ((fold_name(&r.last_name), fold_name(&r.first_name)), r.games))
+        .collect();
+    let mut map = HashMap::new();
+    for p in &base.players {
+        if let Some(&games) = by_name.get(&(fold_name(&p.last_name), fold_name(&p.first_name))) {
+            map.insert(p.id, games);
+        }
+    }
+    let matched = map.len();
+    (map, matched)
+}
+
+/// Game counts from the first list after a tournament date. Returns the map, the
+/// resolved list URL (for reporting), and the match count.
+pub fn games_after(
+    date: &str,
+    base: &Tournament,
+) -> Result<(HashMap<Uuid, u32>, String, usize), String> {
+    let url = list_url(next_list_date(parse_ymd(date)?));
+    let rated = parse_rating_list(&fetch_url(&url)?);
+    let (map, matched) = match_games(&rated, base);
+    Ok((map, url, matched))
+}
+
+/// Game counts from a specific list (URL or local path).
+pub fn games_from_list(
+    source: &str,
+    base: &Tournament,
+) -> Result<(HashMap<Uuid, u32>, usize), String> {
+    let rated = parse_rating_list(&load_list_text(source)?);
+    Ok(match_games(&rated, base))
 }
 
 /// Fetch (http/https URL) or read (local path) a Latin-1 FESA list into decoded
@@ -231,6 +274,13 @@ mod tests {
         assert_eq!(matched, 1);
         assert_eq!(map[&a], 1834.0); // post-tournament rating used as truth
         assert!(!map.contains_key(&b)); // no FESA entry → falls back to grid rating
+
+        // The games matcher keys on the same folded name but yields the game count,
+        // not the rating — and leaves the unmatched player out (stays provisional).
+        let (games, gmatched) = match_games(&rated, &base);
+        assert_eq!(gmatched, 1);
+        assert_eq!(games[&a], 40);
+        assert!(!games.contains_key(&b));
     }
 
     fn rated(last: &str, first: &str, rating: u32) -> RatedPlayer {
