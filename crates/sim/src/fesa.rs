@@ -39,39 +39,38 @@ pub fn parse_ymd(s: &str) -> Result<Ymd, String> {
     Ok((year, month, day))
 }
 
-/// The FESA rating-list date to use for a tournament dated `after`, given the
+/// FESA's stable "latest list" endpoint — always resolves to the most recent
+/// published list (a permanent one, or a more-recent transient one). Mirrors
+/// `crates/server/src/ratings.rs`'s `FESA_URL`.
+const FESA_LATEST_URL: &str = "https://fesashogi.eu/old/ratinglists/latest.txt";
+
+/// The FESA rating-list **URL** to fetch for a tournament dated `after`, given the
 /// current date `today`.
 ///
-/// FESA publishes a **permanent** list twice a year, on 1 January and 1 July.
-/// (Separately, a *transient* "latest" list is published at irregular intervals and
-/// is replaced the moment any newer list — permanent or transient — appears, so its
-/// URL is short-lived.) We target the first permanent list strictly after the
-/// tournament, since it already reflects the results. If that list is still in the
-/// future — not published yet — we fall back to the most recent permanent list on
-/// or before `today`: a stable URL, deliberately *not* the transient latest (which
-/// would soon 404 and break reproducibility).
-pub fn next_list_date(after: Ymd, today: Ymd) -> Ymd {
-    let (y, _, _) = after;
-    // Two permanent lists a year; the window [y, y+1] always contains the next one.
-    let scheduled = [(y, 1, 1), (y, 7, 1), (y + 1, 1, 1), (y + 1, 7, 1)]
-        .into_iter()
-        .find(|&d| d > after)
-        .expect("y+1 candidates always exceed a date in year y");
+/// FESA publishes a **permanent** list twice a year, on 1 January and 1 July, at a
+/// dated URL. We target the first permanent list strictly after the tournament,
+/// since it already reflects the results. If that list isn't published yet (its
+/// date is still in the future), we fall back to the server's stable `latest.txt`
+/// endpoint — the most recent list available, whether that is a permanent list or
+/// a more-recent transient one. (A transient list has an irregular, uncomputable
+/// date, so it can only be reached through that endpoint.)
+pub fn list_url_for(after: Ymd, today: Ymd) -> String {
+    let scheduled = next_permanent_list(after);
     if scheduled <= today {
-        scheduled
+        list_url(scheduled)
     } else {
-        latest_permanent(today)
+        FESA_LATEST_URL.to_string()
     }
 }
 
-/// The most recent permanent list (1 Jan or 1 Jul) on or before `today`.
-fn latest_permanent(today: Ymd) -> Ymd {
-    let (y, m, _) = today;
-    if m >= 7 {
-        (y, 7, 1)
-    } else {
-        (y, 1, 1)
-    }
+/// The first permanent FESA list date (1 Jan or 1 Jul) strictly after `after`.
+fn next_permanent_list(after: Ymd) -> Ymd {
+    let (y, _, _) = after;
+    // Two permanent lists a year; the window [y, y+1] always contains the next one.
+    [(y, 1, 1), (y, 7, 1), (y + 1, 1, 1), (y + 1, 7, 1)]
+        .into_iter()
+        .find(|&d| d > after)
+        .expect("y+1 candidates always exceed a date in year y")
 }
 
 /// Today's date as `(year, month, day)` in UTC, from the system clock.
@@ -187,7 +186,7 @@ pub fn games_after(
     date: &str,
     base: &Tournament,
 ) -> Result<(HashMap<Uuid, u32>, String, usize), String> {
-    let url = list_url(next_list_date(parse_ymd(date)?, today_ymd()));
+    let url = list_url_for(parse_ymd(date)?, today_ymd());
     let rated = parse_rating_list(&fetch_url(&url)?);
     let (map, matched) = match_games(&rated, base);
     Ok((map, url, matched))
@@ -231,7 +230,7 @@ pub fn overrides_after(
     date: &str,
     base: &Tournament,
 ) -> Result<(StrengthMap, String, usize), String> {
-    let url = list_url(next_list_date(parse_ymd(date)?, today_ymd()));
+    let url = list_url_for(parse_ymd(date)?, today_ymd());
     let rated = parse_rating_list(&fetch_url(&url)?);
     let (map, matched) = match_fesa(&rated, base);
     Ok((map, url, matched))
@@ -253,32 +252,34 @@ mod tests {
     use osp_core::NewPlayer;
 
     #[test]
-    fn next_list_date_picks_the_first_jan_or_jul_after() {
-        // `today` far in the future, so every scheduled list counts as published.
-        let published = (9999, 1, 1);
-        let next = |after| next_list_date(after, published);
-        assert_eq!(next((2025, 11, 15)), (2026, 1, 1));
-        assert_eq!(next((2026, 3, 10)), (2026, 7, 1));
-        assert_eq!(next((2026, 6, 30)), (2026, 7, 1));
+    fn next_permanent_list_picks_the_first_jan_or_jul_after() {
+        assert_eq!(next_permanent_list((2025, 11, 15)), (2026, 1, 1));
+        assert_eq!(next_permanent_list((2026, 3, 10)), (2026, 7, 1));
+        assert_eq!(next_permanent_list((2026, 6, 30)), (2026, 7, 1));
         // A date exactly on a list date resolves to the *next* one (strictly after).
-        assert_eq!(next((2026, 1, 1)), (2026, 7, 1));
-        assert_eq!(next((2026, 7, 1)), (2027, 1, 1));
+        assert_eq!(next_permanent_list((2026, 1, 1)), (2026, 7, 1));
+        assert_eq!(next_permanent_list((2026, 7, 1)), (2027, 1, 1));
         // WOSC 2024 (August) → the following January list.
-        assert_eq!(next((2024, 8, 4)), (2025, 1, 1));
+        assert_eq!(next_permanent_list((2024, 8, 4)), (2025, 1, 1));
     }
 
     #[test]
-    fn next_list_date_falls_back_to_latest_permanent_when_next_is_future() {
-        // Tournament Aug 2024; today Sep 2024 — the next scheduled list (Jan 2025)
-        // isn't out, so use the latest published one (Jul 2024).
-        assert_eq!(next_list_date((2024, 8, 4), (2024, 9, 15)), (2024, 7, 1));
-        // Once today passes the scheduled date, use it.
-        assert_eq!(next_list_date((2024, 8, 4), (2025, 3, 1)), (2025, 1, 1));
-        // Before 1 Jul, the latest permanent list is January (any transient list is
-        // never targeted, since its date isn't computable and its URL is short-lived).
-        assert_eq!(next_list_date((2025, 2, 1), (2025, 6, 20)), (2025, 1, 1));
-        // From 1 Jul onward, the July list is the latest permanent one.
-        assert_eq!(next_list_date((2025, 2, 1), (2025, 7, 5)), (2025, 7, 1));
+    fn list_url_for_uses_the_dated_list_when_published_else_latest() {
+        // Published: the dated URL of the first permanent list after the tournament.
+        assert_eq!(
+            list_url_for((2024, 8, 4), (2025, 3, 1)),
+            "https://fesashogi.eu/old/ratinglists/2025-01-01.txt"
+        );
+        // The next permanent list is still in the future → the stable latest.txt.
+        assert_eq!(list_url_for((2024, 8, 4), (2024, 9, 15)), FESA_LATEST_URL);
+        // Mid-year, before 1 Jul: the next permanent (Jul) list isn't out yet, so
+        // latest.txt — which also covers any transient list published in between.
+        assert_eq!(list_url_for((2025, 2, 1), (2025, 6, 20)), FESA_LATEST_URL);
+        // Once the July list is out, back to its dated URL.
+        assert_eq!(
+            list_url_for((2025, 2, 1), (2025, 7, 5)),
+            "https://fesashogi.eu/old/ratinglists/2025-07-01.txt"
+        );
     }
 
     #[test]
