@@ -40,6 +40,9 @@
     onClickWinner: (boardIndex: number, clicked: Winner) => void;
     /** Set/clear the "a draw occurred" flag on a board. */
     onToggleDrawn: (boardIndex: number, drawn: boolean) => void;
+    /** Mark (or clear, with null) a board as a no-show: `absent` names the side
+     *  that failed to appear. */
+    onSetNoShow: (boardIndex: number, absent: Winner | null) => void;
     /** Set (or clear, with null) a board's handicap. */
     onSetHandicap: (boardIndex: number, handicap: Handicap | null) => void;
     busy?: boolean;
@@ -56,9 +59,16 @@
     onForcePairing,
     onClickWinner,
     onToggleDrawn,
+    onSetNoShow,
     onSetHandicap,
     busy = false,
   }: Props = $props();
+
+  // Toggle a no-show for `side`: clicking the side already marked absent clears
+  // it, otherwise it becomes the absentee (switching sides if the other was set).
+  function toggleNoShow(index: number, board: Board, side: Winner) {
+    onSetNoShow(index, board.no_show === side ? null : side);
+  }
 
   // Resolve player ids to display names.
   const byId = $derived(new Map(players.map((p) => [p.id, p])));
@@ -385,6 +395,7 @@
           <th class="p1-col">{$_("roundView.player1")}</th>
           <th>{$_("roundView.player2")}</th>
           <th class="draw-col">{$_("roundView.draw")}</th>
+          <th class="noshow-col">{$_("roundView.noShow")}</th>
           {#if handicapPolicy !== "none"}
             <th class="handicap-col">{$_("roundView.handicap")}</th>
             {#if handicapPolicy === "suggested"}
@@ -408,8 +419,8 @@
               <button
                 type="button"
                 class="player"
-                class:winner={board.result === "player1"}
-                class:loser={board.result === "player2"}
+                class:winner={board.result === "player1" || board.no_show === "player2"}
+                class:loser={board.result === "player2" || board.no_show === "player1"}
                 disabled={busy}
                 title={$_("roundView.clickToSetWinner")}
                 onclick={() => onClickWinner(index, "player1")}
@@ -421,8 +432,8 @@
               <button
                 type="button"
                 class="player"
-                class:winner={board.result === "player2"}
-                class:loser={board.result === "player1"}
+                class:winner={board.result === "player2" || board.no_show === "player1"}
+                class:loser={board.result === "player1" || board.no_show === "player2"}
                 disabled={busy}
                 title={$_("roundView.clickToSetWinner")}
                 onclick={() => onClickWinner(index, "player2")}
@@ -442,6 +453,34 @@
               >
                 =
               </button>
+            </td>
+            <td class="noshow-col">
+              {#if !isCup(board)}
+                <div class="noshow">
+                  <button
+                    type="button"
+                    class="noshow-btn"
+                    class:active={board.no_show === "player1"}
+                    disabled={busy}
+                    aria-pressed={board.no_show === "player1"}
+                    title={$_("roundView.noShowTitle", { values: { name: name(board.player1) } })}
+                    onclick={() => toggleNoShow(index, board, "player1")}
+                  >
+                    ◄
+                  </button>
+                  <button
+                    type="button"
+                    class="noshow-btn"
+                    class:active={board.no_show === "player2"}
+                    disabled={busy}
+                    aria-pressed={board.no_show === "player2"}
+                    title={$_("roundView.noShowTitle", { values: { name: name(board.player2) } })}
+                    onclick={() => toggleNoShow(index, board, "player2")}
+                  >
+                    ►
+                  </button>
+                </div>
+              {/if}
             </td>
             {#if handicapPolicy !== "none"}
               <td class="handicap-col">
@@ -502,6 +541,7 @@
               <span class="player bye-opponent">{$_("roundView.byeOpponent")}</span>
             </td>
             <td class="draw-col"></td>
+            <td class="noshow-col"></td>
             {#if handicapPolicy !== "none"}
               <td class="handicap-col"></td>
               {#if handicapPolicy === "suggested"}
@@ -926,6 +966,39 @@
     background: var(--bg-warning);
   }
 
+  .noshow-col {
+    text-align: center;
+    width: 4rem;
+  }
+  .noshow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+  }
+  .noshow-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.9rem;
+    padding: 0;
+    border: 1px solid var(--border-soft);
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--text-tertiary);
+    font: inherit;
+    cursor: pointer;
+  }
+  .noshow-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+  }
+  .noshow-btn.active {
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+    background: var(--bg-warning);
+  }
+
   .handicap {
     width: 4.5rem;
     background: var(--bg-inset);
@@ -967,6 +1040,7 @@
       display: none;
     }
     .draw-col,
+    .noshow-col,
     .handicap-col {
       display: none;
     }

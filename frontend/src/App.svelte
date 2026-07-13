@@ -23,6 +23,7 @@
     restoreBackup,
     setBoardDrawn,
     setBoardHandicap,
+    setBoardNoShow,
     setBoardWinner,
     setPlayerEligible,
     undoTournament,
@@ -543,6 +544,12 @@
     });
   }
 
+  function handleSetNoShow(roundNumber: number, boardIndex: number, absent: Winner | null) {
+    run(async () => {
+      apply(await setBoardNoShow(roundNumber, boardIndex, absent));
+    });
+  }
+
   function handleSave() {
     if (!tournament) return;
     const current = tournament;
@@ -870,6 +877,8 @@
               handleSetResult(activeRound.number, boardIndex, clicked)}
             onToggleDrawn={(boardIndex, drawn) =>
               handleSetDrawn(activeRound.number, boardIndex, drawn)}
+            onSetNoShow={(boardIndex, absent) =>
+              handleSetNoShow(activeRound.number, boardIndex, absent)}
             onSetHandicap={(boardIndex, handicap) =>
               handleSetHandicap(activeRound.number, boardIndex, handicap)}
             {busy}

@@ -178,6 +178,14 @@ pub struct Board {
     /// Swiss for saves predating this field.
     #[serde(default, skip_serializing_if = "PairingSource::is_swiss")]
     pub source: PairingSource,
+    /// A player failed to show up. The variant names the player who was *absent*;
+    /// the other player is credited the point exactly as for a bye, while the
+    /// no-show takes a zero loss. Kept separate from [`result`](Self::result)
+    /// (which stays `None` — no game was actually played) so the cross-table and
+    /// American grid can show it distinctly (`0#` for the absentee, `0+` for the
+    /// player who showed up), and so it never feeds the ELO estimate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_show: Option<Winner>,
 }
 
 impl Board {
@@ -197,7 +205,33 @@ impl Board {
             handicap: None,
             points_diff,
             source,
+            no_show: None,
         }
+    }
+
+    /// Whether this board's outcome is settled: either a game was played (a
+    /// `result` is recorded) or a player was marked as a no-show. Drives the
+    /// round's `completed` flag, so a no-show counts toward closing the round
+    /// even though no game was played.
+    pub fn is_decided(&self) -> bool {
+        self.result.is_some() || self.no_show.is_some()
+    }
+
+    /// The id of the player who did not show up, if this board is a no-show.
+    pub fn no_show_player(&self) -> Option<Uuid> {
+        self.no_show.map(|w| match w {
+            Winner::Player1 => self.player1,
+            Winner::Player2 => self.player2,
+        })
+    }
+
+    /// The id of the player who *did* show up — the one credited the free point,
+    /// exactly like a bye — if this board is a no-show.
+    pub fn no_show_opponent(&self) -> Option<Uuid> {
+        self.no_show.map(|w| match w {
+            Winner::Player1 => self.player2,
+            Winner::Player2 => self.player1,
+        })
     }
 
     /// The winner that counts for standings and pairing. For a handicap game,

@@ -126,6 +126,13 @@ pub(crate) fn compute_scores(
         // A float is judged on the points going *into* the round, so record
         // opponents and floats before applying this round's results.
         for board in &round.boards {
+            // A no-show is not a real game: the player who showed up is scored
+            // exactly like a bye and the absentee like an absence (both handled
+            // below), so neither records the other as an opponent, and there is
+            // no float to read off this board.
+            if board.no_show.is_some() {
+                continue;
+            }
             let (a, b) = (board.player1, board.player2);
             if !by_id.contains_key(&a) || !by_id.contains_key(&b) {
                 continue;
@@ -163,6 +170,16 @@ pub(crate) fn compute_scores(
                 s.last_descended = Some(round.number); // a bye is a downfloat
             }
         }
+        // A no-show has the same effect on the player who showed up as a bye: a
+        // downfloat they can't be given twice.
+        for board in &round.boards {
+            if let Some(present) = board.no_show_opponent() {
+                if let Some(s) = by_id.get_mut(&present) {
+                    s.had_bye = true;
+                    s.last_descended = Some(round.number);
+                }
+            }
+        }
 
         // Apply this round's results (effective winner scores).
         for board in &round.boards {
@@ -181,6 +198,16 @@ pub(crate) fn compute_scores(
             if let Some(s) = by_id.get_mut(&bye) {
                 s.points += 1;
                 s.victories += 1;
+            }
+        }
+        // The player who showed up on a no-show board scores the free point, as
+        // for a bye. The absentee scores nothing (like an absence).
+        for board in &round.boards {
+            if let Some(present) = board.no_show_opponent() {
+                if let Some(s) = by_id.get_mut(&present) {
+                    s.points += 1;
+                    s.victories += 1;
+                }
             }
         }
 
@@ -271,6 +298,40 @@ mod tests {
         let scores = compute_scores(&[a.clone(), b.clone()], &settings, &[round]);
         assert_eq!(scores.get(&a.id).last_descended, Some(1));
         assert_eq!(scores.get(&b.id).last_ascended, Some(1));
+    }
+
+    #[test]
+    fn no_show_scores_like_a_bye_for_the_present_player_and_an_absence_for_the_absentee() {
+        // A and B are paired but B doesn't show up. A is credited the point (as
+        // for a bye: +1 point/win, marked as having "had a bye", a downfloat),
+        // while B scores nothing. Neither records the other as an opponent.
+        let a = player(1, None);
+        let b = player(2, None);
+        let round = Round {
+            number: 1,
+            boards: vec![Board {
+                no_show: Some(Winner::Player2), // player2 (B) is absent
+                ..Board::pending(a.id, b.id, Some(0), PairingSource::Swiss)
+            }],
+            bye: None,
+            absent: Vec::new(),
+            completed: true,
+        };
+        let scores = compute_scores(
+            &[a.clone(), b.clone()],
+            &TournamentSettings::default(),
+            &[round],
+        );
+        assert_eq!(scores.get(&a.id).points, 1);
+        assert_eq!(scores.get(&a.id).victories, 1);
+        assert!(scores.get(&a.id).had_bye);
+        assert_eq!(scores.get(&a.id).last_descended, Some(1));
+        assert!(scores.get(&a.id).opponents.is_empty());
+        // The absentee is untouched — no point, no opponent, no float.
+        assert_eq!(scores.get(&b.id).points, 0);
+        assert_eq!(scores.get(&b.id).victories, 0);
+        assert!(!scores.get(&b.id).had_bye);
+        assert!(scores.get(&b.id).opponents.is_empty());
     }
 
     #[test]

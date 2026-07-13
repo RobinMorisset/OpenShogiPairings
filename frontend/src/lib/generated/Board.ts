@@ -36,4 +36,13 @@ points_diff?: number | null,
  * How this pairing was decided (Swiss / referee-forced / cup). Defaults to
  * Swiss for saves predating this field.
  */
-source?: PairingSource, };
+source?: PairingSource, 
+/**
+ * A player failed to show up. The variant names the player who was *absent*;
+ * the other player is credited the point exactly as for a bye, while the
+ * no-show takes a zero loss. Kept separate from [`result`](Self::result)
+ * (which stays `None` — no game was actually played) so the cross-table and
+ * American grid can show it distinctly (`0#` for the absentee, `0+` for the
+ * player who showed up), and so it never feeds the ELO estimate.
+ */
+no_show?: Winner | null, };

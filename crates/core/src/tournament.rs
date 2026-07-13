@@ -799,7 +799,7 @@ impl Tournament {
         if round.completed {
             return Err(TournamentError::RoundHasResults);
         }
-        if round.boards.iter().any(|bd| bd.result.is_some()) {
+        if round.boards.iter().any(|bd| bd.is_decided()) {
             return Err(TournamentError::RoundHasResults);
         }
 
@@ -882,7 +882,47 @@ impl Tournament {
         } else {
             Some(clicked)
         };
-        round.completed = round.boards.iter().all(|b| b.result.is_some());
+        // Recording an actual result supersedes a no-show — the game was played
+        // after all — so the two states stay mutually exclusive.
+        if board.result.is_some() {
+            board.no_show = None;
+        }
+        round.completed = round.boards.iter().all(|b| b.is_decided());
+        Ok(&round.boards[board_index])
+    }
+
+    /// Mark a board as a no-show, or clear it.
+    ///
+    /// `absent` names the side that failed to appear (`None` clears the flag,
+    /// back to a normal unplayed board). The player who showed up is credited a
+    /// free point exactly like a bye; the absentee takes a zero loss. A no-show
+    /// isn't a played game, so recording one clears any actual result and draw
+    /// flag on the board. Like recording a winner, this keeps the round's
+    /// `completed` flag in sync — a no-show counts toward closing the round.
+    pub fn set_board_no_show(
+        &mut self,
+        round_number: u32,
+        board_index: usize,
+        absent: Option<Winner>,
+    ) -> Result<&Board, TournamentError> {
+        let round = self
+            .rounds
+            .iter_mut()
+            .find(|r| r.number == round_number)
+            .ok_or(TournamentError::RoundNotFound(round_number))?;
+        let board = round
+            .boards
+            .get_mut(board_index)
+            .ok_or(TournamentError::BoardNotFound {
+                round: round_number,
+                board: board_index,
+            })?;
+        board.no_show = absent;
+        if absent.is_some() {
+            board.result = None;
+            board.drawn = false;
+        }
+        round.completed = round.boards.iter().all(|b| b.is_decided());
         Ok(&round.boards[board_index])
     }
 
@@ -1377,6 +1417,38 @@ mod tests {
             t.toggle_board_winner(1, 0, Winner::Player2).unwrap().result,
             None
         );
+    }
+
+    #[test]
+    fn no_show_completes_the_round_and_is_exclusive_with_a_result() {
+        use crate::round::Winner;
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+
+        // Marking a no-show settles the only board, so the round completes even
+        // though no game was played.
+        let board = t.set_board_no_show(1, 0, Some(Winner::Player2)).unwrap();
+        assert_eq!(board.no_show, Some(Winner::Player2));
+        assert_eq!(board.result, None);
+        assert!(t.rounds[0].completed);
+
+        // Recording an actual winner supersedes the no-show (game was played).
+        let board = t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        assert_eq!(board.result, Some(Winner::Player1));
+        assert_eq!(board.no_show, None);
+
+        // And marking a no-show again clears the recorded result.
+        let board = t.set_board_no_show(1, 0, Some(Winner::Player1)).unwrap();
+        assert_eq!(board.result, None);
+        assert_eq!(board.no_show, Some(Winner::Player1));
+
+        // Clearing it reopens the round.
+        t.set_board_no_show(1, 0, None).unwrap();
+        assert!(!t.rounds[0].completed);
     }
 
     #[test]

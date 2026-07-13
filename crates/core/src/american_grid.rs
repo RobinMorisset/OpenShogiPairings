@@ -135,8 +135,9 @@ fn row_for(
     row
 }
 
-/// The single round cell for a player: `0+` for a bye, `0-` for an absence, or
-/// `<opponent><marker><handicap?>` for a game. The opponent is their final rank.
+/// The single round cell for a player: `0+` for a bye (or a no-show opponent),
+/// `0-` for an absence, `0#` for a no-show, or `<opponent><marker><handicap?>`
+/// for a game. The opponent is their final rank.
 fn round_cell(player_id: Uuid, round: &Round, rank_of: &HashMap<Uuid, u32>) -> String {
     if round.bye == Some(player_id) {
         return "0+".into();
@@ -146,11 +147,23 @@ fn round_cell(player_id: Uuid, round: &Round, rank_of: &HashMap<Uuid, u32>) -> S
         .iter()
         .find(|b| b.player1 == player_id || b.player2 == player_id)
     else {
-        // No board and not the bye: absent (OSP has no distinct no-show token).
+        // No board and not the bye: absent for the whole round.
         return "0-".into();
     };
 
     let is_player1 = board.player1 == player_id;
+
+    // A no-show board renders distinctly: `0#` for the player who was absent,
+    // `0+` (a bye-equivalent free point) for the one who showed up.
+    if board.no_show.is_some() {
+        return if board.no_show_player() == Some(player_id) {
+            "0#".into()
+        } else {
+            "0+".into()
+        };
+    }
+
+
     let opponent_id = if is_player1 {
         board.player2
     } else {
@@ -346,6 +359,28 @@ mod tests {
         let grid = to_grid(&t, &t.standings());
         // C's row now ends its round block with an absence in round 2.
         assert!(grid.contains("0-]"), "absence token missing: {grid}");
+    }
+
+    #[test]
+    fn no_show_tokens() {
+        // P1 (rated 2000) beats P2 in a first round so the ranking is settled,
+        // then in round 2 P2 doesn't show up against P1: P1's cell is `0+`, P2's
+        // `0#`.
+        let (mut t, p1, p2) = one_board(|_| {});
+        t.rounds.push(Round {
+            number: 2,
+            boards: vec![Board {
+                no_show: Some(Winner::Player2), // P2 absent
+                ..Board::pending(p1, p2, None, PairingSource::Swiss)
+            }],
+            bye: None,
+            absent: Vec::new(),
+            completed: true,
+        });
+        let grid = to_grid(&t, &t.standings());
+        // P1 (rank 1) shows the free point `0+`; P2 (rank 2) the no-show `0#`.
+        assert!(grid.contains("0+]"), "no-show opponent token missing: {grid}");
+        assert!(grid.contains("0#]"), "no-show token missing: {grid}");
     }
 
     #[test]

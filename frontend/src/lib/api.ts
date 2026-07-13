@@ -486,6 +486,21 @@ export function setBoardDrawn(
   );
 }
 
+/**
+ * Mark (or clear) a board as a no-show. `absent` names the side that failed to
+ * appear; `null` clears the flag back to a normal unplayed board.
+ */
+export function setBoardNoShow(
+  roundNumber: number,
+  boardIndex: number,
+  absent: Winner | null,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    scopedPath(`/rounds/${roundNumber}/boards/${boardIndex}/no-show`),
+    { method: "POST", body: JSON.stringify({ absent }) },
+  );
+}
+
 /** Set or clear a board's handicap (the server freezes the giver from ratings). */
 export function setBoardHandicap(
   roundNumber: number,

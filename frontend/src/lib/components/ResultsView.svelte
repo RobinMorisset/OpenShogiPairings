@@ -118,6 +118,10 @@
   type Cell =
     | { kind: "bye" }
     | { kind: "absent" }
+    // A no-show board: this player was the absentee (`0#`) or the one who
+    // showed up and was credited the free point, bye-style (`0+`).
+    | { kind: "no-show"; opponentName: string }
+    | { kind: "no-show-win"; opponentName: string }
     | { kind: "pending"; opponent: string; opponentName: string }
     | PlayedCell;
 
@@ -134,6 +138,11 @@
     const opponentId = numberOf.get(opponentUuid);
     const opponent = opponentId != null ? String(opponentId) : "?";
     const opponentName = nameOf(opponentUuid);
+    if (board.no_show) {
+      return board.no_show === side
+        ? { kind: "no-show", opponentName }
+        : { kind: "no-show-win", opponentName };
+    }
     if (!board.result) return { kind: "pending", opponent, opponentName };
 
     const { actualWon, gave } = boardOutcome(board, side);
@@ -354,6 +363,18 @@
                 <span class="win" data-tip={$_("resultsView.byeTitle")}>0+</span>
               {:else if cell.kind === "absent"}
                 <span class="absent" data-tip={$_("resultsView.absentTitle")}>0−</span>
+              {:else if cell.kind === "no-show"}
+                <span
+                  class="absent"
+                  data-tip={$_("resultsView.noShowTitle", { values: { name: cell.opponentName } })}
+                  >0#</span
+                >
+              {:else if cell.kind === "no-show-win"}
+                <span
+                  class="win"
+                  data-tip={$_("resultsView.noShowWinTitle", { values: { name: cell.opponentName } })}
+                  >0+</span
+                >
               {:else if cell.kind === "pending"}
                 <span
                   class="pending"

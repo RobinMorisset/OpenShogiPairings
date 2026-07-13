@@ -46,6 +46,7 @@ use crate::{auth, live};
 /// - `POST   /rounds/force-pairing`      re-pair the round with a forced board
 /// - `POST   /rounds/{n}/boards/{i}/result`  toggle a board winner
 /// - `POST   /rounds/{n}/boards/{i}/drawn`   set the draw flag
+/// - `POST   /rounds/{n}/boards/{i}/no-show` set/clear a board no-show
 /// - `PUT    /rounds/{n}/boards/{i}/handicap` set/clear the handicap
 /// - `POST   /players`       register a player
 /// - `POST   /players/batch` register many players as a single mutation (CSV import)
@@ -98,6 +99,10 @@ pub fn scope(state: AppState) -> Router<AppState> {
         .route(
             "/rounds/{round_number}/boards/{board_index}/drawn",
             post(set_board_drawn),
+        )
+        .route(
+            "/rounds/{round_number}/boards/{board_index}/no-show",
+            post(set_board_no_show),
         )
         .route(
             "/rounds/{round_number}/boards/{board_index}/handicap",
@@ -591,6 +596,35 @@ async fn set_board_drawn(
         t.set_board_drawn(params.round_number, params.board_index, req.drawn)
             .map(|_| ())
     })?;
+    view(&store)
+}
+
+/// Body of the no-show endpoint: which side failed to appear, or `null` to
+/// clear the flag back to a normal unplayed board.
+#[derive(Debug, Deserialize)]
+struct SetNoShowRequest {
+    absent: Option<Winner>,
+}
+
+/// Mark (or clear) a board as a no-show.
+///
+/// Like recording a winner, a no-show can complete the round (once every board
+/// is decided), so the automatic "round N completed" backup is taken here too,
+/// only on the transition into completed.
+async fn set_board_no_show(
+    TournamentCtx(instance): TournamentCtx,
+    Path(params): Path<BoardParams>,
+    Json(req): Json<SetNoShowRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.store.write().expect("store lock poisoned");
+    let was_completed = round_completed(&store, params.round_number);
+    store.mutate(|t| {
+        t.set_board_no_show(params.round_number, params.board_index, req.absent)
+            .map(|_| ())
+    })?;
+    if !was_completed && round_completed(&store, params.round_number) {
+        backup_after(&store, &format!("round {} completed", params.round_number));
+    }
     view(&store)
 }
 
