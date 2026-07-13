@@ -1,0 +1,9 @@
+# Revisions to skip in `git blame` (bulk reformatting / mechanical changes,
+# no authorship signal). Enable locally with:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# (GitHub honors this file automatically.)
+
+# style: cargo fmt across the workspace
+abfac61c6a308dac7918e3311e870d4220f8843b
