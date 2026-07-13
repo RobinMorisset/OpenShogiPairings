@@ -8,7 +8,7 @@
     loginAdmin,
     replaceTournament,
   } from "../api";
-  import { currentTournamentId, initialTab } from "../session";
+  import { currentTournamentId, getToken, initialTab } from "../session";
   import { loadTournament } from "../tournamentFile";
   import CreateTournament from "./CreateTournament.svelte";
   import type { TournamentSummary } from "../types";
@@ -137,7 +137,11 @@
           <li>
             <button type="button" class="ghost pick" onclick={() => select(t.id)} disabled={busy}>
               {#if t.has_password}
-                <span class="lock" title={$_("picker.passwordProtected")}>🔒</span>
+                {#if getToken(t.id)}
+                  <span class="lock" title={$_("picker.passwordUnlocked")}>🔓</span>
+                {:else}
+                  <span class="lock" title={$_("picker.passwordProtected")}>🔒</span>
+                {/if}
               {/if}
               {t.name}
             </button>

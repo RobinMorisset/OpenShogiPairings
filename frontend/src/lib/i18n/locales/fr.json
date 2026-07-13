@@ -249,6 +249,7 @@
     "title": "Tournois",
     "empty": "Aucun tournoi pour l'instant — créez-en un ci-dessous.",
     "passwordProtected": "Protégé par mot de passe",
+    "passwordUnlocked": "Protégé par mot de passe — déjà déverrouillé",
     "delete": "Supprimer",
     "confirmDelete": "Supprimer « {name} » ? Le tournoi et ses sauvegardes seront retirés du serveur. Cette action est irréversible.",
     "adminPasswordTitle": "Connexion administrateur requise",

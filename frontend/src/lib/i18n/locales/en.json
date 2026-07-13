@@ -249,6 +249,7 @@
     "title": "Tournaments",
     "empty": "No tournaments yet — create one below.",
     "passwordProtected": "Password-protected",
+    "passwordUnlocked": "Password-protected — already unlocked",
     "delete": "Delete",
     "confirmDelete": "Delete \"{name}\"? This removes it and its backups from the server. This cannot be undone.",
     "adminPasswordTitle": "Admin sign-in required",
