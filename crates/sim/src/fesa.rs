@@ -3,7 +3,7 @@
 //! For a historical tournament, the *next* FESA rating list after the event
 //! already reflects its results, so it is a good proxy for each player's true
 //! strength. Given the tournament date, resolve the first list that postdates it
-//! (FESA publishes one every 1 Jan and 1 Jun), fetch it, and match players by
+//! (FESA publishes one every 1 Jan and 1 Jul), fetch it, and match players by
 //! name to build a strength-override map (see `osp_core::sim::sample_strengths`).
 
 use std::collections::HashMap;
@@ -39,14 +39,64 @@ pub fn parse_ymd(s: &str) -> Result<Ymd, String> {
     Ok((year, month, day))
 }
 
-/// The first FESA rating-list date (1 Jan or 1 Jun) strictly after `after`.
-pub fn next_list_date(after: Ymd) -> Ymd {
+/// The FESA rating-list date to use for a tournament dated `after`, given the
+/// current date `today`.
+///
+/// FESA publishes a **permanent** list twice a year, on 1 January and 1 July.
+/// (Separately, a *transient* "latest" list is published at irregular intervals and
+/// is replaced the moment any newer list — permanent or transient — appears, so its
+/// URL is short-lived.) We target the first permanent list strictly after the
+/// tournament, since it already reflects the results. If that list is still in the
+/// future — not published yet — we fall back to the most recent permanent list on
+/// or before `today`: a stable URL, deliberately *not* the transient latest (which
+/// would soon 404 and break reproducibility).
+pub fn next_list_date(after: Ymd, today: Ymd) -> Ymd {
     let (y, _, _) = after;
-    // Two lists a year; the window [y, y+1] always contains the next one.
-    [(y, 1, 1), (y, 6, 1), (y + 1, 1, 1), (y + 1, 6, 1)]
+    // Two permanent lists a year; the window [y, y+1] always contains the next one.
+    let scheduled = [(y, 1, 1), (y, 7, 1), (y + 1, 1, 1), (y + 1, 7, 1)]
         .into_iter()
         .find(|&d| d > after)
-        .expect("y+1 candidates always exceed a date in year y")
+        .expect("y+1 candidates always exceed a date in year y");
+    if scheduled <= today {
+        scheduled
+    } else {
+        latest_permanent(today)
+    }
+}
+
+/// The most recent permanent list (1 Jan or 1 Jul) on or before `today`.
+fn latest_permanent(today: Ymd) -> Ymd {
+    let (y, m, _) = today;
+    if m >= 7 {
+        (y, 7, 1)
+    } else {
+        (y, 1, 1)
+    }
+}
+
+/// Today's date as `(year, month, day)` in UTC, from the system clock.
+pub fn today_ymd() -> Ymd {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    civil_from_days((secs / 86_400) as i64)
+}
+
+/// Convert a day count since the Unix epoch to `(year, month, day)` (proleptic
+/// Gregorian). Howard Hinnant's `civil_from_days`.
+fn civil_from_days(days: i64) -> Ymd {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let day = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let month = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    let year = if month <= 2 { year + 1 } else { year };
+    (year as i32, month as u32, day as u32)
 }
 
 /// The FESA URL for a dated rating list.
@@ -137,7 +187,7 @@ pub fn games_after(
     date: &str,
     base: &Tournament,
 ) -> Result<(HashMap<Uuid, u32>, String, usize), String> {
-    let url = list_url(next_list_date(parse_ymd(date)?));
+    let url = list_url(next_list_date(parse_ymd(date)?, today_ymd()));
     let rated = parse_rating_list(&fetch_url(&url)?);
     let (map, matched) = match_games(&rated, base);
     Ok((map, url, matched))
@@ -181,7 +231,7 @@ pub fn overrides_after(
     date: &str,
     base: &Tournament,
 ) -> Result<(StrengthMap, String, usize), String> {
-    let url = list_url(next_list_date(parse_ymd(date)?));
+    let url = list_url(next_list_date(parse_ymd(date)?, today_ymd()));
     let rated = parse_rating_list(&fetch_url(&url)?);
     let (map, matched) = match_fesa(&rated, base);
     Ok((map, url, matched))
@@ -203,14 +253,40 @@ mod tests {
     use osp_core::NewPlayer;
 
     #[test]
-    fn next_list_date_picks_the_first_jan_or_jun_after() {
-        assert_eq!(next_list_date((2025, 11, 15)), (2026, 1, 1));
-        assert_eq!(next_list_date((2026, 3, 10)), (2026, 6, 1));
-        assert_eq!(next_list_date((2026, 5, 31)), (2026, 6, 1));
+    fn next_list_date_picks_the_first_jan_or_jul_after() {
+        // `today` far in the future, so every scheduled list counts as published.
+        let published = (9999, 1, 1);
+        let next = |after| next_list_date(after, published);
+        assert_eq!(next((2025, 11, 15)), (2026, 1, 1));
+        assert_eq!(next((2026, 3, 10)), (2026, 7, 1));
+        assert_eq!(next((2026, 6, 30)), (2026, 7, 1));
         // A date exactly on a list date resolves to the *next* one (strictly after).
-        assert_eq!(next_list_date((2026, 1, 1)), (2026, 6, 1));
-        assert_eq!(next_list_date((2026, 6, 1)), (2027, 1, 1));
-        assert_eq!(next_list_date((2026, 7, 1)), (2027, 1, 1));
+        assert_eq!(next((2026, 1, 1)), (2026, 7, 1));
+        assert_eq!(next((2026, 7, 1)), (2027, 1, 1));
+        // WOSC 2024 (August) → the following January list.
+        assert_eq!(next((2024, 8, 4)), (2025, 1, 1));
+    }
+
+    #[test]
+    fn next_list_date_falls_back_to_latest_permanent_when_next_is_future() {
+        // Tournament Aug 2024; today Sep 2024 — the next scheduled list (Jan 2025)
+        // isn't out, so use the latest published one (Jul 2024).
+        assert_eq!(next_list_date((2024, 8, 4), (2024, 9, 15)), (2024, 7, 1));
+        // Once today passes the scheduled date, use it.
+        assert_eq!(next_list_date((2024, 8, 4), (2025, 3, 1)), (2025, 1, 1));
+        // Before 1 Jul, the latest permanent list is January (any transient list is
+        // never targeted, since its date isn't computable and its URL is short-lived).
+        assert_eq!(next_list_date((2025, 2, 1), (2025, 6, 20)), (2025, 1, 1));
+        // From 1 Jul onward, the July list is the latest permanent one.
+        assert_eq!(next_list_date((2025, 2, 1), (2025, 7, 5)), (2025, 7, 1));
+    }
+
+    #[test]
+    fn civil_from_days_matches_known_dates() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1)); // the Unix epoch
+        assert_eq!(civil_from_days(18_993), (2022, 1, 1));
+        assert_eq!(civil_from_days(19_723), (2024, 1, 1)); // 2024 is a leap year
+        assert_eq!(civil_from_days(19_905), (2024, 7, 1));
     }
 
     #[test]
