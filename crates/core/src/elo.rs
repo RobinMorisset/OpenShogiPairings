@@ -175,18 +175,22 @@ fn prior(player: &Player, k_multiplier: f64, provisional_mult: f64) -> (f64, f64
     }
 }
 
-/// The Gaussian prior `(mean, standard deviation)` the estimator assigns
-/// `player` under `settings` — the same `N(rating, σ₀²)` used by [`estimate_elos`].
+/// The **simulation oracle's** prior `(mean, standard deviation)` for a player's
+/// *true* strength: the same rating- and reliability-dependent `N(rating, σ₀²)`
+/// shape as the estimator's [`prior`], but with the K multiplier fixed at ×1 (the
+/// raw FESA K). The oracle is the same physical world for every settings variant,
+/// so its width must never depend on a per-variant pairing knob
+/// (`elo_k_multiplier`); the simulator scales it globally via its own `jitter`
+/// instead. `provisional_mult` (its own oracle-level parameter, distinct from the
+/// pairing estimate's) widens the prior for a provisionally-rated player and is
+/// clamped to ≥ 1 so a provisional rating is never treated as *more* certain than
+/// an established one.
 ///
 /// Exposed for the simulator ([`crate::sim`]), which draws each player's
-/// ground-truth strength from this prior so the injected noise is rating-
-/// dependent and coherent with the estimator rather than a second, flat model.
-pub(crate) fn player_prior(player: &Player, settings: &TournamentSettings) -> (f64, f64) {
-    prior(
-        player,
-        settings.elo_k_multiplier(),
-        settings.elo_provisional_multiplier(),
-    )
+/// ground-truth strength from this prior so the injected noise is rating-dependent
+/// and coherent with the estimator rather than a second, flat model.
+pub(crate) fn oracle_prior(player: &Player, provisional_mult: f64) -> (f64, f64) {
+    prior(player, 1.0, provisional_mult.max(1.0))
 }
 
 /// Expected score `σ(x) = 1/(1+e^−x)` for `x = (θself − θopp)/s`.

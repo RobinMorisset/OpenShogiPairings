@@ -87,10 +87,19 @@ struct Args {
 
     /// Multiplier on each player's prior width: 0 pins true strength to its center
     /// (the override — e.g. the post-tournament ELO — else the registration
-    /// rating), 1 samples at the estimator's own prior width around that center, >1
-    /// stress-tests worse-than-assumed ratings.
+    /// rating), 1 samples at the raw-FESA-K prior width around that center, >1
+    /// stress-tests worse-than-assumed ratings. Part of the settings-independent
+    /// truth model — never affected by a variant's `elo_k_multiplier`.
     #[arg(long, default_value_t = 0.0)]
     jitter: f64,
+
+    /// The oracle's provisional-player width multiplier: how much wider the
+    /// *true-strength* prior is for a provisionally-rated player (no FESA list entry
+    /// or too few games) than for an established one. Its own truth-model knob,
+    /// independent of any variant's pairing `elo_provisional_multiplier`. Clamped to
+    /// ≥ 1. Only matters at `--jitter > 0`.
+    #[arg(long, default_value_t = 2.0)]
+    oracle_provisional: f64,
 
     /// Run the hybrid direct-elimination cup with this bracket size (8/16/32/64).
     /// Requires --cup-nations.
@@ -212,7 +221,7 @@ fn run(args: Args) -> Result<(), String> {
     };
 
     let names = player_names(&base);
-    let observed = observed_report(&base, &overrides, &args.thresholds);
+    let observed = observed_report(&base, &overrides, args.oracle_provisional, &args.thresholds);
     let mut reports = Vec::new();
     let mut dump = args.dump_runs.as_ref().map(|_| {
         String::from("variant,run,mean_diff,frac_exceed,fidelity,interest,winner\n")
@@ -227,6 +236,7 @@ fn run(args: Args) -> Result<(), String> {
             settings,
             &overrides,
             args.jitter,
+            args.oracle_provisional,
             rounds,
             cup.as_ref(),
             args.runs,
@@ -354,6 +364,7 @@ fn simulate_variant(
     settings: &TournamentSettings,
     overrides: &StrengthMap,
     jitter: f64,
+    oracle_provisional: f64,
     rounds: u32,
     cup: Option<&CupConfig>,
     runs: u64,
@@ -366,8 +377,17 @@ fn simulate_variant(
             // worlds (not just the printed label), while every variant still sees
             // the *same* seed per run — common random numbers, for a fair A/B.
             let mut rng = ChaCha8Rng::seed_from_u64(seed.wrapping_add(i));
-            simulate_run(base, settings, overrides, jitter, rounds, cup, &mut rng)
-                .map_err(|e| e.to_string())
+            simulate_run(
+                base,
+                settings,
+                overrides,
+                jitter,
+                oracle_provisional,
+                rounds,
+                cup,
+                &mut rng,
+            )
+            .map_err(|e| e.to_string())
         })
         .collect()
 }
@@ -648,6 +668,7 @@ struct ObservedReport {
 fn observed_report(
     base: &Tournament,
     overrides: &StrengthMap,
+    oracle_provisional: f64,
     thresholds: &[f64],
 ) -> Option<ObservedReport> {
     let played = base
@@ -659,10 +680,11 @@ fn observed_report(
         return None;
     }
 
-    // Nominal strengths: jitter 0 → override else registration rating. The rng is
-    // unused at jitter 0 but the signature needs one.
+    // Nominal strengths: jitter 0 → override else registration rating (so the
+    // provisional multiplier and the rng are both unused here, but the signature
+    // needs them).
     let mut rng = ChaCha8Rng::seed_from_u64(0);
-    let strengths = sample_strengths(&base.players, &base.settings, overrides, 0.0, &mut rng);
+    let strengths = sample_strengths(&base.players, overrides, 0.0, oracle_provisional, &mut rng);
 
     let mut pooled = game_elo_diffs(base, &strengths);
     let diff = diff_stats(&pooled, thresholds);
