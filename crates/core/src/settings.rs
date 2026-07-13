@@ -47,21 +47,24 @@ pub enum HandicapPolicy {
 /// asymmetric-Laplace penalty of the *same width* but with exponential — hence
 /// fatter — tails: its restoring force is *constant*, so a sustained run of
 /// surprising results (e.g. an under-rated improver beating stronger opponents)
-/// moves the estimate much further before the prior reins it in. The Laplace
-/// variant is also asymmetric via the per-category
-/// `elo_upward_looseness_*` knobs, which can make an *upward* revision clear on
-/// less evidence than a downward one. See `docs/elo-pairing-mode.md`.
+/// moves the estimate much further before the prior reins it in. **Either** shape
+/// can additionally be made asymmetric via the per-category
+/// `elo_upward_looseness_*` knobs, which widen the upward arm so an *upward*
+/// revision clears on less evidence than a downward one (for the Gaussian this is
+/// a two-piece normal; for the Laplace, a wider upward scale). See
+/// `docs/elo-pairing-mode.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
 pub enum EloPriorShape {
-    /// Thin-tailed `N(rating, σ₀²)` — the default, exactly the historical
-    /// estimator (behaviour-neutral).
+    /// Thin-tailed `N(rating, σ₀²)` — the default. Behaviour-neutral (exactly the
+    /// historical estimator) unless a per-category upward-looseness knob is raised,
+    /// which turns it into an asymmetric two-piece normal.
     #[default]
     Gaussian,
-    /// Huber-smoothed asymmetric Laplace: same width, fatter (exponential) tails,
-    /// and per-category upward/downward asymmetry knobs (the
-    /// `elo_upward_looseness_*` settings).
+    /// Huber-smoothed Laplace: same width as the Gaussian but fatter (exponential)
+    /// tails. Also honours the per-category `elo_upward_looseness_*` asymmetry
+    /// knobs.
     Laplace,
 }
 
@@ -378,15 +381,15 @@ pub struct TournamentSettings {
     pub elo_prior_shape: EloPriorShape,
     /// How much *looser* an upward revision is than a downward one for an
     /// **established** (reliably-rated) player, as an integer percent
-    /// (100 = ×1.0 = symmetric). Only affects the [`EloPriorShape::Laplace`] prior,
-    /// where it scales that player's upward arm width (`b_up = r · b_down`):
-    /// `r > 1` lets a win revise the estimate up on less evidence than a loss
-    /// revises it down. A reliable rating is the one we trust most, so this
-    /// usually stays at `100` (symmetric) — asymmetry is most useful for the less
-    /// certain players below. Read via [`Self::elo_upward_looseness_established`],
-    /// which clamps it ≥ 1.0 (an upward revision is never *harder* than a downward
-    /// one). Only meaningful when the prior shape is Laplace and a live estimate is
-    /// maintained.
+    /// (100 = ×1.0 = symmetric). Widens that player's upward arm in **either**
+    /// prior shape (the Gaussian's `σ_up = r·σ₀`, or the Laplace's
+    /// `b_up = r·b_down`): `r > 1` lets a win revise the estimate up on less
+    /// evidence than a loss revises it down. A reliable rating is the one we trust
+    /// most, so this usually stays at `100` (symmetric) — asymmetry is most useful
+    /// for the less certain players below. Read via
+    /// [`Self::elo_upward_looseness_established`], which clamps it ≥ 1.0 (an upward
+    /// revision is never *harder* than a downward one). Only meaningful when a live
+    /// estimate is maintained.
     #[serde(default = "default_elo_upward_looseness_percent")]
     pub elo_upward_looseness_established_percent: u32,
     /// The upward-looseness ratio `r` for a **provisionally-rated** player (not in

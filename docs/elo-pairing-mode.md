@@ -230,38 +230,48 @@ estimate much further before the prior reins it in, at the cost of a *dead zone*
 below `≈ s/b` net surprise-wins the estimate does not move at all (the constant
 force isn't yet overcome), and past it the estimate tracks the evidence.
 
+**Asymmetry is a separate axis from the tail shape** — the per-category
+upward-looseness knobs below apply to the Gaussian and the Laplace alike, so a
+referee can pick fatter tails, an upward tilt, both, or neither.
+
 - **Width mapping.** The Laplace scale is variance-matched to the Gaussian,
   `b_down = σ₀/√2`, so the existing knobs (`m`, provisional multiplier,
   `elo_unrated_k`) keep their meaning — they still set `σ₀`, which sets `b_down`.
-- **Asymmetry, per player category.** The upward arm is widened to
-  `b_up = r · b_down`, where `r ≥ 1`. `r > 1` makes an *upward* revision (the
-  common case — an under-rated improver) clear on less evidence than a downward
-  one, while the downward arm stays as tight as before. `r = 1` is symmetric. `r`
-  is set **separately for the three prior categories** — `elo_upward_looseness_
+- **Asymmetry, per player category — and it works for *both* shapes.** The upward
+  arm is widened by a ratio `r ≥ 1`: for the Laplace `b_up = r · b_down`, and for
+  the Gaussian `σ_up = r · σ₀` (a **two-piece normal** — std `σ₀` below the mean,
+  `r · σ₀` above). `r > 1` makes an *upward* revision (the common case — an
+  under-rated improver) clear on less evidence than a downward one, while the
+  downward arm stays as tight as before. `r = 1` is symmetric and, for the
+  Gaussian, collapses back to the plain `N(μ₀, σ₀²)` exactly. `r` is set
+  **separately for the three prior categories** — `elo_upward_looseness_
   established`, `_provisional`, `_unrated` — because a global tilt is rarely what
   you want: a reliable FESA rating deserves little upward bias, whereas a newcomer
   who beats the field is far more likely genuinely strong than lucky, so the
   unrated (and, to a lesser degree, provisional) categories are where the
   asymmetry earns its keep. Each player reads the `r` of the same category that
-  set its width (§2.1/§2.2). All three default to `1`, so the prior stays neutral
-  about direction until a referee opts in.
-- **Still log-concave.** `−|d|` is concave, so the objective stays concave and the
-  MAP unique. The only wrinkle is the kink at `d = 0`, where the Gaussian's finite
-  curvature (`−1/σ₀²`) that keeps the Newton step well-defined is absent. We round
-  it off with a two-piece linear Huber core of half-width `HUBER_DELTA` (a couple
-  of ELO points) **anchored at the origin** (`g(0) = 0`): this restores a strictly
-  negative curvature near the kink *and* keeps the penalty minimised exactly at
-  `μ₀`, so a player with no games still sits precisely at their registration
-  rating regardless of `r`.
+  set its width (§2.1/§2.2). All three default to `1`.
+- **Still log-concave.** For the Laplace, `−|d|` is concave, so the objective stays
+  concave and the MAP unique; the only wrinkle is the kink at `d = 0`, where the
+  Gaussian's finite curvature (`−1/σ₀²`) that keeps the Newton step well-defined is
+  absent, so we round it off with a two-piece linear Huber core of half-width
+  `HUBER_DELTA` (a couple of ELO points) **anchored at the origin** (`g(0) = 0`):
+  this restores a strictly negative curvature near the kink *and* keeps the penalty
+  minimised exactly at `μ₀`. The asymmetric **Gaussian** needs none of this — the
+  two-piece normal is already `C¹` at the mode (both arms have zero slope there)
+  and strictly concave, so plain Newton works unchanged. Either way the mode stays
+  at `μ₀`, so a player with no games sits precisely at their registration rating
+  regardless of `r`.
 
-Default is `Gaussian`, `r = 1` — behaviour-neutral; nothing changes until a
-referee switches shape.
+Default is `Gaussian` with every `r = 1` — behaviour-neutral; nothing changes
+until a referee raises a looseness knob or switches shape.
 
 ## 3. The solver
 
 The objective is unconstrained and concave (strongly and smoothly so with the
-default Gaussian prior; still concave, with a piecewise-smooth Huber core, under
-the optional Laplace prior of §2.5), so its maximiser is unique. Use **coordinate
+Gaussian prior — even the asymmetric two-piece variant, which stays `C¹` and
+strictly concave; still concave, with a piecewise-smooth Huber core, under the
+optional Laplace prior of §2.5), so its maximiser is unique. Use **coordinate
 ascent (Gauss–Seidel)** — no external LP/QP dependency, in keeping with the
 hand-written blossom matcher (a single dense Newton solve works too; coordinate
 ascent is just simpler and allocation-free).
@@ -472,8 +482,9 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   `settings.elo_upward_looseness_{established,provisional,unrated}()`;
   normalization clamps each ≥ 100 (an upward revision is never harder than a
   downward one). Each player reads the knob for the category that set its prior
-  width. Inert under the Gaussian prior; the UI only shows the three inputs when
-  the shape is Laplace.
+  width. Applies to **both** prior shapes (the Gaussian becomes a two-piece
+  normal, the Laplace widens its upward scale); the UI shows the three inputs
+  whenever a live estimate is maintained.
 
 The eight `elo_*` estimate knobs (`elo_k_multiplier_percent`,
 `elo_provisional_multiplier_percent`, `elo_unrated_prior_center`, `elo_unrated_k`,

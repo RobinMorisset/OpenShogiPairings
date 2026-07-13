@@ -1090,47 +1090,45 @@
       <p class="desc small-note">
         {$_("settings.eloPriorShapeDesc")}
       </p>
-      {#if eloPriorShape === "laplace"}
-        <label class="check elo-k">
-          {$_("settings.eloUpwardLoosenessEstablished")}
-          <input
-            type="number"
-            min="1"
-            step="0.5"
-            class="threshold narrow"
-            value={eloLoosenessEstablishedPercent / 100}
-            disabled={busy}
-            onchange={(e) => editEloUpwardLooseness("established", e.currentTarget.value)}
-          />
-        </label>
-        <label class="check elo-k">
-          {$_("settings.eloUpwardLoosenessProvisional")}
-          <input
-            type="number"
-            min="1"
-            step="0.5"
-            class="threshold narrow"
-            value={eloLoosenessProvisionalPercent / 100}
-            disabled={busy}
-            onchange={(e) => editEloUpwardLooseness("provisional", e.currentTarget.value)}
-          />
-        </label>
-        <label class="check elo-k">
-          {$_("settings.eloUpwardLoosenessUnrated")}
-          <input
-            type="number"
-            min="1"
-            step="0.5"
-            class="threshold narrow"
-            value={eloLoosenessUnratedPercent / 100}
-            disabled={busy}
-            onchange={(e) => editEloUpwardLooseness("unrated", e.currentTarget.value)}
-          />
-        </label>
-        <p class="desc small-note">
-          {$_("settings.eloUpwardLoosenessDesc")}
-        </p>
-      {/if}
+      <label class="check elo-k">
+        {$_("settings.eloUpwardLoosenessEstablished")}
+        <input
+          type="number"
+          min="1"
+          step="0.5"
+          class="threshold narrow"
+          value={eloLoosenessEstablishedPercent / 100}
+          disabled={busy}
+          onchange={(e) => editEloUpwardLooseness("established", e.currentTarget.value)}
+        />
+      </label>
+      <label class="check elo-k">
+        {$_("settings.eloUpwardLoosenessProvisional")}
+        <input
+          type="number"
+          min="1"
+          step="0.5"
+          class="threshold narrow"
+          value={eloLoosenessProvisionalPercent / 100}
+          disabled={busy}
+          onchange={(e) => editEloUpwardLooseness("provisional", e.currentTarget.value)}
+        />
+      </label>
+      <label class="check elo-k">
+        {$_("settings.eloUpwardLoosenessUnrated")}
+        <input
+          type="number"
+          min="1"
+          step="0.5"
+          class="threshold narrow"
+          value={eloLoosenessUnratedPercent / 100}
+          disabled={busy}
+          onchange={(e) => editEloUpwardLooseness("unrated", e.currentTarget.value)}
+        />
+      </label>
+      <p class="desc small-note">
+        {$_("settings.eloUpwardLoosenessDesc")}
+      </p>
     {/if}
   </div>
 

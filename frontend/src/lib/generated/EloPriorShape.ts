@@ -10,9 +10,11 @@
  * asymmetric-Laplace penalty of the *same width* but with exponential — hence
  * fatter — tails: its restoring force is *constant*, so a sustained run of
  * surprising results (e.g. an under-rated improver beating stronger opponents)
- * moves the estimate much further before the prior reins it in. The Laplace
- * variant is also asymmetric via the per-category
- * `elo_upward_looseness_*` knobs, which can make an *upward* revision clear on
- * less evidence than a downward one. See `docs/elo-pairing-mode.md`.
+ * moves the estimate much further before the prior reins it in. **Either** shape
+ * can additionally be made asymmetric via the per-category
+ * `elo_upward_looseness_*` knobs, which widen the upward arm so an *upward*
+ * revision clears on less evidence than a downward one (for the Gaussian this is
+ * a two-piece normal; for the Laplace, a wider upward scale). See
+ * `docs/elo-pairing-mode.md`.
  */
 export type EloPriorShape = "gaussian" | "laplace";

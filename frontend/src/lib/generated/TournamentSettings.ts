@@ -162,15 +162,15 @@ elo_prior_shape: EloPriorShape,
 /**
  * How much *looser* an upward revision is than a downward one for an
  * **established** (reliably-rated) player, as an integer percent
- * (100 = ×1.0 = symmetric). Only affects the [`EloPriorShape::Laplace`] prior,
- * where it scales that player's upward arm width (`b_up = r · b_down`):
- * `r > 1` lets a win revise the estimate up on less evidence than a loss
- * revises it down. A reliable rating is the one we trust most, so this
- * usually stays at `100` (symmetric) — asymmetry is most useful for the less
- * certain players below. Read via [`Self::elo_upward_looseness_established`],
- * which clamps it ≥ 1.0 (an upward revision is never *harder* than a downward
- * one). Only meaningful when the prior shape is Laplace and a live estimate is
- * maintained.
+ * (100 = ×1.0 = symmetric). Widens that player's upward arm in **either**
+ * prior shape (the Gaussian's `σ_up = r·σ₀`, or the Laplace's
+ * `b_up = r·b_down`): `r > 1` lets a win revise the estimate up on less
+ * evidence than a loss revises it down. A reliable rating is the one we trust
+ * most, so this usually stays at `100` (symmetric) — asymmetry is most useful
+ * for the less certain players below. Read via
+ * [`Self::elo_upward_looseness_established`], which clamps it ≥ 1.0 (an upward
+ * revision is never *harder* than a downward one). Only meaningful when a live
+ * estimate is maintained.
  */
 elo_upward_looseness_established_percent: number, 
 /**

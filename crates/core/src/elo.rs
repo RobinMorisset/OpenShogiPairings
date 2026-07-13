@@ -5,8 +5,10 @@
 //! `s = 400/ln 10`, and each player has a prior anchoring `θ` to their
 //! registration rating (or, for an unrated player, to a wide, referee-tunable
 //! prior — by default `N(600, 350²)`). The prior is Gaussian by default, but a
-//! referee can switch to a fatter-tailed, optionally asymmetric Huber-smoothed
-//! Laplace prior ([`EloPriorShape`]); both are log-concave, so the objective
+//! referee can switch to a fatter-tailed Huber-smoothed Laplace prior
+//! ([`EloPriorShape`]); either shape can also be made **asymmetric** (an upward
+//! revision made on less evidence than a downward one — see the per-category
+//! `elo_upward_looseness_*` settings). All are log-concave, so the objective
 //! stays concave and the solver keeps its unique-maximum guarantee. The
 //! estimated ELO is the **MAP** (maximum a-posteriori) point — the maximiser of
 //! the penalised log-likelihood — found by coordinate-ascent Newton. The whole
@@ -212,9 +214,17 @@ fn prior(
 /// Bradley–Terry log-likelihood keeps the whole objective concave — the unique
 /// maximiser and deterministic convergence the solver relies on.
 enum PriorPenalty {
-    /// `N(μ₀, σ₀²)`: quadratic penalty, linear restoring force `d / σ₀²`. Held as
-    /// the precision `1/σ₀²`.
-    Gaussian { precision: f64 },
+    /// A (possibly asymmetric) Gaussian — a *two-piece normal* with std `σ₀` below
+    /// the mean and `r·σ₀` above it, so the linear restoring force `d/σ²` is
+    /// gentler on the upward side when `r > 1`. Held as the two precisions
+    /// `precision_down = 1/σ₀²` and `precision_up = 1/(r·σ₀)²`. It is `C¹` at the
+    /// mode (both arms have zero slope there — no kink to smooth) and strictly
+    /// concave, so the solver is unaffected. `r = 1` gives `precision_up =
+    /// precision_down`, i.e. the plain symmetric `N(μ₀, σ₀²)`.
+    Gaussian {
+        precision_down: f64,
+        precision_up: f64,
+    },
     /// Huber-smoothed **asymmetric Laplace**: outside a `±HUBER_DELTA` core the
     /// penalty is linear with a *constant* restoring force `1/b` — `1/b_up` above
     /// the mean, `1/b_down` below — giving fatter (exponential) tails than the
@@ -225,21 +235,27 @@ enum PriorPenalty {
 }
 
 impl PriorPenalty {
-    /// Build the penalty for one player from the chosen `shape`, their Gaussian
-    /// width `σ₀` (from [`prior`]), and the upward-looseness ratio `r`. The
-    /// Laplace scale is variance-matched to the Gaussian (`b_down = σ₀/√2`) so the
-    /// existing K / provisional / unrated-K knobs keep their meaning; the upward
-    /// arm is widened to `b_up = r · b_down`.
+    /// Build the penalty for one player from the chosen `shape`, their (downward)
+    /// width `σ₀` (from [`prior`]), and the upward-looseness ratio `r`. In both
+    /// shapes the upward arm is widened by `r`: the Gaussian uses `σ_up = r·σ₀`,
+    /// and the Laplace scale is variance-matched to it (`b_down = σ₀/√2`,
+    /// `b_up = r·b_down`) so the existing K / provisional / unrated-K knobs keep
+    /// their meaning. `r = 1` yields the symmetric prior in either shape.
     fn new(shape: EloPriorShape, sigma0: f64, r: f64) -> Self {
+        let r = r.max(1.0);
         match shape {
-            EloPriorShape::Gaussian => PriorPenalty::Gaussian {
-                precision: 1.0 / (sigma0 * sigma0),
-            },
+            EloPriorShape::Gaussian => {
+                let sigma_up = r * sigma0;
+                PriorPenalty::Gaussian {
+                    precision_down: 1.0 / (sigma0 * sigma0),
+                    precision_up: 1.0 / (sigma_up * sigma_up),
+                }
+            }
             EloPriorShape::Laplace => {
                 let b_down = sigma0 / std::f64::consts::SQRT_2;
                 PriorPenalty::Laplace {
                     b_down,
-                    b_up: r.max(1.0) * b_down,
+                    b_up: r * b_down,
                 }
             }
         }
@@ -253,7 +269,19 @@ impl PriorPenalty {
     /// strictly negative curvature.
     fn grad_hess(&self, d: f64) -> (f64, f64) {
         match *self {
-            PriorPenalty::Gaussian { precision } => (-d * precision, -precision),
+            PriorPenalty::Gaussian {
+                precision_down,
+                precision_up,
+            } => {
+                // Pick the arm by side of the mode. The gradient is continuous at
+                // d = 0 (both give 0); the curvature jumps but stays < 0.
+                let precision = if d >= 0.0 {
+                    precision_up
+                } else {
+                    precision_down
+                };
+                (-d * precision, -precision)
+            }
             PriorPenalty::Laplace { b_down, b_up } => {
                 // g(d) = penalty'(d); the log-posterior takes −penalty, so the
                 // gradient contribution is −g and the Hessian is −g'. The core is
@@ -901,6 +929,48 @@ mod tests {
             lap > gauss + 10.0,
             "fatter tails should swing further on a sustained streak: \
              gaussian {gauss}, laplace {lap}"
+        );
+    }
+
+    #[test]
+    fn gaussian_prior_can_be_made_asymmetric_too() {
+        // The same split works for the default Gaussian (a two-piece normal, no
+        // kink to smooth): widening only the upward arm lets an unrated newcomer
+        // climb further on an upset, while a no-games player still sits exactly at
+        // the prior mean.
+        let newcomer = player(None);
+        let strong = player(Some(1600));
+        let r = decided(1, vec![win(newcomer.id, strong.id)]);
+
+        // Shape stays Gaussian (default); only the unrated upward looseness moves.
+        let climb = |unrated_pct: u32| {
+            let settings = TournamentSettings {
+                elo_upward_looseness_unrated_percent: unrated_pct,
+                ..Default::default()
+            };
+            estimate_elos(
+                &[newcomer.clone(), strong.clone()],
+                &settings,
+                std::slice::from_ref(&r),
+            )[&newcomer.id]
+        };
+        let sym = climb(100); // r = 1 → the plain symmetric Gaussian
+        let asym = climb(300); // looser upward arm
+        assert!(
+            asym > sym + 20.0,
+            "a looser upward Gaussian arm should climb further: sym {sym}, asym {asym}"
+        );
+
+        // No games → still exactly at the unrated center, asymmetry or not (the
+        // two-piece normal's mode is unchanged).
+        let settings = TournamentSettings {
+            elo_upward_looseness_unrated_percent: 300,
+            ..Default::default()
+        };
+        let at_rest = estimate_elos(std::slice::from_ref(&newcomer), &settings, &[])[&newcomer.id];
+        assert!(
+            (at_rest - UNRATED_PRIOR_MEAN).abs() < 1e-6,
+            "a no-games unrated player still sits at the center, got {at_rest}"
         );
     }
 
