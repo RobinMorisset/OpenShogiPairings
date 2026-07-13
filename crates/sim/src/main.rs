@@ -990,42 +990,24 @@ fn print_report(
     }
 
     // Cup champion: winner of the direct-elimination bracket, when a cup was
-    // configured. Same layout, minus the observed column (the base has no cup).
-    let mut cup_shown: Vec<Uuid> = Vec::new();
-    for r in reports {
-        for (id, _) in r.cup_champions.iter().take(6) {
-            if !cup_shown.contains(id) {
-                cup_shown.push(*id);
-            }
-        }
-    }
-    if !cup_shown.is_empty() {
-        println!(
-            "\ncup champion probability (top-1, 95% CI) — showing {} players",
-            cup_shown.len()
-        );
-        print!("{:<20}", "player");
-        for r in reports {
-            print!("  {:>22}", trunc(&r.name, 22));
-        }
-        println!();
-        for id in &cup_shown {
-            print!(
-                "{:<20}",
-                trunc(names.get(id).map(String::as_str).unwrap_or("?"), 20)
+    // configured. The bracket is rating-seeded and independent of the pairing
+    // settings being compared, so it plays out identically across variants —
+    // report it once (from the first variant), not as a per-variant comparison.
+    if let Some(base) = reports.first() {
+        if !base.cup_champions.is_empty() {
+            let shown = base.cup_champions.len().min(8);
+            println!(
+                "\ncup champion probability (top-1, 95% CI) — settings-independent, showing top {shown}"
             );
-            for r in reports {
-                match r.cup_champions.iter().find(|(pid, _)| pid == id) {
-                    Some((_, p)) => print!(
-                        "  {:>6.1}% [{:>4.1},{:>4.1}]",
-                        p.p * 100.0,
-                        p.lo * 100.0,
-                        p.hi * 100.0
-                    ),
-                    None => print!("  {:>22}", "-"),
-                }
+            for (id, p) in base.cup_champions.iter().take(shown) {
+                println!(
+                    "{:<20}  {:>6.1}% [{:>4.1},{:>4.1}]",
+                    trunc(names.get(id).map(String::as_str).unwrap_or("?"), 20),
+                    p.p * 100.0,
+                    p.lo * 100.0,
+                    p.hi * 100.0
+                );
             }
-            println!();
         }
     }
 
@@ -1108,6 +1090,11 @@ struct JsonReport {
     seed: u64,
     jitter: f64,
     variants: Vec<JsonVariant>,
+    /// Cup champion probabilities — reported once, not per variant: the bracket is
+    /// rating-seeded and independent of the pairing settings, so it is identical
+    /// across variants. Empty when no cup was configured.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    cup_champions: Vec<JsonCupChampion>,
     #[serde(skip_serializing_if = "Option::is_none")]
     observed: Option<JsonObserved>,
 }
@@ -1141,8 +1128,6 @@ struct JsonVariant {
     fidelity_estimate: f64,
     interest: f64,
     victory: Vec<JsonVictory>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    cup_champions: Vec<JsonCupChampion>,
 }
 
 #[derive(Serialize)]
@@ -1243,8 +1228,13 @@ fn write_outputs(
                         top3: pp.top3,
                     })
                     .collect(),
-                cup_champions: r
-                    .cup_champions
+            })
+            .collect(),
+        // Settings-independent, so taken once from the first variant.
+        cup_champions: reports
+            .first()
+            .map(|r| {
+                r.cup_champions
                     .iter()
                     .map(|(id, p)| JsonCupChampion {
                         player: names.get(id).cloned().unwrap_or_else(|| id.to_string()),
@@ -1252,9 +1242,9 @@ fn write_outputs(
                         prob_lo: p.lo,
                         prob_hi: p.hi,
                     })
-                    .collect(),
+                    .collect()
             })
-            .collect(),
+            .unwrap_or_default(),
     };
     std::fs::write(
         dir.join("report.json"),
