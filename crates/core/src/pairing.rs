@@ -884,8 +884,9 @@ pub fn explain_pairing(
 // --- Counterfactual ("why not pair A and B?") -----------------------------
 
 /// Sentinel vertex standing in for the bye in a matching. Real player ids are v4
-/// UUIDs, never the nil UUID, so this can't collide with a player.
-const PHANTOM: Uuid = Uuid::nil();
+/// UUIDs, never the nil UUID, so this can't collide with a player. Also used by
+/// `tournament` as the wire value meaning "the bye" in a counterfactual probe.
+pub(crate) const PHANTOM: Uuid = Uuid::nil();
 
 /// Normalized (order-independent) edge, so `(a, b)` and `(b, a)` are one key.
 fn unord_pair(a: Uuid, b: Uuid) -> (Uuid, Uuid) {
@@ -1207,10 +1208,12 @@ pub fn counterfactual_force(
         bye,
     );
 
-    // Re-solve everyone but the forced pair (phantom still in play if there is a
-    // bye), then add the forced edge back for the full counterfactual matching.
+    // Re-solve everyone but the forced pair, then add the forced edge back for
+    // the full counterfactual matching. The phantom stays in play for the rest
+    // *unless* it's one side of the forced pair itself (forcing someone onto the
+    // bye) — it's already spoken for then, not up for grabs again.
     let mut verts: Vec<Uuid> = free.iter().copied().filter(|&v| v != a && v != b).collect();
-    if need_phantom {
+    if need_phantom && a != PHANTOM && b != PHANTOM {
         verts.push(PHANTOM);
     }
     let no_forbidden = HashSet::new();
@@ -2528,5 +2531,96 @@ mod tests {
 
         assert!(cf.changed.is_empty());
         assert!(cf.cost_delta.is_empty());
+    }
+
+    #[test]
+    fn forcing_a_player_onto_the_bye_reassigns_the_sit_out() {
+        // Three equal players: p0-p1 play, p2 byes. Force p0 onto the bye
+        // instead (PHANTOM stands for the bye slot) — p2 must then play the
+        // freed-up p1, and the new bye (p0) has no player2.
+        let p: Vec<Player> = (1..=3).map(|i| player(i, Some(1500), None)).collect();
+        let round = pair_round_weighted(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &[],
+            &p.iter().map(|x| x.id).collect::<Vec<_>>(),
+            &[],
+            None,
+        );
+        let boards: Vec<(Uuid, Uuid)> = round
+            .boards
+            .iter()
+            .map(|b| (b.player1, b.player2))
+            .collect();
+        let bye = round.bye.expect("odd count byes someone");
+        let (playing_a, playing_b) = boards[0];
+        assert_ne!(playing_a, bye);
+
+        let cf = counterfactual_force(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &[],
+            &boards,
+            Some(bye),
+            playing_a,
+            PHANTOM,
+        );
+
+        assert!(cf.scoped_out.is_none());
+        assert!(
+            cf.changed
+                .iter()
+                .any(|b| b.player1 == playing_a && b.player2.is_none()),
+            "the forced player now takes the bye"
+        );
+        assert!(
+            changed_pairs(&cf).contains(&unord(bye, playing_b)),
+            "the old bye-taker plays the freed-up opponent"
+        );
+    }
+
+    #[test]
+    fn forbidding_the_bye_forces_the_sit_out_to_play() {
+        // Same setup, but forbid the current bye instead of forcing a new one:
+        // the bye-taker must now play, and someone else sits out.
+        let p: Vec<Player> = (1..=3).map(|i| player(i, Some(1500), None)).collect();
+        let round = pair_round_weighted(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &[],
+            &p.iter().map(|x| x.id).collect::<Vec<_>>(),
+            &[],
+            None,
+        );
+        let boards: Vec<(Uuid, Uuid)> = round
+            .boards
+            .iter()
+            .map(|b| (b.player1, b.player2))
+            .collect();
+        let bye = round.bye.expect("odd count byes someone");
+
+        let cf = counterfactual_forbid(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &[],
+            &boards,
+            Some(bye),
+            bye,
+            PHANTOM,
+        );
+
+        assert!(cf.scoped_out.is_none());
+        assert!(
+            !cf.changed.iter().any(|b| b.player1 == bye && b.player2.is_none()),
+            "the old bye-taker no longer sits out"
+        );
+        assert!(
+            cf.changed.iter().any(|b| b.player2.is_none()),
+            "someone else takes the bye instead"
+        );
     }
 }

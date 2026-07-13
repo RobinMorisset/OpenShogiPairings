@@ -212,7 +212,8 @@
   });
 
   // Each player's opponent in this round's Swiss boards (both directions). The
-  // bye-taker has none.
+  // bye-taker's "opponent" is the bye sentinel, so forbidding it reads as
+  // forbidding the bye itself (i.e. forcing them to play).
   const opponentOf = $derived.by(() => {
     const m = new Map<string, string>();
     for (const b of round.boards) {
@@ -221,6 +222,7 @@
         m.set(b.player2, b.player1);
       }
     }
+    if (round.bye) m.set(round.bye, NIL_UUID);
     return m;
   });
 
@@ -645,12 +647,15 @@
                 {#each swissPlayers as id (id)}
                   <option value={id}>{name(id)}</option>
                 {/each}
+                {#if round.bye}
+                  <option value={NIL_UUID}>{$_("roundView.probe.bye")}</option>
+                {/if}
               </select>
             {:else}
               <span class="probe-vs">{$_("roundView.probe.pairedWith")}</span>
               <span class="probe-partner">
                 {#if probeA}
-                  {forbidPartner ? name(forbidPartner) : $_("roundView.probe.noPartner")}
+                  {forbidPartner ? probeName(forbidPartner) : $_("roundView.probe.noPartner")}
                 {:else}
                   —
                 {/if}

@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::cup::{Cup, CupPairings, CupPodium, CUP_SIZES};
 use crate::pairing::{
     counterfactual_forbid, counterfactual_force, explain_pairing, pair_round_weighted,
-    Counterfactual, CounterfactualMode, RoundExplanation, ScopeReason,
+    Counterfactual, CounterfactualMode, RoundExplanation, ScopeReason, PHANTOM,
 };
 use crate::player::{NewPlayer, Player, PointAdjustment};
 use crate::round::{
@@ -780,10 +780,24 @@ impl Tournament {
             .collect();
 
         // Both probed players must be engine-paired (in a Swiss board or the bye).
+        // `PHANTOM` stands for the bye itself (the nil UUID, never a real player
+        // id) — it's in scope exactly when this round actually has a Swiss bye
+        // to negotiate.
         let in_swiss = |id: Uuid| {
             round.bye == Some(id) || swiss_boards.iter().any(|&(x, y)| x == id || y == id)
         };
         for id in [a, b] {
+            if id == PHANTOM {
+                if round.bye.is_none() {
+                    return Ok(Counterfactual {
+                        scoped_out: Some(ScopeReason::Absent),
+                        cost_delta: Vec::new(),
+                        cycles: Vec::new(),
+                        changed: Vec::new(),
+                    });
+                }
+                continue;
+            }
             if !in_swiss(id) {
                 return Ok(Counterfactual {
                     scoped_out: Some(self.scope_reason(round, id)?),
@@ -815,10 +829,14 @@ impl Tournament {
     /// keeping the round's existing forced boards and absentees. Closes the loop
     /// from the counterfactual preview ("why not pair them?") to applying it.
     ///
+    /// Either side may instead be [`PHANTOM`] (the bye sentinel), meaning "force
+    /// the other player onto the bye" rather than a real pairing — the engine
+    /// re-picks everyone else's boards around that fixed bye.
+    ///
     /// Refuses if the round is completed or already has recorded results (re-
     /// pairing would discard them). The pair is validated by the re-pairing path
-    /// exactly like any referee-forced board (both must be present Swiss players,
-    /// neither a cup player nor already forced elsewhere).
+    /// exactly like any referee-forced board/bye (must be a present Swiss
+    /// player, neither a cup player nor already forced elsewhere).
     pub fn force_pairing(&mut self, a: Uuid, b: Uuid) -> Result<&Round, TournamentError> {
         let round = self.rounds.last().ok_or(TournamentError::NoCurrentRound)?;
         if round.completed {
@@ -829,19 +847,27 @@ impl Tournament {
         }
 
         // Rebuild the draft the round came from: its absentees, its existing
-        // forced boards, plus the newly forced pair. The engine re-picks the bye.
+        // forced boards, plus the newly forced pair (or bye). The engine
+        // re-picks everything else, including the bye when it isn't fixed here.
         let mut forced_boards: Vec<Board> = round
             .boards
             .iter()
             .filter(|bd| matches!(bd.source, PairingSource::Forced))
             .map(|bd| Board::pending(bd.player1, bd.player2, None, PairingSource::Forced))
             .collect();
-        forced_boards.push(Board::pending(a, b, None, PairingSource::Forced));
+        let forced_bye = match (a == PHANTOM, b == PHANTOM) {
+            (true, false) => Some(b),
+            (false, true) => Some(a),
+            _ => {
+                forced_boards.push(Board::pending(a, b, None, PairingSource::Forced));
+                None
+            }
+        };
         let draft = RoundDraft {
             number: round.number,
             absent: round.absent.clone(),
             forced_boards,
-            forced_bye: None,
+            forced_bye,
         };
 
         // Drop the round and re-confirm from the reconstructed draft. Earlier
@@ -1644,6 +1670,49 @@ mod tests {
         let b = r1.boards[1].player1;
         assert_eq!(t.force_pairing(a, b), Err(TournamentError::RoundHasResults));
         let _ = ids;
+    }
+
+    #[test]
+    fn force_pairing_onto_the_bye_reassigns_the_sit_out() {
+        let mut t = Tournament::new("Cup").unwrap();
+        let ids: Vec<Uuid> = ["A", "B", "C"]
+            .iter()
+            .map(|n| t.add_player(named(n)).unwrap().id)
+            .collect();
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+
+        let r1 = t.rounds.last().unwrap();
+        let bye = r1.bye.expect("odd count byes someone");
+        let playing = ids.iter().copied().find(|&id| id != bye).unwrap();
+
+        let round = t.force_pairing(playing, PHANTOM).unwrap();
+        assert_eq!(round.number, 1, "the same round is re-paired");
+        assert_eq!(round.bye, Some(playing), "the forced player now byes");
+        assert!(
+            round.boards.iter().any(|bd| bd.player1 == bye || bd.player2 == bye),
+            "the old bye-taker now plays"
+        );
+    }
+
+    #[test]
+    fn explain_counterfactual_forbidding_the_bye_is_in_scope() {
+        let mut t = Tournament::new("Cup").unwrap();
+        ["A", "B", "C"].iter().for_each(|n| {
+            t.add_player(named(n)).unwrap();
+        });
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+
+        let r1 = t.rounds.last().unwrap();
+        let bye = r1.bye.expect("odd count byes someone");
+
+        let cf = t
+            .explain_counterfactual(1, bye, PHANTOM, CounterfactualMode::Forbid)
+            .unwrap();
+        assert!(cf.scoped_out.is_none(), "the bye is in scope for the probe");
     }
 
     fn rated(last_name: &str, rating: u32) -> NewPlayer {
