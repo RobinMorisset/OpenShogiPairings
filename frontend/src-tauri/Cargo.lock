@@ -77,7 +77,7 @@ checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "app"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dirs 5.0.1",
  "log",
@@ -1809,7 +1809,7 @@ dependencies = [
 
 [[package]]
 name = "integer-blossom"
-version = "0.1.0"
+version = "1.0.0"
 
 [[package]]
 name = "ipnet"
@@ -2444,7 +2444,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "osp-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "integer-blossom",
  "rand 0.8.6",
@@ -2458,7 +2458,7 @@ dependencies = [
 
 [[package]]
 name = "osp-server"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "axum",
  "bcrypt",
