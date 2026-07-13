@@ -24,6 +24,20 @@
 //! `(<±><code>)` handicap. Opponents are referenced by the `Nr` (final rank)
 //! column. A `=` records only that a draw occurred (the win/loss of the replay is
 //! not encoded), so an imported draw is given an arbitrary decisive winner.
+//!
+//! # Accepted round-trip limitations
+//!
+//! The importer reconstructs a *Swiss/bye/absence* history, not the no-show board
+//! machinery: a player who showed up on a no-show board exports as `0+` (a free
+//! point) and reimports as a plain **bye**, and the absentee's `0#` reimports as
+//! an **absence**. A single round can therefore legitimately carry several `0+`
+//! cells — a genuine bye plus one or more no-show forfeits, indistinguishable in
+//! the grid. Rather than reject such a grid, the importer keeps the **first**
+//! `0+` (the player highest in the file) as the round's bye and imports the rest
+//! as **absences**, emitting a `tracing::warn!`. This is a deliberate, lossy
+//! simplification: the importer exists only to seed non-trivial tournament state
+//! for tests and simulations (there is no UI for it), where an exact round-trip
+//! of no-show boards is out of scope.
 
 use std::collections::HashMap;
 
@@ -58,9 +72,6 @@ pub enum GridImportError {
     /// Both sides of a game recorded the same win/loss (or disagreed on a draw).
     #[error("round {round}: {a} and {b} recorded inconsistent results")]
     InconsistentResult { round: u32, a: u32, b: u32 },
-    /// More than one player took the bye in a single round.
-    #[error("round {round}: more than one player took the bye")]
-    MultipleByes { round: u32 },
     /// The tournament machinery rejected the reconstructed state.
     #[error(transparent)]
     Tournament(#[from] TournamentError),
@@ -201,12 +212,22 @@ fn rebuild_round(
         }
     }
 
-    if byes.len() > 1 {
-        return Err(GridImportError::MultipleByes {
-            round: round_number,
-        });
+    // A round can legitimately show several `0+` cells: a genuine bye plus one or
+    // more no-show *forfeits*, which both render `0+` and the grid can't tell
+    // apart (see the module docs). Rather than fail the whole import, keep the
+    // first `0+` (the player highest in the file — `byes` is in row order) as the
+    // round's real bye and demote the rest to absences, warning about it.
+    let mut byes = byes.into_iter();
+    let forced_bye = byes.next();
+    let demoted: Vec<uuid::Uuid> = byes.collect();
+    if !demoted.is_empty() {
+        tracing::warn!(
+            round = round_number,
+            demoted = demoted.len(),
+            "several byes in one round; keeping the first and importing the rest as absences"
+        );
+        absent.extend(demoted);
     }
-    let forced_bye = byes.into_iter().next();
 
     // Force every pairing, so the engine has an empty graph to solve.
     tournament.prepare_round()?;
@@ -748,17 +769,27 @@ Nr Name    Nat Elo  1   Pts
     }
 
     #[test]
-    fn rejects_multiple_byes_in_one_round() {
+    fn demotes_extra_byes_to_absences_instead_of_failing() {
+        // Two `0+` cells in one round (a genuine bye plus a no-show forfeit, both
+        // rendered `0+`): the importer keeps the first — the player highest in the
+        // file — as the round's bye and demotes the rest to absences, rather than
+        // rejecting the whole grid.
         let grid = "\
-[Bad]
-Nr Name    Nat Elo  1   Pts
-1  [A] [a] FR  2000 [0+] 0
-2  [B] [b] FR  1000 [0+] 0
+[Two byes]
+Nr Name    Nat Elo  1    Pts
+1  [A] [a] FR  2000 [0+] 1
+2  [B] [b] FR  1900 [0+] 1
+3  [C] [c] FR  1800 [4+] 1
+4  [D] [d] FR  1700 [3-] 0
 ";
-        assert!(matches!(
-            import_american_grid(grid),
-            Err(GridImportError::MultipleByes { round: 1 })
-        ));
+        let t = import_american_grid(grid).unwrap();
+        assert_eq!(t.rounds.len(), 1);
+        let r = &t.rounds[0];
+        // A (first in the file) keeps the bye; B is demoted to an absence.
+        assert_eq!(r.bye, Some(player(&t, "A").id));
+        assert_eq!(r.absent, vec![player(&t, "B").id]);
+        // The real game between C and D is still reconstructed and decided.
+        assert!(board(&t, 0, "C", "D").result.is_some());
     }
 
     #[test]
