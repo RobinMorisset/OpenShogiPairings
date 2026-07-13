@@ -110,6 +110,20 @@
     tournament?.rounds.find((r) => `round-${r.number}` === activeTab) ?? null,
   );
 
+  // The tabs in the order they're rendered below, so the arrow-key shortcuts can
+  // step through them. Kept in sync by construction with the markup order.
+  const tabOrder = $derived(
+    tournament
+      ? [
+          "settings",
+          "players",
+          "results",
+          ...tournament.rounds.map((r) => `round-${r.number}`),
+          ...(tournament.draft ? ["draft"] : []),
+        ]
+      : [],
+  );
+
   // The suggested-handicap slice for the active round, matched by position
   // (rounds are numbered sequentially without gaps).
   const activeRoundSuggested = $derived.by(() => {
@@ -453,6 +467,36 @@
     });
   }
 
+  // Keyboard shortcuts. Skipped while typing in a field so we don't clobber the
+  // browser's native caret movement (arrows) or per-field undo (Ctrl/Cmd+Z).
+  function handleKeydown(e: KeyboardEvent) {
+    const target = e.target as HTMLElement | null;
+    const typing =
+      !!target &&
+      (target.isContentEditable ||
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT");
+
+    // Ctrl/Cmd+Z → undo the last tournament change.
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z") {
+      if (typing) return;
+      e.preventDefault();
+      if (canUndo && !busy) handleUndo();
+      return;
+    }
+
+    // Left/Right arrows → step between the visible tabs.
+    if (!typing && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      const i = tabOrder.indexOf(activeTab);
+      if (i === -1) return;
+      const next = e.key === "ArrowLeft" ? i - 1 : i + 1;
+      if (next < 0 || next >= tabOrder.length) return;
+      e.preventDefault();
+      activeTab = tabOrder[next];
+    }
+  }
+
   function handlePrepareRound() {
     // Starting round 1 also finalizes registration (folded into one undo step
     // server-side); pass the chosen cup size along so that finalize can seed the
@@ -556,6 +600,8 @@
     // If the cancelled round's tab was active, the tab-validity effect resets it.
   }
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div class="app">
   <header>
