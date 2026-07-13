@@ -1,0 +1,66 @@
+Championnat et Open de France, Rueil-Malmaison, France, 2026-07-04 to 2026-07-05
+Nr Name                      Nat  Grade  ELO    1        2        3        4        5        6        7       Pts   +/-
+ 1 Goix           Théo       FR   1 Kyu  1775  30+      15+       2+       5-       7+       4+       6+        6   +52
+ 2 Weimann        Célestin   FR   2 Dan  1808  28+      23+       1-      20+      11+       6+      12+        6   +32
+ 3 Posada Zuluaga Victor     CO   1 Dan  1799  31+      10+      29+      12+       4-       8+       5+        6   +34
+ 4 Nguyen         Anh Tuan   FR   2 Dan  1812  25+      20+       7-       9+       3+       1-      11+        5    +7
+ 5 Pucher         Olivier    FR   2 Dan  1922  32+      14+       8+       1+       6-      17+       3-        5    -6
+ 6 Flahaut        Clément    FR   1 Dan  1845  40+      24+      11+       7+       5+       2-       1-        5    +7
+ 7 Huwart         Guillaume  FR   1 Dan  1767  38+      18+       4+       6-       1-      24+      15+        5   +14
+ 8 Weimann        Christophe FR   1 Dan  1704  35+      21+       5-      16+      14+       3-      13+        5   +13
+ 9 Le Roux        Philippe   FR   2 Kyu  1569  23-      38+      19+       4-      35+      10+      17+        5   +21
+10 Real           Thibault   BE   7 Kyu  1259  12+       3-      15+      13-      21+       9-      24+        4  +221
+11 Wiethölter     Frederik   FR   1 Dan  1698  19+      17+       6-      29+       2-      14+       4-        4    +2
+12 Imanishi       Hirotaka   JP   2 Dan  1937  10-      31+      13+       3-      23+      20+       2-        4   -40
+13 Coll           Julien     FR   4 Kyu  1349  24-      28+      12-      10+      22+      18+       8-        4   +91
+14 Rozentalis     Adam       FR   3 Kyu  1491  16+       5-      39+      21+       8-      11-      25+        4   +41
+15 Zeller         Rémi       FR   1 Kyu  1650  27+       1-      10-      42+      19+      26+       7-        4   -17
+16 Morisset       Robin      FR   2 Kyu  1486  14-      30+(-r ) 32+       8-      25-      37+      34+        4   -20
+17 Marks          Andy       FR   1 Dan  1757  37+      11-      26+      24+      18+       5-       9-        4   -22
+18 Party          Eliot      FR   1 Kyu  1673  46+       7-      27+      22+      17-      13-      23+        4   -24
+19 Spohr          Barnabé    FR   6 Kyu  1200  11-      33+       9-      39+      15-      28+      35+        4   +48
+20 Roeloffzen     Erik       FR   1 Kyu  1570  26+       4-      35+       2-      37+      12-      27+        4    +0
+21 Le Pelleter    Erwann     FR   1 Dan  1728  36+       8-      23+      14-      10-      25+      26+        4   -39
+22 Gérard         Arnaud     FR          1484* 34+      36+      46+      18-      13-      35+      29+        5  
+23 Rautureau      Flavian    FR   5 Kyu  1304   9+       2-      21-      28+      12-      38+      18-        3   +49
+24 Pagès          Jérémy     FR   1 Kyu  1521  13+       6-      37+      17-      31+       7-      10-        3   -16
+25 Varlet         Charlotte  FR  10 Kyu   997   4-      26-      41+      27+      16+      21-      14-        3  +157
+26 Lafay          Gareth     FR   5 Kyu  1336  20-      25+      17-      30-(-b ) 39+      15-      21-        2    -5
+27 Castel         Jonathan   FR   5 Kyu  1261  15-      40+      18-      25-      32+      30+      20-        3    -7
+28 Hellal         Denis      FR          1033   2-      13-      44+      23-      41+      19-      37+        3   +35
+29 Osmont         Fabien     FR   3 Kyu  1462   0-      39+       3-      11-      30-      31+      22-        2   -38
+30 Le Pelleter    Ronan      FR   8 Kyu  1059   1-      16-(+r ) 34+(-rl) 26+(+b ) 29+      27-      36+        4  +124
+31 Castillo       Eduardo    SV   8 Kyu  1086   3-      12-      42+      33+      24-      29-      40+        3   +43
+32 Mery           Elie       FR           896   5-      46+      16-      37-      27-      41+      38+        3  +107
+33 Chaigneau      Amaury     FR           859  43+      19-      38+      31-      36-      39+      42+        4   +94
+34 Billon         Benjamin   FR  15 Kyu   630  22-      47+      30-(+rl) 46+      43+      36+      16-        4  +248
+35 Chavet         Antoine    FR   8 Kyu  1155   8-      44+      20-      40+       9-      22-      19-        2    +8
+36 Alves          Ricardo    FR   7 Kyu  1134  21-      22-      40-      44+      33+      34-      30-        2   -33
+37 Mizessyn       François   FR   8 Kyu  1088  17-      41+      24-      32+      20-      16-      28-        2   +12
+38 Attary         Imane      FR   8 Kyu  1078   7-       9-      33-      43+      40+      23-      32-        2   -11
+39 Walmsley       Morgan     CA   9 Kyu   962  42+      29-      14-      19-      26-      33-      43+        2    +9
+40 Salmon         Xavier     FR  11 Kyu   955   6-      27-      36+      35-      38-      42+      31-        2   +32
+41 Alquier        Thierry    FR           718*  0+      37-      25-      47+      28-      32-      45+        2  
+42 Raynal         Baptiste   FR  10 Kyu   870  39-      43+      31-      15-      44+      40-      33-        2    -7
+43 Grand          Charlotte  FR           354* 33-      42-      47+      38-      34-       0+      39-        1  
+44 Beau           Bastien    BE           494  47+      35-      28-      36-      42-      45-       0-        1   +27
+45 Aurel          Justine    FR           584*  0-       0-       0-       0-       0+      44+      41-        1  
+46 Marks          Edwin      FR   5 Kyu  1253  18-      32-      22-      34-       0-       0-       0-        0   -52
+47 Saber          Raphael    FR             1* 44-      34-      43-      41-       0-       0-       0-        0  
+
+Promoting Goix Théo to 1 Dan
+Promoting Real Thibault to 4 Kyu
+Promoting Rautureau Flavian to 4 Kyu
+Promoting Varlet Charlotte to 7 Kyu
+Promoting Lafay Gareth to 4 Kyu
+Promoting Hellal Denis to 9 Kyu
+Promoting Le Pelleter Ronan to 7 Kyu
+Promoting Castillo Eduardo to 7 Kyu
+Promoting Mery Elie to 10 Kyu
+Promoting Chaigneau Amaury to 11 Kyu
+Promoting Billon Benjamin to 12 Kyu
+Promoting Chavet Antoine to 7 Kyu
+Promoting Mizessyn François to 7 Kyu
+Promoting Salmon Xavier to 10 Kyu
+Promoting Grand Charlotte to 18 Kyu
+Promoting Beau Bastien to 16 Kyu
