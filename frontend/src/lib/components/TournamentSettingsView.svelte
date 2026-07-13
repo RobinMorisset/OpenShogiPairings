@@ -486,55 +486,8 @@
     </p>
   {/if}
 
-  <div class="section mode-section">
-    <h3>{$_("settings.eloModeTitle")}</h3>
-    <p class="desc">
-      {$_("settings.eloModeDesc")}
-    </p>
-    <label class="check">
-      <input
-        type="checkbox"
-        checked={eloEnabled}
-        disabled={busy}
-        onchange={(e) => setEloEnabled(e.currentTarget.checked)}
-      />
-      {$_("settings.eloModeCheckbox")}
-    </label>
-    {#if eloEnabled}
-      <label class="check elo-k">
-        {$_("settings.eloDriftMultiplier")}
-        <input
-          type="number"
-          min="0.5"
-          step="0.5"
-          class="threshold narrow"
-          value={eloKPercent / 100}
-          disabled={busy}
-          onchange={(e) => editEloMultiplier(e.currentTarget.value)}
-        />
-      </label>
-      <p class="desc small-note">
-        {$_("settings.eloDriftDesc")}
-      </p>
-      <label class="check elo-k">
-        {$_("settings.eloProvisionalMultiplier")}
-        <input
-          type="number"
-          min="1"
-          step="0.5"
-          class="threshold narrow"
-          value={eloProvisionalPercent / 100}
-          disabled={busy}
-          onchange={(e) => editEloProvisionalMultiplier(e.currentTarget.value)}
-        />
-      </label>
-      <p class="desc small-note">
-        {$_("settings.eloProvisionalDesc")}
-      </p>
-    {/if}
-  </div>
-
   <fieldset class="swiss-fieldset" disabled={swissDisabled}>
+  <div class="section">
     <h3>{$_("settings.macmahonTitle")}</h3>
     <p class="desc">
     {$_("settings.macmahonDesc")}
@@ -638,58 +591,55 @@
     </div>
   {/if}
 
-  {#if thresholds.length > 0}
-    <div class="section">
-      <h3>{$_("settings.degressiveTitle")}</h3>
-      <p class="desc">
-        {$_("settings.degressiveDesc")}
-      </p>
+  <div class="subsection">
+    <h4>{$_("settings.degressiveTitle")}</h4>
+    <p class="desc">
+      {$_("settings.degressiveDesc")}
+    </p>
 
-      {#if schedule.length > 0}
-        <div class="preview">
-          <h4>{$_("settings.spreadOverRounds")}</h4>
-          <ul>
-            {#each schedule as s (s.label)}
-              <li>
-                <span class="band">{s.label}</span> → {$_("settings.upTo")}
-                <strong>{s.max}</strong>
-                {$_(s.max === 1 ? "settings.startingPointSingular" : "settings.startingPointsPlural")}
-              </li>
-            {/each}
-          </ul>
-        </div>
-      {/if}
-    </div>
-  {/if}
+    {#if schedule.length > 0}
+      <div class="preview">
+        <h4>{$_("settings.spreadOverRounds")}</h4>
+        <ul>
+          {#each schedule as s (s.label)}
+            <li>
+              <span class="band">{s.label}</span> → {$_("settings.upTo")}
+              <strong>{s.max}</strong>
+              {$_(s.max === 1 ? "settings.startingPointSingular" : "settings.startingPointsPlural")}
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+  </div>
 
-  {#if thresholds.length > 0}
-    <div class="section">
-      <h3>{$_("settings.airtightGroupsTitle")}</h3>
-      <p class="desc">
-        {$_("settings.airtightGroupsDesc")}
-      </p>
+  <div class="subsection">
+    <h4>{$_("settings.airtightGroupsTitle")}</h4>
+    <p class="desc">
+      {$_("settings.airtightGroupsDesc")}
+    </p>
 
-      <label class="check">
-        <input
-          type="checkbox"
-          checked={airtightRounds != null}
-          disabled={busy}
-          onchange={(e) => setAirtightEnabled(e.currentTarget.checked)}
-        />
-        {$_("settings.onlyFirstRoundsPrefix")}
-        <input
-          type="number"
-          min="1"
-          step="1"
-          class="threshold narrow"
-          value={airtightRounds ?? 1}
-          disabled={busy || airtightRounds == null}
-          onchange={(e) => editAirtightRounds(e.currentTarget.value)}
-        />
-        {$_("settings.onlyFirstRoundsSuffix")}
-      </label>
-    </div>
-  {/if}
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={airtightRounds != null}
+        disabled={busy}
+        onchange={(e) => setAirtightEnabled(e.currentTarget.checked)}
+      />
+      {$_("settings.onlyFirstRoundsPrefix")}
+      <input
+        type="number"
+        min="1"
+        step="1"
+        class="threshold narrow"
+        value={airtightRounds ?? 1}
+        disabled={busy || airtightRounds == null}
+        onchange={(e) => editAirtightRounds(e.currentTarget.value)}
+      />
+      {$_("settings.onlyFirstRoundsSuffix")}
+    </label>
+  </div>
+  </div>
 
   <div class="section">
     <h3>{$_("settings.clubProtectionTitle")}</h3>
@@ -971,6 +921,54 @@
   </div>
 
   <div class="section">
+    <h3>{$_("settings.eloModeTitle")}</h3>
+    <p class="desc">
+      {$_("settings.eloModeDesc")}
+    </p>
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={eloEnabled}
+        disabled={busy}
+        onchange={(e) => setEloEnabled(e.currentTarget.checked)}
+      />
+      {$_("settings.eloModeCheckbox")}
+    </label>
+    {#if eloEnabled}
+      <label class="check elo-k">
+        {$_("settings.eloDriftMultiplier")}
+        <input
+          type="number"
+          min="0.5"
+          step="0.5"
+          class="threshold narrow"
+          value={eloKPercent / 100}
+          disabled={busy}
+          onchange={(e) => editEloMultiplier(e.currentTarget.value)}
+        />
+      </label>
+      <p class="desc small-note">
+        {$_("settings.eloDriftDesc")}
+      </p>
+      <label class="check elo-k">
+        {$_("settings.eloProvisionalMultiplier")}
+        <input
+          type="number"
+          min="1"
+          step="0.5"
+          class="threshold narrow"
+          value={eloProvisionalPercent / 100}
+          disabled={busy}
+          onchange={(e) => editEloProvisionalMultiplier(e.currentTarget.value)}
+        />
+      </label>
+      <p class="desc small-note">
+        {$_("settings.eloProvisionalDesc")}
+      </p>
+    {/if}
+  </div>
+
+  <div class="section">
     <h3>{$_("settings.exportSettings")}</h3>
     <p class="desc">{$_("settings.exportSettingsDesc")}</p>
     <button type="button" class="ghost small" onclick={exportSettings}>
@@ -983,6 +981,18 @@
   .settings {
     max-width: 32rem;
   }
+  @media (min-width: 60rem) {
+    .settings {
+      max-width: 66rem;
+      margin: 0 auto;
+      column-count: 2;
+      column-gap: 3rem;
+    }
+    .section,
+    fieldset.swiss-fieldset {
+      break-inside: avoid;
+    }
+  }
   h3 {
     margin: 0.4rem 0 0.3rem;
   }
@@ -991,23 +1001,30 @@
     border-top: 1px solid var(--border-divider);
     padding-top: 1rem;
   }
+  .settings > fieldset.swiss-fieldset > .section:first-child {
+    margin-top: 0.5rem;
+    border-top: none;
+    padding-top: 0;
+  }
   /* Groups the Swiss-only sections so they can be greyed out as one in ELO mode.
      Reset the browser's default fieldset chrome; the inner `.section`s keep their
-     own separators. */
+     own separators. It's the first thing in the tab, so no leading divider. */
   fieldset.swiss-fieldset {
     border: none;
-    border-top: 1px solid var(--border-divider);
-    margin: 1.75rem 0 0;
-    padding: 1rem 0 0;
+    margin: 0;
+    padding: 0;
     min-width: 0;
   }
   fieldset.swiss-fieldset:disabled {
     opacity: 0.5;
   }
-  .mode-section {
-    margin-top: 0.5rem;
-    border-top: none;
-    padding-top: 0;
+  .subsection {
+    margin-top: 1.25rem;
+  }
+  .subsection h4 {
+    margin: 0 0 0.3rem;
+    font-size: 0.95rem;
+    color: var(--text-strong);
   }
   .elo-k {
     margin-top: 0.7rem;
