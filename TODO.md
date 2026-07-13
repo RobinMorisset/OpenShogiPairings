@@ -33,8 +33,6 @@ Known limitations and future work, roughly ordered by area.
 
 - **Webhook for pushing results and pulling players** See https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification
 
-- **Standings by direct confrontation**
-
 - **Make the Tauri desktop app's data directory configurable.** It's currently
   hardcoded to `dirs::data_dir()/openshogipairings/tournaments/`
   (`frontend/src-tauri/src/lib.rs`'s `local_data_dir`), matching where

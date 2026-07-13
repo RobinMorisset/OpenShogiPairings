@@ -86,5 +86,6 @@ export const TIEBREAKS: {
   { code: "sos_w2", label: "SOSW-2", field: "sosw2", title: "SOSW dropping the two lowest-scoring opponents" },
   { code: "cuss_m", label: "CUSSM", field: "cussm", title: "Cumulative sum of the running points total each round" },
   { code: "cuss_w", label: "CUSSW", field: "cussw", title: "Cumulative sum of the running win total each round" },
+  { code: "dc", label: "DC", field: "dc", title: "Direct confrontation: wins among players tied on every earlier criterion, when they've all played each other" },
   { code: "est_elo", label: "Est. ELO", field: "estimated_elo", title: "Live Bayesian estimate of the player's current strength" },
 ];

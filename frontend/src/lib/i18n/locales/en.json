@@ -346,6 +346,7 @@
     "sos_w2": { "title": "SOSW dropping the two lowest-scoring opponents" },
     "cuss_m": { "title": "Cumulative sum of the running points total each round" },
     "cuss_w": { "title": "Cumulative sum of the running win total each round" },
+    "dc": { "title": "Direct confrontation: wins among players tied on every earlier criterion, when they've all played each other" },
     "est_elo": { "label": "Est. ELO", "title": "Live Bayesian estimate of the player's current strength" }
   }
 }

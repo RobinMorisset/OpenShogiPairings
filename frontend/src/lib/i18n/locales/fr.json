@@ -346,6 +346,7 @@
     "sos_w2": { "title": "SOSW sans les deux moins bons adversaires" },
     "cuss_m": { "title": "Somme cumulative du total de points ronde par ronde" },
     "cuss_w": { "title": "Somme cumulative du total de victoires ronde par ronde" },
+    "dc": { "title": "Confrontation directe : victoires entre joueurs à égalité sur tous les critères précédents, lorsqu'ils se sont tous rencontrés" },
     "est_elo": { "label": "ELO est.", "title": "Estimation bayésienne en temps réel du niveau actuel du joueur" }
   }
 }

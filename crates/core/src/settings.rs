@@ -147,6 +147,11 @@ pub enum Tiebreak {
     CussM,
     /// Cumulative sum of the running win total after each round.
     CussW,
+    /// Direct confrontation: among players still tied on every earlier
+    /// criterion, the sum of a player's wins against the others in that tied
+    /// group — but only when the group is a complete subgraph (every pair in
+    /// it has played each other). Otherwise 0, and the group stays tied.
+    Dc,
     /// The live Bayesian ELO estimate (experimental ELO pairing mode). Ranks
     /// higher estimate first, like the other metrics.
     EstElo,

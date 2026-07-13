@@ -65,6 +65,11 @@ pub struct Standing {
     pub cussm: u32,
     /// Cumulative sum of the running win total after each round.
     pub cussw: u32,
+    /// Direct confrontation: this player's wins against the other players they
+    /// were still tied with once every earlier configured criterion ran out
+    /// (0 if that tied group never played a complete round-robin among
+    /// themselves, or if `Dc` isn't configured, or wasn't reached).
+    pub dc: u32,
     /// Opponents faced, one entry per game, in round order (a rematch appears
     /// twice). Lets the Results tab show how the opponent-sum tie-breaks were
     /// built without re-deriving who played whom.
@@ -101,6 +106,7 @@ impl Standing {
             Tiebreak::SosW2 => self.sosw2,
             Tiebreak::CussM => self.cussm,
             Tiebreak::CussW => self.cussw,
+            Tiebreak::Dc => self.dc,
             // Ranking metrics are u32; a (non-negative) estimated ELO fits, and a
             // stray negative estimate floors at 0 for ordering.
             Tiebreak::EstElo => self.estimated_elo.max(0) as u32,
@@ -175,6 +181,9 @@ pub fn compute_standings(
                 sosw2: sum_dropping_lowest(opp_w, 2),
                 cussm: s.cuss_m,
                 cussw: s.cuss_w,
+                // Filled in below, while the ranking order is computed, since it
+                // depends on which players end up tied on the earlier criteria.
+                dc: 0,
                 opponents: s.opponents.clone(),
                 defeated: s.defeated.clone(),
                 running_points: s.running_points.clone(),
@@ -187,24 +196,102 @@ pub fn compute_standings(
     // Rank by each configured criterion in order (points is one of them, normally
     // first); the tournament number breaks any remaining tie so the order is
     // deterministic (unnumbered players last).
+    //
+    // Most criteria are a plain per-player number, so ranking by them is just a
+    // lexicographic sort. Direct confrontation isn't: its value for a player
+    // depends on which other players they're still tied with once every earlier
+    // criterion has run out, so ranking proceeds by repeatedly splitting the
+    // still-tied groups, criterion by criterion, rather than a single sort.
     let tnum: HashMap<Uuid, u32> = players
         .iter()
         .map(|p| (p.id, p.tournament_id.unwrap_or(u32::MAX)))
         .collect();
-    standings.sort_by(|a, b| {
-        let mut ord = std::cmp::Ordering::Equal;
-        for &tb in &settings.tiebreaks {
-            // Estimated ELO only ranks in ELO pairing mode; otherwise the estimate
-            // is just the registration rating, so skip it (defends against a
-            // loaded save that predates normalization dropping it).
-            if tb == Tiebreak::EstElo && !settings.elo_pairing_enabled {
+
+    let mut start: Vec<usize> = (0..standings.len()).collect();
+    start.sort_by_key(|&i| tnum[&standings[i].player_id]);
+    let mut groups: Vec<Vec<usize>> = vec![start];
+
+    for &tb in &settings.tiebreaks {
+        // Estimated ELO only ranks in ELO pairing mode; otherwise the estimate is
+        // just the registration rating, so skip it (defends against a loaded
+        // save that predates normalization dropping it).
+        if tb == Tiebreak::EstElo && !settings.elo_pairing_enabled {
+            continue;
+        }
+        let mut next_groups: Vec<Vec<usize>> = Vec::new();
+        for group in groups {
+            if group.len() < 2 {
+                next_groups.push(group);
                 continue;
             }
-            ord = ord.then_with(|| b.tiebreak(tb).cmp(&a.tiebreak(tb)));
+            if tb == Tiebreak::Dc {
+                match direct_confrontation(&group, &standings) {
+                    Some(dc) => {
+                        for &i in &group {
+                            standings[i].dc = dc[&standings[i].player_id];
+                        }
+                        next_groups.extend(split_by_key(group, |i| standings[i].dc));
+                    }
+                    // Not a complete subgraph: DC stays 0 for everyone here, and
+                    // the group stays tied going into the next criterion.
+                    None => next_groups.push(group),
+                }
+                continue;
+            }
+            next_groups.extend(split_by_key(group, |i| standings[i].tiebreak(tb)));
         }
-        ord.then(tnum[&a.player_id].cmp(&tnum[&b.player_id]))
-    });
-    standings
+        groups = next_groups;
+    }
+
+    groups
+        .into_iter()
+        .flatten()
+        .map(|i| standings[i].clone())
+        .collect()
+}
+
+/// Stable-split a tied group into subgroups sharing the same (descending) key —
+/// each subgroup is still internally ordered as it was in `group` (so an outer
+/// tie-break already applied, like tournament number, survives untouched).
+fn split_by_key(mut group: Vec<usize>, key: impl Fn(usize) -> u32) -> Vec<Vec<usize>> {
+    group.sort_by_key(|&i| std::cmp::Reverse(key(i)));
+    let mut result: Vec<Vec<usize>> = Vec::new();
+    for i in group {
+        match result.last_mut() {
+            Some(last) if key(last[0]) == key(i) => last.push(i),
+            _ => result.push(vec![i]),
+        }
+    }
+    result
+}
+
+/// Direct confrontation scores for a tied `group`: each player's wins against
+/// the others in the group. Only defined — `Some` — when the group is a
+/// complete subgraph (every pair in it has played each other at least once);
+/// otherwise `None`, meaning the criterion doesn't apply to this group.
+fn direct_confrontation(group: &[usize], standings: &[Standing]) -> Option<HashMap<Uuid, u32>> {
+    let ids: Vec<Uuid> = group.iter().map(|&i| standings[i].player_id).collect();
+    for (pos, &i) in group.iter().enumerate() {
+        for &other_id in &ids[(pos + 1)..] {
+            if !standings[i].opponents.contains(&other_id) {
+                return None;
+            }
+        }
+    }
+    let id_set: std::collections::HashSet<Uuid> = ids.iter().copied().collect();
+    Some(
+        group
+            .iter()
+            .map(|&i| {
+                let wins = standings[i]
+                    .defeated
+                    .iter()
+                    .filter(|d| id_set.contains(d))
+                    .count() as u32;
+                (standings[i].player_id, wins)
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -573,5 +660,95 @@ mod tests {
             &rounds,
         );
         assert!(pos(&by_w, f.id) < pos(&by_w, e.id)); // F above E by SOSW
+    }
+
+    #[test]
+    fn direct_confrontation_breaks_a_tie_within_a_complete_subgraph() {
+        // A, B and C each finish on 2 points but by different means: A beats
+        // both B and C; B beats C plus outsider D; C beats outsiders D and E.
+        // A, B and C have played each other (a complete subgraph), so DC ranks
+        // them by wins *within that trio*: A beat both (2), B beat only C (1),
+        // C beat neither (0) — A > B > C, even though their tournament numbers
+        // (3, 2, 1) say the opposite.
+        let a = player(3, None);
+        let b = player(2, None);
+        let c = player(1, None);
+        let d = player(4, None);
+        let e = player(5, None);
+        let rounds = vec![
+            round(
+                1,
+                vec![
+                    board(a.id, b.id, Winner::Player1), // A beats B
+                    board(c.id, d.id, Winner::Player1), // C beats D
+                ],
+            ),
+            round(
+                2,
+                vec![
+                    board(a.id, c.id, Winner::Player1), // A beats C
+                    board(b.id, d.id, Winner::Player1), // B beats D
+                ],
+            ),
+            round(3, vec![board(b.id, c.id, Winner::Player1)]), // B beats C
+            round(4, vec![board(c.id, e.id, Winner::Player1)]), // C beats E
+        ];
+        let players = vec![a.clone(), b.clone(), c.clone(), d.clone(), e.clone()];
+        let settings = TournamentSettings {
+            tiebreaks: vec![Tiebreak::Points, Tiebreak::Dc],
+            ..Default::default()
+        };
+        let standings = compute_standings(&players, &settings, &rounds);
+        let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
+
+        assert_eq!((of(a.id).points, of(b.id).points, of(c.id).points), (2, 2, 2));
+        assert_eq!((of(a.id).dc, of(b.id).dc, of(c.id).dc), (2, 1, 0));
+
+        let pos = |id| standings.iter().position(|s| s.player_id == id).unwrap();
+        assert!(pos(a.id) < pos(b.id));
+        assert!(pos(b.id) < pos(c.id));
+    }
+
+    #[test]
+    fn direct_confrontation_does_nothing_without_a_complete_subgraph() {
+        // A, B, C and D all finish on 1 point, but they haven't all played each
+        // other: A faced C and D, B faced C and D, but A never faced B and C
+        // never faced D. DC can't apply to a tied group that isn't a complete
+        // subgraph, so it stays 0 for everyone and the tournament number alone
+        // breaks the tie.
+        let a = player(1, None);
+        let b = player(2, None);
+        let c = player(3, None);
+        let d = player(4, None);
+        let rounds = vec![
+            round(
+                1,
+                vec![
+                    board(a.id, c.id, Winner::Player1), // A beats C
+                    board(b.id, d.id, Winner::Player1), // B beats D
+                ],
+            ),
+            round(
+                2,
+                vec![
+                    board(a.id, d.id, Winner::Player2), // D beats A
+                    board(b.id, c.id, Winner::Player2), // C beats B
+                ],
+            ),
+        ];
+        let players = vec![a.clone(), b.clone(), c.clone(), d.clone()];
+        let settings = TournamentSettings {
+            tiebreaks: vec![Tiebreak::Points, Tiebreak::Dc],
+            ..Default::default()
+        };
+        let standings = compute_standings(&players, &settings, &rounds);
+        let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
+
+        for id in [a.id, b.id, c.id, d.id] {
+            assert_eq!(of(id).points, 1);
+            assert_eq!(of(id).dc, 0);
+        }
+        let order: Vec<Uuid> = standings.iter().map(|s| s.player_id).collect();
+        assert_eq!(order, vec![a.id, b.id, c.id, d.id]); // tournament number order
     }
 }

@@ -10,4 +10,4 @@
  * which ones rank the table, and in which order, via
  * [`TournamentSettings::tiebreaks`].
  */
-export type Tiebreak = "points" | "sos_m" | "sos_w" | "sodos_m" | "sodos_w" | "sosos_m" | "sosos_w" | "sos_m1" | "sos_m2" | "sos_w1" | "sos_w2" | "cuss_m" | "cuss_w" | "est_elo";
+export type Tiebreak = "points" | "sos_m" | "sos_w" | "sodos_m" | "sodos_w" | "sosos_m" | "sosos_w" | "sos_m1" | "sos_m2" | "sos_w1" | "sos_w2" | "cuss_m" | "cuss_w" | "dc" | "est_elo";

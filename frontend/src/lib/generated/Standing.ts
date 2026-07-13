@@ -66,6 +66,13 @@ cussm: number,
  */
 cussw: number, 
 /**
+ * Direct confrontation: this player's wins against the other players they
+ * were still tied with once every earlier configured criterion ran out
+ * (0 if that tied group never played a complete round-robin among
+ * themselves, or if `Dc` isn't configured, or wasn't reached).
+ */
+dc: number, 
+/**
  * Opponents faced, one entry per game, in round order (a rematch appears
  * twice). Lets the Results tab show how the opponent-sum tie-breaks were
  * built without re-deriving who played whom.
