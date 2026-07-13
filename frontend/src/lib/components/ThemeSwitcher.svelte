@@ -10,6 +10,7 @@
 <button
   type="button"
   class="theme-switcher ghost"
+  data-testid="theme-switcher"
   onclick={toggle}
   title={$_($theme === "dark" ? "themeSwitcher.switchToLight" : "themeSwitcher.switchToDark")}
   aria-label={$_($theme === "dark" ? "themeSwitcher.switchToLight" : "themeSwitcher.switchToDark")}

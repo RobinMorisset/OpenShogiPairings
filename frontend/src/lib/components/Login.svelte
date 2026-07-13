@@ -47,7 +47,7 @@
       autocomplete="current-password"
       disabled={busy}
     />
-    <button type="submit" disabled={busy || password.length === 0}>
+    <button type="submit" data-testid="login-submit" disabled={busy || password.length === 0}>
       {busy ? $_("login.signingIn") : $_("login.submit")}
     </button>
   </form>

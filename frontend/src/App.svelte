@@ -677,19 +677,27 @@
           <button
             type="button"
             class="ghost"
+            data-testid="undo"
             onclick={handleUndo}
             disabled={busy || !canUndo}
             title={$_("app.undoTitle")}
           >
             {$_("app.undo")}
           </button>
-          <button type="button" class="ghost" onclick={handleSave} disabled={busy}>
+          <button
+            type="button"
+            class="ghost"
+            data-testid="save"
+            onclick={handleSave}
+            disabled={busy}
+          >
             {$_("app.save")}
           </button>
           <button
             type="button"
             class="ghost"
             class:active={showBackups}
+            data-testid="toggle-backups"
             onclick={handleToggleBackups}
             disabled={busy}
             title={$_("app.backupsTitle")}
@@ -699,6 +707,7 @@
           <button
             type="button"
             class="ghost"
+            data-testid="switch-tournament"
             onclick={() => currentTournamentId.set(null)}
             disabled={busy}
             title={$_("app.switchTournamentTitle")}
@@ -740,6 +749,7 @@
           type="button"
           class="tab"
           class:active={activeTab === "settings"}
+          data-testid="tab-settings"
           onclick={() => (activeTab = "settings")}
         >
           {$_("app.tabSettings")}
@@ -748,6 +758,7 @@
           type="button"
           class="tab"
           class:active={activeTab === "players"}
+          data-testid="tab-players"
           onclick={() => (activeTab = "players")}
         >
           {$_("app.tabPlayers", { values: { count: tournament.players.length } })}
@@ -756,6 +767,7 @@
           type="button"
           class="tab"
           class:active={activeTab === "results"}
+          data-testid="tab-results"
           onclick={() => (activeTab = "results")}
         >
           {$_("app.tabResults")}
@@ -765,6 +777,7 @@
             type="button"
             class="tab"
             class:active={activeTab === `round-${round.number}`}
+            data-testid={`tab-round-${round.number}`}
             onclick={() => (activeTab = `round-${round.number}`)}
           >
             {round.completed
@@ -777,6 +790,7 @@
             type="button"
             class="tab draft-tab"
             class:active={activeTab === "draft"}
+            data-testid="tab-draft"
             onclick={() => (activeTab = "draft")}
           >
             {$_("app.tabRoundDraft", { values: { number: tournament.draft.number } })}
@@ -800,6 +814,7 @@
           <button
             type="button"
             class="ctrl primary"
+            data-testid="prepare-round"
             onclick={handlePrepareRound}
             disabled={!startEnabled}
             title={startTitle}
@@ -809,6 +824,7 @@
           <button
             type="button"
             class="ctrl"
+            data-testid="export-grid"
             onclick={handleExportGrid}
             disabled={!exportEnabled}
             title={exportTitle}
@@ -818,6 +834,7 @@
           <button
             type="button"
             class="ctrl danger"
+            data-testid="cancel-round"
             onclick={handleCancelRound}
             disabled={!canCancel}
             title={cancelTitle}

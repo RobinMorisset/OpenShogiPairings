@@ -135,7 +135,13 @@
       <ul class="tournaments">
         {#each tournaments as t (t.id)}
           <li>
-            <button type="button" class="ghost pick" onclick={() => select(t.id)} disabled={busy}>
+            <button
+              type="button"
+              class="ghost pick"
+              data-testid="select-tournament"
+              onclick={() => select(t.id)}
+              disabled={busy}
+            >
               {#if t.has_password}
                 {#if getToken(t.id)}
                   <span class="lock" title={$_("picker.passwordUnlocked")}>🔓</span>
@@ -148,6 +154,7 @@
             <button
               type="button"
               class="ghost small danger"
+              data-testid="delete-tournament"
               onclick={() => handleDelete(t)}
               disabled={busy}
               title={$_("picker.delete")}
@@ -173,10 +180,20 @@
           disabled={busy}
         />
         <div class="actions">
-          <button type="submit" disabled={busy || adminPassword.length === 0}>
+          <button
+            type="submit"
+            data-testid="admin-password-submit"
+            disabled={busy || adminPassword.length === 0}
+          >
             {$_("login.submit")}
           </button>
-          <button type="button" class="ghost" onclick={() => (pendingCreate = null)} disabled={busy}>
+          <button
+            type="button"
+            class="ghost"
+            data-testid="admin-password-cancel"
+            onclick={() => (pendingCreate = null)}
+            disabled={busy}
+          >
             {$_("createTournament.cancel")}
           </button>
         </div>

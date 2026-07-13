@@ -249,6 +249,7 @@
     <button
       type="button"
       class="ghost primary"
+      data-testid="confirm-round"
       disabled={busy || problem !== null}
       onclick={onConfirm}
     >

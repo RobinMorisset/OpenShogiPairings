@@ -49,7 +49,7 @@
       </label>
     {/if}
     <div class="actions">
-      <button type="submit" disabled={busy || name.trim() === ""}>
+      <button type="submit" data-testid="create-tournament" disabled={busy || name.trim() === ""}>
         {$_("createTournament.create")}
       </button>
     </div>
@@ -57,7 +57,7 @@
 
   <div class="or">{$_("createTournament.or")}</div>
 
-  <button type="button" class="ghost" disabled={busy} onclick={onLoad}>
+  <button type="button" class="ghost" data-testid="load-tournament" disabled={busy} onclick={onLoad}>
     {$_("createTournament.loadFromFile")}
   </button>
 </section>
