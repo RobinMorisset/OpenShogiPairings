@@ -184,11 +184,16 @@
     "club": "Club",
     "roundColumn": "R{number}",
     "victories": "Wins",
+    "macmahon": "MM",
+    "macmahonTitle": "MacMahon starting points (before wins)",
     "victoriesPlusMacmahon": "Wins + MacMahon points",
     "byeTitle": "Bye (counts as a win)",
     "absentTitle": "Absent (counts as a loss)",
-    "handicapGameWin": "Handicap game — counts as a win in the standings",
-    "handicapGameLoss": "Handicap game — counts as a loss in the standings",
+    "opponentTitle": "vs {name}",
+    "handicapGameWin": "Wiel rule: as the handicap giver, this counts as a win in the standings despite losing the game.",
+    "handicapGameLoss": "Wiel rule: the handicap giver counts as the winner, so this surprise win doesn't count in the standings.",
+    "tiebreakNoOpponents": "No opponents counted yet",
+    "tiebreakDropped": "(dropped {dropped})",
     "noRoundsCompleted": "No rounds completed yet — results appear here as rounds are completed."
   },
   "pairingSource": {

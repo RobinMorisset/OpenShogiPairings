@@ -34,6 +34,12 @@ pub(crate) struct PlayerScore {
     /// Cumulative sum of the player's running win total, added up after each
     /// completed round (the "cumulative" tie-break, wins only).
     pub cuss_w: u32,
+    /// The player's running points total as it stood after each completed round
+    /// (one entry per round) — the sequence CUSSM sums, kept for the breakdown.
+    pub running_points: Vec<u32>,
+    /// The player's running win total after each completed round — the sequence
+    /// CUSSW sums.
+    pub running_wins: Vec<u32>,
     /// Whether the player has taken a bye.
     pub had_bye: bool,
     /// Round number of the most recent round the player floated up / down (a bye
@@ -106,6 +112,8 @@ pub(crate) fn compute_scores(
                     defeated: Vec::new(),
                     cuss_m: 0,
                     cuss_w: 0,
+                    running_points: Vec::new(),
+                    running_wins: Vec::new(),
                     had_bye: false,
                     last_ascended: None,
                     last_descended: None,
@@ -183,6 +191,8 @@ pub(crate) fn compute_scores(
         for s in by_id.values_mut() {
             s.cuss_m += s.points;
             s.cuss_w += s.victories;
+            s.running_points.push(s.points);
+            s.running_wins.push(s.victories);
         }
     }
 

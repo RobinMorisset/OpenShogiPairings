@@ -65,6 +65,17 @@ pub struct Standing {
     pub cussm: u32,
     /// Cumulative sum of the running win total after each round.
     pub cussw: u32,
+    /// Opponents faced, one entry per game, in round order (a rematch appears
+    /// twice). Lets the Results tab show how the opponent-sum tie-breaks were
+    /// built without re-deriving who played whom.
+    pub opponents: Vec<Uuid>,
+    /// Opponents defeated (effective winner), one entry per game — the subset of
+    /// `opponents` the SODOS tie-breaks sum over.
+    pub defeated: Vec<Uuid>,
+    /// Running points total after each completed round (the sequence CUSSM sums).
+    pub running_points: Vec<u32>,
+    /// Running win total after each completed round (the sequence CUSSW sums).
+    pub running_wins: Vec<u32>,
     /// The player's current estimated ELO (rounded), from the Bayesian estimate
     /// that drives the experimental ELO pairing mode (see [`crate::estimate_elos`]).
     /// Computed regardless of mode; the Results tab only shows it when the ELO
@@ -164,6 +175,10 @@ pub fn compute_standings(
                 sosw2: sum_dropping_lowest(opp_w, 2),
                 cussm: s.cuss_m,
                 cussw: s.cuss_w,
+                opponents: s.opponents.clone(),
+                defeated: s.defeated.clone(),
+                running_points: s.running_points.clone(),
+                running_wins: s.running_wins.clone(),
                 estimated_elo: elos.get(&p.id).copied().unwrap_or(0.0).round() as i32,
             }
         })

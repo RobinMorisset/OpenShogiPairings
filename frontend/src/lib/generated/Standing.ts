@@ -66,6 +66,25 @@ cussm: number,
  */
 cussw: number, 
 /**
+ * Opponents faced, one entry per game, in round order (a rematch appears
+ * twice). Lets the Results tab show how the opponent-sum tie-breaks were
+ * built without re-deriving who played whom.
+ */
+opponents: Array<string>, 
+/**
+ * Opponents defeated (effective winner), one entry per game — the subset of
+ * `opponents` the SODOS tie-breaks sum over.
+ */
+defeated: Array<string>, 
+/**
+ * Running points total after each completed round (the sequence CUSSM sums).
+ */
+running_points: Array<number>, 
+/**
+ * Running win total after each completed round (the sequence CUSSW sums).
+ */
+running_wins: Array<number>, 
+/**
  * The player's current estimated ELO (rounded), from the Bayesian estimate
  * that drives the experimental ELO pairing mode (see [`crate::estimate_elos`]).
  * Computed regardless of mode; the Results tab only shows it when the ELO

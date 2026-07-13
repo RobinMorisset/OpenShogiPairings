@@ -1,7 +1,7 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
   import { TIEBREAKS } from "../types";
-  import type { CupPodium, Player, Round, Standing, Tournament, Winner } from "../types";
+  import type { CupPodium, Player, Round, Standing, Tiebreak, Tournament, Winner } from "../types";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
   import { boardOutcome } from "../boardOutcome";
   import { printPage } from "../platform";
@@ -70,6 +70,26 @@
 
   // Rows follow the server's ranked order, joined to each player's details.
   const byId = $derived(new Map(tournament.players.map((p) => [p.id, p])));
+
+  // Standings keyed by player id, so a cell can look up an opponent's metrics
+  // when explaining how a tie-break was summed.
+  const standingById = $derived(new Map(standings.map((s) => [s.player_id, s])));
+
+  // A player's full name for a tooltip, "Last First"; an em dash if unknown
+  // (e.g. an opponent removed after the game).
+  const nameOf = (id: string): string => {
+    const p = byId.get(id);
+    return p ? `${p.last_name} ${p.first_name}`.trim() : "—";
+  };
+
+  // Show a MacMahon column (between Wins and Points) when the starting score
+  // matters — either someone has MacMahon starting points, or a manual
+  // bonus/penalty adjusts a starting score. Its cell hosts the adjustment
+  // underline that used to live on the Points cell.
+  const showMacmahon = $derived(
+    standings.some((s) => s.macmahon !== 0) ||
+      tournament.players.some((p) => (p.adjustments ?? []).length > 0),
+  );
   const rows = $derived(
     standings
       .map((standing) => ({ standing, player: byId.get(standing.player_id) }))
@@ -81,6 +101,8 @@
   type PlayedCell = {
     kind: "played";
     opponent: string;
+    /** The opponent's full name, for the cell tooltip. */
+    opponentName: string;
     /** This player actually won the game — drives the +/− sign and colour. */
     actualWon: boolean;
     /** Counts as a win in the standings (the giver always does). */
@@ -96,7 +118,7 @@
   type Cell =
     | { kind: "bye" }
     | { kind: "absent" }
-    | { kind: "pending"; opponent: string }
+    | { kind: "pending"; opponent: string; opponentName: string }
     | PlayedCell;
 
   function cellFor(player: Player, round: Round): Cell {
@@ -108,9 +130,11 @@
     const board = round.boards[boardIdx];
     const isP1 = board.player1 === player.id;
     const side: Winner = isP1 ? "player1" : "player2";
-    const opponentId = numberOf.get(isP1 ? board.player2 : board.player1);
+    const opponentUuid = isP1 ? board.player2 : board.player1;
+    const opponentId = numberOf.get(opponentUuid);
     const opponent = opponentId != null ? String(opponentId) : "?";
-    if (!board.result) return { kind: "pending", opponent };
+    const opponentName = nameOf(opponentUuid);
+    if (!board.result) return { kind: "pending", opponent, opponentName };
 
     const { actualWon, gave } = boardOutcome(board, side);
     // Server-computed, Wiel-rule-aware winner for this board (see
@@ -131,6 +155,7 @@
     return {
       kind: "played",
       opponent,
+      opponentName,
       actualWon,
       effectiveWon,
       drawn: board.drawn ?? false,
@@ -156,14 +181,118 @@
     return `${cell.opponent}${draw}${sign}${hc}${floatMarkers(cell)}`;
   }
 
-  /** Tooltip for the Points cell: the breakdown of any manual adjustments, or
-   * the default explanation when the player has none. */
-  function pointsTitle(player: Player): string {
+  /** Tooltip for the MacMahon cell: the breakdown of any manual bonus/penalty
+   * adjustments, or nothing when the player has none (the column header already
+   * says what the plain value is). */
+  function macmahonTitle(player: Player): string | undefined {
     const adjustments = player.adjustments ?? [];
-    if (adjustments.length === 0) return $_("resultsView.victoriesPlusMacmahon");
+    if (adjustments.length === 0) return undefined;
     return adjustments
       .map((a) => `${a.delta > 0 ? "+" : ""}${a.delta} — ${a.reason}`)
       .join("\n");
+  }
+
+  /** A tie-break value, and the players who contributed it — `4 (Doe Jane)`. */
+  function opponentTerm(id: string, field: keyof Standing): string {
+    const value = (standingById.get(id)?.[field] as number | undefined) ?? 0;
+    return `${value} (${nameOf(id)})`;
+  }
+
+  /** Join the opponents' contributions to an opponent-sum tie-break, e.g.
+   * `3 (Doe Jane) + 2 (Roe Max)`; a placeholder when there are none yet. */
+  function sumTerms(ids: string[], field: keyof Standing): string {
+    if (ids.length === 0) return $_("resultsView.tiebreakNoOpponents");
+    return ids.map((id) => opponentTerm(id, field)).join(" + ");
+  }
+
+  /** Like [`sumTerms`] but for the Buchholz-cut metrics: sort the opponents by
+   * their contribution, drop the `drop` lowest (noting who), and sum the rest —
+   * mirroring the server's `sum_dropping_lowest`. */
+  function droppedTerms(ids: string[], field: keyof Standing, drop: number): string {
+    if (ids.length === 0) return $_("resultsView.tiebreakNoOpponents");
+    const terms = ids
+      .map((id) => ({ term: opponentTerm(id, field), value: (standingById.get(id)?.[field] as number | undefined) ?? 0 }))
+      .sort((a, b) => a.value - b.value);
+    const dropped = terms.slice(0, drop);
+    const kept = terms.slice(drop);
+    const keptStr = kept.length > 0 ? kept.map((t) => t.term).join(" + ") : "0";
+    if (dropped.length === 0) return keptStr;
+    return `${keptStr} ${$_("resultsView.tiebreakDropped", { values: { dropped: dropped.map((t) => t.term).join(", ") } })}`;
+  }
+
+  /** The per-cell explanation of how a tie-break was computed, appended under
+   * the metric's description in the tooltip. `undefined` where a breakdown
+   * doesn't apply (Points, which has its own columns; the ELO estimate). */
+  function tiebreakBreakdown(code: Tiebreak, standing: Standing): string | undefined {
+    switch (code) {
+      case "sos_m":
+        return sumTerms(standing.opponents, "points");
+      case "sos_w":
+        return sumTerms(standing.opponents, "victories");
+      case "sodos_m":
+        return sumTerms(standing.defeated, "points");
+      case "sodos_w":
+        return sumTerms(standing.defeated, "victories");
+      case "sosos_m":
+        return sumTerms(standing.opponents, "sosm");
+      case "sosos_w":
+        return sumTerms(standing.opponents, "sosw");
+      case "sos_m1":
+        return droppedTerms(standing.opponents, "points", 1);
+      case "sos_m2":
+        return droppedTerms(standing.opponents, "points", 2);
+      case "sos_w1":
+        return droppedTerms(standing.opponents, "victories", 1);
+      case "sos_w2":
+        return droppedTerms(standing.opponents, "victories", 2);
+      case "cuss_m":
+        return standing.running_points.length > 0
+          ? standing.running_points.join(" + ")
+          : undefined;
+      case "cuss_w":
+        return standing.running_wins.length > 0
+          ? standing.running_wins.join(" + ")
+          : undefined;
+      case "points":
+      case "est_elo":
+        return undefined;
+    }
+  }
+
+  /** The full tooltip for a tie-break cell: the metric's description, plus its
+   * per-player breakdown when one applies. */
+  function tiebreakCellTitle(code: Tiebreak, standing: Standing): string {
+    const title = tiebreakTitle(code, $_);
+    const breakdown = tiebreakBreakdown(code, standing);
+    return breakdown ? `${title}\n${breakdown}` : title;
+  }
+
+  // Native `title` tooltips only surface after a long browser delay. Drive our
+  // own instead: one hover handler on the table reads the `data-tip` of the cell
+  // under the cursor and shows a floating label immediately, following the mouse.
+  let tip = $state<{ text: string; x: number; y: number; below: boolean } | null>(null);
+
+  function trackTip(event: MouseEvent) {
+    const el = (event.target as HTMLElement | null)?.closest?.(
+      "[data-tip]",
+    ) as HTMLElement | null;
+    const text = el?.dataset.tip;
+    if (!text) {
+      tip = null;
+      return;
+    }
+    // Clamp horizontally so a wide label stays on-screen; flip above the cursor
+    // near the bottom edge so a tall breakdown isn't clipped.
+    tip = {
+      text,
+      x: Math.max(8, Math.min(event.clientX + 14, window.innerWidth - 348)),
+      y: event.clientY,
+      below: event.clientY < window.innerHeight - 220,
+    };
+  }
+
+  function clearTip() {
+    tip = null;
   }
 </script>
 
@@ -175,10 +304,6 @@
     <button type="button" class="ghost" onclick={() => printPage(true)}>🖨 {$_("roundView.print")}</button>
   </div>
   {#if cupPodium}
-    {@const nameOf = (id: string) => {
-      const p = byId.get(id);
-      return p ? `${p.last_name} ${p.first_name}`.trim() : "—";
-    }}
     <div class="podium">
       <span class="cup-title">{$_("resultsView.cup")}</span>
       <span>🥇 <strong>{nameOf(cupPodium.champion)}</strong></span>
@@ -186,7 +311,7 @@
       <span>🥉 {nameOf(cupPodium.third)}</span>
     </div>
   {/if}
-  <table>
+  <table onmousemove={trackTip} onmouseleave={clearTip}>
     <thead>
       <tr>
         <th class="num">{$_("resultsView.id")}</th>
@@ -194,7 +319,7 @@
         <th>{$_("resultsView.firstName")}</th>
         <th class="num">{$_("resultsView.rating")}</th>
         {#if showEstimatedElo}
-          <th class="num" title={tiebreakTitle("est_elo", $_)}>{tiebreakLabel("est_elo", $_)}</th>
+          <th class="num" data-tip={tiebreakTitle("est_elo", $_)}>{tiebreakLabel("est_elo", $_)}</th>
         {/if}
         <th>{$_("resultsView.nationality")}</th>
         <th>{$_("resultsView.club")}</th>
@@ -202,8 +327,11 @@
           <th class="num">{$_("resultsView.roundColumn", { values: { number: round.number } })}</th>
         {/each}
         <th class="num">{$_("resultsView.victories")}</th>
+        {#if showMacmahon}
+          <th class="num" data-tip={$_("resultsView.macmahonTitle")}>{$_("resultsView.macmahon")}</th>
+        {/if}
         {#each tiebreakColumns as col (col.code)}
-          <th class="num" title={tiebreakTitle(col.code, $_)}>{tiebreakLabel(col.code, $_)}</th>
+          <th class="num" data-tip={tiebreakTitle(col.code, $_)}>{tiebreakLabel(col.code, $_)}</th>
         {/each}
       </tr>
     </thead>
@@ -223,35 +351,47 @@
             {@const cell = cellFor(player, round)}
             <td class="num result">
               {#if cell.kind === "bye"}
-                <span class="win" title={$_("resultsView.byeTitle")}>0+</span>
+                <span class="win" data-tip={$_("resultsView.byeTitle")}>0+</span>
               {:else if cell.kind === "absent"}
-                <span class="absent" title={$_("resultsView.absentTitle")}>0−</span>
+                <span class="absent" data-tip={$_("resultsView.absentTitle")}>0−</span>
               {:else if cell.kind === "pending"}
-                <span class="pending">{cell.opponent}?</span>
+                <span
+                  class="pending"
+                  data-tip={$_("resultsView.opponentTitle", { values: { name: cell.opponentName } })}
+                  >{cell.opponent}?</span
+                >
               {:else}
+                {@const opponentTitle = $_("resultsView.opponentTitle", { values: { name: cell.opponentName } })}
                 <span
                   class={cell.actualWon ? "win" : "loss"}
-                  title={cell.handicap
-                    ? $_(
+                  data-tip={cell.handicap && cell.effectiveWon !== cell.actualWon
+                    ? `${opponentTitle}\n${$_(
                         cell.effectiveWon
                           ? "resultsView.handicapGameWin"
                           : "resultsView.handicapGameLoss",
-                      )
-                    : undefined}>{playedLabel(cell)}</span
+                      )}`
+                    : opponentTitle}>{playedLabel(cell)}</span
                 >
               {/if}
             </td>
           {/each}
           <td class="num victories">{standing.victories}</td>
+          {#if showMacmahon}
+            <td
+              class="num macmahon"
+              class:adjusted={(player.adjustments ?? []).length > 0}
+              data-tip={macmahonTitle(player)}>{standing.points - standing.victories}</td
+            >
+          {/if}
           {#each tiebreakColumns as col (col.code)}
             {#if col.code === "points"}
-              <td
-                class="num points"
-                class:adjusted={(player.adjustments ?? []).length > 0}
-                title={pointsTitle(player)}>{standing.points}</td
+              <td class="num points" data-tip={$_("resultsView.victoriesPlusMacmahon")}
+                >{standing.points}</td
               >
             {:else}
-              <td class="num tiebreak">{standing[col.field]}</td>
+              <td class="num tiebreak" data-tip={tiebreakCellTitle(col.code, standing)}
+                >{standing[col.field]}</td
+              >
             {/if}
           {/each}
         </tr>
@@ -264,6 +404,17 @@
       {$_("resultsView.noRoundsCompleted")}
     </p>
   {/if}
+  </div>
+{/if}
+
+{#if tip}
+  <div
+    class="cell-tip print-hide"
+    style="left: {tip.x}px; top: {tip.y}px; transform: translateY({tip.below
+      ? '18px'
+      : 'calc(-100% - 14px)'});"
+  >
+    {tip.text}
   </div>
 {/if}
 
@@ -316,7 +467,11 @@
     font-weight: 700;
     color: var(--color-purple);
   }
-  .points.adjusted {
+  .macmahon {
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+  .macmahon.adjusted {
     text-decoration: underline dotted;
     text-underline-offset: 0.2rem;
   }
@@ -350,6 +505,20 @@
   .medal {
     font-size: 0.85rem;
   }
+  .cell-tip {
+    position: fixed;
+    z-index: 1000;
+    max-width: 340px;
+    padding: 0.35rem 0.55rem;
+    border-radius: 0.4rem;
+    background: var(--text);
+    color: var(--bg-surface);
+    font-size: 0.78rem;
+    line-height: 1.4;
+    white-space: pre-line;
+    pointer-events: none;
+    box-shadow: 0 4px 14px var(--shadow-dropdown);
+  }
   .muted {
     color: var(--text-secondary);
   }
@@ -380,6 +549,7 @@
     .absent,
     .pending,
     .points,
+    .macmahon,
     .tiebreak,
     .est-elo,
     .muted,
