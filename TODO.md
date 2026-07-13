@@ -50,5 +50,3 @@ with clients picking which to connect to. Design:
 - **Team tournaments**
 
 - **Standings by direct confrontation**
-
-- **Package the executable** so it can be easily downloaded through github, rather than requiring building from source.
