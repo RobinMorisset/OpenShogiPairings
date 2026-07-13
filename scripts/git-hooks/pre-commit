@@ -12,3 +12,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 echo "== svelte-check =="
 export PATH="/c/Program Files/nodejs:$PATH"
 ( cd frontend && npm run check )
+
+echo "== i18n locale keys =="
+node scripts/check-i18n-keys.mjs
