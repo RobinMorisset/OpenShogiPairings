@@ -475,6 +475,9 @@
     font-weight: 600;
     font-size: 0.8rem;
   }
+  tbody tr:nth-child(even) {
+    background: var(--bg-stripe);
+  }
   .num {
     text-align: right;
     font-variant-numeric: tabular-nums;
@@ -593,6 +596,9 @@
       color: #000 !important;
       background: transparent !important;
       border-color: #000 !important;
+    }
+    tbody tr:nth-child(even) {
+      background: transparent !important;
     }
   }
 </style>
