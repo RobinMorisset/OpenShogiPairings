@@ -4,6 +4,7 @@
   import type { CupPodium, Player, Round, Standing, Tiebreak, Tournament, Winner } from "../types";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
   import { boardOutcome } from "../boardOutcome";
+  import { partitionDropped } from "../tiebreak";
   import { printPage } from "../platform";
 
   interface Props {
@@ -226,11 +227,11 @@
    * mirroring the server's `sum_dropping_lowest`. */
   function droppedTerms(ids: string[], field: keyof Standing, drop: number): string {
     if (ids.length === 0) return $_("resultsView.tiebreakNoOpponents");
-    const terms = ids
-      .map((id) => ({ term: opponentTerm(id, field), value: (standingById.get(id)?.[field] as number | undefined) ?? 0 }))
-      .sort((a, b) => a.value - b.value);
-    const dropped = terms.slice(0, drop);
-    const kept = terms.slice(drop);
+    const terms = ids.map((id) => ({
+      term: opponentTerm(id, field),
+      value: (standingById.get(id)?.[field] as number | undefined) ?? 0,
+    }));
+    const { kept, dropped } = partitionDropped(terms, (t) => t.value, drop);
     const keptStr = kept.length > 0 ? kept.map((t) => t.term).join(" + ") : "0";
     if (dropped.length === 0) return keptStr;
     return `${keptStr} ${$_("resultsView.tiebreakDropped", { values: { dropped: dropped.map((t) => t.term).join(", ") } })}`;

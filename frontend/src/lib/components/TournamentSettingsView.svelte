@@ -14,6 +14,7 @@
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
   import { saveSettings } from "../tournamentFile";
   import { gradeRank } from "../grade";
+  import { cleanThresholds, eqThresholds, normExempt, type ThresholdRow } from "../thresholds";
 
   interface Props {
     settings: TournamentSettings;
@@ -51,89 +52,8 @@
     );
   });
 
-  // A threshold row being edited: either an ELO value or a dan/kyu grade
-  // (only the fields for the active `kind` are meaningful), plus its optional
-  // degressive stopping round (null = never drops).
-  type ThresholdRow = {
-    kind: "elo" | "grade";
-    value: number;
-    gradeKind: GradeKind;
-    gradeLevel: number;
-    dropsAfterRound: number | null;
-  };
-
-  // A key that sorts ELO thresholds by value, then grade thresholds by
-  // strength — mirrors the server's `ThresholdCriterion::sort_key`.
-  function criterionSortKey(c: ThresholdCriterion): [number, number] {
-    return c.kind === "elo" ? [0, c.value] : [1, gradeRank(c.grade)];
-  }
-
-  function criterionEquals(a: ThresholdCriterion, b: ThresholdCriterion): boolean {
-    if (a.kind !== b.kind) return false;
-    if (a.kind === "elo") return a.value === (b as { kind: "elo"; value: number }).value;
-    const bg = (b as { kind: "grade"; grade: { kind: GradeKind; level: number } }).grade;
-    return a.grade.kind === bg.kind && a.grade.level === bg.level;
-  }
-
-  // Clean, sort and de-duplicate (by criterion) into the server's canonical
-  // form — used both to persist and to compare our local rows against what's
-  // stored.
-  function cleanThresholds(rows: ThresholdRow[]): MacMahonThreshold[] {
-    return rows
-      .filter((r) =>
-        r.kind === "elo"
-          ? Number.isFinite(r.value) && r.value >= 1
-          : Number.isFinite(r.gradeLevel) && r.gradeLevel >= 1,
-      )
-      .map((r) => ({
-        criterion:
-          r.kind === "elo"
-            ? ({ kind: "elo", value: Math.round(r.value) } as const)
-            : ({
-                kind: "grade",
-                grade: { kind: r.gradeKind, level: Math.round(r.gradeLevel) },
-              } as const),
-        drops_after_round:
-          r.dropsAfterRound != null && Number.isFinite(r.dropsAfterRound) && r.dropsAfterRound >= 1
-            ? Math.round(r.dropsAfterRound)
-            : null,
-      }))
-      .sort((a, b) => {
-        const [at, av] = criterionSortKey(a.criterion);
-        const [bt, bv] = criterionSortKey(b.criterion);
-        return at - bt || av - bv;
-      })
-      .filter((v, i, arr) => i === 0 || !criterionEquals(v.criterion, arr[i - 1].criterion));
-  }
-
-  function eqThresholds(a: MacMahonThreshold[], b: MacMahonThreshold[]): boolean {
-    return (
-      a.length === b.length &&
-      a.every(
-        (v, i) =>
-          criterionEquals(v.criterion, b[i].criterion) &&
-          (v.drops_after_round ?? null) === (b[i].drops_after_round ?? null),
-      )
-    );
-  }
-
   function eqStr(a: string[], b: string[]): boolean {
     return a.length === b.length && a.every((v, i) => v === b[i]);
-  }
-
-  // Mirror the server's exempt-club normalization: trim, drop empties, and
-  // de-duplicate case-insensitively keeping the first spelling.
-  function normExempt(list: string[]): string[] {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const raw of list) {
-      const c = raw.trim();
-      if (c && !seen.has(c.toLowerCase())) {
-        seen.add(c.toLowerCase());
-        out.push(c);
-      }
-    }
-    return out;
   }
 
   // Local editable rows, kept in *entry* order (not sorted) so the row a referee

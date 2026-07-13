@@ -17,6 +17,7 @@
   } from "../types";
   import { sourceBadge } from "../pairingSource";
   import { handicapGiverId } from "../boardOutcome";
+  import { absent, toggledNoShow } from "../noShow";
   import { printPage } from "../platform";
 
   interface Props {
@@ -65,26 +66,10 @@
     busy = false,
   }: Props = $props();
 
-  // Whether `side` is currently a no-show on this board (true for that side, and
-  // for either side when both were absent).
-  function absent(noShow: NoShow | null | undefined, side: Winner): boolean {
-    return noShow === side || noShow === "both";
-  }
-
-  // Combine the two per-side absence flags into the single no-show value.
-  function combineNoShow(p1: boolean, p2: boolean): NoShow | null {
-    if (p1 && p2) return "both";
-    if (p1) return "player1";
-    if (p2) return "player2";
-    return null;
-  }
-
   // Toggle `side`'s no-show independently, so the two buttons together cover all
   // of none / player1 / player2 / both (each side can be a no-show at once).
   function toggleNoShow(index: number, board: Board, side: Winner) {
-    const p1 = side === "player1" ? !absent(board.no_show, "player1") : absent(board.no_show, "player1");
-    const p2 = side === "player2" ? !absent(board.no_show, "player2") : absent(board.no_show, "player2");
-    onSetNoShow(index, combineNoShow(p1, p2));
+    onSetNoShow(index, toggledNoShow(board.no_show, side));
   }
 
   // Resolve player ids to display names.
