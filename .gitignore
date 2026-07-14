@@ -27,3 +27,8 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 *.log
+
+# Result files generated from a FESA HTML results page by
+# scripts/fesa_html_to_results.py — regenerate on demand rather than tracking
+# the (large, partly importer-unsupported) batch.
+test_files/fesa_spring2026/

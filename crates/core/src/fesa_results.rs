@@ -47,12 +47,16 @@ pub fn import_fesa_results(
         if line.trim().is_empty() {
             continue;
         }
-        if is_data_row(line) {
-            data.push((i + 1, line));
-        } else if title.is_none() {
-            // The first non-empty, non-data line is the title; the column header
-            // and the trailing "Promoting …" lines are non-data and ignored.
+        if title.is_none() {
+            // The very first non-empty line is always the title. It is taken
+            // unconditionally — before the data-row test — because a title can
+            // begin with a year (e.g. "2026 British Shogi Championships"), which
+            // otherwise looks like a leading player number and would be misparsed
+            // as a data row. The column header and trailing "Promoting …" lines
+            // come after it and are non-data, so they are ignored.
             title = Some(line.trim().to_string());
+        } else if is_data_row(line) {
+            data.push((i + 1, line));
         }
     }
 
@@ -511,6 +515,23 @@ mod tests {
             })
             .expect("Beta vs Gamma paired in round 3");
         assert!(win.result.is_some());
+    }
+
+    #[test]
+    fn a_title_that_begins_with_a_year_is_not_misparsed_as_a_player_row() {
+        // FESA titles often lead with the year (e.g. "2026 British Shogi
+        // Championships"), which looks like a leading player number. The first
+        // line must be taken as the title regardless, or it is fed to the row
+        // parser and fails with "no ELO column found".
+        let mut text = String::from("2026 British Shogi Championships : 2026-02-14/15\n");
+        text.push_str("Nr Name Nat Grade ELO R1 R2 Pts +/-\n");
+        text.push_str(" 1 Lamb            Stephen GB 4 Dan 1955 2+ 2+ 2 +4\n");
+        text.push_str(" 2 Ikeda           Masahiro JP 2 Dan 1912 1- 1- 0 -4\n");
+
+        let (t, _) = import_fesa_results(&text).unwrap();
+        assert_eq!(t.name, "2026 British Shogi Championships : 2026-02-14/15");
+        assert_eq!(t.players.len(), 2);
+        assert_eq!(t.rounds.len(), 2);
     }
 
     #[test]
