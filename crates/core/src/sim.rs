@@ -23,7 +23,10 @@ use std::collections::{HashMap, HashSet};
 use rand::Rng;
 use uuid::Uuid;
 
-use crate::elo::{estimate_elos, oracle_prior, UNRATED_PRIOR_DEFAULT_K, UNRATED_PRIOR_MEAN};
+use crate::elo::{
+    estimate_elos, oracle_prior, oracle_provisional_width, UNRATED_PRIOR_DEFAULT_K,
+    UNRATED_PRIOR_MEAN,
+};
 use crate::player::Player;
 use crate::round::Winner;
 use crate::settings::TournamentSettings;
@@ -163,7 +166,7 @@ pub fn sample_strengths(
     players
         .iter()
         .map(|p| {
-            let (prior_mean, std) = oracle_prior(
+            let (prior_mean, prior_std) = oracle_prior(
                 p,
                 oracle.provisional,
                 oracle.unrated_center,
@@ -172,6 +175,17 @@ pub fn sample_strengths(
             // The override (post-tournament / known) strength is the mean to jitter
             // around; fall back to the registration rating when there is none.
             let center = overrides.get(&p.id).copied().unwrap_or(prior_mean);
+            // A player who was unrated at registration but has a post-tournament
+            // result (an override) is, by definition, *provisionally* rated — we
+            // have a tournament's worth of evidence on them. Jitter at the
+            // provisional width for that result, not the very broad "truly unknown"
+            // unrated width, which would wildly over-disperse a player we actually
+            // know. A genuinely unrated player (no override) keeps the broad width.
+            let std = if p.rating.is_none() && overrides.contains_key(&p.id) {
+                oracle_provisional_width(center, oracle.provisional)
+            } else {
+                prior_std
+            };
             let strength = if oracle.jitter <= 0.0 {
                 center
             } else {
@@ -698,6 +712,57 @@ mod tests {
         assert!(
             spread > 10.0,
             "override was effectively pinned: spread {spread}"
+        );
+    }
+
+    #[test]
+    fn an_unrated_player_with_a_result_jitters_at_provisional_not_broad_width() {
+        // A player unrated at registration but carrying a post-tournament override
+        // (2337) is provisionally rated — jitter must use the *provisional* width for
+        // 2337 (σ≈75), not the very broad "truly unknown" unrated width (σ≈350). A
+        // second unrated player with no override keeps the broad width.
+        let mut t = Tournament::new("Sim").unwrap();
+        let with_result = t
+            .add_player(NewPlayer {
+                last_name: "Rated-post".into(),
+                ..Default::default() // rating None
+            })
+            .unwrap()
+            .id;
+        let still_unrated = t
+            .add_player(NewPlayer {
+                last_name: "Unknown".into(),
+                ..Default::default()
+            })
+            .unwrap()
+            .id;
+        let mut overrides = StrengthMap::new();
+        overrides.insert(with_result, 2337.0);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(5);
+        let (mut a, mut b) = (Vec::new(), Vec::new());
+        for _ in 0..8000 {
+            let s = sample_strengths(&t.players, &overrides, &OracleModel::new(1.0, 2.0), &mut rng);
+            a.push(s[&with_result]);
+            b.push(s[&still_unrated]);
+        }
+        let std = |v: &[f64]| {
+            let m = v.iter().sum::<f64>() / v.len() as f64;
+            ((v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / v.len() as f64).sqrt(), m)
+        };
+        let (spread_a, mean_a) = std(&a);
+        let (spread_b, _) = std(&b);
+
+        let provisional = oracle_provisional_width(2337.0, 2.0); // ≈ 75
+        assert!((mean_a - 2337.0).abs() < 10.0, "mean {mean_a} not ~2337");
+        assert!(
+            (spread_a - provisional).abs() < provisional * 0.25,
+            "override'd-unrated spread {spread_a} not ~provisional {provisional}"
+        );
+        // The truly-unrated player must be far broader — this is the whole fix.
+        assert!(
+            spread_b > 3.0 * spread_a,
+            "broad unrated spread {spread_b} should dwarf provisional {spread_a}"
         );
     }
 

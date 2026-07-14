@@ -38,6 +38,54 @@ pub enum HandicapPolicy {
     Suggested,
 }
 
+/// The shape of every player's Bayesian ELO prior (see [`crate::elo`]).
+///
+/// `Gaussian` is the historical `N(rating, σ₀²)`: a thin-tailed penalty whose
+/// restoring force *grows* with the deviation, so it pulls the estimate back to
+/// the registration rating ever harder the further it drifts and caps a single
+/// result's effect near the player's K. `Laplace` is a Huber-smoothed
+/// asymmetric-Laplace penalty of the *same width* but with exponential — hence
+/// fatter — tails: its restoring force is *constant*, so a sustained run of
+/// surprising results (e.g. an under-rated improver beating stronger opponents)
+/// moves the estimate much further before the prior reins it in. `Flat` is the
+/// improper limit — *no* prior at all: the estimate is the maximum-likelihood
+/// performance rating over the games, reproducing the FESA rating program
+/// (`turnering.py`) for unrated newcomers (an all-loss player floors to 1, an
+/// all-win player is rated as if they had drawn their strongest opponent).
+/// `Gaussian` and `Laplace` can additionally be made asymmetric via the
+/// per-category `elo_upward_looseness_*` knobs, which widen the upward arm so an
+/// *upward* revision clears on less evidence than a downward one (for the Gaussian
+/// this is a two-piece normal; for the Laplace, a wider upward scale); `Flat` has
+/// no arm to widen. See `docs/elo-pairing-mode.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(rename_all = "snake_case")]
+pub enum EloPriorShape {
+    /// Thin-tailed `N(rating, σ₀²)` — the default. Behaviour-neutral (exactly the
+    /// historical estimator) unless a per-category upward-looseness knob is raised,
+    /// which turns it into an asymmetric two-piece normal.
+    #[default]
+    Gaussian,
+    /// Huber-smoothed Laplace: same width as the Gaussian but fatter (exponential)
+    /// tails. Also honours the per-category `elo_upward_looseness_*` asymmetry
+    /// knobs.
+    Laplace,
+    /// **Flat** (improper/uniform) prior — *no* pull toward a prior mean. The
+    /// estimate becomes the maximum-likelihood *performance rating* over the
+    /// player's games, reproducing the historical `turnering.py` (`performance2`)
+    /// treatment of unrated players rather than any Bayesian anchor. Intended for
+    /// the `elo_prior_shape_unrated` slot: a strong newcomer's rating is then read
+    /// straight off the strength of the field they beat, with no regularisation
+    /// toward the unrated centre. Because a flat prior leaves the all-win / all-loss
+    /// likelihood unbounded, those scorelines follow `turnering.py`'s guards (see
+    /// [`crate::elo::estimate_elos`]): an all-loss player floors to `1`, an all-win
+    /// player is rated as if they had *drawn* their strongest opponent, and a player
+    /// with no games stays at the seed. The upward-looseness knobs do not apply
+    /// (there is no arm to widen). Not log-concave-strengthening, so mixing it onto
+    /// well-connected fields is fine but it supplies no curvature of its own.
+    Flat,
+}
+
 /// What a MacMahon threshold compares against — an ELO rating or a dan/kyu
 /// grade. A tournament's thresholds can freely mix both kinds (e.g. some bands
 /// drawn from ELO, others from grade), each counted independently.
@@ -206,6 +254,13 @@ fn default_elo_unrated_k() -> u32 {
     crate::elo::UNRATED_PRIOR_DEFAULT_K as u32
 }
 
+/// The default upward-looseness ratio `r` for the Laplace prior, as an integer
+/// percent (100 = ×1.0 = symmetric). Named so `#[serde(default = …)]` can fill
+/// it in for tournaments saved before the field existed.
+fn default_elo_upward_looseness_percent() -> u32 {
+    100
+}
+
 /// Configuration that isn't tied to a single player or round.
 ///
 /// Kept as its own record so it can grow (time controls, tie-break choices, …)
@@ -284,30 +339,18 @@ pub struct TournamentSettings {
     /// Swiss-specific rules (score gap, float repeat, floater selection, fold) and
     /// club protection are all disabled; pairing instead minimizes the squared
     /// difference of a live Bayesian ELO estimate. See
-    /// `docs/elo-pairing-mode.md`. Off by default. Mutually exclusive with
-    /// [`Self::mixed_elo_pairing_enabled`] (this one wins if both are set; see
-    /// [`Self::normalized`]).
+    /// `docs/elo-pairing-mode.md`. Off by default.
     #[serde(default)]
     pub elo_pairing_enabled: bool,
-    /// Mixed mode: keeps MacMahon and the Swiss score-group rules (score gap,
-    /// float repeat, club protection, airtight groups) but replaces *only* the
-    /// fold and floater-selection rules with the squared-ELO-gap rule, so
-    /// within-group (and cross-group) ordering follows the live estimate instead
-    /// of a static registration rating. Unlike [`Self::elo_pairing_enabled`], this
-    /// stays fully compatible with MacMahon points. Off by default. Mutually
-    /// exclusive with `elo_pairing_enabled` (see [`Self::normalized`]).
-    #[serde(default)]
-    pub mixed_elo_pairing_enabled: bool,
     /// Award MacMahon starting points from the **live ELO estimate** rather than
     /// the static registration rating: each ELO-based threshold is compared
-    /// against the same Bayesian estimate that drives the ELO pairing modes,
-    /// recomputed each round, so a player's MacMahon points can rise or fall as
-    /// their estimated strength moves (grade-based thresholds are unaffected —
-    /// they still read the player's grade). Independent of the pairing mode:
-    /// this can be combined with plain Swiss or mixed-ELO pairing. Inert unless
-    /// there is at least one ELO threshold to compare against (see
-    /// [`Self::macmahon_from_estimate_active`]); the UI greys it out until then.
-    /// Off by default.
+    /// against the same Bayesian estimate that drives ELO pairing, recomputed each
+    /// round, so a player's MacMahon points can rise or fall as their estimated
+    /// strength moves (grade-based thresholds are unaffected — they still read the
+    /// player's grade). Independent of the pairing mode: this can be combined with
+    /// plain Swiss or ELO pairing. Inert unless there is at least one ELO threshold
+    /// to compare against (see [`Self::macmahon_from_estimate_active`]); the UI
+    /// greys it out until then. Off by default.
     #[serde(default)]
     pub macmahon_from_estimated_elo: bool,
     /// The multiplier `m` on each player's FESA K, as an integer percent
@@ -343,6 +386,63 @@ pub struct TournamentSettings {
     /// when [`Self::elo_estimate_needed`] or [`Self::macmahon_from_estimate_active`].
     #[serde(default = "default_elo_unrated_k")]
     pub elo_unrated_k: u32,
+    /// The prior shape for an **established** (reliably-rated) player — thin-tailed
+    /// Gaussian (default, behaviour-neutral) or the fatter-tailed, optionally
+    /// asymmetric Laplace. The shape is chosen *per category* because a fat tail is
+    /// only warranted where the true-strength population is actually heavy-tailed:
+    /// an established player's strength is well-anchored by their history, so a fat
+    /// tail there merely loosens the anchor and adds noise — hence the default
+    /// Gaussian. Contrast [`Self::elo_prior_shape_unrated`]. See [`EloPriorShape`].
+    /// Only meaningful when [`Self::elo_estimate_needed`] or
+    /// [`Self::macmahon_from_estimate_active`].
+    #[serde(default)]
+    pub elo_prior_shape_established: EloPriorShape,
+    /// The prior shape for a **provisionally-rated** player (not in the FESA list,
+    /// or with fewer than [`crate::PROVISIONAL_GAMES_THRESHOLD`] games). Defaults to
+    /// Gaussian like the established case; the provisional *width* is already
+    /// widened by [`Self::elo_provisional_multiplier`], so the extra fat tail is
+    /// usually unnecessary here. See [`Self::elo_prior_shape_established`].
+    #[serde(default)]
+    pub elo_prior_shape_provisional: EloPriorShape,
+    /// The prior shape for an **unrated** player — the one category whose true
+    /// strength is genuinely heavy-tailed: most newcomers are weak, but a small
+    /// fraction are strong veterans arriving from a country with no ELO system, so
+    /// the population has a fat upper tail no Gaussian can represent. Setting this to
+    /// [`EloPriorShape::Laplace`] (ideally with a raised
+    /// [`Self::elo_upward_looseness_unrated_percent`]) lets a newcomer who beats the
+    /// field climb toward their true strength instead of being dragged back to the
+    /// prior centre. See [`Self::elo_prior_shape_established`].
+    #[serde(default)]
+    pub elo_prior_shape_unrated: EloPriorShape,
+    /// How much *looser* an upward revision is than a downward one for an
+    /// **established** (reliably-rated) player, as an integer percent
+    /// (100 = ×1.0 = symmetric). Widens that player's upward arm in **either**
+    /// prior shape (the Gaussian's `σ_up = r·σ₀`, or the Laplace's
+    /// `b_up = r·b_down`): `r > 1` lets a win revise the estimate up on less
+    /// evidence than a loss revises it down. A reliable rating is the one we trust
+    /// most, so this usually stays at `100` (symmetric) — asymmetry is most useful
+    /// for the less certain players below. Read via
+    /// [`Self::elo_upward_looseness_established`], which clamps it ≥ 1.0 (an upward
+    /// revision is never *harder* than a downward one). Only meaningful when a live
+    /// estimate is maintained.
+    #[serde(default = "default_elo_upward_looseness_percent")]
+    pub elo_upward_looseness_established_percent: u32,
+    /// The upward-looseness ratio `r` for a **provisionally-rated** player (not in
+    /// the FESA list, or with fewer than [`crate::PROVISIONAL_GAMES_THRESHOLD`]
+    /// games), as an integer percent (100 = ×1.0 = symmetric). Same meaning as
+    /// [`Self::elo_upward_looseness_established_percent`] but for the less-trusted
+    /// provisional prior, where a modest upward tilt is often warranted. Read via
+    /// [`Self::elo_upward_looseness_provisional`] (clamps ≥ 1.0).
+    #[serde(default = "default_elo_upward_looseness_percent")]
+    pub elo_upward_looseness_provisional_percent: u32,
+    /// The upward-looseness ratio `r` for an **unrated** player, as an integer
+    /// percent (100 = ×1.0 = symmetric). Same meaning as
+    /// [`Self::elo_upward_looseness_established_percent`] but for the wide unrated
+    /// prior — the case where an upward tilt helps most, since a newcomer beating
+    /// the field is far more likely genuinely strong than a fluke. Read via
+    /// [`Self::elo_upward_looseness_unrated`] (clamps ≥ 1.0).
+    #[serde(default = "default_elo_upward_looseness_percent")]
+    pub elo_upward_looseness_unrated_percent: u32,
 }
 
 impl Default for TournamentSettings {
@@ -360,12 +460,17 @@ impl Default for TournamentSettings {
             half_point_absences: false,
             tiebreaks: default_tiebreaks(),
             elo_pairing_enabled: false,
-            mixed_elo_pairing_enabled: false,
             macmahon_from_estimated_elo: false,
             elo_k_multiplier_percent: default_elo_k_multiplier_percent(),
             elo_provisional_multiplier_percent: default_elo_provisional_multiplier_percent(),
             elo_unrated_prior_center: default_elo_unrated_prior_center(),
             elo_unrated_k: default_elo_unrated_k(),
+            elo_prior_shape_established: EloPriorShape::default(),
+            elo_prior_shape_provisional: EloPriorShape::default(),
+            elo_prior_shape_unrated: EloPriorShape::default(),
+            elo_upward_looseness_established_percent: default_elo_upward_looseness_percent(),
+            elo_upward_looseness_provisional_percent: default_elo_upward_looseness_percent(),
+            elo_upward_looseness_unrated_percent: default_elo_upward_looseness_percent(),
         }
     }
 }
@@ -449,12 +554,6 @@ impl TournamentSettings {
             self.airtight_groups_rounds = None;
         }
 
-        // The two ELO modes are mutually exclusive; pure ELO wins if both are
-        // somehow set (e.g. a stale client payload).
-        if self.elo_pairing_enabled {
-            self.mixed_elo_pairing_enabled = false;
-        }
-
         // Exempt clubs: keep the first spelling of each, trimmed and non-empty.
         let mut seen = HashSet::new();
         self.club_protection_exempt_clubs = self
@@ -476,15 +575,24 @@ impl TournamentSettings {
             self.tiebreaks.retain(|&tb| tb != Tiebreak::EstElo);
         }
 
-        // A zero K multiplier would give a degenerate (zero-width) prior, freezing
-        // every estimate at its registration rating and dividing by zero in the
-        // solver — clamp it up to at least 1%.
-        self.elo_k_multiplier_percent = self.elo_k_multiplier_percent.max(1);
+        // `elo_k_multiplier_percent` is left as-is: 0 is a meaningful setting —
+        // it pins every *rated* player to their registration rating so only unrated
+        // players are estimated (the estimator handles the zero-width prior by
+        // skipping those players, see [`crate::elo::estimate_elos`]). Any positive
+        // percent widens the rated prior normally.
         // A provisional rating should never be treated as more reliable than an
         // established one, so the extra multiplier is at least ×1.
         self.elo_provisional_multiplier_percent = self.elo_provisional_multiplier_percent.max(100);
         // A zero-width unrated prior would divide by zero in the solver — clamp K ≥ 1.
         self.elo_unrated_k = self.elo_unrated_k.max(1);
+        // An upward revision is never *harder* than a downward one, so r ≥ 1, for
+        // each player category.
+        self.elo_upward_looseness_established_percent =
+            self.elo_upward_looseness_established_percent.max(100);
+        self.elo_upward_looseness_provisional_percent =
+            self.elo_upward_looseness_provisional_percent.max(100);
+        self.elo_upward_looseness_unrated_percent =
+            self.elo_upward_looseness_unrated_percent.max(100);
 
         self
     }
@@ -495,7 +603,7 @@ impl TournamentSettings {
     /// estimate is maintained: [`Self::macmahon_from_estimate_active`] maintains
     /// one for scoring even in plain Swiss.
     pub fn elo_estimate_needed(&self) -> bool {
-        self.elo_pairing_enabled || self.mixed_elo_pairing_enabled
+        self.elo_pairing_enabled
     }
 
     /// Whether MacMahon starting points are actually drawn from the live ELO
@@ -531,6 +639,25 @@ impl TournamentSettings {
     /// prior would divide by zero in the solver and freeze the estimate).
     pub fn elo_unrated_k(&self) -> f64 {
         self.elo_unrated_k.max(1) as f64
+    }
+
+    /// The [`EloPriorShape::Laplace`] upward-looseness ratio `r` for an
+    /// **established** player, as a float, clamped ≥ 1.0 (an upward revision is
+    /// never harder than a downward one). `1.0` is symmetric.
+    pub fn elo_upward_looseness_established(&self) -> f64 {
+        self.elo_upward_looseness_established_percent.max(100) as f64 / 100.0
+    }
+
+    /// The Laplace upward-looseness ratio `r` for a **provisionally-rated** player,
+    /// as a float, clamped ≥ 1.0.
+    pub fn elo_upward_looseness_provisional(&self) -> f64 {
+        self.elo_upward_looseness_provisional_percent.max(100) as f64 / 100.0
+    }
+
+    /// The Laplace upward-looseness ratio `r` for an **unrated** player, as a
+    /// float, clamped ≥ 1.0.
+    pub fn elo_upward_looseness_unrated(&self) -> f64 {
+        self.elo_upward_looseness_unrated_percent.max(100) as f64 / 100.0
     }
 
     /// Sort thresholds (ELO ones by value, then grade ones by strength) and
@@ -850,40 +977,8 @@ mod tests {
             on.tiebreaks,
             vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM]
         );
-
-        // Mixed ELO mode also keeps a live estimate, so it counts too.
-        let mixed = TournamentSettings {
-            tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM],
-            mixed_elo_pairing_enabled: true,
-            ..Default::default()
-        }
-        .normalized();
-        assert_eq!(
-            mixed.tiebreaks,
-            vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM]
-        );
-    }
-
-    #[test]
-    fn the_two_elo_modes_are_mutually_exclusive() {
-        // Pure ELO wins if a stale payload somehow sets both.
-        let s = TournamentSettings {
-            elo_pairing_enabled: true,
-            mixed_elo_pairing_enabled: true,
-            ..Default::default()
-        }
-        .normalized();
-        assert!(s.elo_pairing_enabled);
-        assert!(!s.mixed_elo_pairing_enabled);
-
-        // Mixed alone is left untouched.
-        let s = TournamentSettings {
-            mixed_elo_pairing_enabled: true,
-            ..Default::default()
-        }
-        .normalized();
-        assert!(!s.elo_pairing_enabled);
-        assert!(s.mixed_elo_pairing_enabled);
+        // (Estimate-based MacMahon also keeps a live estimate; that path is covered
+        // by `estimate_based_macmahon_keeps_the_est_elo_tiebreak_valid`.)
     }
 
     #[test]
@@ -975,15 +1070,58 @@ mod tests {
     }
 
     #[test]
-    fn elo_estimate_needed_is_true_for_either_elo_mode() {
+    fn prior_shape_defaults_to_gaussian_and_is_behaviour_neutral() {
+        let s = TournamentSettings::default();
+        assert_eq!(s.elo_prior_shape_established, EloPriorShape::Gaussian);
+        assert_eq!(s.elo_prior_shape_provisional, EloPriorShape::Gaussian);
+        assert_eq!(s.elo_prior_shape_unrated, EloPriorShape::Gaussian);
+        assert_eq!(s.elo_upward_looseness_established_percent, 100);
+        assert_eq!(s.elo_upward_looseness_provisional_percent, 100);
+        assert_eq!(s.elo_upward_looseness_unrated_percent, 100);
+        assert!((s.elo_upward_looseness_established() - 1.0).abs() < 1e-9);
+        assert!((s.elo_upward_looseness_provisional() - 1.0).abs() < 1e-9);
+        assert!((s.elo_upward_looseness_unrated() - 1.0).abs() < 1e-9);
+        // Omitted from an old save → the (Gaussian, symmetric) defaults.
+        let loaded: TournamentSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(loaded.elo_prior_shape_unrated, EloPriorShape::Gaussian);
+        assert_eq!(loaded.elo_upward_looseness_unrated_percent, 100);
+        // A per-category Laplace shape round-trips through JSON.
+        let laplace = TournamentSettings {
+            elo_prior_shape_unrated: EloPriorShape::Laplace,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&laplace).unwrap();
+        let back: TournamentSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.elo_prior_shape_unrated, EloPriorShape::Laplace);
+        assert_eq!(back.elo_prior_shape_established, EloPriorShape::Gaussian);
+    }
+
+    #[test]
+    fn normalized_clamps_upward_looseness_to_at_least_symmetric() {
+        // An upward revision is never harder than a downward one, so each
+        // category's r ≥ 1.
+        let s = TournamentSettings {
+            elo_upward_looseness_established_percent: 50,
+            elo_upward_looseness_provisional_percent: 80,
+            elo_upward_looseness_unrated_percent: 0,
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(s.elo_upward_looseness_established_percent, 100);
+        assert_eq!(s.elo_upward_looseness_provisional_percent, 100);
+        assert_eq!(s.elo_upward_looseness_unrated_percent, 100);
+        let raw = TournamentSettings {
+            elo_upward_looseness_unrated_percent: 0,
+            ..Default::default()
+        };
+        assert!(raw.elo_upward_looseness_unrated() >= 1.0);
+    }
+
+    #[test]
+    fn elo_estimate_needed_is_true_for_elo_pairing() {
         assert!(!TournamentSettings::default().elo_estimate_needed());
         assert!(TournamentSettings {
             elo_pairing_enabled: true,
-            ..Default::default()
-        }
-        .elo_estimate_needed());
-        assert!(TournamentSettings {
-            mixed_elo_pairing_enabled: true,
             ..Default::default()
         }
         .elo_estimate_needed());

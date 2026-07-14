@@ -11,14 +11,6 @@ estimation math and how the mode plugs into the existing pairing engine
 ([`crates/core/src/pairing.rs`](../crates/core/src/pairing.rs)) and scoring
 replay ([`crates/core/src/scoring.rs`](../crates/core/src/scoring.rs)).
 
-There is also a **mixed mode** (`mixed_elo_pairing_enabled`), a middle ground
-between Swiss and this (pure) ELO mode: it keeps MacMahon and the Swiss
-score-group rules (score gap, float repeat, club, airtight groups, bye group)
-but replaces just `Rule::Fold` and `Rule::FloaterSelection` with `Rule::EloGap`,
-so within- and across-group ordering follows the live estimate instead of a
-static registration rating — unlike pure ELO mode, it stays fully compatible
-with MacMahon points. See §6a.
-
 Scope markers: **V1** = the first shippable version; **V2** = deferred, listed at
 the end.
 
@@ -77,9 +69,12 @@ Two properties make this the right fit for OSP:
   to its own seed, so there is no gauge freedom to fix. The prior is load-bearing,
   not just regularisation.
 
-The log-likelihood is concave and every prior is a concave (Gaussian) log-density,
-so the objective is smooth and strongly concave and the maximiser is **unique and
-deterministic**.
+The log-likelihood is concave and every prior is a **log-concave** density
+(Gaussian by default, or the optional Laplace of §2.5 — both log-concave), so the
+objective is concave and the maximiser is **unique and deterministic**. With the
+default Gaussian prior it is additionally smooth and *strongly* concave; the
+Laplace variant keeps concavity but is only piecewise-smooth, which §2.5 handles
+with a small Huber core.
 
 ### 2.1 Prior for rated players — FESA K × a single multiplier
 
@@ -214,13 +209,89 @@ If upsets should move estimates more across the board, raise **m** (bigger K →
 bigger cap). If the unrated jumps feel too large, shrink `σ_u` — a tighter, more
 informative unrated prior trades responsiveness for stability (the same knob).
 
+### 2.5 Optional fatter-tailed / asymmetric prior — `EloPriorShape`
+
+The Gaussian prior's restoring force is `(θ − μ₀)/σ₀²`, i.e. **linear and
+unbounded**: it fights back ever harder the further the estimate drifts, so a run
+of surprising results is capped near `K` per game (§2.4) and a genuinely
+mis-seeded player is corrected only slowly. A referee can instead select
+`EloPriorShape::Laplace`, a Huber-smoothed **asymmetric Laplace** prior of the
+*same width* but with a **constant** restoring force `1/b` — exponential (hence
+fatter) tails. A sustained streak against much-stronger opponents then moves the
+estimate much further before the prior reins it in, at the cost of a *dead zone*:
+below `≈ s/b` net surprise-wins the estimate does not move at all (the constant
+force isn't yet overcome), and past it the estimate tracks the evidence.
+
+**Asymmetry is a separate axis from the tail shape** — the per-category
+upward-looseness knobs below apply to the Gaussian and the Laplace alike, so a
+referee can pick fatter tails, an upward tilt, both, or neither.
+
+- **Width mapping.** The Laplace scale is variance-matched to the Gaussian,
+  `b_down = σ₀/√2`, so the existing knobs (`m`, provisional multiplier,
+  `elo_unrated_k`) keep their meaning — they still set `σ₀`, which sets `b_down`.
+- **Asymmetry, per player category — and it works for *both* shapes.** The upward
+  arm is widened by a ratio `r ≥ 1`: for the Laplace `b_up = r · b_down`, and for
+  the Gaussian `σ_up = r · σ₀` (a **two-piece normal** — std `σ₀` below the mean,
+  `r · σ₀` above). `r > 1` makes an *upward* revision (the common case — an
+  under-rated improver) clear on less evidence than a downward one, while the
+  downward arm stays as tight as before. `r = 1` is symmetric and, for the
+  Gaussian, collapses back to the plain `N(μ₀, σ₀²)` exactly. `r` is set
+  **separately for the three prior categories** — `elo_upward_looseness_
+  established`, `_provisional`, `_unrated` — because a global tilt is rarely what
+  you want: a reliable FESA rating deserves little upward bias, whereas a newcomer
+  who beats the field is far more likely genuinely strong than lucky, so the
+  unrated (and, to a lesser degree, provisional) categories are where the
+  asymmetry earns its keep. Each player reads the `r` of the same category that
+  set its width (§2.1/§2.2). All three default to `1`.
+- **Still log-concave.** For the Laplace, `−|d|` is concave, so the objective stays
+  concave and the MAP unique; the only wrinkle is the kink at `d = 0`, where the
+  Gaussian's finite curvature (`−1/σ₀²`) that keeps the Newton step well-defined is
+  absent, so we round it off with a two-piece linear Huber core of half-width
+  `HUBER_DELTA` (a couple of ELO points) **anchored at the origin** (`g(0) = 0`):
+  this restores a strictly negative curvature near the kink *and* keeps the penalty
+  minimised exactly at `μ₀`. The asymmetric **Gaussian** needs none of this — the
+  two-piece normal is already `C¹` at the mode (both arms have zero slope there)
+  and strictly concave, so plain Newton works unchanged. Either way the mode stays
+  at `μ₀`, so a player with no games sits precisely at their registration rating
+  regardless of `r`.
+
+**`EloPriorShape::Flat` — the improper prior (`turnering.py` performance rating).**
+A third shape drops the prior entirely: its contribution to the gradient and
+Hessian is `(0, 0)`, so a player carrying it is estimated by the **likelihood
+alone** — the maximum-likelihood performance rating over their games. This
+reproduces the FESA rating program's treatment of unrated newcomers (the
+`performance2` Newton solve), where a strong veteran arriving without an ELO is
+rated straight off the field they beat, with no regularisation toward the unrated
+centre. It is meant for the `elo_prior_shape_unrated` slot; the upward-looseness
+knobs don't apply (there's no arm to widen). Because a flat prior can't bound an
+all-win or all-loss likelihood, those scorelines follow `turnering.py`'s guards,
+applied in `estimate_elos`:
+
+- **all games lost** → floored to `FLAT_ALL_LOSS_FLOOR = 1` (the bottom of the
+  assumed `[1, 1200]` unrated range, matching turnering's new-rule floor);
+- **all games won** → a pseudo-*draw* against the strongest opponent is added to
+  the likelihood (turnering's `[best_elo] + elo_results`), giving the otherwise-
+  monotone objective a finite maximum above the field;
+- **no games** → the player's Hessian is `0`, so the sweep leaves them at their
+  seed (the unrated centre) rather than dividing by zero.
+
+A mixed scoreline needs no guard — the likelihood alone is strictly concave in
+that player's `θ`. Note the flat prior supplies *no* curvature, so it relies on
+the rated field's proper priors to pin the overall scale; on a normal tournament
+(some rated players present) that is always satisfied.
+
+Default is `Gaussian` with every `r = 1` — behaviour-neutral; nothing changes
+until a referee raises a looseness knob or switches shape.
+
 ## 3. The solver
 
-With every prior Gaussian the objective is smooth, unconstrained and strongly
-concave, so its maximiser is unique. Use **coordinate ascent (Gauss–Seidel)** — no
-external LP/QP dependency, in keeping with the hand-written blossom matcher (a
-single dense Newton solve works too; coordinate ascent is just simpler and
-allocation-free).
+The objective is unconstrained and concave (strongly and smoothly so with the
+Gaussian prior — even the asymmetric two-piece variant, which stays `C¹` and
+strictly concave; still concave, with a piecewise-smooth Huber core, under the
+optional Laplace prior of §2.5), so its maximiser is unique. Use **coordinate
+ascent (Gauss–Seidel)** — no external LP/QP dependency, in keeping with the
+hand-written blossom matcher (a single dense Newton solve works too; coordinate
+ascent is just simpler and allocation-free).
 
 For each player `i`, holding the others fixed, take a 1-D Newton step on the
 concave 1-D objective:
@@ -233,7 +304,10 @@ hessian  H = Σ_games −Eᵢg(1−Eᵢg)/s²  − 1/σ₀ᵢ²
 
 where `Eᵢg = σ((θᵢ − θ_opp)/s)` and `(μᵢ₀, σ₀ᵢ)` is the rated prior (§2.1) or the
 unrated prior `(600, 350)` (§2.2) — every player now carries a prior term, so
-there is no special-cased branch. Sweep all players until the largest change in a
+there is no special-cased branch. The `−(θᵢ − μᵢ₀)/σ₀ᵢ²` / `−1/σ₀ᵢ²` terms above are
+the Gaussian prior's contribution; under the optional Laplace prior (§2.5) they are
+replaced by that prior's constant restoring force and its Huber-core curvature,
+computed by `PriorPenalty::grad_hess` — the rest of the sweep is identical. Sweep all players until the largest change in a
 sweep is below a tolerance (a few ELO-hundredths). Strong concavity guarantees
 convergence to the unique global maximum, so the result is deterministic given a
 fixed tolerance and max-iteration cap.
@@ -308,44 +382,11 @@ EloGap, whose real-valued squared-gap costs are essentially never tied, so a clu
 tie-break would almost never change a pairing — not worth the tier. The
 `club_protection_*` settings are simply ignored when the ELO mode is on.
 
-### 6a. Mixed mode: `EloGap` as a drop-in replacement for `Fold` + `FloaterSelection`
+### 6a. Estimate-based MacMahon (`macmahon_from_estimated_elo`)
 
-Mixed mode (`mixed_elo_pairing_enabled`) uses a different rule list, still built
-entirely from existing `Rule` variants — no new rule was needed:
-
-```
-Rematch, ByeGroup, AirtightGroups, ScoreGap, FloatRepeat, Club, EloGap
-```
-
-This is exactly the Swiss list with `FloaterSelection` and `Fold` removed and
-`EloGap` appended at the bottom (lowest priority — it's the finest-grained
-tiebreak, same role `Fold` played). Everything above it — MacMahon-derived
-score groups (`ScoreGap`, `AirtightGroups`, `ByeGroup`), no-repeat-float
-(`FloatRepeat`), and club protection — is untouched, so a group is still formed
-exactly as in Swiss; only *how players are ordered inside (and across) that
-group* changes, from a static fold-by-registration-rating to a live,
-result-reactive ELO estimate. Concretely: `EloGap`'s edge cost
-`(round(eloᵢ) − round(eloⱼ))²` fires on every edge regardless of score group
-(unlike `Fold`, which is zero across groups, and `FloaterSelection`, which is
-zero within one) — but since `ScoreGap` sits above it in priority, cross-group
-pairings are still only chosen when a float is unavoidable, same as Swiss;
-`EloGap` merely decides *which* players end up on each side of that float and
-how they're matched within a group.
-
-`PairingModel::build` computes the live ELO estimate (`elo`/`elo_rank`/
-`max_elo_gap`) whenever `TournamentSettings::elo_estimate_needed()` is true —
-i.e. either ELO mode — rather than gating on `elo_pairing_enabled` alone, so
-mixed mode gets the same estimator ([`crates/core/src/elo.rs`](../crates/core/src/elo.rs))
-feeding both the pairing rule and (optionally) the `Tiebreak::EstElo` ranking
-criterion. `elo_rank` (used only by pure ELO mode's `ByeSelection`) is simply
-unused in mixed mode, which keeps `ByeGroup` (the MacMahon-aware bye rule)
-instead.
-
-### 6b. Estimate-based MacMahon (`macmahon_from_estimated_elo`)
-
-A third, orthogonal way to hybridize — this one touches **scoring**, not the
-pairing rule list, so it composes with *any* pairing mode (plain Swiss or mixed
-ELO; it's moot under pure ELO, which ignores MacMahon). When
+An orthogonal way to hybridize — this one touches **scoring**, not the pairing
+rule list, so it composes with plain Swiss pairing (it's moot under pure ELO,
+which ignores MacMahon). When
 `macmahon_from_estimated_elo` is on, `compute_scores`
 ([`crates/core/src/scoring.rs`](../crates/core/src/scoring.rs)) awards each
 player's MacMahon starting points from the **live ELO estimate** instead of their
@@ -362,7 +403,7 @@ plumbing).
 at least one ELO threshold to compare against (with only grade thresholds, or
 none, the estimate would change nothing, so the estimator call is skipped, and
 the UI greys the checkbox out). This is deliberately kept separate from
-`elo_estimate_needed()` (§6a) — the latter still gates only the *pairing* model's
+`elo_estimate_needed()` (pure ELO pairing) — the latter still gates only the *pairing* model's
 ELO context, so plain Swiss + estimate-based MacMahon doesn't pay for the pairing
 ELO context it wouldn't use. The `Tiebreak::EstElo` ranking criterion becomes
 valid here too (a live estimate is maintained), so `normalized()` keeps it
@@ -380,14 +421,9 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   MacMahon in the UI (greys out thresholds, removals, floater style, fold, and the
   club-protection controls — implemented by wrapping those sections in a disabled
   `<fieldset>`). Off by default.
-- `mixed_elo_pairing_enabled: bool` — the mixed-mode switch (see §6a). Mutually
-  exclusive with `elo_pairing_enabled` (`normalized()` clears this one if both are
-  set, so pure ELO wins). Unlike pure ELO mode, it only greys out the
-  floater-selection section — MacMahon, degressive removals, airtight groups and
-  club protection stay active. Off by default.
 - `macmahon_from_estimated_elo: bool` — award MacMahon from the live estimate
-  rather than the registration rating (see §6b). Independent of the pairing-mode
-  switches (composes with Swiss or mixed ELO). Inert unless there's an ELO
+  rather than the registration rating (see §6a). Independent of the pairing-mode
+  switch (composes with plain Swiss). Inert unless there's an ELO
   threshold (`macmahon_from_estimate_active()`); the UI greys the checkbox out
   until then. Off by default.
 - `elo_k_multiplier_percent: u32` — the single knob `m`, stored as an integer
@@ -415,15 +451,46 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   (default `705 ≈ σ 350`; see §2.2). Read via `settings.elo_unrated_k()`, which
   clamps K ≥ 1; normalization stores the clamped value. Unlike `m` and the
   provisional multiplier, this is the *only* width knob for an unrated player.
+- `elo_prior_shape_{established,provisional,unrated}: EloPriorShape` — the prior
+  shape **per player category**: `Gaussian` (default), the fatter-tailed,
+  optionally asymmetric `Laplace`, or the improper `Flat` (the `turnering.py`
+  performance rating — no prior; see §2.5). A plain enum (`#[serde(rename_all =
+  "snake_case")]`), default-`Gaussian` for all three, so old saves and untouched
+  tournaments keep the historical behaviour exactly. Splitting the shape per
+  category lets a fat tail be confined to the one population whose true strength is
+  genuinely heavy-tailed — **unrated** players, where most newcomers are weak but a
+  few are strong veterans arriving without an ELO — while established and
+  provisional players, well-anchored by their history, stay on the thin-tailed
+  Gaussian (a fat tail there just loosens the anchor and adds noise). The Settings
+  UI exposes a single selector bound to the *unrated* shape; established and
+  provisional are written `Gaussian`.
+- `elo_upward_looseness_{established,provisional,unrated}_percent: u32` — the
+  asymmetry ratio `r` for the Laplace prior, **one per player category**, integer
+  percent (`100` = ×1.0 = symmetric, the default for all three). Read via
+  `settings.elo_upward_looseness_{established,provisional,unrated}()`;
+  normalization clamps each ≥ 100 (an upward revision is never harder than a
+  downward one). Each player reads the knob for the category that set its prior
+  width. Applies to **both** prior shapes (the Gaussian becomes a two-piece
+  normal, the Laplace widens its upward scale); the UI shows the three inputs
+  whenever a live estimate is maintained.
 
-The four `elo_*` estimate knobs (`elo_k_multiplier_percent`,
-`elo_provisional_multiplier_percent`, `elo_unrated_prior_center`, `elo_unrated_k`)
-surface in the Settings UI whenever a live estimate is actually maintained — either
-ELO pairing mode, or estimate-based MacMahon (§6b) with an ELO threshold. The FESA
-K table, `s`, and the reliability threshold (18 games) remain constants in
-`elo.rs`, not settings; `UNRATED_PRIOR_MEAN` / `UNRATED_PRIOR_DEFAULT_K` there are
-only the *defaults* for the two settings above (and the fallback where no settings
-are in hand).
+There are ten `elo_*` estimate knobs (`elo_k_multiplier_percent`,
+`elo_provisional_multiplier_percent`, `elo_unrated_prior_center`, `elo_unrated_k`,
+the three `elo_prior_shape_*`, and the three `elo_upward_looseness_*_percent`), but
+the Settings UI deliberately exposes only **two** derived controls whenever a live
+estimate is maintained (pure ELO pairing, or estimate-based MacMahon (§6a) with an
+ELO threshold): *Estimate* — unrated players only (`elo_k_multiplier_percent = 0`,
+the default, pinning rated players to their registration rating) or all players
+(`= 100`); and *Unrated prior* — the flat performance rating
+(`elo_prior_shape_unrated = flat`, the default) or a tuned asymmetric Laplace
+(`laplace` with `elo_unrated_prior_center = 700`, `elo_unrated_k = 260`,
+`elo_upward_looseness_unrated_percent = 300`). The remaining knobs (the provisional
+multiplier, the per-category shapes and loosenesses) keep their defaults through
+the UI and are reachable only via the settings JSON / the simulator CLI, where the
+full estimator is still exercised for research. The FESA K table, `s`, and the
+reliability threshold (18 games) remain constants in `elo.rs`, not settings;
+`UNRATED_PRIOR_MEAN` / `UNRATED_PRIOR_DEFAULT_K` there are only the *defaults* for
+the two settings above (and the fallback where no settings are in hand).
 
 ## Ranking
 

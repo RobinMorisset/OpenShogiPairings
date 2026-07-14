@@ -2,9 +2,14 @@
 //!
 //! Each player has a latent strength `θ` on the ELO scale. Game outcomes follow
 //! the logistic (Bradley–Terry) model `P(i beats j) = σ((θᵢ − θⱼ)/s)` with
-//! `s = 400/ln 10`, and each player has a Gaussian prior anchoring `θ` to their
+//! `s = 400/ln 10`, and each player has a prior anchoring `θ` to their
 //! registration rating (or, for an unrated player, to a wide, referee-tunable
-//! prior — by default `N(600, 350²)`). The
+//! prior — by default `N(600, 350²)`). The prior is Gaussian by default, but a
+//! referee can switch to a fatter-tailed Huber-smoothed Laplace prior
+//! ([`EloPriorShape`]); either shape can also be made **asymmetric** (an upward
+//! revision made on less evidence than a downward one — see the per-category
+//! `elo_upward_looseness_*` settings). All are log-concave, so the objective
+//! stays concave and the solver keeps its unique-maximum guarantee. The
 //! estimated ELO is the **MAP** (maximum a-posteriori) point — the maximiser of
 //! the penalised log-likelihood — found by coordinate-ascent Newton. The whole
 //! thing is a **pure replay** of the completed rounds, recomputed from scratch
@@ -20,7 +25,7 @@ use uuid::Uuid;
 
 use crate::player::Player;
 use crate::round::{Handicap, Round, Winner};
-use crate::settings::TournamentSettings;
+use crate::settings::{EloPriorShape, TournamentSettings};
 
 /// ELO scale factor `s = 400 / ln 10`: a 400-point gap is 10:1 odds. Also the
 /// factor in the prior-width law `σ₀ = √(K · s)`, so it's `pub(crate)` for
@@ -54,6 +59,21 @@ const CONVERGENCE_TOL: f64 = 1e-4;
 /// overshoot when a wide-prior player is far from the optimum; repeated sweeps
 /// then close the remaining distance.
 const MAX_STEP: f64 = 800.0;
+
+/// Half-width (ELO points) of the quadratic Huber core that rounds off the
+/// Laplace prior's kink at the registration rating. Small enough that its effect
+/// is negligible (a couple of points) yet it restores a finite, strictly
+/// negative curvature there so the Newton step is well-defined and can't chatter
+/// across the kink. The core is anchored at the mean (`g(0) = 0`), so a player
+/// with no games still sits *exactly* at their prior mean regardless of the
+/// asymmetry.
+const HUBER_DELTA: f64 = 2.0;
+
+/// The rating an all-loss player floors to under a flat ([`EloPriorShape::Flat`])
+/// prior — the bottom of the assumed unrated strength range `[1, 1200]`, matching
+/// `turnering.py`'s new-rule floor. A flat prior plus a 0 % score leaves the
+/// likelihood monotone (no finite maximiser), so a definite value must be supplied.
+const FLAT_ALL_LOSS_FLOOR: f64 = 1.0;
 
 // --- FESA handicap treatment ----------------------------------------------
 //
@@ -179,7 +199,9 @@ fn prior(
 ) -> (f64, f64) {
     match player.rating {
         Some(rating) => {
-            // Multipliers are clamped ≥ 1%/100% by settings normalization, so K > 0.
+            // `k_multiplier` may be 0 here (the "estimate unrated only" mode), giving
+            // σ₀ = 0; `estimate_elos` detects that and pins the player instead of
+            // using this degenerate prior. The provisional multiplier is clamped ≥ 1.
             let reliability = if is_reliably_rated(player) {
                 1.0
             } else {
@@ -189,6 +211,118 @@ fn prior(
             (f64::from(rating), (k * S).sqrt())
         }
         None => (unrated_center, (unrated_k * S).sqrt()),
+    }
+}
+
+/// A player's prior penalty on the log-posterior, in a form the coordinate-ascent
+/// solver can consume directly: given the current deviation `d = θ − μ₀` from the
+/// prior mean, it yields that term's contribution to the gradient and Hessian.
+///
+/// All variants are **log-concave**, so adding them to the (concave)
+/// Bradley–Terry log-likelihood keeps the whole objective concave — the unique
+/// maximiser and deterministic convergence the solver relies on. The [`Self::Flat`]
+/// variant is the improper limit (zero curvature): it is log-concave but supplies
+/// no curvature of its own, so a player carrying it needs games (or the solver's
+/// degenerate-case guards) to be pinned down.
+enum PriorPenalty {
+    /// A (possibly asymmetric) Gaussian — a *two-piece normal* with std `σ₀` below
+    /// the mean and `r·σ₀` above it, so the linear restoring force `d/σ²` is
+    /// gentler on the upward side when `r > 1`. Held as the two precisions
+    /// `precision_down = 1/σ₀²` and `precision_up = 1/(r·σ₀)²`. It is `C¹` at the
+    /// mode (both arms have zero slope there — no kink to smooth) and strictly
+    /// concave, so the solver is unaffected. `r = 1` gives `precision_up =
+    /// precision_down`, i.e. the plain symmetric `N(μ₀, σ₀²)`.
+    Gaussian {
+        precision_down: f64,
+        precision_up: f64,
+    },
+    /// Huber-smoothed **asymmetric Laplace**: outside a `±HUBER_DELTA` core the
+    /// penalty is linear with a *constant* restoring force `1/b` — `1/b_up` above
+    /// the mean, `1/b_down` below — giving fatter (exponential) tails than the
+    /// Gaussian and, when `b_up > b_down`, an easier upward revision. Inside the
+    /// core the force is linearised through the origin so the penalty is `C¹`,
+    /// strictly convex, and minimised exactly at `d = 0`.
+    Laplace { b_down: f64, b_up: f64 },
+    /// **Flat** (improper/uniform) prior: contributes `(0, 0)` always, so the
+    /// estimate is driven purely by the likelihood — the maximum-likelihood
+    /// performance rating, as in `turnering.py`. Carries no width or asymmetry (the
+    /// looseness ratio has no arm to widen). A player holding it must be pinned by
+    /// their games or by the solver's degenerate-case handling.
+    Flat,
+}
+
+impl PriorPenalty {
+    /// Build the penalty for one player from the chosen `shape`, their (downward)
+    /// width `σ₀` (from [`prior`]), and the upward-looseness ratio `r`. In both
+    /// shapes the upward arm is widened by `r`: the Gaussian uses `σ_up = r·σ₀`,
+    /// and the Laplace scale is variance-matched to it (`b_down = σ₀/√2`,
+    /// `b_up = r·b_down`) so the existing K / provisional / unrated-K knobs keep
+    /// their meaning. `r = 1` yields the symmetric prior in either shape.
+    fn new(shape: EloPriorShape, sigma0: f64, r: f64) -> Self {
+        let r = r.max(1.0);
+        match shape {
+            EloPriorShape::Gaussian => {
+                let sigma_up = r * sigma0;
+                PriorPenalty::Gaussian {
+                    precision_down: 1.0 / (sigma0 * sigma0),
+                    precision_up: 1.0 / (sigma_up * sigma_up),
+                }
+            }
+            EloPriorShape::Laplace => {
+                let b_down = sigma0 / std::f64::consts::SQRT_2;
+                PriorPenalty::Laplace {
+                    b_down,
+                    b_up: r * b_down,
+                }
+            }
+            // A flat prior has no width and no asymmetry: `sigma0` and `r` are
+            // irrelevant.
+            EloPriorShape::Flat => PriorPenalty::Flat,
+        }
+    }
+
+    /// The `(gradient, hessian)` contribution of this prior at deviation `d`.
+    /// Both are ≤ 0 curvature-wise (the Hessian term is `≤ 0`), and strictly
+    /// negative wherever it matters for a well-defined ascent step: the Gaussian
+    /// always, the Laplace inside its core (where a no-games player sits) — and
+    /// outside the core any moved player has games, whose likelihood supplies the
+    /// strictly negative curvature.
+    fn grad_hess(&self, d: f64) -> (f64, f64) {
+        match *self {
+            PriorPenalty::Gaussian {
+                precision_down,
+                precision_up,
+            } => {
+                // Pick the arm by side of the mode. The gradient is continuous at
+                // d = 0 (both give 0); the curvature jumps but stays < 0.
+                let precision = if d >= 0.0 {
+                    precision_up
+                } else {
+                    precision_down
+                };
+                (-d * precision, -precision)
+            }
+            PriorPenalty::Laplace { b_down, b_up } => {
+                // g(d) = penalty'(d); the log-posterior takes −penalty, so the
+                // gradient contribution is −g and the Hessian is −g'. The core is
+                // two straight segments meeting at the origin (g(0) = 0), each
+                // running out to the constant ±1/b force at ±HUBER_DELTA.
+                let (g, g_prime) = if d >= HUBER_DELTA {
+                    (1.0 / b_up, 0.0)
+                } else if d <= -HUBER_DELTA {
+                    (-1.0 / b_down, 0.0)
+                } else if d >= 0.0 {
+                    (d / (b_up * HUBER_DELTA), 1.0 / (b_up * HUBER_DELTA))
+                } else {
+                    (d / (b_down * HUBER_DELTA), 1.0 / (b_down * HUBER_DELTA))
+                };
+                (-g, -g_prime)
+            }
+            // Improper flat prior: no restoring force, no curvature. The player's
+            // games (or the degenerate-case guards in `estimate_elos`) must supply
+            // the curvature that pins them down.
+            PriorPenalty::Flat => (0.0, 0.0),
+        }
     }
 }
 
@@ -223,9 +357,37 @@ pub(crate) fn oracle_prior(
     )
 }
 
+/// The oracle prior width (σ₀) for a player *provisionally* rated at `rating`.
+///
+/// Used by the simulator for a player who was **unrated** at registration but
+/// nonetheless has a post-tournament result (an override): earning a rating from a
+/// tournament's worth of games makes them *provisionally* rated, not truly unknown,
+/// so their true strength should be jittered at this provisional width — the same
+/// `√(K · s)` law as a rated player, at the provisional multiplier — rather than the
+/// very broad "we know nothing" unrated width. Uses the oracle's ×1 K multiplier,
+/// like [`oracle_prior`]; `provisional_mult` is clamped to ≥ 1.
+pub(crate) fn oracle_provisional_width(rating: f64, provisional_mult: f64) -> f64 {
+    let k = fesa_k(rating.round().max(0.0) as u32) * provisional_mult.max(1.0);
+    (k * S).sqrt()
+}
+
 /// Expected score `σ(x) = 1/(1+e^−x)` for `x = (θself − θopp)/s`.
 fn expected(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
+}
+
+/// Precomputed degenerate-scoreline handling for a flat-prior player (see
+/// [`EloPriorShape::Flat`]). A flat prior gives an all-win or all-loss player an
+/// unbounded likelihood, so [`estimate_elos`] substitutes `turnering.py`'s rule.
+/// Players with a mix of results, or with no games, need no substitution (they are
+/// pinned by the likelihood or left at their seed) and carry `None`.
+enum FlatDegenerate {
+    /// Every counted game lost — pin to [`FLAT_ALL_LOSS_FLOOR`].
+    AllLoss,
+    /// Every counted game won — add a pseudo-draw against the strongest opponent
+    /// (its index into `players`, with that game's handicap `offset`) so the
+    /// likelihood has a finite maximum, as in `turnering.py`'s `[best_elo] + …`.
+    AllWin { opp: usize, offset: f64 },
 }
 
 /// Estimate every player's current ELO (posterior mode) from the completed
@@ -235,6 +397,11 @@ fn expected(x: f64) -> f64 {
 /// handicap games are excluded for now (V1 — a handicap→ELO mapping is future
 /// work). The returned map has one entry per player in `players`; a player with no
 /// counted games sits exactly at their prior mean.
+///
+/// A K multiplier of 0 (`settings.elo_k_multiplier() == 0`) **pins** every rated
+/// player to their registration rating — only unrated players are estimated. This
+/// is the "apply estimates to unrated players only" mode: rated players keep their
+/// trusted rating and the unrated newcomers are estimated against that fixed field.
 pub fn estimate_elos(
     players: &[Player],
     settings: &TournamentSettings,
@@ -244,17 +411,46 @@ pub fn estimate_elos(
     let provisional = settings.elo_provisional_multiplier();
     let unrated_center = settings.elo_unrated_prior_center();
     let unrated_k = settings.elo_unrated_k();
+    let shape_established = settings.elo_prior_shape_established;
+    let shape_provisional = settings.elo_prior_shape_provisional;
+    let shape_unrated = settings.elo_prior_shape_unrated;
+    let looseness_established = settings.elo_upward_looseness_established();
+    let looseness_provisional = settings.elo_upward_looseness_provisional();
+    let looseness_unrated = settings.elo_upward_looseness_unrated();
     let n = players.len();
 
     let index: HashMap<Uuid, usize> = players.iter().enumerate().map(|(i, p)| (p.id, i)).collect();
     let mut theta = vec![0.0_f64; n];
     let mut mean = vec![0.0_f64; n];
-    let mut precision = vec![0.0_f64; n]; // 1/σ₀² — the prior's weight
+    let mut penalties: Vec<PriorPenalty> = Vec::with_capacity(n);
+    let mut is_flat = vec![false; n];
+    let mut pinned = vec![false; n];
     for (i, p) in players.iter().enumerate() {
         let (mu0, sigma0) = prior(p, m, provisional, unrated_center, unrated_k);
         mean[i] = mu0;
         theta[i] = mu0; // seed at the prior mean
-        precision[i] = 1.0 / (sigma0 * sigma0);
+                        // K multiplier 0 pins every *rated* player to their registration rating
+                        // (only unrated players are estimated). Their `sigma0` is 0, which would
+                        // give a degenerate Gaussian, so mark them pinned and skip their update
+                        // entirely; the seed already holds their rating. Unrated players are
+                        // unaffected (their prior is independent of `m`).
+        if m == 0.0 && p.rating.is_some() {
+            pinned[i] = true;
+            penalties.push(PriorPenalty::Flat); // unused; the pin skips their update
+            continue;
+        }
+        // The prior shape and the upward-looseness ratio both depend on how much the
+        // seed rating is trusted — the same three categories `prior` distinguishes. A
+        // fat tail is confined to the category whose true strength is actually
+        // heavy-tailed (unrated), keeping established and provisional players on their
+        // well-anchored Gaussian.
+        let (shape, r) = match p.rating {
+            None => (shape_unrated, looseness_unrated),
+            Some(_) if is_reliably_rated(p) => (shape_established, looseness_established),
+            Some(_) => (shape_provisional, looseness_provisional),
+        };
+        is_flat[i] = matches!(shape, EloPriorShape::Flat);
+        penalties.push(PriorPenalty::new(shape, sigma0, r));
     }
 
     // Per-player incident games: (opponent index, this player's score in {0, ½, 1},
@@ -305,21 +501,70 @@ pub fn estimate_elos(
         }
     }
 
+    // Degenerate scorelines for flat-prior players, precomputed once from the seeds
+    // (theta still holds each player's seed here). A flat prior can't bound an
+    // all-win or all-loss likelihood, so those follow `turnering.py`; a mixed
+    // scoreline is bounded by the likelihood alone, and a no-games flat player is
+    // left at their seed (their Hessian stays 0 and the sweep skips them).
+    let flat_degenerate: Vec<Option<FlatDegenerate>> = (0..n)
+        .map(|i| {
+            if !is_flat[i] || games[i].is_empty() {
+                return None;
+            }
+            if games[i].iter().all(|&(_, s, _)| s == 0.0) {
+                Some(FlatDegenerate::AllLoss)
+            } else if games[i].iter().all(|&(_, s, _)| s == 1.0) {
+                // Strongest opponent by seed rating — a stable pseudo-opponent.
+                let &(opp, _, offset) = games[i]
+                    .iter()
+                    .max_by(|a, b| theta[a.0].total_cmp(&theta[b.0]))
+                    .expect("non-empty by the guard above");
+                Some(FlatDegenerate::AllWin { opp, offset })
+            } else {
+                None
+            }
+        })
+        .collect();
+
     // Coordinate ascent: sweep players, each a 1-D Newton step on the concave
     // penalised log-likelihood. Strong concavity (every player has a finite prior
-    // precision) guarantees a unique maximum and convergence.
+    // precision, or — for a flat prior — enough game curvature after the degenerate
+    // guards) gives a unique maximum and convergence.
     for _ in 0..MAX_SWEEPS {
         let mut max_delta = 0.0_f64;
         for i in 0..n {
+            // A pinned player (rated, with K multiplier 0) never moves off their
+            // registration rating.
+            if pinned[i] {
+                continue;
+            }
+            // A flat all-loss player has no finite maximum; pin them to the floor.
+            if let Some(FlatDegenerate::AllLoss) = flat_degenerate[i] {
+                let step = FLAT_ALL_LOSS_FLOOR - theta[i];
+                theta[i] = FLAT_ALL_LOSS_FLOOR;
+                max_delta = max_delta.max(step.abs());
+                continue;
+            }
             // Prior term first, then each game's likelihood contribution.
-            let mut gradient = -(theta[i] - mean[i]) * precision[i];
-            let mut hessian = -precision[i];
+            let (mut gradient, mut hessian) = penalties[i].grad_hess(theta[i] - mean[i]);
             for &(j, score, offset) in &games[i] {
                 let e = expected((theta[i] - theta[j] + offset) / S);
                 gradient += (score - e) / S;
                 hessian -= e * (1.0 - e) / (S * S);
             }
-            // hessian ≤ −precision[i] < 0, so this is a well-defined ascent step.
+            // A flat all-win player: a pseudo-draw against their strongest opponent
+            // gives the otherwise-monotone likelihood a finite maximum.
+            if let Some(FlatDegenerate::AllWin { opp, offset }) = flat_degenerate[i] {
+                let e = expected((theta[i] - theta[opp] + offset) / S);
+                gradient += (0.5 - e) / S;
+                hessian -= e * (1.0 - e) / (S * S);
+            }
+            // hessian < 0 (see `PriorPenalty::grad_hess`) except for a flat prior
+            // with no games, whose 0 curvature means nothing to learn — leave them
+            // at their seed rather than divide by zero.
+            if hessian == 0.0 {
+                continue;
+            }
             let step = (-gradient / hessian).clamp(-MAX_STEP, MAX_STEP);
             theta[i] += step;
             max_delta = max_delta.max(step.abs());
@@ -694,5 +939,433 @@ mod tests {
             prev = now;
             prev_gain = gain;
         }
+    }
+
+    /// A Laplace prior for *every* player category with the same upward-looseness
+    /// `r` (so tests that don't care about the split can pass one number and still
+    /// exercise the Laplace mechanics on whatever category their fixture uses).
+    fn laplace(looseness_percent: u32) -> TournamentSettings {
+        TournamentSettings {
+            elo_prior_shape_established: EloPriorShape::Laplace,
+            elo_prior_shape_provisional: EloPriorShape::Laplace,
+            elo_prior_shape_unrated: EloPriorShape::Laplace,
+            elo_upward_looseness_established_percent: looseness_percent,
+            elo_upward_looseness_provisional_percent: looseness_percent,
+            elo_upward_looseness_unrated_percent: looseness_percent,
+            ..Default::default()
+        }
+    }
+
+    /// `n` fresh equal-rated (1500) opponents.
+    fn equals(n: usize) -> Vec<Player> {
+        (0..n).map(|_| player(Some(1500))).collect()
+    }
+
+    #[test]
+    fn laplace_no_games_sits_at_registration_even_when_asymmetric() {
+        // The Huber core is anchored at the mean, so switching to a (strongly
+        // asymmetric) Laplace prior must not budge a player who has played nothing
+        // — rated or unrated. This is the invariant the kink-smoothing preserves.
+        let rated = player(Some(1800));
+        let unrated = player(None);
+        let elos = estimate_elos(&[rated.clone(), unrated.clone()], &laplace(300), &[]);
+        assert!((elos[&rated.id] - 1800.0).abs() < 1e-6);
+        assert!((elos[&unrated.id] - UNRATED_PRIOR_MEAN).abs() < 1e-6);
+    }
+
+    #[test]
+    fn laplace_upward_revision_is_easier_than_downward_when_asymmetric() {
+        // Mirror-image evidence past the Laplace dead zone: `riser` beats six
+        // equal-rated opponents (pushed up), `faller` loses to six (pushed down) by
+        // a symmetric amount. A symmetric Laplace prior moves them equally;
+        // loosening only the upward arm makes the rise exceed the fall — the
+        // "under-rating is more common" tilt.
+        let riser = player(Some(1500));
+        let faller = player(Some(1500));
+        let r_opps = equals(6);
+        let f_opps = equals(6);
+        let mut all = vec![riser.clone(), faller.clone()];
+        all.extend(r_opps.iter().cloned());
+        all.extend(f_opps.iter().cloned());
+        let rounds: Vec<Round> = (0..6)
+            .map(|i| {
+                decided(
+                    i as u32 + 1,
+                    vec![win(riser.id, r_opps[i].id), win(f_opps[i].id, faller.id)],
+                )
+            })
+            .collect();
+
+        let shift = |r_pct: u32| {
+            let elos = estimate_elos(&all, &laplace(r_pct), &rounds);
+            (elos[&riser.id] - 1500.0, 1500.0 - elos[&faller.id])
+        };
+
+        // Symmetric prior (r = 1): the mirrored setup rises and falls equally, and
+        // the streak clears the dead zone so the movement is substantial.
+        let (up_sym, down_sym) = shift(100);
+        assert!(
+            up_sym > 10.0,
+            "the streak should clear the dead zone: {up_sym}"
+        );
+        assert!(
+            (up_sym - down_sym).abs() < 1e-2,
+            "symmetric prior should be balanced: up {up_sym}, down {down_sym}"
+        );
+
+        // Looser upward (r = 3): the riser climbs further than under the symmetric
+        // prior, while the downward arm — untouched by r — never falls more.
+        let (up_asym, down_asym) = shift(300);
+        assert!(
+            up_asym > up_sym + 1.0,
+            "loosening the upward arm should raise more: sym {up_sym}, asym {up_asym}"
+        );
+        assert!(
+            down_asym <= down_sym + 1e-2,
+            "the downward arm is not loosened: sym {down_sym}, asym {down_asym}"
+        );
+        assert!(
+            up_asym > down_asym + 1.0,
+            "an upward revision should clear on less evidence than a downward one: \
+             up {up_asym}, down {down_asym}"
+        );
+    }
+
+    #[test]
+    fn laplace_swings_further_than_gaussian_on_a_sustained_upset_streak() {
+        // An established 1200 repeatedly beats much-stronger 1800s. Both priors
+        // climb, but the fatter-tailed Laplace (constant restoring force) yields to
+        // the sustained evidence more than the Gaussian, whose pull stiffens with
+        // distance — the motivating behaviour of the fatter tail.
+        let mut hero = player(Some(1200));
+        hero.fesa_games = Some(50); // established, so no provisional widening
+        let opps: Vec<Player> = (0..5).map(|_| player(Some(1800))).collect();
+        let mut all = vec![hero.clone()];
+        all.extend(opps.iter().cloned());
+        let rounds: Vec<Round> = opps
+            .iter()
+            .enumerate()
+            .map(|(i, o)| decided(i as u32 + 1, vec![win(hero.id, o.id)]))
+            .collect();
+
+        let est = |settings: &TournamentSettings| estimate_elos(&all, settings, &rounds)[&hero.id];
+        let gauss = est(&TournamentSettings::default());
+        let lap = est(&laplace(100)); // symmetric, so the gap is purely the tail
+        assert!(gauss > 1200.0 && lap > 1200.0, "both priors climb on wins");
+        assert!(
+            lap > gauss + 10.0,
+            "fatter tails should swing further on a sustained streak: \
+             gaussian {gauss}, laplace {lap}"
+        );
+    }
+
+    #[test]
+    fn laplace_confined_to_unrated_leaves_rated_players_on_the_gaussian() {
+        // The per-category shape split is the whole point: a fat tail on the
+        // *unrated* prior lets a newcomer climb further on a sustained upset, while a
+        // rated player — whose shape stays Gaussian — is bit-for-bit unaffected. That
+        // invariance is what makes "fat tail for unrated only" safe for the field.
+        let unrated_only_laplace = TournamentSettings {
+            elo_prior_shape_unrated: EloPriorShape::Laplace,
+            ..Default::default()
+        };
+
+        // (a) An unrated newcomer beating five 1800s climbs further under the
+        //     unrated-Laplace prior than under the all-Gaussian default — proof the
+        //     unrated category actually picks up the Laplace shape.
+        let newcomer = player(None);
+        let opps_u: Vec<Player> = (0..5).map(|_| player(Some(1800))).collect();
+        let mut all_u = vec![newcomer.clone()];
+        all_u.extend(opps_u.iter().cloned());
+        let rounds_u: Vec<Round> = opps_u
+            .iter()
+            .enumerate()
+            .map(|(i, o)| decided(i as u32 + 1, vec![win(newcomer.id, o.id)]))
+            .collect();
+        let climb = |s: &TournamentSettings| estimate_elos(&all_u, s, &rounds_u)[&newcomer.id];
+        let gauss_u = climb(&TournamentSettings::default());
+        let lap_u = climb(&unrated_only_laplace);
+        assert!(
+            lap_u > gauss_u + 10.0,
+            "the unrated prior should pick up the Laplace shape and swing further: \
+             gaussian {gauss_u}, unrated-laplace {lap_u}"
+        );
+
+        // (b) An established 1200 in the same upset situation is untouched: no unrated
+        //     player is present, so flipping only the unrated shape must leave every
+        //     estimate identical.
+        let mut hero = player(Some(1200));
+        hero.fesa_games = Some(50); // established → Gaussian under both configs
+        let opps_e: Vec<Player> = (0..5).map(|_| player(Some(1800))).collect();
+        let mut all_e = vec![hero.clone()];
+        all_e.extend(opps_e.iter().cloned());
+        let rounds_e: Vec<Round> = opps_e
+            .iter()
+            .enumerate()
+            .map(|(i, o)| decided(i as u32 + 1, vec![win(hero.id, o.id)]))
+            .collect();
+        let est_e = |s: &TournamentSettings| estimate_elos(&all_e, s, &rounds_e)[&hero.id];
+        let gauss_e = est_e(&TournamentSettings::default());
+        let lap_e = est_e(&unrated_only_laplace);
+        assert!(
+            (gauss_e - lap_e).abs() < 1e-9,
+            "a rated player's estimate must not move when only the unrated shape is \
+             Laplace: gaussian {gauss_e}, unrated-laplace {lap_e}"
+        );
+    }
+
+    /// A flat (improper) prior on the unrated slot — the `turnering.py` performance
+    /// rating — leaving the rated categories on their default Gaussian.
+    fn flat_unrated() -> TournamentSettings {
+        TournamentSettings {
+            elo_prior_shape_unrated: EloPriorShape::Flat,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn flat_unrated_reads_off_the_field_and_ignores_the_prior_center() {
+        // turnering.py-style: an unrated player's estimate is the maximum-likelihood
+        // performance rating over their games, with no pull toward the unrated
+        // centre. So moving the centre must not move a flat estimate — the tell of an
+        // improper prior — whereas the centre-anchored Gaussian does move.
+        let newcomer = player(None);
+        let mut a = player(Some(1500));
+        a.fesa_games = Some(50);
+        let mut b = player(Some(1500));
+        b.fesa_games = Some(50);
+        let all = vec![newcomer.clone(), a.clone(), b.clone()];
+        let rounds = vec![
+            decided(1, vec![win(newcomer.id, a.id)]), // newcomer beats A
+            decided(2, vec![win(b.id, newcomer.id)]), // B beats newcomer
+        ];
+        let est = |shape, center: u32| {
+            let settings = TournamentSettings {
+                elo_prior_shape_unrated: shape,
+                elo_unrated_prior_center: center,
+                ..Default::default()
+            };
+            estimate_elos(&all, &settings, &rounds)[&newcomer.id]
+        };
+        // Flat: identical regardless of the centre.
+        let flat_low = est(EloPriorShape::Flat, 600);
+        let flat_high = est(EloPriorShape::Flat, 1000);
+        // Only solver-tolerance residue separates them (the two runs differ solely in
+        // the newcomer's seed, which a flat prior never anchors) — orders of magnitude
+        // below the Gaussian's centre-driven shift asserted below.
+        assert!(
+            (flat_low - flat_high).abs() < 1e-2,
+            "a flat (improper) prior must ignore the centre: {flat_low} vs {flat_high}"
+        );
+        // A 1 win / 1 loss record vs a 1500 field → performance sits right at 1500.
+        assert!(
+            (flat_low - 1500.0).abs() < 60.0,
+            "a 1-1 record vs 1500s should rate near 1500, got {flat_low}"
+        );
+        // Gaussian: the centre pulls the estimate, so the two centres disagree.
+        let g_low = est(EloPriorShape::Gaussian, 600);
+        let g_high = est(EloPriorShape::Gaussian, 1000);
+        assert!(
+            (g_low - g_high).abs() > 20.0,
+            "a Gaussian prior should track its centre: {g_low} vs {g_high}"
+        );
+    }
+
+    #[test]
+    fn flat_unrated_all_losses_floors_to_one() {
+        // A flat prior can't bound an all-loss likelihood; turnering.py floors it.
+        let newcomer = player(None);
+        let opps: Vec<Player> = (0..5).map(|_| player(Some(1500))).collect();
+        let mut all = vec![newcomer.clone()];
+        all.extend(opps.iter().cloned());
+        let rounds: Vec<Round> = opps
+            .iter()
+            .enumerate()
+            .map(|(i, o)| decided(i as u32 + 1, vec![win(o.id, newcomer.id)]))
+            .collect();
+        let est = estimate_elos(&all, &flat_unrated(), &rounds)[&newcomer.id];
+        assert!(
+            (est - FLAT_ALL_LOSS_FLOOR).abs() < 1e-6,
+            "an all-loss flat player floors to {FLAT_ALL_LOSS_FLOOR}, got {est}"
+        );
+    }
+
+    #[test]
+    fn flat_unrated_all_wins_is_finite_and_above_the_field() {
+        // The pseudo-draw against the strongest opponent bounds the otherwise-
+        // monotone all-win likelihood, so the estimate is a finite performance
+        // rating above the field — not the unbounded run-away a bare flat prior gives.
+        let newcomer = player(None);
+        let opps: Vec<Player> = (0..5).map(|_| player(Some(1500))).collect();
+        let mut all = vec![newcomer.clone()];
+        all.extend(opps.iter().cloned());
+        let rounds: Vec<Round> = opps
+            .iter()
+            .enumerate()
+            .map(|(i, o)| decided(i as u32 + 1, vec![win(newcomer.id, o.id)]))
+            .collect();
+        let est = estimate_elos(&all, &flat_unrated(), &rounds)[&newcomer.id];
+        assert!(
+            est.is_finite(),
+            "all-win flat estimate must be finite, got {est}"
+        );
+        assert!(
+            est > 1700.0,
+            "an all-win newcomer should rate well above the 1500 field, got {est}"
+        );
+        assert!(
+            est < 2600.0,
+            "…but the pseudo-draw keeps it from running away, got {est}"
+        );
+    }
+
+    #[test]
+    fn k_multiplier_zero_estimates_unrated_only_and_pins_rated_players() {
+        // "Apply estimates to unrated players only": a rated player stays exactly at
+        // their registration rating no matter what they score, while an unrated
+        // newcomer is still estimated against that fixed field.
+        let mut rated = player(Some(1600));
+        rated.fesa_games = Some(50);
+        let newcomer = player(None);
+        let strong = player(Some(2000));
+        let all = vec![rated.clone(), newcomer.clone(), strong.clone()];
+        // The rated 1600 loses to the 2000; the newcomer beats the 2000.
+        let rounds = vec![
+            decided(1, vec![win(strong.id, rated.id)]),
+            decided(2, vec![win(newcomer.id, strong.id)]),
+        ];
+        let settings = TournamentSettings {
+            elo_k_multiplier_percent: 0,
+            ..Default::default()
+        };
+        let est = estimate_elos(&all, &settings, &rounds);
+        assert!(
+            (est[&rated.id] - 1600.0).abs() < 1e-9,
+            "a rated player is pinned to their rating at k=0, got {}",
+            est[&rated.id]
+        );
+        assert!(
+            (est[&strong.id] - 2000.0).abs() < 1e-9,
+            "the rated 2000 is pinned too, got {}",
+            est[&strong.id]
+        );
+        // The unrated newcomer is still moved by their games (beat a fixed 2000).
+        assert!(
+            est[&newcomer.id] > UNRATED_PRIOR_MEAN + 100.0,
+            "the unrated newcomer should still be estimated upward, got {}",
+            est[&newcomer.id]
+        );
+    }
+
+    #[test]
+    fn flat_unrated_with_no_games_stays_at_the_seed() {
+        // Zero curvature and no games: the sweep skips them and they sit at the seed
+        // (the unrated centre), never a NaN from 0/0.
+        let newcomer = player(None);
+        let settings = TournamentSettings {
+            elo_prior_shape_unrated: EloPriorShape::Flat,
+            elo_unrated_prior_center: 900,
+            ..Default::default()
+        };
+        let est = estimate_elos(std::slice::from_ref(&newcomer), &settings, &[])[&newcomer.id];
+        assert!(
+            (est - 900.0).abs() < 1e-6,
+            "a no-games flat player stays at the seed, got {est}"
+        );
+    }
+
+    #[test]
+    fn gaussian_prior_can_be_made_asymmetric_too() {
+        // The same split works for the default Gaussian (a two-piece normal, no
+        // kink to smooth): widening only the upward arm lets an unrated newcomer
+        // climb further on an upset, while a no-games player still sits exactly at
+        // the prior mean.
+        let newcomer = player(None);
+        let strong = player(Some(1600));
+        let r = decided(1, vec![win(newcomer.id, strong.id)]);
+
+        // Shape stays Gaussian (default); only the unrated upward looseness moves.
+        let climb = |unrated_pct: u32| {
+            let settings = TournamentSettings {
+                elo_upward_looseness_unrated_percent: unrated_pct,
+                ..Default::default()
+            };
+            estimate_elos(
+                &[newcomer.clone(), strong.clone()],
+                &settings,
+                std::slice::from_ref(&r),
+            )[&newcomer.id]
+        };
+        let sym = climb(100); // r = 1 → the plain symmetric Gaussian
+        let asym = climb(300); // looser upward arm
+        assert!(
+            asym > sym + 20.0,
+            "a looser upward Gaussian arm should climb further: sym {sym}, asym {asym}"
+        );
+
+        // No games → still exactly at the unrated center, asymmetry or not (the
+        // two-piece normal's mode is unchanged).
+        let settings = TournamentSettings {
+            elo_upward_looseness_unrated_percent: 300,
+            ..Default::default()
+        };
+        let at_rest = estimate_elos(std::slice::from_ref(&newcomer), &settings, &[])[&newcomer.id];
+        assert!(
+            (at_rest - UNRATED_PRIOR_MEAN).abs() < 1e-6,
+            "a no-games unrated player still sits at the center, got {at_rest}"
+        );
+    }
+
+    /// A Laplace prior (all categories) with a distinct upward-looseness per player
+    /// category.
+    fn laplace3(established: u32, provisional: u32, unrated: u32) -> TournamentSettings {
+        TournamentSettings {
+            elo_prior_shape_established: EloPriorShape::Laplace,
+            elo_prior_shape_provisional: EloPriorShape::Laplace,
+            elo_prior_shape_unrated: EloPriorShape::Laplace,
+            elo_upward_looseness_established_percent: established,
+            elo_upward_looseness_provisional_percent: provisional,
+            elo_upward_looseness_unrated_percent: unrated,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn each_player_category_reads_only_its_own_upward_looseness() {
+        // An *established* hero beats ten opponents. Its upward shift responds to
+        // the established looseness knob and is completely unmoved by the
+        // provisional/unrated ones — so the three knobs are applied per category,
+        // not globally.
+        let mut hero = player(Some(1500));
+        hero.fesa_games = Some(50); // established
+        let opps = equals(10);
+        let mut all = vec![hero.clone()];
+        all.extend(opps.iter().cloned());
+        let rounds: Vec<Round> = (0..10)
+            .map(|i| decided(i as u32 + 1, vec![win(hero.id, opps[i].id)]))
+            .collect();
+
+        let shift = |s: &TournamentSettings| estimate_elos(&all, s, &rounds)[&hero.id] - 1500.0;
+
+        let base = shift(&laplace3(100, 100, 100));
+        assert!(base > 10.0, "the streak should clear the dead zone: {base}");
+
+        // Loosening only the established knob raises the established hero further.
+        let est_loose = shift(&laplace3(300, 100, 100));
+        assert!(
+            est_loose > base + 5.0,
+            "an established hero should read its own knob: base {base}, loosened {est_loose}"
+        );
+
+        // Loosening the *other* categories' knobs leaves it where the symmetric
+        // prior put it (the hero is neither provisional nor unrated). Any residual
+        // is solver-convergence noise, orders of magnitude below the established
+        // knob's ~hundreds-of-points effect and below the sweep tolerance.
+        let others_loose = shift(&laplace3(100, 300, 300));
+        assert!(
+            (others_loose - base).abs() < CONVERGENCE_TOL,
+            "an established hero must ignore the provisional/unrated knobs: \
+             base {base}, others {others_loose}"
+        );
     }
 }

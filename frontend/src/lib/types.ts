@@ -17,6 +17,7 @@ export type { CounterfactualMode } from "./generated/CounterfactualMode";
 export type { Cup } from "./generated/Cup";
 export type { CupPodium } from "./generated/CupPodium";
 export type { CupStage } from "./generated/CupStage";
+export type { EloPriorShape } from "./generated/EloPriorShape";
 export type { FloaterStyle } from "./generated/FloaterStyle";
 export type { Grade } from "./generated/Grade";
 export type { GradeKind } from "./generated/GradeKind";

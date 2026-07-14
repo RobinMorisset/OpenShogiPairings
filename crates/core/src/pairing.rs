@@ -155,11 +155,8 @@ enum Rule {
     /// (which is indifferent to the bye), so the sit-out is decided before the
     /// rest is optimized.
     ByeSelection,
-    /// (Either ELO mode) Prefer opponents of equal estimated ELO; penalty grows
-    /// with the square of the ELO gap. In pure ELO mode this replaces the whole
-    /// Swiss score/float/fold family; in mixed ELO mode it replaces only
-    /// [`Rule::Fold`] and [`Rule::FloaterSelection`], leaving the score-group
-    /// rules (and hence MacMahon) in place.
+    /// (Pure ELO mode) Prefer opponents of equal estimated ELO; penalty grows with
+    /// the square of the ELO gap, replacing the whole Swiss score/float/fold family.
     EloGap,
 }
 
@@ -185,12 +182,7 @@ pub enum RuleId {
 /// The rules in effect, highest priority first, for the active mode. Swiss/
 /// MacMahon is the default. The experimental (pure) ELO mode swaps the whole
 /// score/float/fold/club family for a bye-selection rule and a squared-ELO-gap
-/// rule, keeping only no-rematch above them. The mixed ELO mode is a middle
-/// ground: it keeps MacMahon and the score-group rules (score gap, float
-/// repeat, club, airtight groups, bye group) but replaces just [`Rule::Fold`]
-/// and [`Rule::FloaterSelection`] with [`Rule::EloGap`] — so within- and
-/// across-group ordering follows the live estimate instead of a static
-/// registration rating — remaining fully compatible with MacMahon points.
+/// rule, keeping only no-rematch above them.
 fn active_rules(settings: &TournamentSettings) -> &'static [Rule] {
     const SWISS: [Rule; 8] = [
         Rule::Rematch,
@@ -202,20 +194,9 @@ fn active_rules(settings: &TournamentSettings) -> &'static [Rule] {
         Rule::Club,
         Rule::Fold,
     ];
-    const MIXED_ELO: [Rule; 7] = [
-        Rule::Rematch,
-        Rule::ByeGroup,
-        Rule::AirtightGroups,
-        Rule::ScoreGap,
-        Rule::FloatRepeat,
-        Rule::Club,
-        Rule::EloGap,
-    ];
     const ELO: [Rule; 3] = [Rule::Rematch, Rule::ByeSelection, Rule::EloGap];
     if settings.elo_pairing_enabled {
         &ELO
-    } else if settings.mixed_elo_pairing_enabled {
-        &MIXED_ELO
     } else {
         &SWISS
     }
@@ -2059,129 +2040,6 @@ mod tests {
         assert!(!pairs.contains(&unord(p[0].id, p[1].id)));
         assert!(!pairs.contains(&unord(p[2].id, p[3].id)));
         // Winners (raised estimates) meet, losers meet.
-        assert!(
-            pairs.contains(&unord(p[1].id, p[3].id)),
-            "the two winners are paired"
-        );
-        assert!(
-            pairs.contains(&unord(p[0].id, p[2].id)),
-            "the two losers are paired"
-        );
-    }
-
-    // --- Mixed ELO mode -----------------------------------------------------
-
-    fn mixed_elo_settings() -> TournamentSettings {
-        TournamentSettings {
-            mixed_elo_pairing_enabled: true,
-            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
-            elo_provisional_multiplier_percent: 100,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn mixed_elo_mode_uses_the_mixed_rule_list() {
-        assert_eq!(
-            active_rules(&mixed_elo_settings())
-                .iter()
-                .map(|r| r.id())
-                .collect::<Vec<_>>(),
-            vec![
-                RuleId::Rematch,
-                RuleId::ByeGroup,
-                RuleId::AirtightGroups,
-                RuleId::ScoreGap,
-                RuleId::FloatRepeat,
-                RuleId::Club,
-                RuleId::EloGap,
-            ],
-        );
-    }
-
-    #[test]
-    fn mixed_elo_mode_still_respects_macmahon_groups() {
-        // Upper group (1 MacMahon point): X0, X1. Lower group (0 points): Y0, Y1,
-        // all far apart in rating so ScoreGap still dominates EloGap and keeps the
-        // groups from crossing, exactly like Swiss.
-        let p = vec![
-            player(1, Some(2000), None), // X0
-            player(2, Some(1900), None), // X1
-            player(3, Some(1400), None), // Y0
-            player(4, Some(1300), None), // Y1
-        ];
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
-
-        let round = pair_round_weighted(1, &p, &mixed_elo_settings(), &[], &present, &[], None);
-        let pairs = board_pairs(&round);
-        assert!(
-            pairs.contains(&unord(p[0].id, p[1].id)),
-            "the two MacMahon-1 players stay together"
-        );
-        assert!(
-            pairs.contains(&unord(p[2].id, p[3].id)),
-            "the two MacMahon-0 players stay together"
-        );
-    }
-
-    #[test]
-    fn mixed_elo_mode_orders_within_a_group_by_elo_gap_not_fold() {
-        // Four players, all on the same MacMahon points (all above the 1500
-        // threshold), by descending rating: 2000, 1900, 1800, 1700. Classic Swiss
-        // fold would pair top-half with bottom-half (2000-1800, 1900-1700); mixed
-        // ELO mode instead minimizes the squared ELO gap directly, pairing
-        // adjacent ratings (2000-1900, 1800-1700) — the whole point of swapping
-        // Fold for EloGap.
-        let p = vec![
-            player(1, Some(2000), None),
-            player(2, Some(1900), None),
-            player(3, Some(1800), None),
-            player(4, Some(1700), None),
-        ];
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
-
-        let round = pair_round_weighted(1, &p, &mixed_elo_settings(), &[], &present, &[], None);
-        let pairs = board_pairs(&round);
-        assert!(
-            pairs.contains(&unord(p[0].id, p[1].id)),
-            "adjacent ratings paired, not folded"
-        );
-        assert!(
-            pairs.contains(&unord(p[2].id, p[3].id)),
-            "adjacent ratings paired, not folded"
-        );
-    }
-
-    #[test]
-    fn mixed_elo_mode_reacts_to_results_within_a_group() {
-        // Same four players/group as above. Round 1 pairs by adjacency
-        // (2000-1900, 1800-1700), the underdog winning each board. Round 2 must
-        // not rematch either pair, and — since the winners now outrank the losers
-        // on points too — ScoreGap and EloGap agree on regrouping the two winners
-        // together and the two losers together: the combination behaves soundly,
-        // same end result as pure ELO mode would give this field.
-        let p = vec![
-            player(1, Some(2000), None),
-            player(2, Some(1900), None),
-            player(3, Some(1800), None),
-            player(4, Some(1700), None),
-        ];
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
-        let settings = mixed_elo_settings();
-
-        let r1 = completed_round(
-            1,
-            &[
-                (p[1].id, p[0].id, Winner::Player1),
-                (p[3].id, p[2].id, Winner::Player1),
-            ],
-            None,
-        );
-
-        let round = pair_round_weighted(2, &p, &settings, &[r1], &present, &[], None);
-        let pairs = board_pairs(&round);
-        assert!(!pairs.contains(&unord(p[0].id, p[1].id)), "no rematch");
-        assert!(!pairs.contains(&unord(p[2].id, p[3].id)), "no rematch");
         assert!(
             pairs.contains(&unord(p[1].id, p[3].id)),
             "the two winners are paired"
