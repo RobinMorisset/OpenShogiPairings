@@ -742,13 +742,21 @@ mod tests {
         let mut rng = ChaCha8Rng::seed_from_u64(5);
         let (mut a, mut b) = (Vec::new(), Vec::new());
         for _ in 0..8000 {
-            let s = sample_strengths(&t.players, &overrides, &OracleModel::new(1.0, 2.0), &mut rng);
+            let s = sample_strengths(
+                &t.players,
+                &overrides,
+                &OracleModel::new(1.0, 2.0),
+                &mut rng,
+            );
             a.push(s[&with_result]);
             b.push(s[&still_unrated]);
         }
         let std = |v: &[f64]| {
             let m = v.iter().sum::<f64>() / v.len() as f64;
-            ((v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / v.len() as f64).sqrt(), m)
+            (
+                (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / v.len() as f64).sqrt(),
+                m,
+            )
         };
         let (spread_a, mean_a) = std(&a);
         let (spread_b, _) = std(&b);
