@@ -153,12 +153,36 @@ elo_unrated_prior_center: number,
  */
 elo_unrated_k: number, 
 /**
- * The shape of every player's ELO prior — thin-tailed Gaussian (default,
- * behaviour-neutral) or the fatter-tailed, optionally asymmetric Laplace.
- * See [`EloPriorShape`]. Only meaningful when [`Self::elo_estimate_needed`]
- * or [`Self::macmahon_from_estimate_active`].
+ * The prior shape for an **established** (reliably-rated) player — thin-tailed
+ * Gaussian (default, behaviour-neutral) or the fatter-tailed, optionally
+ * asymmetric Laplace. The shape is chosen *per category* because a fat tail is
+ * only warranted where the true-strength population is actually heavy-tailed:
+ * an established player's strength is well-anchored by their history, so a fat
+ * tail there merely loosens the anchor and adds noise — hence the default
+ * Gaussian. Contrast [`Self::elo_prior_shape_unrated`]. See [`EloPriorShape`].
+ * Only meaningful when [`Self::elo_estimate_needed`] or
+ * [`Self::macmahon_from_estimate_active`].
  */
-elo_prior_shape: EloPriorShape, 
+elo_prior_shape_established: EloPriorShape, 
+/**
+ * The prior shape for a **provisionally-rated** player (not in the FESA list,
+ * or with fewer than [`crate::PROVISIONAL_GAMES_THRESHOLD`] games). Defaults to
+ * Gaussian like the established case; the provisional *width* is already
+ * widened by [`Self::elo_provisional_multiplier`], so the extra fat tail is
+ * usually unnecessary here. See [`Self::elo_prior_shape_established`].
+ */
+elo_prior_shape_provisional: EloPriorShape, 
+/**
+ * The prior shape for an **unrated** player — the one category whose true
+ * strength is genuinely heavy-tailed: most newcomers are weak, but a small
+ * fraction are strong veterans arriving from a country with no ELO system, so
+ * the population has a fat upper tail no Gaussian can represent. Setting this to
+ * [`EloPriorShape::Laplace`] (ideally with a raised
+ * [`Self::elo_upward_looseness_unrated_percent`]) lets a newcomer who beats the
+ * field climb toward their true strength instead of being dragged back to the
+ * prior centre. See [`Self::elo_prior_shape_established`].
+ */
+elo_prior_shape_unrated: EloPriorShape, 
 /**
  * How much *looser* an upward revision is than a downward one for an
  * **established** (reliably-rated) player, as an integer percent

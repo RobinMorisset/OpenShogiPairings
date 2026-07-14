@@ -142,7 +142,7 @@
     const sEloProv = settings.elo_provisional_multiplier_percent ?? 200;
     const sEloUnratedCenter = settings.elo_unrated_prior_center ?? 600;
     const sEloUnratedK = settings.elo_unrated_k ?? 705;
-    const sEloPriorShape = settings.elo_prior_shape ?? "gaussian";
+    const sEloPriorShape = settings.elo_prior_shape_unrated ?? "gaussian";
     const sEloLooseEst = settings.elo_upward_looseness_established_percent ?? 100;
     const sEloLooseProv = settings.elo_upward_looseness_provisional_percent ?? 100;
     const sEloLooseUnr = settings.elo_upward_looseness_unrated_percent ?? 100;
@@ -224,7 +224,9 @@
       elo_provisional_multiplier_percent: eloProvisionalPercent,
       elo_unrated_prior_center: eloUnratedCenter,
       elo_unrated_k: eloUnratedK,
-      elo_prior_shape: eloPriorShape,
+      elo_prior_shape_established: "gaussian",
+      elo_prior_shape_provisional: "gaussian",
+      elo_prior_shape_unrated: eloPriorShape,
       elo_upward_looseness_established_percent: eloLoosenessEstablishedPercent,
       elo_upward_looseness_provisional_percent: eloLoosenessProvisionalPercent,
       elo_upward_looseness_unrated_percent: eloLoosenessUnratedPercent,

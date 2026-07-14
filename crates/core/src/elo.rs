@@ -354,7 +354,9 @@ pub fn estimate_elos(
     let provisional = settings.elo_provisional_multiplier();
     let unrated_center = settings.elo_unrated_prior_center();
     let unrated_k = settings.elo_unrated_k();
-    let shape = settings.elo_prior_shape;
+    let shape_established = settings.elo_prior_shape_established;
+    let shape_provisional = settings.elo_prior_shape_provisional;
+    let shape_unrated = settings.elo_prior_shape_unrated;
     let looseness_established = settings.elo_upward_looseness_established();
     let looseness_provisional = settings.elo_upward_looseness_provisional();
     let looseness_unrated = settings.elo_upward_looseness_unrated();
@@ -368,12 +370,15 @@ pub fn estimate_elos(
         let (mu0, sigma0) = prior(p, m, provisional, unrated_center, unrated_k);
         mean[i] = mu0;
         theta[i] = mu0; // seed at the prior mean
-                        // The upward-looseness ratio depends on how much the seed rating is
-                        // trusted — the same three categories `prior` distinguishes.
-        let r = match p.rating {
-            None => looseness_unrated,
-            Some(_) if is_reliably_rated(p) => looseness_established,
-            Some(_) => looseness_provisional,
+                        // The prior shape and the upward-looseness ratio both depend on how much
+                        // the seed rating is trusted — the same three categories `prior`
+                        // distinguishes. A fat tail is confined to the category whose true
+                        // strength is actually heavy-tailed (unrated), keeping established
+                        // and provisional players on their well-anchored Gaussian.
+        let (shape, r) = match p.rating {
+            None => (shape_unrated, looseness_unrated),
+            Some(_) if is_reliably_rated(p) => (shape_established, looseness_established),
+            Some(_) => (shape_provisional, looseness_provisional),
         };
         penalties.push(PriorPenalty::new(shape, sigma0, r));
     }
@@ -817,11 +822,14 @@ mod tests {
         }
     }
 
-    /// A Laplace prior with the same upward-looseness `r` for all three player
-    /// categories (so tests that don't care about the split can pass one number).
+    /// A Laplace prior for *every* player category with the same upward-looseness
+    /// `r` (so tests that don't care about the split can pass one number and still
+    /// exercise the Laplace mechanics on whatever category their fixture uses).
     fn laplace(looseness_percent: u32) -> TournamentSettings {
         TournamentSettings {
-            elo_prior_shape: EloPriorShape::Laplace,
+            elo_prior_shape_established: EloPriorShape::Laplace,
+            elo_prior_shape_provisional: EloPriorShape::Laplace,
+            elo_prior_shape_unrated: EloPriorShape::Laplace,
             elo_upward_looseness_established_percent: looseness_percent,
             elo_upward_looseness_provisional_percent: looseness_percent,
             elo_upward_looseness_unrated_percent: looseness_percent,
@@ -933,6 +941,61 @@ mod tests {
     }
 
     #[test]
+    fn laplace_confined_to_unrated_leaves_rated_players_on_the_gaussian() {
+        // The per-category shape split is the whole point: a fat tail on the
+        // *unrated* prior lets a newcomer climb further on a sustained upset, while a
+        // rated player — whose shape stays Gaussian — is bit-for-bit unaffected. That
+        // invariance is what makes "fat tail for unrated only" safe for the field.
+        let unrated_only_laplace = TournamentSettings {
+            elo_prior_shape_unrated: EloPriorShape::Laplace,
+            ..Default::default()
+        };
+
+        // (a) An unrated newcomer beating five 1800s climbs further under the
+        //     unrated-Laplace prior than under the all-Gaussian default — proof the
+        //     unrated category actually picks up the Laplace shape.
+        let newcomer = player(None);
+        let opps_u: Vec<Player> = (0..5).map(|_| player(Some(1800))).collect();
+        let mut all_u = vec![newcomer.clone()];
+        all_u.extend(opps_u.iter().cloned());
+        let rounds_u: Vec<Round> = opps_u
+            .iter()
+            .enumerate()
+            .map(|(i, o)| decided(i as u32 + 1, vec![win(newcomer.id, o.id)]))
+            .collect();
+        let climb = |s: &TournamentSettings| estimate_elos(&all_u, s, &rounds_u)[&newcomer.id];
+        let gauss_u = climb(&TournamentSettings::default());
+        let lap_u = climb(&unrated_only_laplace);
+        assert!(
+            lap_u > gauss_u + 10.0,
+            "the unrated prior should pick up the Laplace shape and swing further: \
+             gaussian {gauss_u}, unrated-laplace {lap_u}"
+        );
+
+        // (b) An established 1200 in the same upset situation is untouched: no unrated
+        //     player is present, so flipping only the unrated shape must leave every
+        //     estimate identical.
+        let mut hero = player(Some(1200));
+        hero.fesa_games = Some(50); // established → Gaussian under both configs
+        let opps_e: Vec<Player> = (0..5).map(|_| player(Some(1800))).collect();
+        let mut all_e = vec![hero.clone()];
+        all_e.extend(opps_e.iter().cloned());
+        let rounds_e: Vec<Round> = opps_e
+            .iter()
+            .enumerate()
+            .map(|(i, o)| decided(i as u32 + 1, vec![win(hero.id, o.id)]))
+            .collect();
+        let est_e = |s: &TournamentSettings| estimate_elos(&all_e, s, &rounds_e)[&hero.id];
+        let gauss_e = est_e(&TournamentSettings::default());
+        let lap_e = est_e(&unrated_only_laplace);
+        assert!(
+            (gauss_e - lap_e).abs() < 1e-9,
+            "a rated player's estimate must not move when only the unrated shape is \
+             Laplace: gaussian {gauss_e}, unrated-laplace {lap_e}"
+        );
+    }
+
+    #[test]
     fn gaussian_prior_can_be_made_asymmetric_too() {
         // The same split works for the default Gaussian (a two-piece normal, no
         // kink to smooth): widening only the upward arm lets an unrated newcomer
@@ -974,10 +1037,13 @@ mod tests {
         );
     }
 
-    /// A Laplace prior with a distinct upward-looseness per player category.
+    /// A Laplace prior (all categories) with a distinct upward-looseness per player
+    /// category.
     fn laplace3(established: u32, provisional: u32, unrated: u32) -> TournamentSettings {
         TournamentSettings {
-            elo_prior_shape: EloPriorShape::Laplace,
+            elo_prior_shape_established: EloPriorShape::Laplace,
+            elo_prior_shape_provisional: EloPriorShape::Laplace,
+            elo_prior_shape_unrated: EloPriorShape::Laplace,
             elo_upward_looseness_established_percent: established,
             elo_upward_looseness_provisional_percent: provisional,
             elo_upward_looseness_unrated_percent: unrated,

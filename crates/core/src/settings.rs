@@ -373,12 +373,34 @@ pub struct TournamentSettings {
     /// when [`Self::elo_estimate_needed`] or [`Self::macmahon_from_estimate_active`].
     #[serde(default = "default_elo_unrated_k")]
     pub elo_unrated_k: u32,
-    /// The shape of every player's ELO prior — thin-tailed Gaussian (default,
-    /// behaviour-neutral) or the fatter-tailed, optionally asymmetric Laplace.
-    /// See [`EloPriorShape`]. Only meaningful when [`Self::elo_estimate_needed`]
-    /// or [`Self::macmahon_from_estimate_active`].
+    /// The prior shape for an **established** (reliably-rated) player — thin-tailed
+    /// Gaussian (default, behaviour-neutral) or the fatter-tailed, optionally
+    /// asymmetric Laplace. The shape is chosen *per category* because a fat tail is
+    /// only warranted where the true-strength population is actually heavy-tailed:
+    /// an established player's strength is well-anchored by their history, so a fat
+    /// tail there merely loosens the anchor and adds noise — hence the default
+    /// Gaussian. Contrast [`Self::elo_prior_shape_unrated`]. See [`EloPriorShape`].
+    /// Only meaningful when [`Self::elo_estimate_needed`] or
+    /// [`Self::macmahon_from_estimate_active`].
     #[serde(default)]
-    pub elo_prior_shape: EloPriorShape,
+    pub elo_prior_shape_established: EloPriorShape,
+    /// The prior shape for a **provisionally-rated** player (not in the FESA list,
+    /// or with fewer than [`crate::PROVISIONAL_GAMES_THRESHOLD`] games). Defaults to
+    /// Gaussian like the established case; the provisional *width* is already
+    /// widened by [`Self::elo_provisional_multiplier`], so the extra fat tail is
+    /// usually unnecessary here. See [`Self::elo_prior_shape_established`].
+    #[serde(default)]
+    pub elo_prior_shape_provisional: EloPriorShape,
+    /// The prior shape for an **unrated** player — the one category whose true
+    /// strength is genuinely heavy-tailed: most newcomers are weak, but a small
+    /// fraction are strong veterans arriving from a country with no ELO system, so
+    /// the population has a fat upper tail no Gaussian can represent. Setting this to
+    /// [`EloPriorShape::Laplace`] (ideally with a raised
+    /// [`Self::elo_upward_looseness_unrated_percent`]) lets a newcomer who beats the
+    /// field climb toward their true strength instead of being dragged back to the
+    /// prior centre. See [`Self::elo_prior_shape_established`].
+    #[serde(default)]
+    pub elo_prior_shape_unrated: EloPriorShape,
     /// How much *looser* an upward revision is than a downward one for an
     /// **established** (reliably-rated) player, as an integer percent
     /// (100 = ×1.0 = symmetric). Widens that player's upward arm in **either**
@@ -430,7 +452,9 @@ impl Default for TournamentSettings {
             elo_provisional_multiplier_percent: default_elo_provisional_multiplier_percent(),
             elo_unrated_prior_center: default_elo_unrated_prior_center(),
             elo_unrated_k: default_elo_unrated_k(),
-            elo_prior_shape: EloPriorShape::default(),
+            elo_prior_shape_established: EloPriorShape::default(),
+            elo_prior_shape_provisional: EloPriorShape::default(),
+            elo_prior_shape_unrated: EloPriorShape::default(),
             elo_upward_looseness_established_percent: default_elo_upward_looseness_percent(),
             elo_upward_looseness_provisional_percent: default_elo_upward_looseness_percent(),
             elo_upward_looseness_unrated_percent: default_elo_upward_looseness_percent(),
@@ -1060,7 +1084,9 @@ mod tests {
     #[test]
     fn prior_shape_defaults_to_gaussian_and_is_behaviour_neutral() {
         let s = TournamentSettings::default();
-        assert_eq!(s.elo_prior_shape, EloPriorShape::Gaussian);
+        assert_eq!(s.elo_prior_shape_established, EloPriorShape::Gaussian);
+        assert_eq!(s.elo_prior_shape_provisional, EloPriorShape::Gaussian);
+        assert_eq!(s.elo_prior_shape_unrated, EloPriorShape::Gaussian);
         assert_eq!(s.elo_upward_looseness_established_percent, 100);
         assert_eq!(s.elo_upward_looseness_provisional_percent, 100);
         assert_eq!(s.elo_upward_looseness_unrated_percent, 100);
@@ -1069,16 +1095,17 @@ mod tests {
         assert!((s.elo_upward_looseness_unrated() - 1.0).abs() < 1e-9);
         // Omitted from an old save → the (Gaussian, symmetric) defaults.
         let loaded: TournamentSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(loaded.elo_prior_shape, EloPriorShape::Gaussian);
+        assert_eq!(loaded.elo_prior_shape_unrated, EloPriorShape::Gaussian);
         assert_eq!(loaded.elo_upward_looseness_unrated_percent, 100);
-        // A Laplace shape round-trips through JSON.
+        // A per-category Laplace shape round-trips through JSON.
         let laplace = TournamentSettings {
-            elo_prior_shape: EloPriorShape::Laplace,
+            elo_prior_shape_unrated: EloPriorShape::Laplace,
             ..Default::default()
         };
         let json = serde_json::to_string(&laplace).unwrap();
         let back: TournamentSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.elo_prior_shape, EloPriorShape::Laplace);
+        assert_eq!(back.elo_prior_shape_unrated, EloPriorShape::Laplace);
+        assert_eq!(back.elo_prior_shape_established, EloPriorShape::Gaussian);
     }
 
     #[test]

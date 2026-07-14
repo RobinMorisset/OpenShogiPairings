@@ -472,10 +472,18 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   (default `705 ≈ σ 350`; see §2.2). Read via `settings.elo_unrated_k()`, which
   clamps K ≥ 1; normalization stores the clamped value. Unlike `m` and the
   provisional multiplier, this is the *only* width knob for an unrated player.
-- `elo_prior_shape: EloPriorShape` — `Gaussian` (default) or the fatter-tailed,
+- `elo_prior_shape_{established,provisional,unrated}: EloPriorShape` — the prior
+  shape **per player category**: `Gaussian` (default) or the fatter-tailed,
   optionally asymmetric `Laplace` (see §2.5). A plain enum (`#[serde(rename_all =
-  "snake_case")]`), default-`Gaussian`, so old saves and untouched tournaments keep
-  the historical behaviour exactly.
+  "snake_case")]`), default-`Gaussian` for all three, so old saves and untouched
+  tournaments keep the historical behaviour exactly. Splitting the shape per
+  category lets a fat tail be confined to the one population whose true strength is
+  genuinely heavy-tailed — **unrated** players, where most newcomers are weak but a
+  few are strong veterans arriving without an ELO — while established and
+  provisional players, well-anchored by their history, stay on the thin-tailed
+  Gaussian (a fat tail there just loosens the anchor and adds noise). The Settings
+  UI exposes a single selector bound to the *unrated* shape; established and
+  provisional are written `Gaussian`.
 - `elo_upward_looseness_{established,provisional,unrated}_percent: u32` — the
   asymmetry ratio `r` for the Laplace prior, **one per player category**, integer
   percent (`100` = ×1.0 = symmetric, the default for all three). Read via
@@ -486,9 +494,9 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   normal, the Laplace widens its upward scale); the UI shows the three inputs
   whenever a live estimate is maintained.
 
-The eight `elo_*` estimate knobs (`elo_k_multiplier_percent`,
+The ten `elo_*` estimate knobs (`elo_k_multiplier_percent`,
 `elo_provisional_multiplier_percent`, `elo_unrated_prior_center`, `elo_unrated_k`,
-`elo_prior_shape`, and the three `elo_upward_looseness_*_percent`)
+the three `elo_prior_shape_*`, and the three `elo_upward_looseness_*_percent`)
 surface in the Settings UI whenever a live estimate is actually maintained — either
 ELO pairing mode, or estimate-based MacMahon (§6b) with an ELO threshold. The FESA
 K table, `s`, and the reliability threshold (18 games) remain constants in
