@@ -206,13 +206,19 @@ fn parse_results_row(
     let remainder = strip_cell_annotations(&remainder);
     let tokens: Vec<&str> = remainder.split_whitespace().collect();
 
-    // ELO is the first 3-4 digit number, or any digits with a `*` (an unrated
-    // player's assigned rating, which can be a single digit). It precedes the
-    // round cells (which end in a sign) and is distinct from Pts/MMS (1-2 digits).
-    let elo_idx = tokens
+    // ELO sits immediately left of the round cells (each of which ends in a
+    // result sign). Anchoring it there — rather than to "the first number-shaped
+    // token" — lets a rating be as short as 1-2 digits without colliding with a
+    // grade level like the `2` in `2 Dan`, which also precedes the ELO. The
+    // anchored token is still shape-checked so a malformed row fails cleanly.
+    let first_cell = tokens
         .iter()
-        .position(|t| is_elo_token(t))
-        .ok_or_else(|| bad("no ELO column found"))?;
+        .position(|t| is_cell_token(t))
+        .ok_or_else(|| bad("no round cells"))?;
+    let elo_idx = match first_cell.checked_sub(1) {
+        Some(i) if is_elo_token(tokens[i]) => i,
+        _ => return Err(bad("no ELO column found")),
+    };
     let elo_tok = tokens[elo_idx];
     let unrated = elo_tok.ends_with('*');
     let elo: u32 = elo_tok
@@ -310,12 +316,14 @@ fn strip_cell_annotations(s: &str) -> String {
     out
 }
 
-/// A rating token: a 3-4 digit number, or any digits with a trailing `*` (the
-/// pre-unrated marker — an assigned rating that can be a single digit).
+/// A rating token: a 1-4 digit number, or any digits with a trailing `*` (the
+/// pre-unrated marker). Ratings can be as low as 1-2 digits; the token is only
+/// tested at its anchored position (just left of the round cells), so allowing
+/// the short forms here does not let a grade level be mistaken for an ELO.
 fn is_elo_token(t: &str) -> bool {
     match t.strip_suffix('*') {
         Some(core) => !core.is_empty() && core.chars().all(|c| c.is_ascii_digit()),
-        None => (3..=4).contains(&t.len()) && t.chars().all(|c| c.is_ascii_digit()),
+        None => (1..=4).contains(&t.len()) && t.chars().all(|c| c.is_ascii_digit()),
     }
 }
 
@@ -532,6 +540,40 @@ mod tests {
         assert_eq!(t.name, "2026 British Shogi Championships : 2026-02-14/15");
         assert_eq!(t.players.len(), 2);
         assert_eq!(t.rounds.len(), 2);
+    }
+
+    #[test]
+    fn one_and_two_digit_elos_parse_without_a_grade_level_being_mistaken_for_them() {
+        use crate::Grade;
+        // A rated player can have a very low ELO (1-2 digits). The rating is
+        // anchored to the token just left of the round cells, so the `2`/`3` of a
+        // "2 Dan" / "3 Kyu" grade — which precedes the ELO — is never picked up.
+        let mut text = String::from("Low ELO Open : 2026\nNr Name Nat Grade ELO R1 R2 Pts +/-\n");
+        let row = |nr: u32,
+                   last: &str,
+                   first: &str,
+                   grade: &str,
+                   elo: &str,
+                   cells: &str,
+                   pts: u32,
+                   dz: &str| {
+            format!("{nr:>2} {last:<12}{first} SK {grade} {elo} {cells} {pts} {dz}\n")
+        };
+        // R1: 1 beats 2, 3 beats 4. R2: 1 beats 3, 2 beats 4.
+        text.push_str(&row(1, "Senaj", "Aurel", "3 Kyu", "88", "2+ 3+", 2, "+8")); // 2-digit
+        text.push_str(&row(2, "Novak", "Jan", "2 Dan", "9", "1- 4+", 1, "-3")); // 1-digit
+        text.push_str(&row(3, "Horak", "Ivo", "1 Kyu", "1234", "4+ 1-", 1, "+0"));
+        text.push_str(&row(4, "Fiala", "Petr", "5 Kyu", "800", "3- 2-", 0, "+1"));
+
+        let (t, strengths) = import_fesa_results(&text).unwrap();
+        let senaj = find(&t, "Senaj", "Aurel");
+        assert_eq!(senaj.rating, Some(88));
+        assert_eq!(senaj.grade, Some(Grade::kyu(3)));
+        assert_eq!(strengths[&senaj.id], 96.0); // 88 + 8
+        let novak = find(&t, "Novak", "Jan");
+        assert_eq!(novak.rating, Some(9));
+        assert_eq!(novak.grade, Some(Grade::dan(2)));
+        assert_eq!(strengths[&novak.id], 6.0); // 9 - 3
     }
 
     #[test]
