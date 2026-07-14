@@ -33,3 +33,6 @@ Thumbs.db
 # spring2026). Regenerate on demand rather than tracking the (large, partly
 # importer-unsupported) batch.
 test_files/fesa_results/
+
+# mm_study.py large output (raw per-run dumps, staged configs, manifests)
+/study_*/
