@@ -534,6 +534,22 @@ export function setBoardNoShow(
   );
 }
 
+/**
+ * Flag (or unflag) a board as a two-round "long game" (double time control, two
+ * points for the winner). Allowed only on the current round; unflagging is
+ * allowed even after a result (to demote a game that finished in one round).
+ */
+export function setBoardLong(
+  roundNumber: number,
+  boardIndex: number,
+  long: boolean,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    scopedPath(`/rounds/${roundNumber}/boards/${boardIndex}/long`),
+    { method: "POST", body: JSON.stringify({ long }) },
+  );
+}
+
 /** Set or clear a board's handicap (the server freezes the giver from ratings). */
 export function setBoardHandicap(
   roundNumber: number,

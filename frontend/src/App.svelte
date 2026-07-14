@@ -23,6 +23,7 @@
     restoreBackup,
     setBoardDrawn,
     setBoardHandicap,
+    setBoardLong,
     setBoardNoShow,
     setBoardWinner,
     setPlayerEligible,
@@ -140,6 +141,19 @@
     if (!tournament || !activeRound) return [];
     const idx = tournament.rounds.findIndex((r) => r.number === activeRound.number);
     return idx >= 0 ? (suggestedHandicaps[idx] ?? []) : [];
+  });
+
+  // Long (two-round) games started in the previous round that are still unplayed,
+  // surfaced in the current round's view so the referee can record them here (the
+  // board itself lives in that previous round). Empty unless long boards are on.
+  const carriedRoundNumber = $derived(activeRound ? activeRound.number - 1 : 0);
+  const carriedLongBoards = $derived.by(() => {
+    if (!tournament || !activeRound) return [];
+    const prev = tournament.rounds.find((r) => r.number === carriedRoundNumber);
+    if (!prev) return [];
+    return prev.boards
+      .map((board, index) => ({ index, board }))
+      .filter(({ board }) => board.long && board.result == null && board.no_show == null);
   });
 
   // Why the engine chose the active round's pairings — fetched lazily whenever a
@@ -577,6 +591,12 @@
     });
   }
 
+  function handleSetLong(roundNumber: number, boardIndex: number, long: boolean) {
+    run(async () => {
+      apply(await setBoardLong(roundNumber, boardIndex, long));
+    });
+  }
+
   function handleSave() {
     if (!tournament) return;
     const current = tournament;
@@ -925,6 +945,13 @@
               handleSetNoShow(activeRound.number, boardIndex, absent)}
             onSetHandicap={(boardIndex, handicap) =>
               handleSetHandicap(activeRound.number, boardIndex, handicap)}
+            longEnabled={tournament.settings.long_boards_enabled}
+            isCurrentRound={!!currentRound && activeRound.number === currentRound.number}
+            onSetLong={(boardIndex, long) =>
+              handleSetLong(activeRound.number, boardIndex, long)}
+            {carriedLongBoards}
+            onCarriedWinner={(boardIndex, clicked) =>
+              handleSetResult(carriedRoundNumber, boardIndex, clicked)}
             {busy}
           />
         {/if}

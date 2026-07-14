@@ -118,6 +118,13 @@ pub enum TournamentError {
     /// A pairing can't be forced onto a round that already has recorded results.
     #[error("cannot re-pair a round that already has recorded results")]
     RoundHasResults,
+    /// A board's "long game" flag can only be changed on the current round.
+    #[error("a long game can only be set on the current round")]
+    NotCurrentRound,
+    /// The next round can't be prepared while a long game from two rounds ago is
+    /// still unresolved (a long game spans exactly two rounds).
+    #[error("the long game from round {round} must be resolved first")]
+    UnresolvedLongGame { round: u32 },
     /// No round with the given number exists.
     #[error("no round number {0}")]
     RoundNotFound(u32),
@@ -491,6 +498,19 @@ impl Tournament {
         }
 
         let number = self.rounds.len() as u32 + 1;
+        // A long game started in round R spans R and R+1 only; its players sit out
+        // R+1's pairing. Before R+2 can be prepared it must be resolved, so a long
+        // game never straddles three rounds. (Its players are excluded from R+1 in
+        // `confirm_round`; here we refuse to advance past R+1 while it is pending.)
+        if let Some(stale) = self
+            .rounds
+            .iter()
+            .find(|r| r.number + 1 < number && r.boards.iter().any(|b| b.long_pending()))
+        {
+            return Err(TournamentError::UnresolvedLongGame {
+                round: stale.number,
+            });
+        }
         let existing: HashSet<Uuid> = self.players.iter().map(|p| p.id).collect();
         // Default the new draft's absentees to the previous round's absentees,
         // plus anyone who was a no-show there — a no-show reads as "didn't turn
@@ -612,11 +632,22 @@ impl Tournament {
             .chain(cup_byes.iter().copied())
             .collect();
 
-        // The Swiss pool: present players not taken by the cup this round.
+        // Players still busy on an unresolved long game (a two-round board started
+        // in an earlier round). They sit out this round's pairing entirely — like
+        // cup players — while their long game finishes.
+        let busy_long: HashSet<Uuid> = self
+            .rounds
+            .iter()
+            .flat_map(|r| &r.boards)
+            .filter(|b| b.long_pending())
+            .flat_map(|b| [b.player1, b.player2])
+            .collect();
+
+        // The Swiss pool: present players not taken by the cup and not mid-long-game.
         let swiss_present: Vec<Uuid> = present
             .iter()
             .copied()
-            .filter(|id| !cup_players.contains(id))
+            .filter(|id| !cup_players.contains(id) && !busy_long.contains(id))
             .collect();
         let swiss_set: HashSet<Uuid> = swiss_present.iter().copied().collect();
 
@@ -632,6 +663,11 @@ impl Tournament {
                 if cup_players.contains(&player) {
                     return Err(TournamentError::InvalidDraft(
                         "a forced pairing includes a cup player".into(),
+                    ));
+                }
+                if busy_long.contains(&player) {
+                    return Err(TournamentError::InvalidDraft(
+                        "a forced pairing includes a player still in a long game".into(),
                     ));
                 }
                 if !swiss_set.contains(&player) {
@@ -650,6 +686,11 @@ impl Tournament {
             if cup_players.contains(&bye) {
                 return Err(TournamentError::InvalidDraft(
                     "the forced bye is a cup player".into(),
+                ));
+            }
+            if busy_long.contains(&bye) {
+                return Err(TournamentError::InvalidDraft(
+                    "the forced bye is a player still in a long game".into(),
                 ));
             }
             if !swiss_set.contains(&bye) {
@@ -938,7 +979,7 @@ impl Tournament {
         if board.result.is_some() {
             board.no_show = None;
         }
-        round.completed = round.boards.iter().all(|b| b.is_decided());
+        round.completed = round.is_complete();
         Ok(&round.boards[board_index])
     }
 
@@ -974,8 +1015,67 @@ impl Tournament {
             board.result = None;
             board.drawn = false;
         }
-        round.completed = round.boards.iter().all(|b| b.is_decided());
+        round.completed = round.is_complete();
         Ok(&round.boards[board_index])
+    }
+
+    /// Flag (or unflag) a board as a "long game": double time control, lasting two
+    /// rounds and scoring two points for the winner (see
+    /// `docs/two-round-boards.md`).
+    ///
+    /// Allowed only on the **current** (last) round, and only when the tournament
+    /// enables long boards. Flagging *on* requires the board undecided; flagging
+    /// *off* is allowed even after a result, so the referee can demote a long game
+    /// that actually finished in a single round (or resolved by forfeit) back to
+    /// an ordinary one-point board. Keeps the round's `completed` flag in sync,
+    /// since flagging the last-undecided board long can close the round.
+    ///
+    /// Cup (direct-elimination) boards are not supported yet and are rejected.
+    pub fn set_board_long(
+        &mut self,
+        round_number: u32,
+        board_index: usize,
+        long: bool,
+    ) -> Result<&Round, TournamentError> {
+        if !self.settings.long_boards_enabled {
+            return Err(TournamentError::InvalidDraft(
+                "long games are not enabled for this tournament".into(),
+            ));
+        }
+        // Longness is frozen once a round advances, so only the last round's
+        // boards can be toggled.
+        let last_index = self.rounds.len().checked_sub(1);
+        let idx = self
+            .rounds
+            .iter()
+            .position(|r| r.number == round_number)
+            .ok_or(TournamentError::RoundNotFound(round_number))?;
+        if Some(idx) != last_index {
+            return Err(TournamentError::NotCurrentRound);
+        }
+        let round = &mut self.rounds[idx];
+        let board = round
+            .boards
+            .get_mut(board_index)
+            .ok_or(TournamentError::BoardNotFound {
+                round: round_number,
+                board: board_index,
+            })?;
+        // Cup boards spanning two rounds break the bracket↔round mapping; that is
+        // a separate phase, so reject the toggle rather than corrupt the cup.
+        if matches!(board.source, PairingSource::Cup { .. }) {
+            return Err(TournamentError::InvalidDraft(
+                "long games are not yet supported for cup boards".into(),
+            ));
+        }
+        // Making a board long after it is decided is meaningless; turning it off
+        // after a result is the intended demote path.
+        if long && board.is_decided() {
+            return Err(TournamentError::RoundHasResults);
+        }
+        board.long = long;
+        round.completed = round.is_complete();
+        Ok(&self.rounds[idx])
     }
 
     /// Set (or clear) the "a draw occurred" flag on a board. The game is still
@@ -1136,6 +1236,94 @@ mod tests {
     fn start_next_round(t: &mut Tournament) {
         t.prepare_round().unwrap();
         t.confirm_round().unwrap();
+    }
+
+    /// A finalized four-player tournament with long boards enabled, round 1
+    /// confirmed (two boards). Returns the tournament.
+    fn four_players_round1_with_long_enabled() -> Tournament {
+        let mut t = Tournament::new("Long").unwrap();
+        for n in ["A", "B", "C", "D"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.settings.long_boards_enabled = true;
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        t
+    }
+
+    #[test]
+    fn set_board_long_is_gated_by_the_setting_and_the_result_state() {
+        let mut t = four_players_round1_with_long_enabled();
+        // Disabled → rejected even though everything else is valid.
+        t.settings.long_boards_enabled = false;
+        assert!(matches!(
+            t.set_board_long(1, 0, true),
+            Err(TournamentError::InvalidDraft(_))
+        ));
+        t.settings.long_boards_enabled = true;
+
+        // Flagging an undecided board on is fine.
+        t.set_board_long(1, 0, true).unwrap();
+        assert!(t.rounds[0].boards[0].long);
+
+        // Flagging a *decided* board on is refused...
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+        assert_eq!(
+            t.set_board_long(1, 1, true),
+            Err(TournamentError::RoundHasResults)
+        );
+        // ...but flagging a decided long board *off* (the demote path) is allowed.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        assert!(t.rounds[0].boards[0].is_decided());
+        t.set_board_long(1, 0, false).unwrap();
+        assert!(!t.rounds[0].boards[0].long);
+    }
+
+    #[test]
+    fn long_board_spans_two_rounds_completes_early_and_gates_the_next() {
+        let mut t = four_players_round1_with_long_enabled();
+        assert_eq!(t.rounds[0].boards.len(), 2);
+
+        // Board 0 is long; record only the other board.
+        t.set_board_long(1, 0, true).unwrap();
+        let long_players = [t.rounds[0].boards[0].player1, t.rounds[0].boards[0].player2];
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+
+        // Round 1 is complete even though the long board is still unplayed.
+        assert!(t.rounds[0].completed);
+        assert!(!t.rounds[0].boards[0].is_decided());
+
+        // Round 2 excludes the two long players.
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        let r2 = t.rounds.last().unwrap();
+        for b in &r2.boards {
+            assert!(!long_players.contains(&b.player1));
+            assert!(!long_players.contains(&b.player2));
+        }
+        assert!(r2.bye.is_none_or(|x| !long_players.contains(&x)));
+
+        // The long flag can no longer be touched on round 1 (not the current round).
+        assert_eq!(
+            t.set_board_long(1, 0, false),
+            Err(TournamentError::NotCurrentRound)
+        );
+
+        // Complete round 2, then round 3 is gated on the still-pending long game.
+        let n = t.rounds.last().unwrap().boards.len();
+        for i in 0..n {
+            t.toggle_board_winner(2, i, Winner::Player1).unwrap();
+        }
+        assert!(t.rounds[1].completed);
+        assert_eq!(
+            t.prepare_round(),
+            Err(TournamentError::UnresolvedLongGame { round: 1 })
+        );
+
+        // Enter the long result; now the next round can be prepared.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        assert!(t.prepare_round().is_ok());
     }
 
     #[test]

@@ -66,6 +66,7 @@
   let exemptClubs = $state<string[]>([]);
   let floaterStyle = $state<"classic" | "median">("classic");
   let cupEnabled = $state(false);
+  let longBoardsEnabled = $state(false);
   let handicapPolicy = $state<HandicapPolicy>("allowed");
   let handicapWielRule = $state(false);
   let halfPointAbsences = $state(false);
@@ -140,6 +141,7 @@
     const sExempt = settings.club_protection_exempt_clubs;
     const sFloater = settings.floater_style;
     const sCup = settings.cup_enabled;
+    const sLong = settings.long_boards_enabled ?? false;
     const sHandicap = settings.handicap_policy;
     const sHandicapWiel = settings.handicap_wiel_rule;
     const sHalfPointAbsences = settings.half_point_absences ?? false;
@@ -163,6 +165,7 @@
         eqStr(normExempt(exemptClubs), sExempt) &&
         floaterStyle === sFloater &&
         cupEnabled === sCup &&
+        longBoardsEnabled === sLong &&
         handicapPolicy === sHandicap &&
         handicapWielRule === sHandicapWiel &&
         halfPointAbsences === sHalfPointAbsences &&
@@ -191,6 +194,7 @@
         exemptClubs = [...sExempt];
         floaterStyle = sFloater;
         cupEnabled = sCup;
+        longBoardsEnabled = sLong;
         handicapPolicy = sHandicap;
         handicapWielRule = sHandicapWiel;
         halfPointAbsences = sHalfPointAbsences;
@@ -222,6 +226,7 @@
         .filter((c) => c.length > 0),
       floater_style: floaterStyle,
       cup_enabled: cupEnabled,
+      long_boards_enabled: longBoardsEnabled,
       handicap_policy: handicapPolicy,
       handicap_wiel_rule: handicapWielRule,
       half_point_absences: halfPointAbsences,
@@ -330,6 +335,11 @@
 
   function setCupEnabled(v: boolean) {
     cupEnabled = v;
+    persist();
+  }
+
+  function setLongBoardsEnabled(v: boolean) {
+    longBoardsEnabled = v;
     persist();
   }
 
@@ -818,6 +828,22 @@
         onchange={(e) => setCupEnabled(e.currentTarget.checked)}
       />
       {$_("settings.hybridCupCheckbox")}
+    </label>
+  </div>
+
+  <div class="section">
+    <h3>{$_("settings.longBoardsTitle")}</h3>
+    <p class="desc">
+      {$_("settings.longBoardsDesc")}
+    </p>
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={longBoardsEnabled}
+        disabled={busy}
+        onchange={(e) => setLongBoardsEnabled(e.currentTarget.checked)}
+      />
+      {$_("settings.longBoardsCheckbox")}
     </label>
   </div>
 

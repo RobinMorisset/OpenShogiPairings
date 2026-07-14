@@ -1,7 +1,7 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
   import { TIEBREAKS } from "../types";
-  import type { CupPodium, Player, Round, Standing, Tiebreak, Tournament, Winner } from "../types";
+  import type { Board, CupPodium, Player, Round, Standing, Tiebreak, Tournament, Winner } from "../types";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
   import { boardOutcome } from "../boardOutcome";
   import { partitionDropped } from "../tiebreak";
@@ -131,7 +131,33 @@
     | { kind: "no-show"; opponentName: string }
     | { kind: "no-show-win"; opponentName: string }
     | { kind: "pending"; opponent: string; opponentName: string }
+    // A long (two-round) game started this round: its result belongs to the next
+    // round's column, so this column shows a `0−` placeholder.
+    | { kind: "long-pending"; opponentName: string }
     | PlayedCell;
+
+  // A long (two-round) game lives in its starting round but its result is only
+  // known in the next round, so it shows a `0−` placeholder in the starting
+  // column and its result in the following column — matching the American Grid.
+  function longAwareCell(player: Player, i: number): Cell {
+    const onLong = (round: Round) =>
+      round.boards.find(
+        (b) => b.long && (b.player1 === player.id || b.player2 === player.id),
+      );
+    const here = onLong(completedRounds[i]);
+    if (here) {
+      const opp = here.player1 === player.id ? here.player2 : here.player1;
+      return { kind: "long-pending", opponentName: nameOf(opp) };
+    }
+    if (i > 0) {
+      const prev = completedRounds[i - 1];
+      const idx = prev.boards.findIndex(
+        (b) => b.long && (b.player1 === player.id || b.player2 === player.id),
+      );
+      if (idx >= 0) return cellForBoard(player, prev, prev.boards[idx], idx);
+    }
+    return cellFor(player, completedRounds[i]);
+  }
 
   function cellFor(player: Player, round: Round): Cell {
     // The Swiss bye and the (rare) cup bye both read as a free point.
@@ -149,7 +175,11 @@
         (round.absent ?? []).includes(player.id);
       return { kind: "absent", half };
     }
-    const board = round.boards[boardIdx];
+    return cellForBoard(player, round, round.boards[boardIdx], boardIdx);
+  }
+
+  /** The cross-table cell for a specific board (played / no-show / pending). */
+  function cellForBoard(player: Player, round: Round, board: Board, boardIdx: number): Cell {
     const isP1 = board.player1 === player.id;
     const side: Winner = isP1 ? "player1" : "player2";
     const opponentUuid = isP1 ? board.player2 : board.player1;
@@ -222,18 +252,35 @@
       .join("\n");
   }
 
-  /** A tie-break value, and the players who contributed it — `4 (Doe Jane)`. A
-   * `half`-unit field (points, SOSM, …) is rendered `1½`; a whole one as-is. */
-  function opponentTerm(id: string, field: keyof Standing, half: boolean): string {
-    const value = (standingById.get(id)?.[field] as number | undefined) ?? 0;
+  /** A tie-break value, and the player who contributed it — `4 (Doe Jane)`. A
+   * `half`-unit field (points, SOSM, …) is rendered `1½`; a whole one as-is. The
+   * `count` multiplies the contribution, so a two-round (long) game — which
+   * records the opponent twice — shows once with the doubled score. */
+  function opponentTerm(id: string, field: keyof Standing, half: boolean, count = 1): string {
+    const value = ((standingById.get(id)?.[field] as number | undefined) ?? 0) * count;
     return `${half ? formatScore(value) : value} (${nameOf(id)})`;
   }
 
+  /** Group repeated opponent ids (a long game records the same opponent twice)
+   * into one entry per opponent, keeping first-occurrence order. */
+  function groupIds(ids: string[]): { id: string; count: number }[] {
+    const out: { id: string; count: number }[] = [];
+    for (const id of ids) {
+      const existing = out.find((e) => e.id === id);
+      if (existing) existing.count += 1;
+      else out.push({ id, count: 1 });
+    }
+    return out;
+  }
+
   /** Join the opponents' contributions to an opponent-sum tie-break, e.g.
-   * `3 (Doe Jane) + 2 (Roe Max)`; a placeholder when there are none yet. */
+   * `3 (Doe Jane) + 2 (Roe Max)`; a placeholder when there are none yet. A long
+   * game's opponent appears once with its score doubled. */
   function sumTerms(ids: string[], field: keyof Standing, half: boolean): string {
     if (ids.length === 0) return $_("resultsView.tiebreakNoOpponents");
-    return ids.map((id) => opponentTerm(id, field, half)).join(" + ");
+    return groupIds(ids)
+      .map(({ id, count }) => opponentTerm(id, field, half, count))
+      .join(" + ");
   }
 
   /** Like [`sumTerms`] but for the Buchholz-cut metrics: sort the opponents by
@@ -384,11 +431,18 @@
           {/if}
           <td>{player.nationality ?? "—"}</td>
           <td>{player.club ?? "—"}</td>
-          {#each completedRounds as round (round.number)}
-            {@const cell = cellFor(player, round)}
+          {#each completedRounds as round, i (round.number)}
+            {@const cell = longAwareCell(player, i)}
             <td class="num result">
               {#if cell.kind === "bye"}
                 <span class="win" data-tip={$_("resultsView.byeTitle")}>0+</span>
+              {:else if cell.kind === "long-pending"}
+                <span
+                  class="pending"
+                  data-tip={$_("resultsView.longPendingTitle", {
+                    values: { name: cell.opponentName },
+                  })}>0−</span
+                >
               {:else if cell.kind === "absent"}
                 {#if cell.half}
                   <span class="absent" data-tip={$_("resultsView.halfByeTitle")}>0=</span>

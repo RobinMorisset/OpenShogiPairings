@@ -339,6 +339,38 @@ mod tests {
     }
 
     #[test]
+    fn long_board_opponent_counts_twice_in_sos_and_sodos() {
+        // R1: A beats B on a long board; C beats D (normal). R2: B beats C.
+        // B ends on 1 point (2 halves). A faced B on a long board, so B is
+        // counted *twice* for A's opponent-sums: SOSM(A) = SODOSM(A) = 2·2 = 4,
+        // not 2 as it would be for a single game.
+        let a = player(1, None);
+        let b = player(2, None);
+        let c = player(3, None);
+        let d = player(4, None);
+        let long_ab = Board {
+            result: Some(Winner::Player1),
+            long: true,
+            ..Board::pending(a.id, b.id, None, PairingSource::Swiss)
+        };
+        let rounds = vec![
+            round(1, vec![long_ab, board(c.id, d.id, Winner::Player1)]),
+            round(2, vec![board(b.id, c.id, Winner::Player1)]),
+        ];
+        let players = vec![a.clone(), b.clone(), c.clone(), d.clone()];
+        let standings = compute_standings(&players, &TournamentSettings::default(), &rounds);
+        let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
+        // A: 2 points (4 halves) and 2 victories from the long win.
+        assert_eq!((of(a.id).points, of(a.id).victories), (4, 2));
+        // B: beat C once (1 point = 2 halves).
+        assert_eq!(of(b.id).points, 2);
+        // B counted twice in A's opponent-sums.
+        assert_eq!(of(a.id).sosm, 4);
+        assert_eq!(of(a.id).sodosm, 4);
+        assert_eq!(of(a.id).sosw, 2); // B has 1 win, counted twice
+    }
+
+    #[test]
     fn sos_breaks_a_points_tie() {
         // A>C, D>B (upset) in R1; A>D, B>C in R2. Final points A=2, B=1, D=1,
         // C=0. B and D tie on 1 point, but D faced the stronger field (A, B)

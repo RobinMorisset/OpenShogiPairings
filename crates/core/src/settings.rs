@@ -311,6 +311,12 @@ pub struct TournamentSettings {
     /// eligibility column and finalization asks for the cup size.
     #[serde(default)]
     pub cup_enabled: bool,
+    /// Whether the referee may flag individual boards as "long games" that last
+    /// two rounds and score two points for the winner (double time control on the
+    /// top boards). Off by default. When on, the round view shows a per-board
+    /// checkbox. See `docs/two-round-boards.md`.
+    #[serde(default)]
+    pub long_boards_enabled: bool,
     /// How handicap games are treated: hidden, allowed, or suggested (see
     /// [`HandicapPolicy`]).
     #[serde(default)]
@@ -455,6 +461,7 @@ impl Default for TournamentSettings {
             club_protection_exempt_clubs: Vec::new(),
             floater_style: FloaterStyle::default(),
             cup_enabled: false,
+            long_boards_enabled: false,
             handicap_policy: HandicapPolicy::default(),
             handicap_wiel_rule: false,
             half_point_absences: false,

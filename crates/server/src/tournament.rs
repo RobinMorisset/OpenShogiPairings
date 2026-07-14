@@ -50,6 +50,7 @@ use crate::{auth, live};
 /// - `POST   /rounds/{n}/boards/{i}/drawn`   set the draw flag
 /// - `POST   /rounds/{n}/boards/{i}/no-show` set/clear a board no-show
 /// - `PUT    /rounds/{n}/boards/{i}/handicap` set/clear the handicap
+/// - `POST   /rounds/{n}/boards/{i}/long`    flag/unflag a two-round long game
 /// - `POST   /players`       register a player
 /// - `POST   /players/batch` register many players as a single mutation (CSV import)
 /// - `PUT    /players/{player_id}`  edit a player
@@ -109,6 +110,10 @@ pub fn scope(state: AppState) -> Router<AppState> {
         .route(
             "/rounds/{round_number}/boards/{board_index}/handicap",
             put(set_board_handicap),
+        )
+        .route(
+            "/rounds/{round_number}/boards/{board_index}/long",
+            post(set_board_long),
         )
         .route("/players", post(add_player))
         .route("/players/batch", post(add_players_batch))
@@ -638,6 +643,36 @@ async fn set_board_no_show(
     let was_completed = round_completed(&store, params.round_number);
     store.mutate(expected, |t| {
         t.set_board_no_show(params.round_number, params.board_index, req.absent)
+            .map(|_| ())
+    })?;
+    if !was_completed && round_completed(&store, params.round_number) {
+        backup_after(&store, &format!("round {} completed", params.round_number));
+    }
+    view(&store)
+}
+
+/// Body of the long-game endpoint: whether the board is a two-round long game.
+#[derive(Debug, Deserialize)]
+struct SetLongRequest {
+    long: bool,
+}
+
+/// Flag (or unflag) a board as a two-round "long game" (see
+/// `docs/two-round-boards.md`).
+///
+/// Like recording a winner, flagging the last-undecided board long can complete
+/// the round, so the automatic "round N completed" backup is taken here too, only
+/// on the transition into completed.
+async fn set_board_long(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<BoardParams>,
+    Json(req): Json<SetLongRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.store.write().expect("store lock poisoned");
+    let was_completed = round_completed(&store, params.round_number);
+    store.mutate(expected, |t| {
+        t.set_board_long(params.round_number, params.board_index, req.long)
             .map(|_| ())
     })?;
     if !was_completed && round_completed(&store, params.round_number) {

@@ -113,9 +113,8 @@ fn row_for(
     rank_of: &HashMap<Uuid, u32>,
     half_point_absences: bool,
 ) -> Vec<String> {
-    let mut round_cells: Vec<String> = rounds
-        .iter()
-        .map(|r| round_cell(player.id, r, rank_of, half_point_absences))
+    let mut round_cells: Vec<String> = (0..rounds.len())
+        .map(|i| long_aware_cell(player.id, i, rounds, rank_of, half_point_absences))
         .collect();
     // Wrap the whole block in a single literal bracket pair. Done in place so a
     // one-round tournament yields `[cell]` (both edits land on the same cell).
@@ -154,6 +153,39 @@ fn format_half_points(half: u32) -> String {
     }
 }
 
+/// The round cell for a player, aware of long (two-round) games. A long board
+/// lives in its *starting* round but its result is only known in the *next*
+/// round, so it renders as `0-` in the starting column (a game in progress) and
+/// its decisive result in the following column. Everything else defers to
+/// [`round_cell`].
+fn long_aware_cell(
+    player_id: Uuid,
+    i: usize,
+    rounds: &[&Round],
+    rank_of: &HashMap<Uuid, u32>,
+    half_point_absences: bool,
+) -> String {
+    fn on_long(round: &Round, player_id: Uuid) -> Option<&Board> {
+        round
+            .boards
+            .iter()
+            .find(|b| b.long && (b.player1 == player_id || b.player2 == player_id))
+    }
+    // On a long board this round → placeholder; the result belongs to the next
+    // column (it is not settled as of this round).
+    if on_long(rounds[i], player_id).is_some() {
+        return "0-".into();
+    }
+    // Carrying a long game from the previous round → show its result here, the
+    // round in which it becomes known.
+    if i > 0 {
+        if let Some(board) = on_long(rounds[i - 1], player_id) {
+            return game_cell(board, player_id, rank_of);
+        }
+    }
+    round_cell(player_id, rounds[i], rank_of, half_point_absences)
+}
+
 /// The single round cell for a player: `0+` for a bye (or a no-show opponent),
 /// `0-` for an absence (`0=` when the tournament awards absences half a point),
 /// `0#` for a no-show, or `<opponent><marker><handicap?>` for a game. The
@@ -177,7 +209,13 @@ fn round_cell(
         // half point) when the tournament awards absences half a point, else `0-`.
         return if half_point_absences { "0=" } else { "0-" }.into();
     };
+    game_cell(board, player_id, rank_of)
+}
 
+/// The cell for a player's actual board: `0#`/`0+` for a no-show, otherwise
+/// `<opponent-rank><marker><handicap?>`. Shared by the ordinary round rendering
+/// and by the second-round column that carries a long game's result.
+fn game_cell(board: &Board, player_id: Uuid, rank_of: &HashMap<Uuid, u32>) -> String {
     let is_player1 = board.player1 == player_id;
     let side = if is_player1 {
         Winner::Player1
@@ -354,6 +392,41 @@ mod tests {
         let _ = p1;
         assert!(grid.contains("[2+(-2p)]"), "giver cell: {grid}");
         assert!(grid.contains("[1-(+2p)]"), "receiver cell: {grid}");
+    }
+
+    #[test]
+    fn long_board_shows_placeholder_then_result_in_the_next_column() {
+        // A beats B on a long (two-round) board started in round 1. The grid shows
+        // `0-` in round 1 (game in progress) and the result in round 2 (where it
+        // becomes known): A's block reads `[0- 2+]`, B's `[0- 1-]`.
+        let mut t = Tournament::new("Long").unwrap();
+        let a = t.add_player(named("A")).unwrap().id;
+        let b = t.add_player(named("B")).unwrap().id;
+        t.finalize_registration().unwrap();
+        t.rounds.push(Round {
+            number: 1,
+            boards: vec![Board {
+                result: Some(Winner::Player1),
+                long: true,
+                ..Board::pending(a, b, None, PairingSource::Swiss)
+            }],
+            bye: None,
+            cup_byes: Vec::new(),
+            absent: Vec::new(),
+            completed: true,
+        });
+        // Round 2: A and B are on the long game, so they have no board here.
+        t.rounds.push(Round {
+            number: 2,
+            boards: Vec::new(),
+            bye: None,
+            cup_byes: Vec::new(),
+            absent: Vec::new(),
+            completed: true,
+        });
+        let rows = data_rows(&to_grid(&t, &t.standings()));
+        assert!(rows[0].contains("[0- 2+]"), "A row: {rows:?}");
+        assert!(rows[1].contains("[0- 1-]"), "B row: {rows:?}");
     }
 
     #[test]

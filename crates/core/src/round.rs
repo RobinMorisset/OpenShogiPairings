@@ -202,6 +202,12 @@ pub struct Board {
     /// the ELO estimate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_show: Option<NoShow>,
+    /// This board is a "long game": double time control, lasting two rounds, and
+    /// its winner scores two points instead of one. Off by default and omitted
+    /// from JSON when false. The two players sit out the next round's pairing
+    /// while an undecided long board is in flight. See `docs/two-round-boards.md`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub long: bool,
 }
 
 impl Board {
@@ -222,6 +228,7 @@ impl Board {
             points_diff,
             source,
             no_show: None,
+            long: false,
         }
     }
 
@@ -231,6 +238,22 @@ impl Board {
     /// even though no game was played.
     pub fn is_decided(&self) -> bool {
         self.result.is_some() || self.no_show.is_some()
+    }
+
+    /// A long board whose game hasn't finished yet — the state that makes its two
+    /// players sit out the next round's pairing and shows the `0-` placeholder in
+    /// the cross-table. A long board that is already decided (finished early, or
+    /// resolved by forfeit) is not pending, so its players are free again.
+    pub fn long_pending(&self) -> bool {
+        self.long && !self.is_decided()
+    }
+
+    /// Whether this board counts as settled for the purpose of closing its round.
+    /// A pending long board does **not** hold the round open — the rest of the
+    /// field plays on while the long game (which spans this round and the next)
+    /// finishes — so it counts as complete here even without a result.
+    pub fn complete_for_round(&self) -> bool {
+        self.is_decided() || self.long
     }
 
     /// Whether the given `side` failed to show up on this board (true for that
@@ -314,6 +337,17 @@ pub struct Round {
     /// A new round must not be started until the current one is completed.
     #[serde(default)]
     pub completed: bool,
+}
+
+impl Round {
+    /// Whether every board of this round is settled enough to close the round: a
+    /// board is either decided or a long board still running (which spans into the
+    /// next round and so must not hold this one open). This is the single source
+    /// of truth for the [`completed`](Self::completed) flag — note it means a
+    /// completed round may still contain an undecided (long) board.
+    pub fn is_complete(&self) -> bool {
+        self.boards.iter().all(|b| b.complete_for_round())
+    }
 }
 
 /// A round being set up but not yet started (the `RoundDraft` state).

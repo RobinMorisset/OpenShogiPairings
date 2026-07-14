@@ -63,6 +63,13 @@ floater_style: FloaterStyle,
  */
 cup_enabled: boolean, 
 /**
+ * Whether the referee may flag individual boards as "long games" that last
+ * two rounds and score two points for the winner (double time control on the
+ * top boards). Off by default. When on, the round view shows a per-board
+ * checkbox. See `docs/two-round-boards.md`.
+ */
+long_boards_enabled: boolean, 
+/**
  * How handicap games are treated: hidden, allowed, or suggested (see
  * [`HandicapPolicy`]).
  */

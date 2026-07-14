@@ -95,6 +95,8 @@ impl From<TournamentError> for ApiError {
             | TournamentError::NoRoundToCancel
             | TournamentError::NoCurrentRound
             | TournamentError::RoundHasResults
+            | TournamentError::NotCurrentRound
+            | TournamentError::UnresolvedLongGame { .. }
             | TournamentError::HandicapNeedsRatingDifference
             | TournamentError::HandicapNotAllowedForCup
             | TournamentError::UnsupportedFormatVersion { .. }

@@ -166,8 +166,15 @@ pub(crate) fn compute_scores(
             if !by_id.contains_key(&a) || !by_id.contains_key(&b) {
                 continue;
             }
-            by_id.get_mut(&a).unwrap().opponents.push(b);
-            by_id.get_mut(&b).unwrap().opponents.push(a);
+            // A long board (two rounds, two points) counts as *two* games against
+            // the same opponent for the opponent-based tie-breaks (SOS, SODOS,
+            // SOSOS, Buchholz), so it is recorded twice. It still feeds ELO as a
+            // single game (that reads the boards directly, not these lists).
+            let reps = if board.long { 2 } else { 1 };
+            for _ in 0..reps {
+                by_id.get_mut(&a).unwrap().opponents.push(b);
+                by_id.get_mut(&b).unwrap().opponents.push(a);
+            }
 
             // A cup board is a forced bracket pairing, not a Swiss float, so it
             // must not shape the players' float history (though it still counts as
@@ -224,10 +231,16 @@ pub(crate) fn compute_scores(
                 Some(Winner::Player2) => (board.player2, board.player1),
                 None => continue,
             };
+            // A long board (double time control) is worth two points and counts
+            // as two games against the same opponent for the point/victory totals
+            // and the opponent-based tie-breaks; it stays a single game for ELO.
+            let reps = if board.long { 2 } else { 1 };
             if let Some(s) = by_id.get_mut(&winner) {
-                s.points += 2; // a win is 2 half-points
-                s.victories += 1;
-                s.defeated.push(loser);
+                s.points += 2 * reps; // a win is 2 half-points (×2 for a long game)
+                s.victories += reps;
+                for _ in 0..reps {
+                    s.defeated.push(loser);
+                }
             }
         }
         if let Some(bye) = round.bye {
@@ -241,8 +254,11 @@ pub(crate) fn compute_scores(
         for board in &round.boards {
             if let Some(present) = board.no_show_opponent() {
                 if let Some(s) = by_id.get_mut(&present) {
-                    s.points += 2; // a win is 2 half-points
-                    s.victories += 1;
+                    // A long board resolved by forfeit still scores its long
+                    // weight (two points), unless the referee demoted it.
+                    let reps = if board.long { 2 } else { 1 };
+                    s.points += 2 * reps; // a win is 2 half-points (×2 for a long game)
+                    s.victories += reps;
                 }
             }
         }
@@ -477,6 +493,95 @@ mod tests {
         assert_eq!(on.get(&a.id).points, 1); // half a point = 1 half-unit
         assert_eq!(on.get(&a.id).victories, 0); // but not a win
         assert_eq!(on.get(&b.id).points, 2); // the real win is a full point
+    }
+
+    #[test]
+    fn long_board_scores_two_points_two_victories_and_counts_twice_for_tiebreaks() {
+        // A beats B on a long (two-round) board: A scores 2 points (4 halves) and
+        // 2 victories, and the game counts as two games versus B for the
+        // opponent/defeated lists (so SOS/SODOS weight B double).
+        let a = player(1, None);
+        let b = player(2, None);
+        let round = Round {
+            number: 1,
+            boards: vec![Board {
+                result: Some(Winner::Player1),
+                long: true,
+                ..Board::pending(a.id, b.id, Some(0), PairingSource::Swiss)
+            }],
+            bye: None,
+            cup_byes: Vec::new(),
+            absent: Vec::new(),
+            completed: true,
+        };
+        let scores = compute_scores(
+            &[a.clone(), b.clone()],
+            &TournamentSettings::default(),
+            &[round],
+        );
+        assert_eq!(scores.get(&a.id).points, 4); // 2 points = 4 half-points
+        assert_eq!(scores.get(&a.id).victories, 2);
+        assert_eq!(scores.get(&a.id).defeated, vec![b.id, b.id]); // twice
+        assert_eq!(scores.get(&a.id).opponents, vec![b.id, b.id]);
+        assert_eq!(scores.get(&b.id).opponents, vec![a.id, a.id]);
+        assert_eq!(scores.get(&b.id).points, 0);
+        assert_eq!(scores.get(&b.id).victories, 0);
+    }
+
+    #[test]
+    fn pending_long_board_records_the_opponent_but_awards_no_points() {
+        // A long board with no result yet: the opponent is already recorded
+        // (twice), but nobody has scored — the "padded" standings state.
+        let a = player(1, None);
+        let b = player(2, None);
+        let round = Round {
+            number: 1,
+            boards: vec![Board {
+                long: true,
+                ..Board::pending(a.id, b.id, Some(0), PairingSource::Swiss)
+            }],
+            bye: None,
+            cup_byes: Vec::new(),
+            absent: Vec::new(),
+            completed: true, // completed even with the long board pending
+        };
+        let scores = compute_scores(
+            &[a.clone(), b.clone()],
+            &TournamentSettings::default(),
+            &[round],
+        );
+        assert_eq!(scores.get(&a.id).points, 0);
+        assert_eq!(scores.get(&a.id).victories, 0);
+        assert_eq!(scores.get(&a.id).opponents, vec![b.id, b.id]);
+        assert!(scores.get(&a.id).defeated.is_empty());
+    }
+
+    #[test]
+    fn long_board_resolved_by_forfeit_scores_the_long_weight() {
+        // A long board where B is a no-show: A takes the free point at the long
+        // weight (2 points / 2 victories), like a doubled bye.
+        let a = player(1, None);
+        let b = player(2, None);
+        let round = Round {
+            number: 1,
+            boards: vec![Board {
+                no_show: Some(NoShow::Player2),
+                long: true,
+                ..Board::pending(a.id, b.id, Some(0), PairingSource::Swiss)
+            }],
+            bye: None,
+            cup_byes: Vec::new(),
+            absent: Vec::new(),
+            completed: true,
+        };
+        let scores = compute_scores(
+            &[a.clone(), b.clone()],
+            &TournamentSettings::default(),
+            &[round],
+        );
+        assert_eq!(scores.get(&a.id).points, 4); // 2 points
+        assert_eq!(scores.get(&a.id).victories, 2);
+        assert_eq!(scores.get(&b.id).points, 0);
     }
 
     #[test]

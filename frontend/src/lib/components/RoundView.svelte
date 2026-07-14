@@ -47,6 +47,18 @@
     onSetNoShow: (boardIndex: number, absent: NoShow | null) => void;
     /** Set (or clear, with null) a board's handicap. */
     onSetHandicap: (boardIndex: number, handicap: Handicap | null) => void;
+    /** Whether long (two-round) games are enabled — shows the per-board checkbox. */
+    longEnabled?: boolean;
+    /** Whether the viewed round is the current round (the long flag is only
+     *  editable on the current round). */
+    isCurrentRound?: boolean;
+    /** Flag/unflag a board as a two-round long game. */
+    onSetLong?: (boardIndex: number, long: boolean) => void;
+    /** Pending long boards carried in from the previous round, so the referee can
+     *  record their result while running this round. */
+    carriedLongBoards?: { index: number; board: Board }[];
+    /** Record the winner on a carried (previous-round) long board. */
+    onCarriedWinner?: (boardIndex: number, clicked: Winner) => void;
     busy?: boolean;
   }
 
@@ -63,8 +75,22 @@
     onToggleDrawn,
     onSetNoShow,
     onSetHandicap,
+    longEnabled = false,
+    isCurrentRound = false,
+    onSetLong,
+    carriedLongBoards = [],
+    onCarriedWinner,
     busy = false,
   }: Props = $props();
+
+  // The long checkbox is editable only on the current round; turning it *on* also
+  // needs the board still undecided (turning it off after a result is the demote
+  // path). Mirrors the server's `set_board_long` guards.
+  function longToggleDisabled(board: Board): boolean {
+    if (busy || !isCurrentRound) return true;
+    const decided = board.result != null || board.no_show != null;
+    return decided && !board.long;
+  }
 
   // Toggle `side`'s no-show independently, so the two buttons together cover all
   // of none / player1 / player2 / both (each side can be a no-show at once).
@@ -400,6 +426,46 @@
       {/if}
     </div>
   {/if}
+  {#if carriedLongBoards.length > 0}
+    <div class="carried">
+      <p class="carried-title">{$_("roundView.carriedTitle")}</p>
+      <table class="carried-table">
+        <tbody>
+          {#each carriedLongBoards as { index, board } (index)}
+            <tr>
+              <td class="p1-col">
+                <button
+                  type="button"
+                  class="player"
+                  class:winner={board.result === "player1" || board.no_show === "player2"}
+                  class:loser={board.result === "player2" || absent(board.no_show, "player1")}
+                  disabled={busy || !onCarriedWinner}
+                  title={$_("roundView.clickToSetWinner")}
+                  onclick={() => onCarriedWinner?.(index, "player1")}
+                >
+                  {name(board.player1)}
+                </button>
+              </td>
+              <td>
+                <button
+                  type="button"
+                  class="player"
+                  class:winner={board.result === "player2" || board.no_show === "player1"}
+                  class:loser={board.result === "player1" || absent(board.no_show, "player2")}
+                  disabled={busy || !onCarriedWinner}
+                  title={$_("roundView.clickToSetWinner")}
+                  onclick={() => onCarriedWinner?.(index, "player2")}
+                >
+                  {name(board.player2)}
+                </button>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+      <p class="hint">{$_("roundView.carriedHint")}</p>
+    </div>
+  {/if}
   {#if round.boards.length === 0 && !round.bye}
     <p class="empty">{$_("roundView.noBoards")}</p>
   {:else}
@@ -412,6 +478,9 @@
           <th>{$_("roundView.player2")}</th>
           <th class="draw-col">{$_("roundView.draw")}</th>
           <th class="noshow-col">{$_("roundView.noShow")}</th>
+          {#if longEnabled}
+            <th class="long-col">{$_("roundView.long")}</th>
+          {/if}
           {#if handicapPolicy !== "none"}
             <th class="handicap-col">{$_("roundView.handicap")}</th>
             {#if handicapPolicy === "suggested"}
@@ -430,7 +499,11 @@
                   boardLedger(board),
                 )}<span class="compromise print-hide">⚠</span>{/if}</td
             >
-            <td class="num">{index + 1}</td>
+            <td class="num"
+              >{index + 1}{#if board.long}<span class="long-badge" title={$_("roundView.longTitle")}
+                  >★2R</span
+                >{/if}</td
+            >
             <td class="p1-col">
               <button
                 type="button"
@@ -496,6 +569,20 @@
                 </button>
               </div>
             </td>
+            {#if longEnabled}
+              <td class="long-col">
+                {#if !isCup(board)}
+                  <input
+                    type="checkbox"
+                    class="long-check"
+                    checked={board.long ?? false}
+                    disabled={longToggleDisabled(board)}
+                    title={$_("roundView.longTitle")}
+                    onchange={(e) => onSetLong?.(index, e.currentTarget.checked)}
+                  />
+                {/if}
+              </td>
+            {/if}
             {#if handicapPolicy !== "none"}
               <td class="handicap-col">
                 {#if !isCup(board)}
@@ -556,6 +643,9 @@
             </td>
             <td class="draw-col"></td>
             <td class="noshow-col"></td>
+            {#if longEnabled}
+              <td class="long-col"></td>
+            {/if}
             {#if handicapPolicy !== "none"}
               <td class="handicap-col"></td>
               {#if handicapPolicy === "suggested"}
@@ -576,6 +666,9 @@
             </td>
             <td class="draw-col"></td>
             <td class="noshow-col"></td>
+            {#if longEnabled}
+              <td class="long-col"></td>
+            {/if}
             {#if handicapPolicy !== "none"}
               <td class="handicap-col"></td>
               {#if handicapPolicy === "suggested"}
@@ -1044,6 +1137,48 @@
     background: var(--bg-warning);
   }
 
+  .long-col {
+    text-align: center;
+    width: 3rem;
+  }
+  .long-check {
+    cursor: pointer;
+  }
+  .long-check:disabled {
+    cursor: default;
+  }
+  /* A small badge on long boards, so which games run two rounds is visible at a
+     glance on screen and survives into the printed pairing sheet. */
+  .long-badge {
+    margin-left: 0.35rem;
+    padding: 0 0.25rem;
+    border: 1px solid var(--border-soft);
+    border-radius: 0.3rem;
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .carried {
+    margin-bottom: 0.9rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--border-divider);
+    border-radius: 0.4rem;
+    background: var(--bg-stripe);
+  }
+  .carried-title {
+    margin: 0 0 0.3rem;
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+  .carried-table {
+    width: auto;
+  }
+  .carried-table td {
+    border-bottom: none;
+  }
+
   .handicap {
     width: 4.5rem;
     background: var(--bg-inset);
@@ -1086,6 +1221,7 @@
     }
     .draw-col,
     .noshow-col,
+    .long-col,
     .handicap-col {
       display: none;
     }
