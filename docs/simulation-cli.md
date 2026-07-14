@@ -200,6 +200,18 @@ results. So whether minimizing mismatch costs ranking fidelity is contingent on
 which statistic you rank by — the two columns let you measure it rather than
 assume it.
 
+### Top-1 fidelity — `hit(top1)`
+
+Fidelity restricted to the crown: the fraction of runs whose winner is the
+*truly-strongest* player (final standings rank 1 equals true-strength rank 1),
+averaged over runs. Where `fidelity(score)` grades the whole order, `hit` asks
+only the question a title decides — *did the right person win?* — so a format can
+score well on ranking fidelity yet poorly here if it shuffles the very top. It is
+a per-run 0/1 indicator, so it flows through the paired statistical comparison
+like the other metrics; runs 0…1, **higher is better**. Note the ceiling is set
+by strength jitter: when the two strongest players are near-equal, either is
+genuinely strongest on some draws, so even a perfect format cannot reach 1.
+
 ### Game interest — `interest(W)`
 
 A distributional view of boring games that the mean can't see: are the foregone
@@ -230,7 +242,7 @@ threshold) in foregone games.
 ## Statistical comparison
 
 Point estimates are not exact, so a dedicated block reports, for the decision
-metrics (mean|d|, `P(|d|>T)`, fidelity, interest): each metric's value **±95% CI**
+metrics (mean|d|, `P(|d|>T)`, fidelity, hit, interest): each metric's value **±95% CI**
 (from run-to-run variation), and for every other variant the **paired Δ** against
 the first variant, starred by significance. The pairing uses common random numbers
 — the difference is taken per run, cancelling shared variation — so it is a
@@ -254,7 +266,7 @@ at `jitter > 0` its mismatch uses registration ratings, so compare it loosely.
 - **`--out DIR`** — `report.json` (all aggregates, for scripting/plotting) and one
   `elo-diff-<variant>.csv` histogram per variant.
 - **`--dump-runs FILE`** — one row per variant × run (`mean_diff`, `frac_exceed`,
-  `fidelity`, `interest`, `winner`); rows sharing a `run` are paired.
+  `fidelity`, `hit`, `interest`, `winner`); rows sharing a `run` are paired.
 - **`--dump-strengths FILE`** — the sampled true strength of every player in every
   run, for inspecting the oracle (e.g. that `--jitter` scatters a player around
   their post-tournament ELO).

@@ -278,7 +278,7 @@ fn run(args: Args) -> Result<(), String> {
     let mut dump = args
         .dump_runs
         .as_ref()
-        .map(|_| String::from("variant,run,mean_diff,frac_exceed,fidelity,interest,winner\n"));
+        .map(|_| String::from("variant,run,mean_diff,frac_exceed,fidelity,hit,interest,winner\n"));
     let mut strengths_dump = args
         .dump_strengths
         .as_ref()
@@ -457,6 +457,9 @@ struct VariantReport {
     fidelity_score: f64,
     /// Mean Spearman(ELO-estimate order, true-strength order) over runs.
     fidelity_estimate: f64,
+    /// Fraction of runs whose winner is the truly-strongest player (top-1 fidelity):
+    /// mean over runs of 1[final_order[0] == true_order[0]].
+    hit_rate: f64,
     /// Per-player top-1 probability (with CI) and top-3 rate for the Open (overall
     /// standings), sorted best first.
     players: Vec<PlayerProb>,
@@ -470,6 +473,8 @@ struct VariantReport {
     per_run_exceed: Vec<f64>,
     /// Per-run standings fidelity (Spearman vs true strength).
     per_run_fidelity: Vec<f64>,
+    /// Per-run top-1 hit (1.0 if the winner is the truly-strongest player, else 0.0).
+    per_run_hit: Vec<f64>,
     /// Mean game-interest metric (game-weighted Sen welfare) over runs.
     interest: f64,
     /// Per-run game-interest metric.
@@ -503,6 +508,15 @@ fn true_order(out: &RunOutcome) -> Vec<Uuid> {
     strength_order(&out.strengths)
 }
 
+/// Top-1 hit for one run: 1.0 if the standings winner is the truly-strongest
+/// player, else 0.0 (0.0 too if either order is empty).
+fn top1_hit(final_order: &[Uuid], true_ord: &[Uuid]) -> f64 {
+    match (final_order.first(), true_ord.first()) {
+        (Some(w), Some(b)) if w == b => 1.0,
+        _ => 0.0,
+    }
+}
+
 /// Players ordered by descending ELO estimate, ties broken by tournament number.
 fn estimate_order(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<Uuid> {
     let mut ids: Vec<&Player> = players.iter().collect();
@@ -534,7 +548,9 @@ fn append_run_rows(
         } else {
             o.game_diffs.iter().filter(|d| **d > first_t).count() as f64 / o.game_diffs.len() as f64
         };
-        let fidelity = spearman(&o.final_order, &true_order(o));
+        let true_ord = true_order(o);
+        let fidelity = spearman(&o.final_order, &true_ord);
+        let hit = top1_hit(&o.final_order, &true_ord);
         let winner = o
             .final_order
             .first()
@@ -542,7 +558,7 @@ fn append_run_rows(
             .map(String::as_str)
             .unwrap_or("?");
         buf.push_str(&format!(
-            "{variant},{i},{mean_diff:.4},{frac_exceed:.4},{fidelity:.4},{:.4},\"{winner}\"\n",
+            "{variant},{i},{mean_diff:.4},{frac_exceed:.4},{fidelity:.4},{hit:.4},{:.4},\"{winner}\"\n",
             o.interest
         ));
     }
@@ -581,6 +597,10 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
     let est_rhos: Vec<f64> = outcomes
         .iter()
         .map(|o| spearman(&o.estimated_order, &true_order(o)))
+        .collect();
+    let hits: Vec<f64> = outcomes
+        .iter()
+        .map(|o| top1_hit(&o.final_order, &true_order(o)))
         .collect();
 
     // Per-run replications for the inferential comparison: each run is one
@@ -690,11 +710,13 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
         pooled,
         fidelity_score: mean(&score_rhos),
         fidelity_estimate: mean(&est_rhos),
+        hit_rate: mean(&hits),
         players,
         cup_champions,
         per_run_mean_diff,
         per_run_exceed,
         per_run_fidelity: score_rhos,
+        per_run_hit: hits,
         interest: mean(&per_run_interest),
         per_run_interest,
         interest_by_player,
@@ -712,6 +734,7 @@ struct ObservedReport {
     pooled: Vec<f64>,
     fidelity_score: f64,
     fidelity_estimate: f64,
+    hit_rate: f64,
     interest: f64,
     /// Finishing rank (0-based) of each player in the real standings.
     rank_of: HashMap<Uuid, usize>,
@@ -760,6 +783,7 @@ fn observed_report(
         pooled,
         fidelity_score: spearman(&final_order, &true_ord),
         fidelity_estimate: spearman(&est_ord, &true_ord),
+        hit_rate: top1_hit(&final_order, &true_ord),
         interest: interest_welfare(base, &strengths),
         rank_of: final_order
             .iter()
@@ -828,22 +852,23 @@ fn print_report(
     }
 
     println!(
-        "\n{:<14} {:>16} {:>16} {:>12}",
-        "variant", "fidelity(score)", "fidelity(est)", "interest(W)"
+        "\n{:<14} {:>16} {:>16} {:>10} {:>12}",
+        "variant", "fidelity(score)", "fidelity(est)", "hit(top1)", "interest(W)"
     );
     for r in reports {
         println!(
-            "{:<14} {:>16.3} {:>16.3} {:>12.3}",
+            "{:<14} {:>16.3} {:>16.3} {:>10.3} {:>12.3}",
             trunc(&r.name, 14),
             r.fidelity_score,
             r.fidelity_estimate,
+            r.hit_rate,
             r.interest,
         );
     }
     if let Some(o) = observed {
         println!(
-            "{:<14} {:>16.3} {:>16.3} {:>12.3}",
-            "observed*", o.fidelity_score, o.fidelity_estimate, o.interest,
+            "{:<14} {:>16.3} {:>16.3} {:>10.3} {:>12.3}",
+            "observed*", o.fidelity_score, o.fidelity_estimate, o.hit_rate, o.interest,
         );
     }
 
@@ -887,7 +912,7 @@ fn print_report(
             .unwrap_or(400);
         // (label, per-run accessor, display scale, decimals, base-unit, Δ-unit)
         type Acc = fn(&VariantReport) -> &Vec<f64>;
-        let rows: [(String, Acc, f64, usize, &str, &str); 4] = [
+        let rows: [(String, Acc, f64, usize, &str, &str); 5] = [
             (
                 "mean|d|".to_string(),
                 |r| &r.per_run_mean_diff,
@@ -912,6 +937,7 @@ fn print_report(
                 "",
                 "",
             ),
+            ("hit(top1)".to_string(), |r| &r.per_run_hit, 1.0, 3, "", ""),
             (
                 "interest(W)".to_string(),
                 |r| &r.per_run_interest,
@@ -1130,6 +1156,7 @@ struct JsonObserved {
     exceed: Vec<JsonExceed>,
     fidelity_score: f64,
     fidelity_estimate: f64,
+    hit_rate: f64,
     interest: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     winner: Option<String>,
@@ -1146,6 +1173,7 @@ struct JsonVariant {
     exceed: Vec<JsonExceed>,
     fidelity_score: f64,
     fidelity_estimate: f64,
+    hit_rate: f64,
     interest: f64,
     victory: Vec<JsonVictory>,
 }
@@ -1210,6 +1238,7 @@ fn write_outputs(
                 .collect(),
             fidelity_score: o.fidelity_score,
             fidelity_estimate: o.fidelity_estimate,
+            hit_rate: o.hit_rate,
             interest: o.interest,
             winner: o.winner.and_then(|id| names.get(&id).cloned()),
         }),
@@ -1233,6 +1262,7 @@ fn write_outputs(
                     .collect(),
                 fidelity_score: r.fidelity_score,
                 fidelity_estimate: r.fidelity_estimate,
+                hit_rate: r.hit_rate,
                 interest: r.interest,
                 victory: r
                     .players
