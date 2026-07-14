@@ -284,7 +284,8 @@
   }
 
   function editEloPriorShape(raw: string) {
-    eloPriorShape = raw === "laplace" ? "laplace" : "gaussian";
+    eloPriorShape =
+      raw === "laplace" ? "laplace" : raw === "flat" ? "flat" : "gaussian";
     persist();
   }
 
@@ -1087,6 +1088,7 @@
         >
           <option value="gaussian">{$_("settings.eloPriorShapeGaussian")}</option>
           <option value="laplace">{$_("settings.eloPriorShapeLaplace")}</option>
+          <option value="flat">{$_("settings.eloPriorShapeFlat")}</option>
         </select>
       </label>
       <p class="desc small-note">

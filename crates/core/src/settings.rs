@@ -47,12 +47,16 @@ pub enum HandicapPolicy {
 /// asymmetric-Laplace penalty of the *same width* but with exponential — hence
 /// fatter — tails: its restoring force is *constant*, so a sustained run of
 /// surprising results (e.g. an under-rated improver beating stronger opponents)
-/// moves the estimate much further before the prior reins it in. **Either** shape
-/// can additionally be made asymmetric via the per-category
-/// `elo_upward_looseness_*` knobs, which widen the upward arm so an *upward*
-/// revision clears on less evidence than a downward one (for the Gaussian this is
-/// a two-piece normal; for the Laplace, a wider upward scale). See
-/// `docs/elo-pairing-mode.md`.
+/// moves the estimate much further before the prior reins it in. `Flat` is the
+/// improper limit — *no* prior at all: the estimate is the maximum-likelihood
+/// performance rating over the games, reproducing the FESA rating program
+/// (`turnering.py`) for unrated newcomers (an all-loss player floors to 1, an
+/// all-win player is rated as if they had drawn their strongest opponent).
+/// `Gaussian` and `Laplace` can additionally be made asymmetric via the
+/// per-category `elo_upward_looseness_*` knobs, which widen the upward arm so an
+/// *upward* revision clears on less evidence than a downward one (for the Gaussian
+/// this is a two-piece normal; for the Laplace, a wider upward scale); `Flat` has
+/// no arm to widen. See `docs/elo-pairing-mode.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
@@ -66,6 +70,20 @@ pub enum EloPriorShape {
     /// tails. Also honours the per-category `elo_upward_looseness_*` asymmetry
     /// knobs.
     Laplace,
+    /// **Flat** (improper/uniform) prior — *no* pull toward a prior mean. The
+    /// estimate becomes the maximum-likelihood *performance rating* over the
+    /// player's games, reproducing the historical `turnering.py` (`performance2`)
+    /// treatment of unrated players rather than any Bayesian anchor. Intended for
+    /// the `elo_prior_shape_unrated` slot: a strong newcomer's rating is then read
+    /// straight off the strength of the field they beat, with no regularisation
+    /// toward the unrated centre. Because a flat prior leaves the all-win / all-loss
+    /// likelihood unbounded, those scorelines follow `turnering.py`'s guards (see
+    /// [`crate::elo::estimate_elos`]): an all-loss player floors to `1`, an all-win
+    /// player is rated as if they had *drawn* their strongest opponent, and a player
+    /// with no games stays at the seed. The upward-looseness knobs do not apply
+    /// (there is no arm to widen). Not log-concave-strengthening, so mixing it onto
+    /// well-connected fields is fine but it supplies no curvature of its own.
+    Flat,
 }
 
 /// What a MacMahon threshold compares against — an ELO rating or a dan/kyu

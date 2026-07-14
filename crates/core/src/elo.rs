@@ -69,6 +69,12 @@ const MAX_STEP: f64 = 800.0;
 /// asymmetry.
 const HUBER_DELTA: f64 = 2.0;
 
+/// The rating an all-loss player floors to under a flat ([`EloPriorShape::Flat`])
+/// prior — the bottom of the assumed unrated strength range `[1, 1200]`, matching
+/// `turnering.py`'s new-rule floor. A flat prior plus a 0 % score leaves the
+/// likelihood monotone (no finite maximiser), so a definite value must be supplied.
+const FLAT_ALL_LOSS_FLOOR: f64 = 1.0;
+
 // --- FESA handicap treatment ----------------------------------------------
 //
 // FESA rates a handicap game as if the giver were weaker: their rating is turned
@@ -210,9 +216,12 @@ fn prior(
 /// solver can consume directly: given the current deviation `d = θ − μ₀` from the
 /// prior mean, it yields that term's contribution to the gradient and Hessian.
 ///
-/// Both variants are **log-concave**, so adding them to the (concave)
+/// All variants are **log-concave**, so adding them to the (concave)
 /// Bradley–Terry log-likelihood keeps the whole objective concave — the unique
-/// maximiser and deterministic convergence the solver relies on.
+/// maximiser and deterministic convergence the solver relies on. The [`Self::Flat`]
+/// variant is the improper limit (zero curvature): it is log-concave but supplies
+/// no curvature of its own, so a player carrying it needs games (or the solver's
+/// degenerate-case guards) to be pinned down.
 enum PriorPenalty {
     /// A (possibly asymmetric) Gaussian — a *two-piece normal* with std `σ₀` below
     /// the mean and `r·σ₀` above it, so the linear restoring force `d/σ²` is
@@ -232,6 +241,12 @@ enum PriorPenalty {
     /// core the force is linearised through the origin so the penalty is `C¹`,
     /// strictly convex, and minimised exactly at `d = 0`.
     Laplace { b_down: f64, b_up: f64 },
+    /// **Flat** (improper/uniform) prior: contributes `(0, 0)` always, so the
+    /// estimate is driven purely by the likelihood — the maximum-likelihood
+    /// performance rating, as in `turnering.py`. Carries no width or asymmetry (the
+    /// looseness ratio has no arm to widen). A player holding it must be pinned by
+    /// their games or by the solver's degenerate-case handling.
+    Flat,
 }
 
 impl PriorPenalty {
@@ -258,6 +273,9 @@ impl PriorPenalty {
                     b_up: r * b_down,
                 }
             }
+            // A flat prior has no width and no asymmetry: `sigma0` and `r` are
+            // irrelevant.
+            EloPriorShape::Flat => PriorPenalty::Flat,
         }
     }
 
@@ -298,6 +316,10 @@ impl PriorPenalty {
                 };
                 (-g, -g_prime)
             }
+            // Improper flat prior: no restoring force, no curvature. The player's
+            // games (or the degenerate-case guards in `estimate_elos`) must supply
+            // the curvature that pins them down.
+            PriorPenalty::Flat => (0.0, 0.0),
         }
     }
 }
@@ -345,6 +367,20 @@ fn expected(x: f64) -> f64 {
 /// handicap games are excluded for now (V1 — a handicap→ELO mapping is future
 /// work). The returned map has one entry per player in `players`; a player with no
 /// counted games sits exactly at their prior mean.
+/// Precomputed degenerate-scoreline handling for a flat-prior player (see
+/// [`EloPriorShape::Flat`]). A flat prior gives an all-win or all-loss player an
+/// unbounded likelihood, so [`estimate_elos`] substitutes `turnering.py`'s rule.
+/// Players with a mix of results, or with no games, need no substitution (they are
+/// pinned by the likelihood or left at their seed) and carry `None`.
+enum FlatDegenerate {
+    /// Every counted game lost — pin to [`FLAT_ALL_LOSS_FLOOR`].
+    AllLoss,
+    /// Every counted game won — add a pseudo-draw against the strongest opponent
+    /// (its index into `players`, with that game's handicap `offset`) so the
+    /// likelihood has a finite maximum, as in `turnering.py`'s `[best_elo] + …`.
+    AllWin { opp: usize, offset: f64 },
+}
+
 pub fn estimate_elos(
     players: &[Player],
     settings: &TournamentSettings,
@@ -366,6 +402,7 @@ pub fn estimate_elos(
     let mut theta = vec![0.0_f64; n];
     let mut mean = vec![0.0_f64; n];
     let mut penalties: Vec<PriorPenalty> = Vec::with_capacity(n);
+    let mut is_flat = vec![false; n];
     for (i, p) in players.iter().enumerate() {
         let (mu0, sigma0) = prior(p, m, provisional, unrated_center, unrated_k);
         mean[i] = mu0;
@@ -380,6 +417,7 @@ pub fn estimate_elos(
             Some(_) if is_reliably_rated(p) => (shape_established, looseness_established),
             Some(_) => (shape_provisional, looseness_provisional),
         };
+        is_flat[i] = matches!(shape, EloPriorShape::Flat);
         penalties.push(PriorPenalty::new(shape, sigma0, r));
     }
 
@@ -431,12 +469,45 @@ pub fn estimate_elos(
         }
     }
 
+    // Degenerate scorelines for flat-prior players, precomputed once from the seeds
+    // (theta still holds each player's seed here). A flat prior can't bound an
+    // all-win or all-loss likelihood, so those follow `turnering.py`; a mixed
+    // scoreline is bounded by the likelihood alone, and a no-games flat player is
+    // left at their seed (their Hessian stays 0 and the sweep skips them).
+    let flat_degenerate: Vec<Option<FlatDegenerate>> = (0..n)
+        .map(|i| {
+            if !is_flat[i] || games[i].is_empty() {
+                return None;
+            }
+            if games[i].iter().all(|&(_, s, _)| s == 0.0) {
+                Some(FlatDegenerate::AllLoss)
+            } else if games[i].iter().all(|&(_, s, _)| s == 1.0) {
+                // Strongest opponent by seed rating — a stable pseudo-opponent.
+                let &(opp, _, offset) = games[i]
+                    .iter()
+                    .max_by(|a, b| theta[a.0].total_cmp(&theta[b.0]))
+                    .expect("non-empty by the guard above");
+                Some(FlatDegenerate::AllWin { opp, offset })
+            } else {
+                None
+            }
+        })
+        .collect();
+
     // Coordinate ascent: sweep players, each a 1-D Newton step on the concave
     // penalised log-likelihood. Strong concavity (every player has a finite prior
-    // precision) guarantees a unique maximum and convergence.
+    // precision, or — for a flat prior — enough game curvature after the degenerate
+    // guards) gives a unique maximum and convergence.
     for _ in 0..MAX_SWEEPS {
         let mut max_delta = 0.0_f64;
         for i in 0..n {
+            // A flat all-loss player has no finite maximum; pin them to the floor.
+            if let Some(FlatDegenerate::AllLoss) = flat_degenerate[i] {
+                let step = FLAT_ALL_LOSS_FLOOR - theta[i];
+                theta[i] = FLAT_ALL_LOSS_FLOOR;
+                max_delta = max_delta.max(step.abs());
+                continue;
+            }
             // Prior term first, then each game's likelihood contribution.
             let (mut gradient, mut hessian) = penalties[i].grad_hess(theta[i] - mean[i]);
             for &(j, score, offset) in &games[i] {
@@ -444,8 +515,19 @@ pub fn estimate_elos(
                 gradient += (score - e) / S;
                 hessian -= e * (1.0 - e) / (S * S);
             }
-            // hessian < 0 (see `PriorPenalty::grad_hess`), so this is a
-            // well-defined ascent step.
+            // A flat all-win player: a pseudo-draw against their strongest opponent
+            // gives the otherwise-monotone likelihood a finite maximum.
+            if let Some(FlatDegenerate::AllWin { opp, offset }) = flat_degenerate[i] {
+                let e = expected((theta[i] - theta[opp] + offset) / S);
+                gradient += (0.5 - e) / S;
+                hessian -= e * (1.0 - e) / (S * S);
+            }
+            // hessian < 0 (see `PriorPenalty::grad_hess`) except for a flat prior
+            // with no games, whose 0 curvature means nothing to learn — leave them
+            // at their seed rather than divide by zero.
+            if hessian == 0.0 {
+                continue;
+            }
             let step = (-gradient / hessian).clamp(-MAX_STEP, MAX_STEP);
             theta[i] += step;
             max_delta = max_delta.max(step.abs());
@@ -992,6 +1074,128 @@ mod tests {
             (gauss_e - lap_e).abs() < 1e-9,
             "a rated player's estimate must not move when only the unrated shape is \
              Laplace: gaussian {gauss_e}, unrated-laplace {lap_e}"
+        );
+    }
+
+    /// A flat (improper) prior on the unrated slot — the `turnering.py` performance
+    /// rating — leaving the rated categories on their default Gaussian.
+    fn flat_unrated() -> TournamentSettings {
+        TournamentSettings {
+            elo_prior_shape_unrated: EloPriorShape::Flat,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn flat_unrated_reads_off_the_field_and_ignores_the_prior_center() {
+        // turnering.py-style: an unrated player's estimate is the maximum-likelihood
+        // performance rating over their games, with no pull toward the unrated
+        // centre. So moving the centre must not move a flat estimate — the tell of an
+        // improper prior — whereas the centre-anchored Gaussian does move.
+        let newcomer = player(None);
+        let mut a = player(Some(1500));
+        a.fesa_games = Some(50);
+        let mut b = player(Some(1500));
+        b.fesa_games = Some(50);
+        let all = vec![newcomer.clone(), a.clone(), b.clone()];
+        let rounds = vec![
+            decided(1, vec![win(newcomer.id, a.id)]), // newcomer beats A
+            decided(2, vec![win(b.id, newcomer.id)]), // B beats newcomer
+        ];
+        let est = |shape, center: u32| {
+            let settings = TournamentSettings {
+                elo_prior_shape_unrated: shape,
+                elo_unrated_prior_center: center,
+                ..Default::default()
+            };
+            estimate_elos(&all, &settings, &rounds)[&newcomer.id]
+        };
+        // Flat: identical regardless of the centre.
+        let flat_low = est(EloPriorShape::Flat, 600);
+        let flat_high = est(EloPriorShape::Flat, 1000);
+        // Only solver-tolerance residue separates them (the two runs differ solely in
+        // the newcomer's seed, which a flat prior never anchors) — orders of magnitude
+        // below the Gaussian's centre-driven shift asserted below.
+        assert!(
+            (flat_low - flat_high).abs() < 1e-2,
+            "a flat (improper) prior must ignore the centre: {flat_low} vs {flat_high}"
+        );
+        // A 1 win / 1 loss record vs a 1500 field → performance sits right at 1500.
+        assert!(
+            (flat_low - 1500.0).abs() < 60.0,
+            "a 1-1 record vs 1500s should rate near 1500, got {flat_low}"
+        );
+        // Gaussian: the centre pulls the estimate, so the two centres disagree.
+        let g_low = est(EloPriorShape::Gaussian, 600);
+        let g_high = est(EloPriorShape::Gaussian, 1000);
+        assert!(
+            (g_low - g_high).abs() > 20.0,
+            "a Gaussian prior should track its centre: {g_low} vs {g_high}"
+        );
+    }
+
+    #[test]
+    fn flat_unrated_all_losses_floors_to_one() {
+        // A flat prior can't bound an all-loss likelihood; turnering.py floors it.
+        let newcomer = player(None);
+        let opps: Vec<Player> = (0..5).map(|_| player(Some(1500))).collect();
+        let mut all = vec![newcomer.clone()];
+        all.extend(opps.iter().cloned());
+        let rounds: Vec<Round> = opps
+            .iter()
+            .enumerate()
+            .map(|(i, o)| decided(i as u32 + 1, vec![win(o.id, newcomer.id)]))
+            .collect();
+        let est = estimate_elos(&all, &flat_unrated(), &rounds)[&newcomer.id];
+        assert!(
+            (est - FLAT_ALL_LOSS_FLOOR).abs() < 1e-6,
+            "an all-loss flat player floors to {FLAT_ALL_LOSS_FLOOR}, got {est}"
+        );
+    }
+
+    #[test]
+    fn flat_unrated_all_wins_is_finite_and_above_the_field() {
+        // The pseudo-draw against the strongest opponent bounds the otherwise-
+        // monotone all-win likelihood, so the estimate is a finite performance
+        // rating above the field — not the unbounded run-away a bare flat prior gives.
+        let newcomer = player(None);
+        let opps: Vec<Player> = (0..5).map(|_| player(Some(1500))).collect();
+        let mut all = vec![newcomer.clone()];
+        all.extend(opps.iter().cloned());
+        let rounds: Vec<Round> = opps
+            .iter()
+            .enumerate()
+            .map(|(i, o)| decided(i as u32 + 1, vec![win(newcomer.id, o.id)]))
+            .collect();
+        let est = estimate_elos(&all, &flat_unrated(), &rounds)[&newcomer.id];
+        assert!(
+            est.is_finite(),
+            "all-win flat estimate must be finite, got {est}"
+        );
+        assert!(
+            est > 1700.0,
+            "an all-win newcomer should rate well above the 1500 field, got {est}"
+        );
+        assert!(
+            est < 2600.0,
+            "…but the pseudo-draw keeps it from running away, got {est}"
+        );
+    }
+
+    #[test]
+    fn flat_unrated_with_no_games_stays_at_the_seed() {
+        // Zero curvature and no games: the sweep skips them and they sit at the seed
+        // (the unrated centre), never a NaN from 0/0.
+        let newcomer = player(None);
+        let settings = TournamentSettings {
+            elo_prior_shape_unrated: EloPriorShape::Flat,
+            elo_unrated_prior_center: 900,
+            ..Default::default()
+        };
+        let est = estimate_elos(std::slice::from_ref(&newcomer), &settings, &[])[&newcomer.id];
+        assert!(
+            (est - 900.0).abs() < 1e-6,
+            "a no-games flat player stays at the seed, got {est}"
         );
     }
 

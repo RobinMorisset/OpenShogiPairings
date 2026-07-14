@@ -263,6 +263,31 @@ referee can pick fatter tails, an upward tilt, both, or neither.
   at `μ₀`, so a player with no games sits precisely at their registration rating
   regardless of `r`.
 
+**`EloPriorShape::Flat` — the improper prior (`turnering.py` performance rating).**
+A third shape drops the prior entirely: its contribution to the gradient and
+Hessian is `(0, 0)`, so a player carrying it is estimated by the **likelihood
+alone** — the maximum-likelihood performance rating over their games. This
+reproduces the FESA rating program's treatment of unrated newcomers (the
+`performance2` Newton solve), where a strong veteran arriving without an ELO is
+rated straight off the field they beat, with no regularisation toward the unrated
+centre. It is meant for the `elo_prior_shape_unrated` slot; the upward-looseness
+knobs don't apply (there's no arm to widen). Because a flat prior can't bound an
+all-win or all-loss likelihood, those scorelines follow `turnering.py`'s guards,
+applied in `estimate_elos`:
+
+- **all games lost** → floored to `FLAT_ALL_LOSS_FLOOR = 1` (the bottom of the
+  assumed `[1, 1200]` unrated range, matching turnering's new-rule floor);
+- **all games won** → a pseudo-*draw* against the strongest opponent is added to
+  the likelihood (turnering's `[best_elo] + elo_results`), giving the otherwise-
+  monotone objective a finite maximum above the field;
+- **no games** → the player's Hessian is `0`, so the sweep leaves them at their
+  seed (the unrated centre) rather than dividing by zero.
+
+A mixed scoreline needs no guard — the likelihood alone is strictly concave in
+that player's `θ`. Note the flat prior supplies *no* curvature, so it relies on
+the rated field's proper priors to pin the overall scale; on a normal tournament
+(some rated players present) that is always satisfied.
+
 Default is `Gaussian` with every `r = 1` — behaviour-neutral; nothing changes
 until a referee raises a looseness knob or switches shape.
 
@@ -473,8 +498,9 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   clamps K ≥ 1; normalization stores the clamped value. Unlike `m` and the
   provisional multiplier, this is the *only* width knob for an unrated player.
 - `elo_prior_shape_{established,provisional,unrated}: EloPriorShape` — the prior
-  shape **per player category**: `Gaussian` (default) or the fatter-tailed,
-  optionally asymmetric `Laplace` (see §2.5). A plain enum (`#[serde(rename_all =
+  shape **per player category**: `Gaussian` (default), the fatter-tailed,
+  optionally asymmetric `Laplace`, or the improper `Flat` (the `turnering.py`
+  performance rating — no prior; see §2.5). A plain enum (`#[serde(rename_all =
   "snake_case")]`), default-`Gaussian` for all three, so old saves and untouched
   tournaments keep the historical behaviour exactly. Splitting the shape per
   category lets a fat tail be confined to the one population whose true strength is
