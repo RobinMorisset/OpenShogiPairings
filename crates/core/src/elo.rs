@@ -355,6 +355,20 @@ pub(crate) fn oracle_prior(
     )
 }
 
+/// The oracle prior width (σ₀) for a player *provisionally* rated at `rating`.
+///
+/// Used by the simulator for a player who was **unrated** at registration but
+/// nonetheless has a post-tournament result (an override): earning a rating from a
+/// tournament's worth of games makes them *provisionally* rated, not truly unknown,
+/// so their true strength should be jittered at this provisional width — the same
+/// `√(K · s)` law as a rated player, at the provisional multiplier — rather than the
+/// very broad "we know nothing" unrated width. Uses the oracle's ×1 K multiplier,
+/// like [`oracle_prior`]; `provisional_mult` is clamped to ≥ 1.
+pub(crate) fn oracle_provisional_width(rating: f64, provisional_mult: f64) -> f64 {
+    let k = fesa_k(rating.round().max(0.0) as u32) * provisional_mult.max(1.0);
+    (k * S).sqrt()
+}
+
 /// Expected score `σ(x) = 1/(1+e^−x)` for `x = (θself − θopp)/s`.
 fn expected(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
