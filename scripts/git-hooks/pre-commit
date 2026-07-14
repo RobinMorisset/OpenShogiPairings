@@ -10,7 +10,10 @@ echo "== cargo clippy =="
 cargo clippy --workspace --all-targets -- -D warnings
 
 echo "== svelte-check =="
-export PATH="/c/Program Files/nodejs:$PATH"
+# On Windows (Git Bash / MSYS), node isn't on the shell PATH by default.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) export PATH="/c/Program Files/nodejs:$PATH" ;;
+esac
 ( cd frontend && npm run check )
 
 echo "== i18n locale keys =="
