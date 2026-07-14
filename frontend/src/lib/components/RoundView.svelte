@@ -571,16 +571,16 @@
             </td>
             {#if longEnabled}
               <td class="long-col">
-                {#if !isCup(board)}
-                  <input
-                    type="checkbox"
-                    class="long-check"
-                    checked={board.long ?? false}
-                    disabled={longToggleDisabled(board)}
-                    title={$_("roundView.longTitle")}
-                    onchange={(e) => onSetLong?.(index, e.currentTarget.checked)}
-                  />
-                {/if}
+                <!-- Cup boards can be long too; the server couples every cup board
+                     of the round, so ticking one ticks them all. -->
+                <input
+                  type="checkbox"
+                  class="long-check"
+                  checked={board.long ?? false}
+                  disabled={longToggleDisabled(board)}
+                  title={$_("roundView.longTitle")}
+                  onchange={(e) => onSetLong?.(index, e.currentTarget.checked)}
+                />
               </td>
             {/if}
             {#if handicapPolicy !== "none"}

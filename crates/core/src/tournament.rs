@@ -1061,19 +1061,24 @@ impl Tournament {
                 round: round_number,
                 board: board_index,
             })?;
-        // Cup boards spanning two rounds break the bracket↔round mapping; that is
-        // a separate phase, so reject the toggle rather than corrupt the cup.
-        if matches!(board.source, PairingSource::Cup { .. }) {
-            return Err(TournamentError::InvalidDraft(
-                "long games are not yet supported for cup boards".into(),
-            ));
-        }
         // Making a board long after it is decided is meaningless; turning it off
         // after a result is the intended demote path.
         if long && board.is_decided() {
             return Err(TournamentError::RoundHasResults);
         }
-        board.long = long;
+        // A cup board's flag couples to every cup board of the round: a whole cup
+        // bracket round is long or not as a unit, which is exactly the invariant
+        // the cup↔tournament-round mapping relies on (see `Cup::cup_schedule`). A
+        // Swiss/forced board toggles on its own.
+        if matches!(board.source, PairingSource::Cup { .. }) {
+            for b in round.boards.iter_mut() {
+                if matches!(b.source, PairingSource::Cup { .. }) {
+                    b.long = long;
+                }
+            }
+        } else {
+            board.long = long;
+        }
         round.completed = round.is_complete();
         Ok(&self.rounds[idx])
     }
@@ -2262,6 +2267,93 @@ mod tests {
         assert_eq!(podium.runner_up, Some(s[1]));
         assert_eq!(podium.third, Some(s[3]));
         assert_eq!(podium.fourth, Some(s[2]));
+    }
+
+    #[test]
+    fn long_cup_round_couples_all_cup_boards_gaps_the_next_round_and_resumes() {
+        let mut t = Tournament::new("Champ").unwrap();
+        t.update_settings(TournamentSettings {
+            cup_enabled: true,
+            long_boards_enabled: true,
+            ..Default::default()
+        });
+        let s: Vec<Uuid> = (0..8)
+            .map(|i| add_rated(&mut t, &format!("E{i}"), 2000 - i * 100, true))
+            .collect();
+        let n9 = add_rated(&mut t, "N9", 1250, false);
+        let n10 = add_rated(&mut t, "N10", 1200, false);
+        t.finalize_registration_with(Some(8)).unwrap();
+
+        // Round 1: quarterfinals (cup) plus one Swiss board (n9 vs n10).
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+
+        // Flag ONE cup board long → all four cup boards couple to long; the Swiss
+        // board is left alone.
+        let cup_idx = t.rounds[0]
+            .boards
+            .iter()
+            .position(|b| matches!(b.source, PairingSource::Cup { .. }))
+            .unwrap();
+        t.set_board_long(1, cup_idx, true).unwrap();
+        assert!(t.rounds[0]
+            .boards
+            .iter()
+            .filter(|b| matches!(b.source, PairingSource::Cup { .. }))
+            .all(|b| b.long));
+        assert_eq!(
+            t.rounds[0]
+                .boards
+                .iter()
+                .find(|b| matches!(b.source, PairingSource::Swiss))
+                .map(|b| b.long),
+            Some(false)
+        );
+
+        // Deciding only the Swiss board completes round 1 with the QFs pending.
+        decide(&mut t, 1, n9, n10);
+        assert!(t.rounds[0].completed);
+        assert!(t.rounds[0]
+            .boards
+            .iter()
+            .filter(|b| matches!(b.source, PairingSource::Cup { .. }))
+            .all(|b| !b.is_decided()));
+
+        // Round 2 is the gap round: the eight cup players are busy on their long
+        // QFs, so only the two non-eligibles are paired, with no cup boards.
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        let r2 = t.rounds.last().unwrap();
+        assert!(r2
+            .boards
+            .iter()
+            .all(|b| matches!(b.source, PairingSource::Swiss)));
+        assert!(find_board(&t, 2, n9, n10).is_some());
+        assert!(r2
+            .boards
+            .iter()
+            .all(|b| !s.contains(&b.player1) && !s.contains(&b.player2)));
+
+        // Complete round 2; round 3 can't be prepared until the long QFs resolve.
+        decide_rest(&mut t, 2);
+        assert_eq!(
+            t.prepare_round(),
+            Err(TournamentError::UnresolvedLongGame { round: 1 })
+        );
+
+        // Record the QF results; round 3 then hosts the semifinal.
+        for i in 0..4 {
+            decide(&mut t, 1, s[i], s[7 - i]);
+        }
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        assert!(matches!(
+            find_board(&t, 3, s[0], s[3]).unwrap().source,
+            PairingSource::Cup {
+                stage: CupStage::Semifinal
+            }
+        ));
+        assert!(find_board(&t, 3, s[1], s[2]).is_some());
     }
 
     #[test]

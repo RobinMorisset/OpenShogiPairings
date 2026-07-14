@@ -156,6 +156,22 @@
       .filter(({ board }) => board.long && board.result == null && board.no_show == null);
   });
 
+  // Players still busy on an unresolved long game (a two-round board from an
+  // earlier round). They can't be paired or customized in the next round's draft
+  // — the server excludes them from pairing — so keep them out of the draft UI
+  // too (alongside cup players), which also stops a gap round accidentally
+  // carrying them into the next round as absentees.
+  const busyLongPlayers = $derived.by(() => {
+    if (!tournament) return [];
+    const out: string[] = [];
+    for (const r of tournament.rounds) {
+      for (const b of r.boards) {
+        if (b.long && b.result == null && b.no_show == null) out.push(b.player1, b.player2);
+      }
+    }
+    return out;
+  });
+
   // Why the engine chose the active round's pairings — fetched lazily whenever a
   // round tab is open (and refetched when the tournament changes, since editing
   // an earlier result can shift a later round's ledger).
@@ -922,7 +938,7 @@
           <RoundDraftView
             draft={tournament.draft}
             players={tournament.players}
-            cupPlayers={draftCupPlayers}
+            cupPlayers={[...draftCupPlayers, ...busyLongPlayers]}
             onUpdate={handleUpdateDraft}
             onConfirm={handleConfirmRound}
             {busy}

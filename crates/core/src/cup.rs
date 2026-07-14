@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-use crate::round::{CupStage, NoShow, Round};
+use crate::round::{CupStage, NoShow, PairingSource, Round};
 
 /// The valid cup sizes (top-N), each a power of two.
 pub const CUP_SIZES: [u32; 4] = [8, 16, 32, 64];
@@ -76,28 +76,59 @@ impl Cup {
         self.size.trailing_zeros()
     }
 
-    /// Whether tournament round `r` (1-based) is part of the cup.
-    pub fn is_cup_round(&self, r: u32) -> bool {
-        r >= 1 && r <= self.cup_rounds()
+    /// The tournament round each bracket round is played in: index `i` gives the
+    /// (1-based) tournament round of bracket round `i + 1`. Normally the identity
+    /// (bracket round `k` in tournament round `k`), but a bracket round played as
+    /// **long** games (double time control) spans *two* tournament rounds — the
+    /// second is a gap round the rest of the field plays through as pure Swiss —
+    /// so every later bracket round shifts one further on. Derived by replaying
+    /// the recorded long flags forward; a bracket round not yet played (or not
+    /// marked long) defaults to a single round. See `docs/two-round-boards.md`.
+    fn cup_schedule(&self, rounds: &[Round]) -> Vec<u32> {
+        let mut sched = Vec::with_capacity(self.cup_rounds() as usize);
+        let mut t = 1u32;
+        for _ in 0..self.cup_rounds() {
+            sched.push(t);
+            // A bracket round is long when the cup boards in its tournament round
+            // are flagged long (they are coupled, so all or none).
+            let long = rounds.iter().find(|r| r.number == t).is_some_and(|r| {
+                r.boards
+                    .iter()
+                    .any(|b| matches!(b.source, PairingSource::Cup { .. }) && b.long)
+            });
+            t += if long { 2 } else { 1 };
+        }
+        sched
     }
 
-    /// The bracket pairings for cup round `r`, reading earlier results from
+    /// Whether tournament round `r` hosts cup bracket matches (as opposed to a
+    /// gap round between two long cup rounds, or a round past the cup).
+    pub fn is_cup_round(&self, rounds: &[Round], r: u32) -> bool {
+        self.cup_schedule(rounds).contains(&r)
+    }
+
+    /// The bracket pairings for tournament round `r`, reading earlier results from
     /// `rounds`: the two-player matches plus any unopposed advances (cup byes).
     /// `None` if a needed earlier cup result is missing (shouldn't happen for a
-    /// properly gated round). Empty when `r` is past the cup.
+    /// properly gated round). Empty when `r` is a gap round (the idle second round
+    /// of a long cup round) or past the cup.
     ///
     /// A slot goes empty when both players of the match that would fill it were
     /// no-shows: that match advances nobody, so whoever was drawn to face its
     /// winner advances unopposed as a bye.
     pub fn matches_for_round(&self, rounds: &[Round], r: u32) -> Option<CupPairings> {
-        if !self.is_cup_round(r) {
+        let sched = self.cup_schedule(rounds);
+        // Which bracket round (1-based) is played in tournament round `r`? None →
+        // `r` is a gap round or past the cup, so there are no cup pairings.
+        let Some(pos) = sched.iter().position(|&t| t == r) else {
             return Some(CupPairings::default());
-        }
+        };
+        let bracket = pos as u32 + 1;
         let cup_rounds = self.cup_rounds();
-        let (frontier, semifinal_losers) = self.replay_to(rounds, r)?;
+        let (frontier, semifinal_losers) = self.replay_to(rounds, &sched, bracket)?;
 
         let mut pairings = CupPairings::default();
-        if r < cup_rounds {
+        if bracket < cup_rounds {
             let stage = stage_before_final(frontier.len() as u32);
             for pair in fold(&frontier) {
                 push_pairing(pair, stage, &mut pairings);
@@ -121,14 +152,16 @@ impl Cup {
     /// panics on a missing winner.
     pub fn podium(&self, rounds: &[Round]) -> Option<CupPodium> {
         let cup_rounds = self.cup_rounds();
+        let sched = self.cup_schedule(rounds);
+        let final_tround = sched[cup_rounds as usize - 1];
         // The final round must have been reached (its boards generated).
-        rounds.iter().find(|r| r.number == cup_rounds)?;
-        let (frontier, semifinal_losers) = self.replay_to(rounds, cup_rounds)?;
+        rounds.iter().find(|r| r.number == final_tround)?;
+        let (frontier, semifinal_losers) = self.replay_to(rounds, &sched, cup_rounds)?;
         let losers = semifinal_losers.expect("semifinal replayed before the final round");
 
         let (champion, runner_up) =
-            self.decide_slot(*fold(&frontier).first()?, rounds, cup_rounds)?;
-        let (third, fourth) = self.decide_slot(*fold(&losers).first()?, rounds, cup_rounds)?;
+            self.decide_slot(*fold(&frontier).first()?, rounds, final_tround)?;
+        let (third, fourth) = self.decide_slot(*fold(&losers).first()?, rounds, final_tround)?;
         Some(CupPodium {
             champion,
             runner_up,
@@ -137,21 +170,25 @@ impl Cup {
         })
     }
 
-    /// Replay the cup up to (but not including) round `r`, returning the frontier
-    /// entering round `r` (a slot is `None` where both feeding players were
-    /// no-shows) and the two semifinal losers (each `None` under the same). The
-    /// losers are only populated once the semifinal has been replayed.
+    /// Replay the cup up to (but not including) bracket round `bracket`, returning
+    /// the frontier entering it (a slot is `None` where both feeding players were
+    /// no-shows) and the two semifinal losers (each `None` under the same). Each
+    /// earlier bracket round's results are read from its own tournament round via
+    /// `sched`, so long cup rounds (which span two tournament rounds) replay
+    /// correctly. The losers are only populated once the semifinal is replayed.
     #[allow(clippy::type_complexity)]
     fn replay_to(
         &self,
         rounds: &[Round],
-        r: u32,
+        sched: &[u32],
+        bracket: u32,
     ) -> Option<(Vec<Option<Uuid>>, Option<[Option<Uuid>; 2]>)> {
         let cup_rounds = self.cup_rounds();
         let mut frontier: Vec<Option<Uuid>> = self.seed_order.iter().copied().map(Some).collect();
         let mut semifinal_losers: Option<[Option<Uuid>; 2]> = None;
-        for k in 1..r {
-            let (winners, losers) = self.play_round(rounds, k, &frontier)?;
+        for k in 1..bracket {
+            let tround = sched[k as usize - 1];
+            let (winners, losers) = self.play_round(rounds, tround, &frontier)?;
             if k == cup_rounds - 1 {
                 semifinal_losers = Some([losers[0], losers[1]]);
             }
@@ -349,5 +386,81 @@ mod tests {
             cup.matches_for_round(&[], 1).unwrap().matches[0].stage,
             CupStage::RoundOf(32)
         ));
+    }
+
+    #[test]
+    fn a_long_cup_round_consumes_two_tournament_rounds_and_the_bracket_resumes_after() {
+        let s = ids(8);
+        let cup = Cup {
+            size: 8,
+            seed_order: s.clone(),
+        };
+
+        // Tournament round 1 = quarterfinals, played as LONG games (double time
+        // control), so they span rounds 1 and 2. Top seed of each match wins.
+        let mut r1 = cup_round(
+            1,
+            &[
+                (s[0], s[7], CupStage::Quarterfinal),
+                (s[1], s[6], CupStage::Quarterfinal),
+                (s[2], s[5], CupStage::Quarterfinal),
+                (s[3], s[4], CupStage::Quarterfinal),
+            ],
+        );
+        for b in &mut r1.boards {
+            b.long = true;
+        }
+
+        // Round 2 is the gap round: no cup pairings, and the semifinal is pushed to
+        // round 3 instead of round 2.
+        assert!(cup
+            .matches_for_round(std::slice::from_ref(&r1), 2)
+            .unwrap()
+            .matches
+            .is_empty());
+        assert!(!cup.is_cup_round(std::slice::from_ref(&r1), 2));
+        assert!(cup.is_cup_round(std::slice::from_ref(&r1), 3));
+
+        // Round 3 hosts the semifinal, fed by the round-1 quarterfinal results.
+        let sf = cup
+            .matches_for_round(std::slice::from_ref(&r1), 3)
+            .unwrap()
+            .matches;
+        assert_eq!((sf[0].player1, sf[0].player2), (s[0], s[3]));
+        assert_eq!((sf[1].player1, sf[1].player2), (s[1], s[2]));
+        assert!(matches!(sf[0].stage, CupStage::Semifinal));
+
+        // Play the semifinal in round 3 (ordinary length): s0, s1 win.
+        let r3 = cup_round(
+            3,
+            &[
+                (s[0], s[3], CupStage::Semifinal),
+                (s[1], s[2], CupStage::Semifinal),
+            ],
+        );
+        // Round 4 hosts the final and small final.
+        let f = cup
+            .matches_for_round(&[r1.clone(), r3.clone()], 4)
+            .unwrap()
+            .matches;
+        assert_eq!((f[0].player1, f[0].player2), (s[0], s[1]));
+        assert!(matches!(f[0].stage, CupStage::Final));
+        assert_eq!((f[1].player1, f[1].player2), (s[3], s[2]));
+        assert!(matches!(f[1].stage, CupStage::SmallFinal));
+
+        // The podium follows the shifted schedule (final is round 4, not round 3).
+        let r4 = cup_round(
+            4,
+            &[
+                (s[0], s[1], CupStage::Final),
+                (s[3], s[2], CupStage::SmallFinal),
+            ],
+        );
+        assert!(cup.podium(&[r1.clone(), r3.clone()]).is_none()); // final not reached
+        let podium = cup.podium(&[r1, r3, r4]).unwrap();
+        assert_eq!(podium.champion, Some(s[0]));
+        assert_eq!(podium.runner_up, Some(s[1]));
+        assert_eq!(podium.third, Some(s[3]));
+        assert_eq!(podium.fourth, Some(s[2]));
     }
 }

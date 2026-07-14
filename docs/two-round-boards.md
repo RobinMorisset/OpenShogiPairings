@@ -56,8 +56,9 @@ These were settled up front because they change the shape of the implementation:
    round, or that resolved by forfeit, back to an ordinary one-point game (so
    those cases need no special scoring rule). Once the round advances, longness is
    frozen. Cup boards toggle together.
-5. **Scope of the first commit — Swiss only.** Cup (direct-elimination) support is
-   explicitly **deferred to a second commit** (see [Cup interaction](#cup-interaction-deferred-to-a-second-commit)).
+5. **Phasing — Swiss first, then cup.** The Swiss case shipped first; cup
+   (direct-elimination) support followed in a second commit (see
+   [Cup interaction](#cup-interaction-implemented)). Both are now implemented.
 6. **Print.** Long boards are **marked on the printed pairing sheet** (a static
    "★ 2R" glyph), so the physical sheet shows which boards run long.
 
@@ -235,10 +236,9 @@ Guards:
   finished-early / forfeited long game can be demoted (decision #4).
 - Gate behind `self.settings.long_boards_enabled` (reject otherwise, defence in
   depth; the UI already hides the column).
-- **Cup coupling** (second commit): if the target board's `source` is
-  `Cup { .. }`, set `long` on all boards in the round whose source is
-  `Cup { .. }`; otherwise set it on just the one board. Until the cup phase lands,
-  a long toggle on a cup board can simply be rejected.
+- **Cup coupling:** if the target board's `source` is `Cup { .. }`, set `long` on
+  all boards in the round whose source is `Cup { .. }`; otherwise set it on just
+  the one board.
 
 Returns the whole round (the UI needs the coupled cup boards refreshed).
 
@@ -379,58 +379,60 @@ Only invest in exact reimport if these tournaments are actually re-imported (the
 common case is export-only, for federation ELO submission). This is the main
 **known lossy** area — see [Risks](#risks).
 
-## Cup interaction (deferred to a second commit)
+## Cup interaction (implemented)
 
-> **Scope note (decision #5):** everything below is **out of the first commit**.
-> The first commit ships Swiss-only long boards; a long toggle on a cup board is
-> rejected until this phase lands. This section is the plan for that second pass.
+> Shipped in a second commit, after the Swiss phase. Long cup rounds work; the
+> mechanism is below.
 
 `crates/core/src/cup.rs`
 
-A hybrid tournament's cup currently assumes a **1:1 mapping** between cup rounds
-and tournament rounds: `is_cup_round(r) = r <= cup_rounds()`, and
-`matches_for_round(rounds, r)` derives the bracket state by replaying tournament
-rounds `1..r`. Making a cup round **long** breaks that 1:1 assumption: a single
-bracket round now consumes **two** tournament rounds.
-
-Concretely, when the cup boards of tournament round N are long:
+A hybrid tournament's cup used to assume a **1:1 mapping** between bracket rounds
+and tournament rounds (`is_cup_round(r) = r <= cup_rounds()`, and
+`matches_for_round(rounds, r)` replaying tournament rounds `1..r`). Making a cup
+round **long** breaks that: a single bracket round now consumes **two** tournament
+rounds. Concretely, when the cup boards of tournament round N are long:
 
 - Round N holds the cup matches (long, pending). Cup players are excluded from
   round N's Swiss pool as usual.
-- Round N+1 must **not** advance the bracket (the round-N cup games aren't
-  decided). Cup players are all busy (pending long boards), so they are excluded
-  from round N+1 by the same `busy_long` mechanism — round N+1 is an ordinary
-  Swiss round for **everyone else**.
-- Round N+2 resumes the cup: it should present the *next* bracket round, fed by
-  round N's now-decided results.
+- Round N+1 is a **gap round**: the bracket does not advance (round N's cup games
+  aren't decided), and the cup players are all busy (pending long boards), so the
+  `busy_long` exclusion keeps them out — round N+1 is an ordinary Swiss round for
+  everyone else, with no cup boards.
+- Round N+2 resumes the cup with the *next* bracket round, fed by round N's
+  now-decided results (the N+2 gate guarantees they are in).
 
-The core difficulty is `matches_for_round`'s round arithmetic. Options:
+**The mechanism — a derived schedule.** `Cup::cup_schedule(rounds) -> Vec<u32>`
+gives, for each bracket round, the (1-based) tournament round it is played in. It
+walks the bracket rounds from tournament round 1, advancing by **2** for a
+bracket round whose cup boards are flagged long and by **1** otherwise — reading
+the long flags straight off the recorded rounds, so nothing new is stored (same
+derive-don't-store philosophy as the rest of the cup). A bracket round not yet
+played (or not marked long) defaults to a single round.
 
-- **(Recommended) Derive the cup-round→tournament-round offset from long flags.**
-  Teach the cup to skip the extra tournament round a long cup round consumed:
-  when replaying, a cup round that was long occupies two tournament-round slots.
-  `is_cup_round` / `matches_for_round` compute the tournament round for each
-  bracket round by walking the rounds and counting long cup rounds as two. This
-  keeps the "derive from results" philosophy but makes the mapping data-driven
-  rather than `r <= cup_rounds()`.
-- **(Alternative) Store the mapping.** Record, on the `Cup`, which tournament
-  round each bracket round occupies. Simpler arithmetic, but adds stored state
-  that must survive undo/cancel — against the current derive-don't-store grain.
+Everything else is expressed through the schedule:
 
-Because the cup replay (`replay_to`, `play_round`, `decide`) reads boards by
-`round.number`, and the boards physically live in their starting round, the
-replay largely keeps working as long as the **frontier→tournament-round** mapping
-is corrected. `podium()` and `draft_cup_players()` ride on the same mapping.
+- `matches_for_round(rounds, r)` finds the bracket round whose scheduled
+  tournament round is `r` (none → `r` is a gap round or past the cup → no cup
+  pairings), then replays the earlier bracket rounds, each read from **its own**
+  scheduled tournament round.
+- `replay_to(rounds, sched, bracket)` and `podium` read every bracket round's
+  results from `sched[k-1]` rather than assuming round `k`.
+- `is_cup_round(rounds, r)` is now `schedule.contains(&r)` (it gained a `rounds`
+  argument, since longness is only known from the recorded rounds).
 
-**Cup coupling of the toggle** (decision #4) is handled in `set_board_long` (all
-cup boards of the round flip together), so the referee can never create a
-half-long cup round — which is exactly the invariant the cup arithmetic relies
-on.
+Because the boards physically live in their starting round and `decide` reads
+boards by round number, feeding it the scheduled tournament round is the only
+change the replay needs.
 
-Given the depth here, a reasonable **phasing** is to ship long boards for the
-**Swiss** case first (fully useful on its own, and the case the user actually
-experienced), then add cup support in a second pass with the mapping rework and
-its own test matrix. Flag this split to the user.
+**Cup coupling of the toggle** (decision #4) lives in `set_board_long`: toggling
+long on any cup board applies the flag to **every** cup board of that round, so a
+bracket round is long or not as a unit — exactly the invariant `cup_schedule`
+relies on (it reads "is this bracket round long?" from any one cup board).
+
+**Draft/pairing niceties.** `draft_cup_players` returns empty for a gap round (no
+cup boards that round), so the frontend additionally excludes `busy_long` players
+from the draft-customization UI — otherwise a gap round could show a mid-game cup
+player as available and even carry them into the next round as a default absentee.
 
 ## Server API
 
@@ -595,9 +597,10 @@ Frontend:
 
 ## Risks
 
-- **Cup mapping** is the highest-risk change and is why cup support is deferred to
-  a second commit: the 1:1 cup-round↔tournament-round assumption is baked into
-  `cup.rs`.
+- **Cup mapping** was the highest-risk change (the old 1:1 cup-round↔tournament-
+  round assumption baked into `cup.rs`); it is now handled by the derived
+  `cup_schedule` (see [Cup interaction](#cup-interaction-implemented)) and covered
+  by tests.
 - **American-grid reverse import** is lossy for long boards; scoped out of the
   first version unless re-import is a real workflow.
 - **`completed` no longer implies "all boards decided"** — this is the assumption
@@ -612,5 +615,5 @@ Frontend:
 All the questions raised during design are now settled and folded into
 [Decisions](#decisions-locked): a long game finishing early or by forfeit needs no
 special rule (the referee unticks to demote); long boards are marked "★ 2R" on the
-printed sheet; and cup support is deferred to a second commit. No open questions
-remain — the design is ready to implement (Swiss phase first).
+printed sheet; and cup support shipped in a second commit after the Swiss phase.
+Both phases are implemented.
