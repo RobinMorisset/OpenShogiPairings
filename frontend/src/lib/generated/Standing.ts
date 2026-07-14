@@ -6,63 +6,65 @@
  */
 export type Standing = { player_id: string, 
 /**
- * Games won (effective winner; a bye counts as a win).
+ * Games won (effective winner; a bye counts as a win). A whole game count.
  */
 victories: number, 
 /**
- * MacMahon starting points.
+ * MacMahon starting points, in **half-point units** (×2).
  */
 macmahon: number, 
 /**
- * Total score: `macmahon + victories`.
+ * Total score in **half-point units** (×2): `macmahon + 2·victories`, plus
+ * `1` per half-point absence. Divide by 2 for display.
  */
 points: number, 
 /**
- * Sum of opponents' points.
+ * Sum of opponents' points (**half-point units**, since it sums points).
  */
 sosm: number, 
 /**
- * Sum of opponents' wins.
+ * Sum of opponents' wins (whole count).
  */
 sosw: number, 
 /**
- * Sum of defeated opponents' points.
+ * Sum of defeated opponents' points (**half-point units**).
  */
 sodosm: number, 
 /**
- * Sum of defeated opponents' wins.
+ * Sum of defeated opponents' wins (whole count).
  */
 sodosw: number, 
 /**
- * Sum of opponents' SOSM.
+ * Sum of opponents' SOSM (**half-point units**).
  */
 sososm: number, 
 /**
- * Sum of opponents' SOSW.
+ * Sum of opponents' SOSW (whole count).
  */
 sososw: number, 
 /**
- * SOSM dropping the single lowest-scoring opponent.
+ * SOSM dropping the single lowest-scoring opponent (**half-point units**).
  */
 sosm1: number, 
 /**
- * SOSM dropping the two lowest-scoring opponents.
+ * SOSM dropping the two lowest-scoring opponents (**half-point units**).
  */
 sosm2: number, 
 /**
- * SOSW dropping the single lowest-scoring opponent.
+ * SOSW dropping the single lowest-scoring opponent (whole count).
  */
 sosw1: number, 
 /**
- * SOSW dropping the two lowest-scoring opponents.
+ * SOSW dropping the two lowest-scoring opponents (whole count).
  */
 sosw2: number, 
 /**
- * Cumulative sum of the running points total after each round.
+ * Cumulative sum of the running points total after each round
+ * (**half-point units**).
  */
 cussm: number, 
 /**
- * Cumulative sum of the running win total after each round.
+ * Cumulative sum of the running win total after each round (whole count).
  */
 cussw: number, 
 /**
@@ -84,7 +86,8 @@ opponents: Array<string>,
  */
 defeated: Array<string>, 
 /**
- * Running points total after each completed round (the sequence CUSSM sums).
+ * Running points total after each completed round (the sequence CUSSM sums),
+ * in **half-point units**.
  */
 running_points: Array<number>, 
 /**

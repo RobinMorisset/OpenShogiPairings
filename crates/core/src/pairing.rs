@@ -1648,14 +1648,68 @@ mod tests {
             None,
         );
 
-        // Every board carries a frozen float, and the forced A-vs-D board's is +1.
+        // Every board carries a frozen float, and the forced A-vs-D board's is
+        // +2 half-points (A on 1 point = 2 halves, D on 0). Only its sign matters
+        // to the float history.
         assert!(round.boards.iter().all(|b| b.points_diff.is_some()));
         let ad = round
             .boards
             .iter()
             .find(|b| b.player1 == p[0].id && b.player2 == p[3].id)
             .expect("forced board present");
-        assert_eq!(ad.points_diff, Some(1));
+        assert_eq!(ad.points_diff, Some(2));
+    }
+
+    #[test]
+    fn a_half_point_reaches_pairing_at_half_point_granularity() {
+        // With half-point absences on, C sits out round 1 and carries ½ a point
+        // (1 half-unit) into round 2, while A has a full point (2). The engine
+        // sees the scores at half-point granularity: A and C are one half-point
+        // apart, so their round-2 board freezes an *odd* points_diff (±1) — a
+        // float whole-point scoring could never produce. B (lowest) takes the bye.
+        let a = player(1, Some(2000), None);
+        let b = player(2, Some(1500), None);
+        let c = player(3, Some(1000), None);
+        let players = vec![a.clone(), b.clone(), c.clone()];
+        let settings = TournamentSettings {
+            half_point_absences: true,
+            ..Default::default()
+        };
+
+        // Round 1: A beats B; C is absent (half a point).
+        let r1 = Round {
+            number: 1,
+            boards: vec![Board {
+                result: Some(Winner::Player1),
+                ..Board::pending(a.id, b.id, Some(0), PairingSource::Swiss)
+            }],
+            bye: None,
+            cup_byes: Vec::new(),
+            absent: vec![c.id],
+            completed: true,
+        };
+
+        let present = vec![a.id, b.id, c.id];
+        let round = pair_round_weighted(
+            2,
+            &players,
+            &settings,
+            std::slice::from_ref(&r1),
+            &present,
+            &[],
+            None,
+        );
+
+        assert_eq!(round.bye, Some(b.id)); // lowest score takes the bye
+        let ac = round
+            .boards
+            .iter()
+            .find(|bd| {
+                (bd.player1 == a.id && bd.player2 == c.id)
+                    || (bd.player1 == c.id && bd.player2 == a.id)
+            })
+            .expect("A vs C paired");
+        assert_eq!(ac.points_diff.unwrap().abs(), 1); // A(2) vs C(1) — an odd float
     }
 
     #[test]

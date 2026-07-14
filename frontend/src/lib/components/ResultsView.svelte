@@ -5,6 +5,7 @@
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
   import { boardOutcome } from "../boardOutcome";
   import { partitionDropped } from "../tiebreak";
+  import { formatScore, HALF_POINT_TIEBREAKS } from "../score";
   import { printPage } from "../platform";
 
   interface Props {
@@ -123,7 +124,9 @@
 
   type Cell =
     | { kind: "bye" }
-    | { kind: "absent" }
+    // An absence: `half` when the tournament awards absences half a point (a
+    // scored half-bye, `0=`), otherwise a plain zero (`0−`).
+    | { kind: "absent"; half: boolean }
     // A no-show board: this player was the absentee (`0#`) or the one who
     // showed up and was credited the free point, bye-style (`0+`).
     | { kind: "no-show"; opponentName: string }
@@ -138,7 +141,15 @@
     const boardIdx = round.boards.findIndex(
       (b) => b.player1 === player.id || b.player2 === player.id,
     );
-    if (boardIdx < 0) return { kind: "absent" };
+    if (boardIdx < 0) {
+      // No board and not the bye: absent. It scores a half point (a `0=`
+      // half-bye) when the tournament awards absences half a point *and* the
+      // player is in this round's absent list — matching the server's scoring.
+      const half =
+        (tournament.settings.half_point_absences ?? false) &&
+        (round.absent ?? []).includes(player.id);
+      return { kind: "absent", half };
+    }
     const board = round.boards[boardIdx];
     const isP1 = board.player1 === player.id;
     const side: Winner = isP1 ? "player1" : "player2";
@@ -212,26 +223,27 @@
       .join("\n");
   }
 
-  /** A tie-break value, and the players who contributed it — `4 (Doe Jane)`. */
-  function opponentTerm(id: string, field: keyof Standing): string {
+  /** A tie-break value, and the players who contributed it — `4 (Doe Jane)`. A
+   * `half`-unit field (points, SOSM, …) is rendered `1½`; a whole one as-is. */
+  function opponentTerm(id: string, field: keyof Standing, half: boolean): string {
     const value = (standingById.get(id)?.[field] as number | undefined) ?? 0;
-    return `${value} (${nameOf(id)})`;
+    return `${half ? formatScore(value) : value} (${nameOf(id)})`;
   }
 
   /** Join the opponents' contributions to an opponent-sum tie-break, e.g.
    * `3 (Doe Jane) + 2 (Roe Max)`; a placeholder when there are none yet. */
-  function sumTerms(ids: string[], field: keyof Standing): string {
+  function sumTerms(ids: string[], field: keyof Standing, half: boolean): string {
     if (ids.length === 0) return $_("resultsView.tiebreakNoOpponents");
-    return ids.map((id) => opponentTerm(id, field)).join(" + ");
+    return ids.map((id) => opponentTerm(id, field, half)).join(" + ");
   }
 
   /** Like [`sumTerms`] but for the Buchholz-cut metrics: sort the opponents by
    * their contribution, drop the `drop` lowest (noting who), and sum the rest —
    * mirroring the server's `sum_dropping_lowest`. */
-  function droppedTerms(ids: string[], field: keyof Standing, drop: number): string {
+  function droppedTerms(ids: string[], field: keyof Standing, drop: number, half: boolean): string {
     if (ids.length === 0) return $_("resultsView.tiebreakNoOpponents");
     const terms = ids.map((id) => ({
-      term: opponentTerm(id, field),
+      term: opponentTerm(id, field, half),
       value: (standingById.get(id)?.[field] as number | undefined) ?? 0,
     }));
     const { kept, dropped } = partitionDropped(terms, (t) => t.value, drop);
@@ -246,28 +258,28 @@
   function tiebreakBreakdown(code: Tiebreak, standing: Standing): string | undefined {
     switch (code) {
       case "sos_m":
-        return sumTerms(standing.opponents, "points");
+        return sumTerms(standing.opponents, "points", true);
       case "sos_w":
-        return sumTerms(standing.opponents, "victories");
+        return sumTerms(standing.opponents, "victories", false);
       case "sodos_m":
-        return sumTerms(standing.defeated, "points");
+        return sumTerms(standing.defeated, "points", true);
       case "sodos_w":
-        return sumTerms(standing.defeated, "victories");
+        return sumTerms(standing.defeated, "victories", false);
       case "sosos_m":
-        return sumTerms(standing.opponents, "sosm");
+        return sumTerms(standing.opponents, "sosm", true);
       case "sosos_w":
-        return sumTerms(standing.opponents, "sosw");
+        return sumTerms(standing.opponents, "sosw", false);
       case "sos_m1":
-        return droppedTerms(standing.opponents, "points", 1);
+        return droppedTerms(standing.opponents, "points", 1, true);
       case "sos_m2":
-        return droppedTerms(standing.opponents, "points", 2);
+        return droppedTerms(standing.opponents, "points", 2, true);
       case "sos_w1":
-        return droppedTerms(standing.opponents, "victories", 1);
+        return droppedTerms(standing.opponents, "victories", 1, false);
       case "sos_w2":
-        return droppedTerms(standing.opponents, "victories", 2);
+        return droppedTerms(standing.opponents, "victories", 2, false);
       case "cuss_m":
         return standing.running_points.length > 0
-          ? standing.running_points.join(" + ")
+          ? standing.running_points.map((p) => formatScore(p)).join(" + ")
           : undefined;
       case "cuss_w":
         return standing.running_wins.length > 0
@@ -379,7 +391,11 @@
               {#if cell.kind === "bye"}
                 <span class="win" data-tip={$_("resultsView.byeTitle")}>0+</span>
               {:else if cell.kind === "absent"}
-                <span class="absent" data-tip={$_("resultsView.absentTitle")}>0−</span>
+                {#if cell.half}
+                  <span class="absent" data-tip={$_("resultsView.halfByeTitle")}>0=</span>
+                {:else}
+                  <span class="absent" data-tip={$_("resultsView.absentTitle")}>0−</span>
+                {/if}
               {:else if cell.kind === "no-show"}
                 <span
                   class="absent"
@@ -418,17 +434,19 @@
             <td
               class="num macmahon"
               class:adjusted={(player.adjustments ?? []).length > 0}
-              data-tip={macmahonTitle(player)}>{standing.points - standing.victories}</td
+              data-tip={macmahonTitle(player)}>{formatScore(standing.macmahon)}</td
             >
           {/if}
           {#each tiebreakColumns as col (col.code)}
             {#if col.code === "points"}
               <td class="num points" data-tip={$_("resultsView.victoriesPlusMacmahon")}
-                >{standing.points}</td
+                >{formatScore(standing.points)}</td
               >
             {:else}
               <td class="num tiebreak" data-tip={tiebreakCellTitle(col.code, standing)}
-                >{standing[col.field]}</td
+                >{HALF_POINT_TIEBREAKS.has(col.code)
+                  ? formatScore(standing[col.field] as number)
+                  : standing[col.field]}</td
               >
             {/if}
           {/each}

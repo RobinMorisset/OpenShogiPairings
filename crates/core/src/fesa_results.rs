@@ -476,7 +476,34 @@ mod tests {
                 .points
         };
         assert_eq!(points(beta), 0);
-        assert_eq!(points(find(&t, "Alpha", "Ann").id), 2); // win + bye
+        assert_eq!(points(find(&t, "Alpha", "Ann").id), 4); // win + bye = 2 pts = 4 halves
+    }
+
+    #[test]
+    fn imports_a_fesa_half_point_bye_and_scores_it() {
+        // A FESA table with an odd field where one player sits out a round as a
+        // half-point bye (`0=`), like the all-`0=` Campionato Italiano. The
+        // importer turns on `half_point_absences` and scores the ½.
+        let mut text = String::from("Half Open : 2026\nNr Name Nat Grade ELO R1 Pts +/-\n");
+        let row = |nr: u32, last: &str, first: &str, c1: &str, pts: &str| {
+            format!("{nr:>2} {last:<12}{first} IT 1 Dan 1500 {c1} {pts} +0\n")
+        };
+        text.push_str(&row(1, "Alpha", "Ann", "2+", "1")); // beats Beta
+        text.push_str(&row(2, "Beta", "Bob", "1-", "0")); // loses to Alpha
+        text.push_str(&row(3, "Gamma", "Cid", "0=", "1/2")); // half-point bye
+
+        let (t, _) = import_fesa_results(&text).unwrap();
+        assert!(t.settings.half_point_absences);
+        let points = |last, first| {
+            t.standings()
+                .into_iter()
+                .find(|s| s.player_id == find(&t, last, first).id)
+                .unwrap()
+                .points
+        };
+        assert_eq!(points("Alpha", "Ann"), 2); // a full win = 2 halves
+        assert_eq!(points("Beta", "Bob"), 0); // a loss
+        assert_eq!(points("Gamma", "Cid"), 1); // the half-point bye = 1 half
     }
 
     #[test]

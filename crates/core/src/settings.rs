@@ -267,6 +267,13 @@ pub struct TournamentSettings {
     /// count as the winner.
     #[serde(default)]
     pub handicap_wiel_rule: bool,
+    /// Whether a player marked **absent** for a round is awarded half a point
+    /// (rather than the default zero). Off by default. When on, an absence
+    /// scores ½ — rendered `0=` in the cross-table — exactly like a half-point
+    /// bye; the odd-round bye still scores a full point, and a no-show forfeit
+    /// still scores nothing. This is what lets a FESA `0=` result round-trip.
+    #[serde(default)]
+    pub half_point_absences: bool,
     /// The criteria used to rank the standings, in order of priority (the
     /// tournament number breaks anything still level). Points is one of these and
     /// can be reordered like any other. Only these columns are shown on the
@@ -350,6 +357,7 @@ impl Default for TournamentSettings {
             cup_enabled: false,
             handicap_policy: HandicapPolicy::default(),
             handicap_wiel_rule: false,
+            half_point_absences: false,
             tiebreaks: default_tiebreaks(),
             elo_pairing_enabled: false,
             mixed_elo_pairing_enabled: false,
@@ -765,6 +773,18 @@ mod tests {
         // Omitted in the payload (an old save) → still off.
         let s: TournamentSettings = serde_json::from_str("{}").unwrap();
         assert!(!s.handicap_wiel_rule);
+    }
+
+    #[test]
+    fn half_point_absences_defaults_to_off() {
+        assert!(!TournamentSettings::default().half_point_absences);
+        // Omitted in the payload (an old save) → still off.
+        let s: TournamentSettings = serde_json::from_str("{}").unwrap();
+        assert!(!s.half_point_absences);
+        // Round-trips on the wire.
+        let on: TournamentSettings =
+            serde_json::from_str(r#"{"half_point_absences":true}"#).unwrap();
+        assert!(on.half_point_absences);
     }
 
     #[test]

@@ -20,8 +20,9 @@
 //!
 //! A data row has exactly three bracketed groups — `[last]`, `[first]`, and the
 //! round block — which is what lets names contain spaces. Each round cell is a
-//! bye (`0+`), an absence (`0-` / `0#`), or a game `<opp><+/-/=>` with an optional
-//! `(<±><code>)` handicap. Opponents are referenced by the `Nr` (final rank)
+//! bye (`0+`), an absence (`0-` / `0#`), a half-point bye/absence (`0=`), or a
+//! game `<opp><+/-/=>` with an optional `(<±><code>)` handicap. Opponents are
+//! referenced by the `Nr` (final rank)
 //! column. A `=` records only that a draw occurred (the win/loss of the replay is
 //! not encoded), so an imported draw is given an arbitrary decisive winner.
 //!
@@ -110,6 +111,15 @@ pub(crate) fn build_tournament(
 
     // Register the players (in Nr order) and remember Nr -> id.
     let mut tournament = Tournament::new(name.unwrap_or("Imported tournament"))?;
+    // A `0=` cell (half-point bye/absence) is reconstructed as an absence, so it
+    // only scores its ½ if the tournament awards half a point to absences. Turn
+    // that on whenever the source carries any `0=`.
+    if rows
+        .iter()
+        .any(|r| r.cells.iter().any(|c| matches!(c, Cell::HalfBye)))
+    {
+        tournament.settings.half_point_absences = true;
+    }
     let mut id_of: HashMap<u32, uuid::Uuid> = HashMap::new();
     let mut ordered = rows.clone();
     ordered.sort_by_key(|r| r.number);
@@ -158,7 +168,10 @@ fn rebuild_round(
     for row in rows {
         match &row.cells[r] {
             Cell::Bye => byes.push(id_of[&row.number]),
-            Cell::Absent => absent.push(id_of[&row.number]),
+            // A half-point bye reconstructs as an absence; the ½ comes from the
+            // tournament's `half_point_absences` setting, turned on in
+            // `build_tournament` whenever any `0=` is present.
+            Cell::Absent | Cell::HalfBye => absent.push(id_of[&row.number]),
             Cell::Game {
                 opponent,
                 outcome,
@@ -286,6 +299,10 @@ pub(crate) struct RawRow {
 pub(crate) enum Cell {
     Bye,
     Absent,
+    /// A half-point bye/absence (`0=`): the player scored ½ without playing.
+    /// Reconstructed as an absence, with the tournament's `half_point_absences`
+    /// setting turned on so the ½ is scored (see [`build_tournament`]).
+    HalfBye,
     Game {
         opponent: u32,
         outcome: Outcome,
@@ -433,8 +450,9 @@ fn parse_row(
     })
 }
 
-/// Parse a single round cell (`0+`, `0-`, `0#`, or `<opp><+/-/=>` plus an
-/// optional `(<±><code>)` handicap). A trailing floater mark is tolerated.
+/// Parse a single round cell (`0+` bye, `0-`/`0#` absence, `0=` half-point
+/// bye/absence, or `<opp><+/-/=>` plus an optional `(<±><code>)` handicap). A
+/// trailing floater mark is tolerated.
 pub(crate) fn parse_cell(cell: &str, line_no: usize) -> Result<Cell, GridImportError> {
     let bad = || GridImportError::BadCell {
         line: line_no,
@@ -459,6 +477,7 @@ pub(crate) fn parse_cell(cell: &str, line_no: usize) -> Result<Cell, GridImportE
         return match sign {
             '+' => Ok(Cell::Bye),
             '-' | '#' => Ok(Cell::Absent),
+            '=' => Ok(Cell::HalfBye), // `0=`: a half-point bye/absence
             _ => Err(bad()),
         };
     }
@@ -564,7 +583,7 @@ Nr Name          Nat Elo  1   2   Pts
         // Standings: Alpha clear first with 2 points.
         let standings = t.standings();
         assert_eq!(standings[0].player_id, player(&t, "Alpha").id);
-        assert_eq!(standings[0].points, 2);
+        assert_eq!(standings[0].points, 4); // 2 points = 4 half-points
     }
 
     #[test]
@@ -708,9 +727,47 @@ Nr Name    Nat Elo  1   Pts
                 .unwrap()
                 .points
         };
-        assert_eq!(of("A"), 1); // the bye
+        assert_eq!(of("A"), 2); // the bye (1 point = 2 half-points)
         assert_eq!(of("B"), 0); // the no-show
-        assert_eq!(of("C"), 1);
+        assert_eq!(of("C"), 2);
+    }
+
+    #[test]
+    fn imports_a_half_point_bye_and_turns_on_half_point_absences() {
+        // C sits out round 1 as a half-point bye (`0=`); A beats B. The importer
+        // reconstructs C as an absence, turns on `half_point_absences`, and scores
+        // C half a point (1 half-unit).
+        let grid = "\
+[Half]
+Nr Name    Nat Elo  1   Pts
+1  [A] [a] FR  2000 [2+] 1
+2  [B] [b] FR  1000 [1-] 0
+3  [C] [c] FR  1500 [0=] 1/2
+";
+        let t = import_american_grid(grid).unwrap();
+        assert!(t.settings.half_point_absences);
+        assert_eq!(t.rounds[0].absent, vec![player(&t, "C").id]);
+        let of = |last| {
+            t.standings()
+                .into_iter()
+                .find(|s| s.player_id == player(&t, last).id)
+                .unwrap()
+                .points
+        };
+        assert_eq!(of("C"), 1); // half a point = 1 half-unit
+        assert_eq!(of("A"), 2); // a full win
+                                // Export renders C's absence back as `0=` and the ½ total as `1/2`.
+        let grid2 = crate::american_grid(&t, &t.standings());
+        assert!(grid2.contains("[0=]"), "half-bye token missing: {grid2}");
+        assert!(grid2.contains("1/2"), "half-point total missing: {grid2}");
+        // And it round-trips to a fixpoint.
+        let t2 = import_american_grid(&grid2).unwrap();
+        assert_eq!(grid2, crate::american_grid(&t2, &t2.standings()));
+    }
+
+    #[test]
+    fn parses_a_half_point_bye_cell() {
+        assert_eq!(parse_cell("0=", 1).unwrap(), Cell::HalfBye);
     }
 
     #[test]

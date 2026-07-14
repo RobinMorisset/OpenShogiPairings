@@ -35,35 +35,37 @@ use crate::settings::{Tiebreak, TournamentSettings};
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Standing {
     pub player_id: Uuid,
-    /// Games won (effective winner; a bye counts as a win).
+    /// Games won (effective winner; a bye counts as a win). A whole game count.
     pub victories: u32,
-    /// MacMahon starting points.
+    /// MacMahon starting points, in **half-point units** (×2).
     pub macmahon: u32,
-    /// Total score: `macmahon + victories`.
+    /// Total score in **half-point units** (×2): `macmahon + 2·victories`, plus
+    /// `1` per half-point absence. Divide by 2 for display.
     pub points: u32,
-    /// Sum of opponents' points.
+    /// Sum of opponents' points (**half-point units**, since it sums points).
     pub sosm: u32,
-    /// Sum of opponents' wins.
+    /// Sum of opponents' wins (whole count).
     pub sosw: u32,
-    /// Sum of defeated opponents' points.
+    /// Sum of defeated opponents' points (**half-point units**).
     pub sodosm: u32,
-    /// Sum of defeated opponents' wins.
+    /// Sum of defeated opponents' wins (whole count).
     pub sodosw: u32,
-    /// Sum of opponents' SOSM.
+    /// Sum of opponents' SOSM (**half-point units**).
     pub sososm: u32,
-    /// Sum of opponents' SOSW.
+    /// Sum of opponents' SOSW (whole count).
     pub sososw: u32,
-    /// SOSM dropping the single lowest-scoring opponent.
+    /// SOSM dropping the single lowest-scoring opponent (**half-point units**).
     pub sosm1: u32,
-    /// SOSM dropping the two lowest-scoring opponents.
+    /// SOSM dropping the two lowest-scoring opponents (**half-point units**).
     pub sosm2: u32,
-    /// SOSW dropping the single lowest-scoring opponent.
+    /// SOSW dropping the single lowest-scoring opponent (whole count).
     pub sosw1: u32,
-    /// SOSW dropping the two lowest-scoring opponents.
+    /// SOSW dropping the two lowest-scoring opponents (whole count).
     pub sosw2: u32,
-    /// Cumulative sum of the running points total after each round.
+    /// Cumulative sum of the running points total after each round
+    /// (**half-point units**).
     pub cussm: u32,
-    /// Cumulative sum of the running win total after each round.
+    /// Cumulative sum of the running win total after each round (whole count).
     pub cussw: u32,
     /// Direct confrontation: this player's wins against the other players they
     /// were still tied with once every earlier configured criterion ran out
@@ -77,7 +79,8 @@ pub struct Standing {
     /// Opponents defeated (effective winner), one entry per game — the subset of
     /// `opponents` the SODOS tie-breaks sum over.
     pub defeated: Vec<Uuid>,
-    /// Running points total after each completed round (the sequence CUSSM sums).
+    /// Running points total after each completed round (the sequence CUSSM sums),
+    /// in **half-point units**.
     pub running_points: Vec<u32>,
     /// Running win total after each completed round (the sequence CUSSW sums).
     pub running_wins: Vec<u32>,
@@ -367,10 +370,11 @@ mod tests {
         let order: Vec<Uuid> = standings.iter().map(|s| s.player_id).collect();
         assert_eq!(order, vec![a.id, d.id, b.id, c.id]);
 
+        // Points and SOSM are in half-point units (×2).
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
-        assert_eq!((of(a.id).points, of(a.id).sosm), (2, 1));
-        assert_eq!((of(d.id).points, of(d.id).sosm), (1, 3)); // faced A(2)+B(1)
-        assert_eq!((of(b.id).points, of(b.id).sosm), (1, 1)); // faced D(1)+C(0)
+        assert_eq!((of(a.id).points, of(a.id).sosm), (4, 2));
+        assert_eq!((of(d.id).points, of(d.id).sosm), (2, 6)); // faced A(4)+B(2)
+        assert_eq!((of(b.id).points, of(b.id).sosm), (2, 2)); // faced D(2)+C(0)
         assert_eq!(of(c.id).points, 0);
     }
 
@@ -388,16 +392,17 @@ mod tests {
         let standings = compute_standings(&[a.clone(), b.clone()], &settings, &rounds);
 
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
+        // MacMahon and points are in half-point units (×2); victories are whole.
         assert_eq!(
             (of(a.id).macmahon, of(a.id).victories, of(a.id).points),
-            (1, 1, 2)
+            (2, 1, 4)
         );
         assert_eq!(
             (of(b.id).macmahon, of(b.id).victories, of(b.id).points),
-            (1, 0, 1)
+            (2, 0, 2)
         );
-        assert_eq!(of(a.id).sosm, 1); // opponent B has 1 point
-        assert_eq!(of(a.id).sodosm, 1); // defeated B (1 point)
+        assert_eq!(of(a.id).sosm, 2); // opponent B has 1 point (2 halves)
+        assert_eq!(of(a.id).sodosm, 2); // defeated B (1 point = 2 halves)
         assert_eq!(standings[0].player_id, a.id); // A ranks first
     }
 
@@ -420,9 +425,11 @@ mod tests {
         let standings = compute_standings(&[a.clone(), b.clone()], &settings, &rounds);
 
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
+        // Points in half-point units: A keeps only the win (2 halves), not the
+        // dropped MacMahon head start.
         assert_eq!(
             (of(a.id).macmahon, of(a.id).victories, of(a.id).points),
-            (0, 1, 1)
+            (0, 1, 2)
         );
         assert_eq!(
             (of(b.id).macmahon, of(b.id).victories, of(b.id).points),
@@ -450,8 +457,10 @@ mod tests {
         };
         let standings = compute_standings(&[a.clone(), b.clone(), c.clone()], &settings, &rounds);
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
-        assert_eq!((of(a.id).sosm, of(a.id).sosw), (2, 0));
-        assert_eq!((of(a.id).sodosm, of(a.id).sodosw), (2, 0));
+        // SOSM/SODOSM are in half-point units (opponents' MacMahon = 2 halves);
+        // the W flavours are whole win counts (0 here).
+        assert_eq!((of(a.id).sosm, of(a.id).sosw), (4, 0));
+        assert_eq!((of(a.id).sodosm, of(a.id).sodosw), (4, 0));
     }
 
     #[test]
@@ -535,10 +544,10 @@ mod tests {
             &rounds,
         );
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
-        assert_eq!(of(a.id).cussw, 4); // 1 + 1 + 2
+        assert_eq!(of(a.id).cussw, 4); // 1 + 1 + 2 (whole wins)
         assert_eq!(of(b.id).cussw, 2); // 0 + 1 + 1
-                                       // No MacMahon here, so the M flavour matches the W flavour.
-        assert_eq!(of(a.id).cussm, 4);
+                                       // CUSSM sums points (half-units), so with no MacMahon it is twice CUSSW.
+        assert_eq!(of(a.id).cussm, 8);
     }
 
     #[test]
@@ -702,9 +711,10 @@ mod tests {
         let standings = compute_standings(&players, &settings, &rounds);
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
 
+        // Points in half-point units (2 points = 4 halves); DC is a whole count.
         assert_eq!(
             (of(a.id).points, of(b.id).points, of(c.id).points),
-            (2, 2, 2)
+            (4, 4, 4)
         );
         assert_eq!((of(a.id).dc, of(b.id).dc, of(c.id).dc), (2, 1, 0));
 
@@ -749,7 +759,7 @@ mod tests {
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
 
         for id in [a.id, b.id, c.id, d.id] {
-            assert_eq!(of(id).points, 1);
+            assert_eq!(of(id).points, 2); // 1 point = 2 half-points
             assert_eq!(of(id).dc, 0);
         }
         let order: Vec<Uuid> = standings.iter().map(|s| s.player_id).collect();

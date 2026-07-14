@@ -2125,8 +2125,8 @@ mod tests {
                 .expect("dropped cup player is now Swiss-paired");
             assert!(matches!(board.source, PairingSource::Swiss));
         }
-        // The cup bye is worth a point, like any bye.
-        assert_eq!(scored(&t, s[3]), 1);
+        // The cup bye is worth a point, like any bye (2 half-points).
+        assert_eq!(scored(&t, s[3]), 2);
         decide(&mut t, 2, s[1], s[2]); // the one real semifinal
         decide_rest(&mut t, 2);
 

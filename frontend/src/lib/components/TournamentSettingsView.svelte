@@ -67,6 +67,7 @@
   let cupEnabled = $state(false);
   let handicapPolicy = $state<HandicapPolicy>("allowed");
   let handicapWielRule = $state(false);
+  let halfPointAbsences = $state(false);
   let tiebreaks = $state<Tiebreak[]>([]);
   let eloEnabled = $state(false);
   let mixedEloEnabled = $state(false);
@@ -129,6 +130,7 @@
     const sCup = settings.cup_enabled;
     const sHandicap = settings.handicap_policy;
     const sHandicapWiel = settings.handicap_wiel_rule;
+    const sHalfPointAbsences = settings.half_point_absences ?? false;
     const sTiebreaks = settings.tiebreaks ?? [];
     const sElo = settings.elo_pairing_enabled ?? false;
     const sMixedElo = settings.mixed_elo_pairing_enabled ?? false;
@@ -148,6 +150,7 @@
         cupEnabled === sCup &&
         handicapPolicy === sHandicap &&
         handicapWielRule === sHandicapWiel &&
+        halfPointAbsences === sHalfPointAbsences &&
         eqStr(tiebreaks, sTiebreaks) &&
         eloEnabled === sElo &&
         mixedEloEnabled === sMixedElo &&
@@ -172,6 +175,7 @@
         cupEnabled = sCup;
         handicapPolicy = sHandicap;
         handicapWielRule = sHandicapWiel;
+        halfPointAbsences = sHalfPointAbsences;
         tiebreaks = [...sTiebreaks];
         eloEnabled = sElo;
         mixedEloEnabled = sMixedElo;
@@ -199,6 +203,7 @@
       cup_enabled: cupEnabled,
       handicap_policy: handicapPolicy,
       handicap_wiel_rule: handicapWielRule,
+      half_point_absences: halfPointAbsences,
       tiebreaks: [...tiebreaks],
       elo_pairing_enabled: eloEnabled,
       mixed_elo_pairing_enabled: mixedEloEnabled,
@@ -307,6 +312,11 @@
 
   function setHandicapWielRule(v: boolean) {
     handicapWielRule = v;
+    persist();
+  }
+
+  function setHalfPointAbsences(v: boolean) {
+    halfPointAbsences = v;
     persist();
   }
 
@@ -832,6 +842,18 @@
     </label>
     <p class="desc">
       {$_("settings.handicapWielDesc")}
+    </p>
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={halfPointAbsences}
+        disabled={busy}
+        onchange={(e) => setHalfPointAbsences(e.currentTarget.checked)}
+      />
+      {$_("settings.halfPointAbsencesCheckbox")}
+    </label>
+    <p class="desc">
+      {$_("settings.halfPointAbsencesDesc")}
     </p>
   </div>
 

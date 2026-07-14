@@ -75,6 +75,14 @@ handicap_policy: HandicapPolicy,
  */
 handicap_wiel_rule: boolean, 
 /**
+ * Whether a player marked **absent** for a round is awarded half a point
+ * (rather than the default zero). Off by default. When on, an absence
+ * scores ½ — rendered `0=` in the cross-table — exactly like a half-point
+ * bye; the odd-round bye still scores a full point, and a no-show forfeit
+ * still scores nothing. This is what lets a FESA `0=` result round-trip.
+ */
+half_point_absences: boolean, 
+/**
  * The criteria used to rank the standings, in order of priority (the
  * tournament number breaks anything still level). Points is one of these and
  * can be reordered like any other. Only these columns are shown on the

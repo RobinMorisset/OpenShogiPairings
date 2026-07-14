@@ -65,9 +65,16 @@ pub fn to_grid(tournament: &Tournament, standings: &[Standing]) -> String {
     header.push("Pts".into());
     rows.push(header);
 
+    let half_point_absences = tournament.settings.half_point_absences;
     for standing in standings {
         if let Some(player) = players_by_id.get(&standing.player_id) {
-            rows.push(row_for(player, standing, &completed, &rank_of));
+            rows.push(row_for(
+                player,
+                standing,
+                &completed,
+                &rank_of,
+                half_point_absences,
+            ));
         }
     }
 
@@ -104,10 +111,11 @@ fn row_for(
     standing: &Standing,
     rounds: &[&Round],
     rank_of: &HashMap<Uuid, u32>,
+    half_point_absences: bool,
 ) -> Vec<String> {
     let mut round_cells: Vec<String> = rounds
         .iter()
-        .map(|r| round_cell(player.id, r, rank_of))
+        .map(|r| round_cell(player.id, r, rank_of, half_point_absences))
         .collect();
     // Wrap the whole block in a single literal bracket pair. Done in place so a
     // one-round tournament yields `[cell]` (both edits land on the same cell).
@@ -131,14 +139,31 @@ fn row_for(
         player.rating.map(|r| r.to_string()).unwrap_or_default(),
     ];
     row.extend(round_cells);
-    row.push(standing.points.to_string());
+    row.push(format_half_points(standing.points));
     row
 }
 
+/// Render a score held in **half-point units** for the `Pts` column: a whole
+/// number when even (`6` for 6 points), or the FESA `n/2` form when odd (`5/2`
+/// for 2½). Matches how FESA itself writes fractional point totals.
+fn format_half_points(half: u32) -> String {
+    if half.is_multiple_of(2) {
+        (half / 2).to_string()
+    } else {
+        format!("{half}/2")
+    }
+}
+
 /// The single round cell for a player: `0+` for a bye (or a no-show opponent),
-/// `0-` for an absence, `0#` for a no-show, or `<opponent><marker><handicap?>`
-/// for a game. The opponent is their final rank.
-fn round_cell(player_id: Uuid, round: &Round, rank_of: &HashMap<Uuid, u32>) -> String {
+/// `0-` for an absence (`0=` when the tournament awards absences half a point),
+/// `0#` for a no-show, or `<opponent><marker><handicap?>` for a game. The
+/// opponent is their final rank.
+fn round_cell(
+    player_id: Uuid,
+    round: &Round,
+    rank_of: &HashMap<Uuid, u32>,
+    half_point_absences: bool,
+) -> String {
     // The Swiss bye and the (rare) cup bye both read as a free point.
     if round.bye == Some(player_id) || round.cup_byes.contains(&player_id) {
         return "0+".into();
@@ -148,8 +173,9 @@ fn round_cell(player_id: Uuid, round: &Round, rank_of: &HashMap<Uuid, u32>) -> S
         .iter()
         .find(|b| b.player1 == player_id || b.player2 == player_id)
     else {
-        // No board and not the bye: absent for the whole round.
-        return "0-".into();
+        // No board and not the bye: absent for the whole round — `0=` (a scored
+        // half point) when the tournament awards absences half a point, else `0-`.
+        return if half_point_absences { "0=" } else { "0-" }.into();
     };
 
     let is_player1 = board.player1 == player_id;
@@ -456,5 +482,13 @@ mod tests {
             last_name: last.into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn half_point_totals_render_whole_or_n_over_2() {
+        assert_eq!(format_half_points(0), "0");
+        assert_eq!(format_half_points(6), "3"); // 6 halves = 3 points
+        assert_eq!(format_half_points(1), "1/2"); // ½
+        assert_eq!(format_half_points(5), "5/2"); // 2½
     }
 }
