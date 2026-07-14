@@ -199,7 +199,9 @@ fn prior(
 ) -> (f64, f64) {
     match player.rating {
         Some(rating) => {
-            // Multipliers are clamped ≥ 1%/100% by settings normalization, so K > 0.
+            // `k_multiplier` may be 0 here (the "estimate unrated only" mode), giving
+            // σ₀ = 0; `estimate_elos` detects that and pins the player instead of
+            // using this degenerate prior. The provisional multiplier is clamped ≥ 1.
             let reliability = if is_reliably_rated(player) {
                 1.0
             } else {
@@ -374,13 +376,6 @@ fn expected(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
 }
 
-/// Estimate every player's current ELO (posterior mode) from the completed
-/// rounds, using the FESA-K × multiplier prior from `settings`.
-///
-/// Byes contribute nothing (they are not games), draws score ½ for each side, and
-/// handicap games are excluded for now (V1 — a handicap→ELO mapping is future
-/// work). The returned map has one entry per player in `players`; a player with no
-/// counted games sits exactly at their prior mean.
 /// Precomputed degenerate-scoreline handling for a flat-prior player (see
 /// [`EloPriorShape::Flat`]). A flat prior gives an all-win or all-loss player an
 /// unbounded likelihood, so [`estimate_elos`] substitutes `turnering.py`'s rule.
@@ -395,6 +390,18 @@ enum FlatDegenerate {
     AllWin { opp: usize, offset: f64 },
 }
 
+/// Estimate every player's current ELO (posterior mode) from the completed
+/// rounds, using the FESA-K × multiplier prior from `settings`.
+///
+/// Byes contribute nothing (they are not games), draws score ½ for each side, and
+/// handicap games are excluded for now (V1 — a handicap→ELO mapping is future
+/// work). The returned map has one entry per player in `players`; a player with no
+/// counted games sits exactly at their prior mean.
+///
+/// A K multiplier of 0 (`settings.elo_k_multiplier() == 0`) **pins** every rated
+/// player to their registration rating — only unrated players are estimated. This
+/// is the "apply estimates to unrated players only" mode: rated players keep their
+/// trusted rating and the unrated newcomers are estimated against that fixed field.
 pub fn estimate_elos(
     players: &[Player],
     settings: &TournamentSettings,
@@ -417,15 +424,26 @@ pub fn estimate_elos(
     let mut mean = vec![0.0_f64; n];
     let mut penalties: Vec<PriorPenalty> = Vec::with_capacity(n);
     let mut is_flat = vec![false; n];
+    let mut pinned = vec![false; n];
     for (i, p) in players.iter().enumerate() {
         let (mu0, sigma0) = prior(p, m, provisional, unrated_center, unrated_k);
         mean[i] = mu0;
         theta[i] = mu0; // seed at the prior mean
-                        // The prior shape and the upward-looseness ratio both depend on how much
-                        // the seed rating is trusted — the same three categories `prior`
-                        // distinguishes. A fat tail is confined to the category whose true
-                        // strength is actually heavy-tailed (unrated), keeping established
-                        // and provisional players on their well-anchored Gaussian.
+                        // K multiplier 0 pins every *rated* player to their registration rating
+                        // (only unrated players are estimated). Their `sigma0` is 0, which would
+                        // give a degenerate Gaussian, so mark them pinned and skip their update
+                        // entirely; the seed already holds their rating. Unrated players are
+                        // unaffected (their prior is independent of `m`).
+        if m == 0.0 && p.rating.is_some() {
+            pinned[i] = true;
+            penalties.push(PriorPenalty::Flat); // unused; the pin skips their update
+            continue;
+        }
+        // The prior shape and the upward-looseness ratio both depend on how much the
+        // seed rating is trusted — the same three categories `prior` distinguishes. A
+        // fat tail is confined to the category whose true strength is actually
+        // heavy-tailed (unrated), keeping established and provisional players on their
+        // well-anchored Gaussian.
         let (shape, r) = match p.rating {
             None => (shape_unrated, looseness_unrated),
             Some(_) if is_reliably_rated(p) => (shape_established, looseness_established),
@@ -515,6 +533,11 @@ pub fn estimate_elos(
     for _ in 0..MAX_SWEEPS {
         let mut max_delta = 0.0_f64;
         for i in 0..n {
+            // A pinned player (rated, with K multiplier 0) never moves off their
+            // registration rating.
+            if pinned[i] {
+                continue;
+            }
             // A flat all-loss player has no finite maximum; pin them to the floor.
             if let Some(FlatDegenerate::AllLoss) = flat_degenerate[i] {
                 let step = FLAT_ALL_LOSS_FLOOR - theta[i];
@@ -1193,6 +1216,44 @@ mod tests {
         assert!(
             est < 2600.0,
             "…but the pseudo-draw keeps it from running away, got {est}"
+        );
+    }
+
+    #[test]
+    fn k_multiplier_zero_estimates_unrated_only_and_pins_rated_players() {
+        // "Apply estimates to unrated players only": a rated player stays exactly at
+        // their registration rating no matter what they score, while an unrated
+        // newcomer is still estimated against that fixed field.
+        let mut rated = player(Some(1600));
+        rated.fesa_games = Some(50);
+        let newcomer = player(None);
+        let strong = player(Some(2000));
+        let all = vec![rated.clone(), newcomer.clone(), strong.clone()];
+        // The rated 1600 loses to the 2000; the newcomer beats the 2000.
+        let rounds = vec![
+            decided(1, vec![win(strong.id, rated.id)]),
+            decided(2, vec![win(newcomer.id, strong.id)]),
+        ];
+        let settings = TournamentSettings {
+            elo_k_multiplier_percent: 0,
+            ..Default::default()
+        };
+        let est = estimate_elos(&all, &settings, &rounds);
+        assert!(
+            (est[&rated.id] - 1600.0).abs() < 1e-9,
+            "a rated player is pinned to their rating at k=0, got {}",
+            est[&rated.id]
+        );
+        assert!(
+            (est[&strong.id] - 2000.0).abs() < 1e-9,
+            "the rated 2000 is pinned too, got {}",
+            est[&strong.id]
+        );
+        // The unrated newcomer is still moved by their games (beat a fixed 2000).
+        assert!(
+            est[&newcomer.id] > UNRATED_PRIOR_MEAN + 100.0,
+            "the unrated newcomer should still be estimated upward, got {}",
+            est[&newcomer.id]
         );
     }
 

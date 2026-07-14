@@ -70,7 +70,6 @@
   let handicapWielRule = $state(false);
   let tiebreaks = $state<Tiebreak[]>([]);
   let eloEnabled = $state(false);
-  let mixedEloEnabled = $state(false);
   let macmahonFromElo = $state(false);
   let eloKPercent = $state(100);
   let eloProvisionalPercent = $state(200);
@@ -86,24 +85,32 @@
   // grade thresholds, or none. Mirrors the server's `macmahon_from_estimate_active`.
   const hasEloThreshold = $derived(thresholds.some((t) => t.kind === "elo"));
 
-  // Three-way pairing mode derived from the two (mutually exclusive) flags, for
-  // the radio group below.
-  const pairingMode = $derived(eloEnabled ? "elo" : mixedEloEnabled ? "mixed_elo" : "swiss");
+  // Two-way pairing mode (Swiss or experimental pure ELO), for the radio group.
+  const pairingMode = $derived(eloEnabled ? "elo" : "swiss");
 
   // In the experimental (pure) ELO mode the Swiss knobs (MacMahon, degressive,
-  // club protection, floater selection) don't apply, so they're greyed out.
-  // Mixed ELO mode keeps MacMahon/club/degressive — only floater selection
-  // (see `floaterDisabled` below) stops applying, since it's replaced by the
-  // ELO-gap rule along with fold.
+  // club protection, floater selection) don't apply, so they're greyed out; the
+  // floater-selection rule in particular is replaced by the ELO-gap rule.
   const swissDisabled = $derived(eloEnabled);
-  // Floater selection is replaced by the ELO-gap rule in *either* ELO mode.
-  const floaterDisabled = $derived(eloEnabled || mixedEloEnabled);
+  const floaterDisabled = $derived(eloEnabled);
 
   // Whether a live ELO estimate is maintained, so the estimated-ELO tie-break is
-  // meaningful: either ELO pairing mode, or estimate-based MacMahon with an ELO
+  // meaningful: the ELO pairing mode, or estimate-based MacMahon with an ELO
   // threshold to compare against. Mirrors the server's normalization gate.
   const eloEstimateLive = $derived(
-    eloEnabled || mixedEloEnabled || (macmahonFromElo && hasEloThreshold),
+    eloEnabled || (macmahonFromElo && hasEloThreshold),
+  );
+
+  // The two simplified estimator controls (the only ELO knobs a referee sees).
+  // "Apply estimates to": k = 0 means only unrated players are estimated (rated
+  // players keep their registration rating); any positive k estimates everyone.
+  const eloApplyTo = $derived<"unrated" | "all">(
+    eloKPercent === 0 ? "unrated" : "all",
+  );
+  // "Unrated prior": the flat performance rating (default) or the tuned Laplace.
+  // Anything not explicitly Laplace reads as the flat default.
+  const unratedPrior = $derived<"flat" | "laplace">(
+    eloPriorShape === "laplace" ? "laplace" : "flat",
   );
 
   // Metrics not yet in the ranking order — the choices for the "add" dropdown.
@@ -136,7 +143,6 @@
     const sHandicapWiel = settings.handicap_wiel_rule;
     const sTiebreaks = settings.tiebreaks ?? [];
     const sElo = settings.elo_pairing_enabled ?? false;
-    const sMixedElo = settings.mixed_elo_pairing_enabled ?? false;
     const sMacmahonFromElo = settings.macmahon_from_estimated_elo ?? false;
     const sEloK = settings.elo_k_multiplier_percent ?? 100;
     const sEloProv = settings.elo_provisional_multiplier_percent ?? 200;
@@ -159,7 +165,6 @@
         handicapWielRule === sHandicapWiel &&
         eqStr(tiebreaks, sTiebreaks) &&
         eloEnabled === sElo &&
-        mixedEloEnabled === sMixedElo &&
         macmahonFromElo === sMacmahonFromElo &&
         eloKPercent === sEloK &&
         eloProvisionalPercent === sEloProv &&
@@ -187,7 +192,6 @@
         handicapWielRule = sHandicapWiel;
         tiebreaks = [...sTiebreaks];
         eloEnabled = sElo;
-        mixedEloEnabled = sMixedElo;
         macmahonFromElo = sMacmahonFromElo;
         eloKPercent = sEloK;
         eloProvisionalPercent = sEloProv;
@@ -218,7 +222,6 @@
       handicap_wiel_rule: handicapWielRule,
       tiebreaks: [...tiebreaks],
       elo_pairing_enabled: eloEnabled,
-      mixed_elo_pairing_enabled: mixedEloEnabled,
       macmahon_from_estimated_elo: macmahonFromElo,
       elo_k_multiplier_percent: eloKPercent,
       elo_provisional_multiplier_percent: eloProvisionalPercent,
@@ -233,9 +236,21 @@
     });
   }
 
-  function setPairingMode(mode: "swiss" | "mixed_elo" | "elo") {
+  // Sane estimator defaults for a referee first turning on a live-estimate mode:
+  // estimate unrated players only (k = 0) with the flat performance-rating prior.
+  // Only applied when the estimator was never configured via the two controls (the
+  // unrated shape is still the struct default "gaussian", which those controls
+  // don't offer), so it never clobbers an explicit flat/Laplace choice.
+  function applyEstimatorDefaultsIfUnset() {
+    if (eloPriorShape !== "flat" && eloPriorShape !== "laplace") {
+      eloPriorShape = "flat";
+      eloKPercent = 0;
+    }
+  }
+
+  function setPairingMode(mode: "swiss" | "elo") {
     eloEnabled = mode === "elo";
-    mixedEloEnabled = mode === "mixed_elo";
+    if (eloEnabled) applyEstimatorDefaultsIfUnset();
     // Estimated ELO is only a valid ranking criterion while a live estimate is
     // maintained; drop it from the order otherwise (mirrors the server).
     if (!eloEstimateLive) tiebreaks = tiebreaks.filter((c) => c !== "est_elo");
@@ -244,62 +259,32 @@
 
   function setMacmahonFromElo(on: boolean) {
     macmahonFromElo = on;
+    if (on) applyEstimatorDefaultsIfUnset();
     // Turning it off (in plain Swiss) may leave no live estimate, so the
     // estimated-ELO tie-break is no longer valid — mirror the server and drop it.
     if (!eloEstimateLive) tiebreaks = tiebreaks.filter((c) => c !== "est_elo");
     persist();
   }
 
-  function editEloMultiplier(raw: string) {
-    // Presented as a decimal multiplier (×1.0), stored as an integer percent.
-    const m = Number(raw);
-    const pct = Math.round((Number.isFinite(m) ? m : 1) * 100);
-    eloKPercent = Math.max(1, pct);
+  // Control 1 — who the estimate applies to. k = 0 pins rated players to their
+  // registration rating (estimate unrated only); k = 100% estimates everyone.
+  function setEloApplyTo(v: "unrated" | "all") {
+    eloKPercent = v === "unrated" ? 0 : 100;
     persist();
   }
 
-  function editEloProvisionalMultiplier(raw: string) {
-    // Decimal multiplier stored as an integer percent; never below ×1 (a
-    // provisional rating shouldn't be treated as more reliable than an established
-    // one — the server clamps this too).
-    const m = Number(raw);
-    const pct = Math.round((Number.isFinite(m) ? m : 2) * 100);
-    eloProvisionalPercent = Math.max(100, pct);
-    persist();
-  }
-
-  function editEloUnratedCenter(raw: string) {
-    // The center (mean ELO) of the unrated prior. Kept ≥ 0.
-    const v = Math.round(Number(raw));
-    eloUnratedCenter = Math.max(0, Number.isFinite(v) ? v : 600);
-    persist();
-  }
-
-  function editEloUnratedK(raw: string) {
-    // K sets the unrated prior's width (σ = √(K·s)); never below 1 (a zero-width
-    // prior is degenerate — the server clamps this too).
-    const v = Math.round(Number(raw));
-    eloUnratedK = Math.max(1, Number.isFinite(v) ? v : 705);
-    persist();
-  }
-
-  function editEloPriorShape(raw: string) {
-    eloPriorShape =
-      raw === "laplace" ? "laplace" : raw === "flat" ? "flat" : "gaussian";
-    persist();
-  }
-
-  function editEloUpwardLooseness(
-    category: "established" | "provisional" | "unrated",
-    raw: string,
-  ) {
-    // Decimal ratio stored as an integer percent; never below ×1 (an upward
-    // revision is never harder than a downward one — the server clamps this too).
-    const m = Number(raw);
-    const pct = Math.max(100, Math.round((Number.isFinite(m) ? m : 1) * 100));
-    if (category === "established") eloLoosenessEstablishedPercent = pct;
-    else if (category === "provisional") eloLoosenessProvisionalPercent = pct;
-    else eloLoosenessUnratedPercent = pct;
+  // Control 2 — the unrated prior. "flat" is the improper performance rating;
+  // "laplace" switches to the tuned asymmetric Huber-Laplace (centre 700, K 260,
+  // upward looseness ×3) — the tuned knobs are set here rather than shown.
+  function setUnratedPrior(v: "flat" | "laplace") {
+    if (v === "laplace") {
+      eloPriorShape = "laplace";
+      eloUnratedCenter = 700;
+      eloUnratedK = 260;
+      eloLoosenessUnratedPercent = 300;
+    } else {
+      eloPriorShape = "flat";
+    }
     persist();
   }
 
@@ -991,20 +976,6 @@
       <input
         type="radio"
         name="pairing-mode"
-        value="mixed_elo"
-        checked={pairingMode === "mixed_elo"}
-        disabled={busy}
-        onchange={() => setPairingMode("mixed_elo")}
-      />
-      {$_("settings.pairingModeMixedElo")}
-    </label>
-    <p class="desc small-note">
-      {$_("settings.pairingModeMixedEloDesc")}
-    </p>
-    <label class="check">
-      <input
-        type="radio"
-        name="pairing-mode"
         value="elo"
         checked={pairingMode === "elo"}
         disabled={busy}
@@ -1016,122 +987,38 @@
       {$_("settings.eloModeDesc")}
     </p>
     {#if eloEstimateLive}
-      {#if !eloEnabled && !mixedEloEnabled}
-        <p class="desc small-note">
-          {$_("settings.eloEstimateKnobsMacmahonNote")}
-        </p>
-      {/if}
-      <label class="check elo-k">
-        {$_("settings.eloDriftMultiplier")}
-        <input
-          type="number"
-          min="0.5"
-          step="0.5"
-          class="threshold narrow"
-          value={eloKPercent / 100}
-          disabled={busy}
-          onchange={(e) => editEloMultiplier(e.currentTarget.value)}
-        />
-      </label>
       <p class="desc small-note">
-        {$_("settings.eloDriftDesc")}
+        {$_("settings.eloEstimateKnobsNote")}
       </p>
       <label class="check elo-k">
-        {$_("settings.eloProvisionalMultiplier")}
-        <input
-          type="number"
-          min="1"
-          step="0.5"
-          class="threshold narrow"
-          value={eloProvisionalPercent / 100}
-          disabled={busy}
-          onchange={(e) => editEloProvisionalMultiplier(e.currentTarget.value)}
-        />
-      </label>
-      <p class="desc small-note">
-        {$_("settings.eloProvisionalDesc")}
-      </p>
-      <label class="check elo-k">
-        {$_("settings.eloUnratedCenter")}
-        <input
-          type="number"
-          min="0"
-          step="50"
-          class="threshold narrow"
-          value={eloUnratedCenter}
-          disabled={busy}
-          onchange={(e) => editEloUnratedCenter(e.currentTarget.value)}
-        />
-      </label>
-      <label class="check elo-k">
-        {$_("settings.eloUnratedK")}
-        <input
-          type="number"
-          min="1"
-          step="5"
-          class="threshold narrow"
-          value={eloUnratedK}
-          disabled={busy}
-          onchange={(e) => editEloUnratedK(e.currentTarget.value)}
-        />
-      </label>
-      <p class="desc small-note">
-        {$_("settings.eloUnratedDesc")}
-      </p>
-      <label class="check elo-k">
-        {$_("settings.eloPriorShape")}
+        {$_("settings.eloApplyTo")}
         <select
           class="tb-select"
-          value={eloPriorShape}
+          value={eloApplyTo}
           disabled={busy}
-          onchange={(e) => editEloPriorShape(e.currentTarget.value)}
+          onchange={(e) => setEloApplyTo(e.currentTarget.value as "unrated" | "all")}
         >
-          <option value="gaussian">{$_("settings.eloPriorShapeGaussian")}</option>
-          <option value="laplace">{$_("settings.eloPriorShapeLaplace")}</option>
-          <option value="flat">{$_("settings.eloPriorShapeFlat")}</option>
+          <option value="unrated">{$_("settings.eloApplyToUnrated")}</option>
+          <option value="all">{$_("settings.eloApplyToAll")}</option>
         </select>
       </label>
       <p class="desc small-note">
-        {$_("settings.eloPriorShapeDesc")}
+        {$_("settings.eloApplyToDesc")}
       </p>
       <label class="check elo-k">
-        {$_("settings.eloUpwardLoosenessEstablished")}
-        <input
-          type="number"
-          min="1"
-          step="0.5"
-          class="threshold narrow"
-          value={eloLoosenessEstablishedPercent / 100}
+        {$_("settings.eloUnratedPrior")}
+        <select
+          class="tb-select"
+          value={unratedPrior}
           disabled={busy}
-          onchange={(e) => editEloUpwardLooseness("established", e.currentTarget.value)}
-        />
-      </label>
-      <label class="check elo-k">
-        {$_("settings.eloUpwardLoosenessProvisional")}
-        <input
-          type="number"
-          min="1"
-          step="0.5"
-          class="threshold narrow"
-          value={eloLoosenessProvisionalPercent / 100}
-          disabled={busy}
-          onchange={(e) => editEloUpwardLooseness("provisional", e.currentTarget.value)}
-        />
-      </label>
-      <label class="check elo-k">
-        {$_("settings.eloUpwardLoosenessUnrated")}
-        <input
-          type="number"
-          min="1"
-          step="0.5"
-          class="threshold narrow"
-          value={eloLoosenessUnratedPercent / 100}
-          disabled={busy}
-          onchange={(e) => editEloUpwardLooseness("unrated", e.currentTarget.value)}
-        />
+          onchange={(e) => setUnratedPrior(e.currentTarget.value as "flat" | "laplace")}
+        >
+          <option value="flat">{$_("settings.eloUnratedPriorFlat")}</option>
+          <option value="laplace">{$_("settings.eloUnratedPriorLaplace")}</option>
+        </select>
       </label>
       <p class="desc small-note">
-        {$_("settings.eloUpwardLoosenessDesc")}
+        {$_("settings.eloUnratedPriorDesc")}
       </p>
     {/if}
   </div>
@@ -1187,8 +1074,8 @@
   fieldset.swiss-fieldset:disabled {
     opacity: 0.5;
   }
-  /* Floater selection alone is greyed out in mixed ELO mode (it's replaced by
-     the ELO-gap rule there, unlike the rest of the swiss-fieldset). */
+  /* Floater selection is greyed out in pure ELO mode (replaced by the ELO-gap
+     rule), sharing the disabled styling with the rest of the swiss-fieldset. */
   fieldset.floater-fieldset {
     border: none;
     margin: 0;

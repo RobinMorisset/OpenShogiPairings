@@ -11,14 +11,6 @@ estimation math and how the mode plugs into the existing pairing engine
 ([`crates/core/src/pairing.rs`](../crates/core/src/pairing.rs)) and scoring
 replay ([`crates/core/src/scoring.rs`](../crates/core/src/scoring.rs)).
 
-There is also a **mixed mode** (`mixed_elo_pairing_enabled`), a middle ground
-between Swiss and this (pure) ELO mode: it keeps MacMahon and the Swiss
-score-group rules (score gap, float repeat, club, airtight groups, bye group)
-but replaces just `Rule::Fold` and `Rule::FloaterSelection` with `Rule::EloGap`,
-so within- and across-group ordering follows the live estimate instead of a
-static registration rating — unlike pure ELO mode, it stays fully compatible
-with MacMahon points. See §6a.
-
 Scope markers: **V1** = the first shippable version; **V2** = deferred, listed at
 the end.
 
@@ -390,44 +382,11 @@ EloGap, whose real-valued squared-gap costs are essentially never tied, so a clu
 tie-break would almost never change a pairing — not worth the tier. The
 `club_protection_*` settings are simply ignored when the ELO mode is on.
 
-### 6a. Mixed mode: `EloGap` as a drop-in replacement for `Fold` + `FloaterSelection`
+### 6a. Estimate-based MacMahon (`macmahon_from_estimated_elo`)
 
-Mixed mode (`mixed_elo_pairing_enabled`) uses a different rule list, still built
-entirely from existing `Rule` variants — no new rule was needed:
-
-```
-Rematch, ByeGroup, AirtightGroups, ScoreGap, FloatRepeat, Club, EloGap
-```
-
-This is exactly the Swiss list with `FloaterSelection` and `Fold` removed and
-`EloGap` appended at the bottom (lowest priority — it's the finest-grained
-tiebreak, same role `Fold` played). Everything above it — MacMahon-derived
-score groups (`ScoreGap`, `AirtightGroups`, `ByeGroup`), no-repeat-float
-(`FloatRepeat`), and club protection — is untouched, so a group is still formed
-exactly as in Swiss; only *how players are ordered inside (and across) that
-group* changes, from a static fold-by-registration-rating to a live,
-result-reactive ELO estimate. Concretely: `EloGap`'s edge cost
-`(round(eloᵢ) − round(eloⱼ))²` fires on every edge regardless of score group
-(unlike `Fold`, which is zero across groups, and `FloaterSelection`, which is
-zero within one) — but since `ScoreGap` sits above it in priority, cross-group
-pairings are still only chosen when a float is unavoidable, same as Swiss;
-`EloGap` merely decides *which* players end up on each side of that float and
-how they're matched within a group.
-
-`PairingModel::build` computes the live ELO estimate (`elo`/`elo_rank`/
-`max_elo_gap`) whenever `TournamentSettings::elo_estimate_needed()` is true —
-i.e. either ELO mode — rather than gating on `elo_pairing_enabled` alone, so
-mixed mode gets the same estimator ([`crates/core/src/elo.rs`](../crates/core/src/elo.rs))
-feeding both the pairing rule and (optionally) the `Tiebreak::EstElo` ranking
-criterion. `elo_rank` (used only by pure ELO mode's `ByeSelection`) is simply
-unused in mixed mode, which keeps `ByeGroup` (the MacMahon-aware bye rule)
-instead.
-
-### 6b. Estimate-based MacMahon (`macmahon_from_estimated_elo`)
-
-A third, orthogonal way to hybridize — this one touches **scoring**, not the
-pairing rule list, so it composes with *any* pairing mode (plain Swiss or mixed
-ELO; it's moot under pure ELO, which ignores MacMahon). When
+An orthogonal way to hybridize — this one touches **scoring**, not the pairing
+rule list, so it composes with plain Swiss pairing (it's moot under pure ELO,
+which ignores MacMahon). When
 `macmahon_from_estimated_elo` is on, `compute_scores`
 ([`crates/core/src/scoring.rs`](../crates/core/src/scoring.rs)) awards each
 player's MacMahon starting points from the **live ELO estimate** instead of their
@@ -444,7 +403,7 @@ plumbing).
 at least one ELO threshold to compare against (with only grade thresholds, or
 none, the estimate would change nothing, so the estimator call is skipped, and
 the UI greys the checkbox out). This is deliberately kept separate from
-`elo_estimate_needed()` (§6a) — the latter still gates only the *pairing* model's
+`elo_estimate_needed()` (pure ELO pairing) — the latter still gates only the *pairing* model's
 ELO context, so plain Swiss + estimate-based MacMahon doesn't pay for the pairing
 ELO context it wouldn't use. The `Tiebreak::EstElo` ranking criterion becomes
 valid here too (a live estimate is maintained), so `normalized()` keeps it
@@ -462,14 +421,9 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   MacMahon in the UI (greys out thresholds, removals, floater style, fold, and the
   club-protection controls — implemented by wrapping those sections in a disabled
   `<fieldset>`). Off by default.
-- `mixed_elo_pairing_enabled: bool` — the mixed-mode switch (see §6a). Mutually
-  exclusive with `elo_pairing_enabled` (`normalized()` clears this one if both are
-  set, so pure ELO wins). Unlike pure ELO mode, it only greys out the
-  floater-selection section — MacMahon, degressive removals, airtight groups and
-  club protection stay active. Off by default.
 - `macmahon_from_estimated_elo: bool` — award MacMahon from the live estimate
-  rather than the registration rating (see §6b). Independent of the pairing-mode
-  switches (composes with Swiss or mixed ELO). Inert unless there's an ELO
+  rather than the registration rating (see §6a). Independent of the pairing-mode
+  switch (composes with plain Swiss). Inert unless there's an ELO
   threshold (`macmahon_from_estimate_active()`); the UI greys the checkbox out
   until then. Off by default.
 - `elo_k_multiplier_percent: u32` — the single knob `m`, stored as an integer
@@ -520,15 +474,23 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   normal, the Laplace widens its upward scale); the UI shows the three inputs
   whenever a live estimate is maintained.
 
-The ten `elo_*` estimate knobs (`elo_k_multiplier_percent`,
+There are ten `elo_*` estimate knobs (`elo_k_multiplier_percent`,
 `elo_provisional_multiplier_percent`, `elo_unrated_prior_center`, `elo_unrated_k`,
-the three `elo_prior_shape_*`, and the three `elo_upward_looseness_*_percent`)
-surface in the Settings UI whenever a live estimate is actually maintained — either
-ELO pairing mode, or estimate-based MacMahon (§6b) with an ELO threshold. The FESA
-K table, `s`, and the reliability threshold (18 games) remain constants in
-`elo.rs`, not settings; `UNRATED_PRIOR_MEAN` / `UNRATED_PRIOR_DEFAULT_K` there are
-only the *defaults* for the two settings above (and the fallback where no settings
-are in hand).
+the three `elo_prior_shape_*`, and the three `elo_upward_looseness_*_percent`), but
+the Settings UI deliberately exposes only **two** derived controls whenever a live
+estimate is maintained (pure ELO pairing, or estimate-based MacMahon (§6a) with an
+ELO threshold): *Estimate* — unrated players only (`elo_k_multiplier_percent = 0`,
+the default, pinning rated players to their registration rating) or all players
+(`= 100`); and *Unrated prior* — the flat performance rating
+(`elo_prior_shape_unrated = flat`, the default) or a tuned asymmetric Laplace
+(`laplace` with `elo_unrated_prior_center = 700`, `elo_unrated_k = 260`,
+`elo_upward_looseness_unrated_percent = 300`). The remaining knobs (the provisional
+multiplier, the per-category shapes and loosenesses) keep their defaults through
+the UI and are reachable only via the settings JSON / the simulator CLI, where the
+full estimator is still exercised for research. The FESA K table, `s`, and the
+reliability threshold (18 games) remain constants in `elo.rs`, not settings;
+`UNRATED_PRIOR_MEAN` / `UNRATED_PRIOR_DEFAULT_K` there are only the *defaults* for
+the two settings above (and the fallback where no settings are in hand).
 
 ## Ranking
 

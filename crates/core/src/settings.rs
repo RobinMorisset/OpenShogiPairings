@@ -332,30 +332,18 @@ pub struct TournamentSettings {
     /// Swiss-specific rules (score gap, float repeat, floater selection, fold) and
     /// club protection are all disabled; pairing instead minimizes the squared
     /// difference of a live Bayesian ELO estimate. See
-    /// `docs/elo-pairing-mode.md`. Off by default. Mutually exclusive with
-    /// [`Self::mixed_elo_pairing_enabled`] (this one wins if both are set; see
-    /// [`Self::normalized`]).
+    /// `docs/elo-pairing-mode.md`. Off by default.
     #[serde(default)]
     pub elo_pairing_enabled: bool,
-    /// Mixed mode: keeps MacMahon and the Swiss score-group rules (score gap,
-    /// float repeat, club protection, airtight groups) but replaces *only* the
-    /// fold and floater-selection rules with the squared-ELO-gap rule, so
-    /// within-group (and cross-group) ordering follows the live estimate instead
-    /// of a static registration rating. Unlike [`Self::elo_pairing_enabled`], this
-    /// stays fully compatible with MacMahon points. Off by default. Mutually
-    /// exclusive with `elo_pairing_enabled` (see [`Self::normalized`]).
-    #[serde(default)]
-    pub mixed_elo_pairing_enabled: bool,
     /// Award MacMahon starting points from the **live ELO estimate** rather than
     /// the static registration rating: each ELO-based threshold is compared
-    /// against the same Bayesian estimate that drives the ELO pairing modes,
-    /// recomputed each round, so a player's MacMahon points can rise or fall as
-    /// their estimated strength moves (grade-based thresholds are unaffected —
-    /// they still read the player's grade). Independent of the pairing mode:
-    /// this can be combined with plain Swiss or mixed-ELO pairing. Inert unless
-    /// there is at least one ELO threshold to compare against (see
-    /// [`Self::macmahon_from_estimate_active`]); the UI greys it out until then.
-    /// Off by default.
+    /// against the same Bayesian estimate that drives ELO pairing, recomputed each
+    /// round, so a player's MacMahon points can rise or fall as their estimated
+    /// strength moves (grade-based thresholds are unaffected — they still read the
+    /// player's grade). Independent of the pairing mode: this can be combined with
+    /// plain Swiss or ELO pairing. Inert unless there is at least one ELO threshold
+    /// to compare against (see [`Self::macmahon_from_estimate_active`]); the UI
+    /// greys it out until then. Off by default.
     #[serde(default)]
     pub macmahon_from_estimated_elo: bool,
     /// The multiplier `m` on each player's FESA K, as an integer percent
@@ -464,7 +452,6 @@ impl Default for TournamentSettings {
             handicap_wiel_rule: false,
             tiebreaks: default_tiebreaks(),
             elo_pairing_enabled: false,
-            mixed_elo_pairing_enabled: false,
             macmahon_from_estimated_elo: false,
             elo_k_multiplier_percent: default_elo_k_multiplier_percent(),
             elo_provisional_multiplier_percent: default_elo_provisional_multiplier_percent(),
@@ -559,12 +546,6 @@ impl TournamentSettings {
             self.airtight_groups_rounds = None;
         }
 
-        // The two ELO modes are mutually exclusive; pure ELO wins if both are
-        // somehow set (e.g. a stale client payload).
-        if self.elo_pairing_enabled {
-            self.mixed_elo_pairing_enabled = false;
-        }
-
         // Exempt clubs: keep the first spelling of each, trimmed and non-empty.
         let mut seen = HashSet::new();
         self.club_protection_exempt_clubs = self
@@ -586,10 +567,11 @@ impl TournamentSettings {
             self.tiebreaks.retain(|&tb| tb != Tiebreak::EstElo);
         }
 
-        // A zero K multiplier would give a degenerate (zero-width) prior, freezing
-        // every estimate at its registration rating and dividing by zero in the
-        // solver — clamp it up to at least 1%.
-        self.elo_k_multiplier_percent = self.elo_k_multiplier_percent.max(1);
+        // `elo_k_multiplier_percent` is left as-is: 0 is a meaningful setting —
+        // it pins every *rated* player to their registration rating so only unrated
+        // players are estimated (the estimator handles the zero-width prior by
+        // skipping those players, see [`crate::elo::estimate_elos`]). Any positive
+        // percent widens the rated prior normally.
         // A provisional rating should never be treated as more reliable than an
         // established one, so the extra multiplier is at least ×1.
         self.elo_provisional_multiplier_percent = self.elo_provisional_multiplier_percent.max(100);
@@ -613,7 +595,7 @@ impl TournamentSettings {
     /// estimate is maintained: [`Self::macmahon_from_estimate_active`] maintains
     /// one for scoring even in plain Swiss.
     pub fn elo_estimate_needed(&self) -> bool {
-        self.elo_pairing_enabled || self.mixed_elo_pairing_enabled
+        self.elo_pairing_enabled
     }
 
     /// Whether MacMahon starting points are actually drawn from the live ELO
@@ -975,40 +957,8 @@ mod tests {
             on.tiebreaks,
             vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM]
         );
-
-        // Mixed ELO mode also keeps a live estimate, so it counts too.
-        let mixed = TournamentSettings {
-            tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM],
-            mixed_elo_pairing_enabled: true,
-            ..Default::default()
-        }
-        .normalized();
-        assert_eq!(
-            mixed.tiebreaks,
-            vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM]
-        );
-    }
-
-    #[test]
-    fn the_two_elo_modes_are_mutually_exclusive() {
-        // Pure ELO wins if a stale payload somehow sets both.
-        let s = TournamentSettings {
-            elo_pairing_enabled: true,
-            mixed_elo_pairing_enabled: true,
-            ..Default::default()
-        }
-        .normalized();
-        assert!(s.elo_pairing_enabled);
-        assert!(!s.mixed_elo_pairing_enabled);
-
-        // Mixed alone is left untouched.
-        let s = TournamentSettings {
-            mixed_elo_pairing_enabled: true,
-            ..Default::default()
-        }
-        .normalized();
-        assert!(!s.elo_pairing_enabled);
-        assert!(s.mixed_elo_pairing_enabled);
+        // (Estimate-based MacMahon also keeps a live estimate; that path is covered
+        // by `estimate_based_macmahon_keeps_the_est_elo_tiebreak_valid`.)
     }
 
     #[test]
@@ -1148,15 +1098,10 @@ mod tests {
     }
 
     #[test]
-    fn elo_estimate_needed_is_true_for_either_elo_mode() {
+    fn elo_estimate_needed_is_true_for_elo_pairing() {
         assert!(!TournamentSettings::default().elo_estimate_needed());
         assert!(TournamentSettings {
             elo_pairing_enabled: true,
-            ..Default::default()
-        }
-        .elo_estimate_needed());
-        assert!(TournamentSettings {
-            mixed_elo_pairing_enabled: true,
             ..Default::default()
         }
         .elo_estimate_needed());

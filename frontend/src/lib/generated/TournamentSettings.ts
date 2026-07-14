@@ -87,32 +87,19 @@ tiebreaks: Array<Tiebreak>,
  * Swiss-specific rules (score gap, float repeat, floater selection, fold) and
  * club protection are all disabled; pairing instead minimizes the squared
  * difference of a live Bayesian ELO estimate. See
- * `docs/elo-pairing-mode.md`. Off by default. Mutually exclusive with
- * [`Self::mixed_elo_pairing_enabled`] (this one wins if both are set; see
- * [`Self::normalized`]).
+ * `docs/elo-pairing-mode.md`. Off by default.
  */
 elo_pairing_enabled: boolean, 
 /**
- * Mixed mode: keeps MacMahon and the Swiss score-group rules (score gap,
- * float repeat, club protection, airtight groups) but replaces *only* the
- * fold and floater-selection rules with the squared-ELO-gap rule, so
- * within-group (and cross-group) ordering follows the live estimate instead
- * of a static registration rating. Unlike [`Self::elo_pairing_enabled`], this
- * stays fully compatible with MacMahon points. Off by default. Mutually
- * exclusive with `elo_pairing_enabled` (see [`Self::normalized`]).
- */
-mixed_elo_pairing_enabled: boolean, 
-/**
  * Award MacMahon starting points from the **live ELO estimate** rather than
  * the static registration rating: each ELO-based threshold is compared
- * against the same Bayesian estimate that drives the ELO pairing modes,
- * recomputed each round, so a player's MacMahon points can rise or fall as
- * their estimated strength moves (grade-based thresholds are unaffected —
- * they still read the player's grade). Independent of the pairing mode:
- * this can be combined with plain Swiss or mixed-ELO pairing. Inert unless
- * there is at least one ELO threshold to compare against (see
- * [`Self::macmahon_from_estimate_active`]); the UI greys it out until then.
- * Off by default.
+ * against the same Bayesian estimate that drives ELO pairing, recomputed each
+ * round, so a player's MacMahon points can rise or fall as their estimated
+ * strength moves (grade-based thresholds are unaffected — they still read the
+ * player's grade). Independent of the pairing mode: this can be combined with
+ * plain Swiss or ELO pairing. Inert unless there is at least one ELO threshold
+ * to compare against (see [`Self::macmahon_from_estimate_active`]); the UI
+ * greys it out until then. Off by default.
  */
 macmahon_from_estimated_elo: boolean, 
 /**

@@ -59,20 +59,14 @@ tournament. For how it's built, see [Architecture](#architecture) below.
 
 ### Exotic pairing options
 
-- **Experimental mixed ELO pairing mode**: keeps MacMahon and the Swiss
-  score-group rules (score gap, float repeat, club protection, airtight groups)
-  but replaces the fold and floater-selection rules with a live Bayesian
-  estimate of every player's strength, so pairing _within_ (and across) a score
-  group follows current form rather than the static registration rating. Fully
-  compatible with MacMahon points.
-- **Experimental pure ELO pairing mode**: the more extreme variant — ignores
-  MacMahon and Swiss score groups entirely and pairs each round purely to
-  minimize the estimated ELO gap, a "continuous Swiss" for fields where a smooth
-  strength axis fits better than integer points.
+- **Experimental pure ELO pairing mode**: ignores MacMahon and Swiss score
+  groups entirely and pairs each round purely to minimize the estimated ELO gap,
+  a "continuous Swiss" for fields where a smooth strength axis fits better than
+  integer points.
 - **Estimate-based MacMahon**: a lighter hybrid that leaves pairing alone and
-  instead awards MacMahon starting points from the same live ELO estimate — so
-  the groups themselves react to results, while Swiss (or mixed-ELO) pairing runs
-  as usual. Enabled from the MacMahon settings; needs at least one ELO threshold.
+  instead awards MacMahon starting points from a live ELO estimate — so the
+  groups themselves react to results, while plain Swiss pairing runs as usual.
+  Enabled from the MacMahon settings; needs at least one ELO threshold.
 - **Club protection**, avoiding pairing players from the same club, optionally
   limited to the first N rounds and with specific clubs (e.g. the host club)
   exempted.
@@ -304,7 +298,7 @@ that tournament's bearer token if it has a password (except `/login` and
 | `POST /undo` | Revert the last change (server-side undo history). |
 | `GET /american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
 | `PUT /american-grid` | Import an American Grid (raw `text/plain` body), rebuilding the tournament from it — registers the players, forces every round's pairings, and replays the results. Meant for seeding a non-trivial state in tests/simulations, not surfaced in the UI. |
-| `PUT /settings` | Update settings (the whole `TournamentSettings`): `{ "macmahon_thresholds": [{ "criterion": { "kind": "elo", "value": 1200 } }, { "criterion": { "kind": "grade", "grade": { "kind": "dan", "level": 1 } }, "drops_after_round": 3 }], "airtight_groups_rounds": 2, "club_protection_enabled": true, "club_protection_rounds": 3, "club_protection_exempt_clubs": ["Paris"], "mixed_elo_pairing_enabled": …, "elo_pairing_enabled": … }`. Each threshold's `criterion` is either an ELO rating (`{ "kind": "elo", "value": … }`) or a dan/kyu grade (`{ "kind": "grade", "grade": { "kind": "dan"｜"kyu", "level": … } }`) — a tournament can freely mix both kinds, each counted independently; `airtight_groups_rounds`, if set, forbids pairing players with a different number of MacMahon points during rounds `1..=n`; `floater_style` is `"classic"｜"median"`; `mixed_elo_pairing_enabled` / `elo_pairing_enabled` select the experimental mixed / pure ELO pairing modes (mutually exclusive; pure wins if both are set); `cup_enabled` toggles the hybrid direct-elimination cup (its size is chosen at finalization). |
+| `PUT /settings` | Update settings (the whole `TournamentSettings`): `{ "macmahon_thresholds": [{ "criterion": { "kind": "elo", "value": 1200 } }, { "criterion": { "kind": "grade", "grade": { "kind": "dan", "level": 1 } }, "drops_after_round": 3 }], "airtight_groups_rounds": 2, "club_protection_enabled": true, "club_protection_rounds": 3, "club_protection_exempt_clubs": ["Paris"], "elo_pairing_enabled": … }`. Each threshold's `criterion` is either an ELO rating (`{ "kind": "elo", "value": … }`) or a dan/kyu grade (`{ "kind": "grade", "grade": { "kind": "dan"｜"kyu", "level": … } }`) — a tournament can freely mix both kinds, each counted independently; `airtight_groups_rounds`, if set, forbids pairing players with a different number of MacMahon points during rounds `1..=n`; `floater_style` is `"classic"｜"median"`; `elo_pairing_enabled` selects the experimental pure ELO pairing mode; `cup_enabled` toggles the hybrid direct-elimination cup (its size is chosen at finalization). |
 | `POST /finalize-registration` | Finalize registration (unlocks round 1). Body optional: `{ "cup_size": 8｜16｜32｜64 }` when the hybrid cup is enabled — seeds the top-N eligible players into a direct-elimination bracket. The UI usually skips this: `POST /rounds/prepare` finalizes round 1 in the same step. |
 | `POST /cancel-round` | Cancel the last round — discards the open draft if one is being prepared, otherwise removes the most recent round (undoable). |
 | `POST /rounds/prepare` | Begin drafting the next round. For round 1, finalizes registration first (optional `{ "cup_size" }` body, as above) in the same undo step. A round completes automatically once every board has a result, so there is no separate "complete round" call. |
