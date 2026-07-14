@@ -15,13 +15,15 @@
 //! has a rating; not every player has a parsed grade) while still "falling on a
 //! grade boundary" as requested.
 //!
-//! When at least one threshold is selected, it writes **three** settings JSON
-//! files (all sharing those thresholds), ready to pass to `osp-sim --configs`:
+//! When at least one threshold is selected, it writes settings JSON files (all
+//! sharing those thresholds), ready to pass to `osp-sim --configs`:
 //!   `a` — the thresholds alone (static MacMahon);
 //!   `b` — plus MacMahon-from-estimated-ELO with the rated/provisional K
 //!         multiplier pinned to 0 and a Flat prior for unrated players;
 //!   `c` — same as `b` but the unrated prior is an asymmetric Huber-Laplace
-//!         (centre 700, k 260, upward-looseness 300%).
+//!         (centre 700, k 260, upward-looseness 300%);
+//!   `d` — same as `b` but rated/provisional players are unpinned (default K
+//!         multiplier / default Gaussian prior), so results can move them.
 //! If no thresholds are selected (e.g. `N` larger than the field allows), it
 //! writes nothing.
 
@@ -135,7 +137,7 @@ fn main() -> ExitCode {
         .map(|&b| serde_json::json!({ "criterion": { "kind": "elo", "value": b } }))
         .collect();
 
-    // The three configs, all sharing the same thresholds.
+    // The configs, all sharing the same thresholds.
     let cfg_a = serde_json::json!({ "macmahon_thresholds": thresholds });
     let cfg_b = serde_json::json!({
         "macmahon_thresholds": thresholds,
@@ -155,6 +157,15 @@ fn main() -> ExitCode {
         "elo_unrated_k": 260,
         "elo_upward_looseness_unrated_percent": 300,
     });
+    // Like `b`, but rated/provisional players are *not* pinned: the default K
+    // multiplier lets their estimated ELO follow the default (Gaussian) prior
+    // around their rating, so results can move them. Unrated players still use the
+    // Flat prior.
+    let cfg_d = serde_json::json!({
+        "macmahon_thresholds": thresholds,
+        "macmahon_from_estimated_elo": true,
+        "elo_prior_shape_unrated": "flat",
+    });
 
     let stem = Path::new(path)
         .file_stem()
@@ -164,9 +175,10 @@ fn main() -> ExitCode {
         (format!("{stem}.mm{n}-a.json"), &cfg_a),
         (format!("{stem}.mm{n}-b.json"), &cfg_b),
         (format!("{stem}.mm{n}-c.json"), &cfg_c),
+        (format!("{stem}.mm{n}-d.json"), &cfg_d),
     ];
 
-    eprintln!("wrote 3 configs to {out_dir}/:");
+    eprintln!("wrote {} configs to {out_dir}/:", outputs.len());
     let mut written: Vec<String> = Vec::with_capacity(outputs.len());
     for (name, cfg) in &outputs {
         let full = Path::new(out_dir).join(name);

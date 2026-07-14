@@ -64,10 +64,10 @@ DEFAULT_OUT = REPO / "study_out"
 INVALID_DIRNAME = "invalid"
 
 # Config kinds are named `swiss` and `n<N><letter>` (e.g. `n10a`), where N is the
-# mm-grades group-size floor and the letter is its variant (a/b/c). Which N values
-# and letters to sweep is chosen per run (--ns / --letters); the baseline swiss is
-# always included. mm-grades emits its three variants in letter order a,b,c.
-MM_LETTERS = ["a", "b", "c"]
+# mm-grades group-size floor and the letter is its variant. Which N values and
+# letters to sweep is chosen per run (--ns / --letters); the baseline swiss is
+# always included. mm-grades emits every variant, in this letter order.
+MM_LETTERS = ["a", "b", "c", "d"]
 
 
 def kind_name(n, letter):
@@ -146,14 +146,32 @@ def prefers_half_point_absences(result_file):
     return len(_ABSENT_HALF.findall(text)) > len(_ABSENT_ZERO.findall(text))
 
 
+def detect_cup(result_file):
+    """(size, nation) when the file was run as a single-elimination cup among the
+    top 2^N players of its most common nationality, else None. Delegates to
+    cup-detect, which reuses osp-core's cup seeding + bracket replay, so a hit is a
+    tournament osp-sim can reproduce as that hybrid cup. Raises on a tool failure."""
+    proc = subprocess.run(
+        [str(bin_path("cup-detect")), str(result_file)], capture_output=True, text=True
+    )
+    if proc.returncode != 0:
+        raise RuntimeError("cup-detect failed on {}:\n{}".format(result_file, proc.stderr.strip()))
+    out = proc.stdout.strip()
+    if not out:
+        return None
+    size, nation = out.split(",", 1)
+    return int(size), nation
+
+
 # ----------------------------------------------------------------------------
 # run phase
 # ----------------------------------------------------------------------------
 
 def build_binaries():
-    eprint("building osp-sim, mm-grades, fesa-players (release) ...")
+    eprint("building osp-sim, mm-grades, fesa-players, cup-detect (release) ...")
     subprocess.run(
-        ["cargo", "build", "--release", "--bin", "osp-sim", "--bin", "mm-grades", "--bin", "fesa-players"],
+        ["cargo", "build", "--release", "--bin", "osp-sim", "--bin", "mm-grades",
+         "--bin", "fesa-players", "--bin", "cup-detect"],
         cwd=REPO,
         check=True,
     )
@@ -187,9 +205,9 @@ def run_mm_grades(result_file, n, workdir):
                 pass
 
     stem = result_file.stem
-    expected = [workdir / "{}.mm{}-{}.json".format(stem, n, letter) for letter in ("a", "b", "c")]
+    expected = [workdir / "{}.mm{}-{}.json".format(stem, n, letter) for letter in MM_LETTERS]
     present = [p for p in expected if p.exists()]
-    if present and len(present) != 3:
+    if present and len(present) != len(MM_LETTERS):
         raise RuntimeError("mm-grades produced a partial set for {} (N={}): {}".format(result_file, n, present))
     return present, info
 
@@ -198,7 +216,7 @@ def stage_configs(result_file, out, season, stem, ns, letters, keep_going):
     """Generate + stage all configs for one tournament under out/configs/... .
 
     `ns` is the ascending list of group-size floors to sweep; `letters` the mm-grades
-    variants (subset of a/b/c). The smallest N is the *gate*: if it yields no
+    variants (subset of a/b/c/d). The smallest N is the *gate*: if it yields no
     thresholds the tournament is skipped entirely. Each larger N contributes its
     configs only when it too yields thresholds (a strictly bigger field is needed),
     so coverage shrinks as N grows.
@@ -216,8 +234,8 @@ def stage_configs(result_file, out, season, stem, ns, letters, keep_going):
     if work.exists():
         shutil.rmtree(work)
 
-    info = {"players": None, "groups": {}, "skip": None, "error": None, "half_abs": False}
-    letter_idx = {"a": 0, "b": 1, "c": 2}
+    info = {"players": None, "groups": {}, "skip": None, "error": None, "half_abs": False, "cup": None}
+    letter_idx = {l: i for i, l in enumerate(MM_LETTERS)}
     gate = ns[0]
     kinds = []
 
@@ -234,8 +252,16 @@ def stage_configs(result_file, out, season, stem, ns, letters, keep_going):
             if not paths:
                 info["skip"] = "no_n{}".format(gate)  # gate empty -> skip entirely
                 return [], info
-            # First real N: set up the baseline and the file's absence convention.
+            # First real N: set up the baseline, the file's absence convention, and
+            # whether it was actually run as a cup (applied to the whole run below).
             info["half_abs"] = prefers_half_point_absences(result_file)
+            try:
+                info["cup"] = detect_cup(result_file)
+            except RuntimeError as e:
+                if keep_going:
+                    info["error"] = str(e)
+                    return [], info
+                raise
             (cfg_dir / "swiss.json").write_text("{}\n")  # default == basic Swiss
             kinds.append("swiss")
         if not paths:
@@ -259,9 +285,11 @@ def stage_configs(result_file, out, season, stem, ns, letters, keep_going):
     return kinds, info
 
 
-def run_osp_sim(result_file, cfg_dir, kinds, dump_path, args):
-    """Invoke osp-sim for one tournament, writing the per-run dump. Raises on
-    failure (message includes osp-sim's stderr)."""
+def run_osp_sim(result_file, cfg_dir, kinds, dump_path, cup, args):
+    """Invoke osp-sim for one tournament, writing the per-run dump. When `cup` is
+    (size, nation), the run reproduces the hybrid direct-elimination cup, so the
+    cup rounds are bracket-paired rather than Swiss — the faithful format for a
+    tournament that was actually a cup. Raises on failure (osp-sim's stderr)."""
     dump_path.parent.mkdir(parents=True, exist_ok=True)
     config_files = [str(cfg_dir / (k + ".json")) for k in kinds]
     cmd = [
@@ -273,6 +301,9 @@ def run_osp_sim(result_file, cfg_dir, kinds, dump_path, args):
         "--configs", *config_files,
         "--dump-runs", str(dump_path),
     ]
+    if cup:
+        size, nation = cup
+        cmd += ["--cup-size", str(size), "--cup-nations", nation]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError("osp-sim failed on {}:\n{}".format(result_file, proc.stderr.strip()))
@@ -314,7 +345,7 @@ def phase_run(args):
     writer = csv.writer(manifest)
     if new_manifest:
         writer.writerow(
-            ["season", "file", "stem", "status", "players", "n_configs", "configs", "half_abs", "error"]
+            ["season", "file", "stem", "status", "players", "n_configs", "configs", "half_abs", "cup", "error"]
         )
 
     seasons = season_dirs(corpus)
@@ -322,14 +353,14 @@ def phase_run(args):
         wanted = set(args.seasons)
         seasons = [s for s in seasons if s.name in wanted]
 
-    totals = dict(files=0, run=0, full=0, partial=0, skipped=0, cached=0, errors=0)
+    totals = dict(files=0, run=0, full=0, partial=0, skipped=0, cached=0, errors=0, cups=0)
     t0 = time.time()
 
     for season in seasons:
         files = result_files(season)
         if args.max_files:
             files = files[: args.max_files]
-        s = dict(files=0, run=0, full=0, partial=0, skipped=0, cached=0, errors=0)
+        s = dict(files=0, run=0, full=0, partial=0, skipped=0, cached=0, errors=0, cups=0)
 
         for rf in files:
             stem = rf.stem
@@ -352,23 +383,24 @@ def phase_run(args):
                 return 1
 
             players = info["players"] or ""
+            cup_str = "{}:{}".format(*info["cup"]) if info.get("cup") else ""
             if info["error"]:
-                writer.writerow([season.name, rf.name, stem, "error", players, 0, "", "", info["error"].replace("\n", " ")])
+                writer.writerow([season.name, rf.name, stem, "error", players, 0, "", "", cup_str, info["error"].replace("\n", " ")])
                 totals["errors"] += 1
                 s["errors"] += 1
                 continue
 
             if not kinds:  # skipped (gate N yielded no thresholds)
-                writer.writerow([season.name, rf.name, stem, info["skip"], players, 0, "", "", ""])
+                writer.writerow([season.name, rf.name, stem, info["skip"], players, 0, "", "", cup_str, ""])
                 totals["skipped"] += 1
                 s["skipped"] += 1
                 continue
 
             try:
-                run_osp_sim(rf, out / "configs" / season.name / stem, kinds, dump_path, args)
+                run_osp_sim(rf, out / "configs" / season.name / stem, kinds, dump_path, info["cup"], args)
             except RuntimeError as e:
                 if args.keep_going:
-                    writer.writerow([season.name, rf.name, stem, "error", players, len(kinds), "|".join(kinds), int(info["half_abs"]), str(e).replace("\n", " ")])
+                    writer.writerow([season.name, rf.name, stem, "error", players, len(kinds), "|".join(kinds), int(info["half_abs"]), cup_str, str(e).replace("\n", " ")])
                     totals["errors"] += 1
                     s["errors"] += 1
                     continue
@@ -378,10 +410,13 @@ def phase_run(args):
                 return 1
 
             writer.writerow([
-                season.name, rf.name, stem, "run", players, len(kinds), "|".join(kinds), int(info["half_abs"]), "",
+                season.name, rf.name, stem, "run", players, len(kinds), "|".join(kinds), int(info["half_abs"]), cup_str, "",
             ])
             totals["run"] += 1
             s["run"] += 1
+            if cup_str:
+                totals["cups"] += 1
+                s["cups"] += 1
             full = len(kinds) == expected_full
             key = "full" if full else "partial"
             totals[key] += 1
@@ -390,9 +425,10 @@ def phase_run(args):
 
         eprint(
             "[{season}] {files} files -> {run} run ({full} full, {partial} partial), "
-            "{skipped} skipped, {cached} cached{err}".format(
+            "{skipped} skipped, {cached} cached{cup}{err}".format(
                 season=season.name, files=s["files"], run=s["run"], full=s["full"],
                 partial=s["partial"], skipped=s["skipped"], cached=s["cached"],
+                cup="" if not s["cups"] else ", {} cup".format(s["cups"]),
                 err="" if not s["errors"] else ", {} ERRORS".format(s["errors"]),
             )
         )
@@ -405,6 +441,7 @@ def phase_run(args):
     eprint("simulated         : {}  ({} full, {} partial)".format(totals["run"], totals["full"], totals["partial"]))
     eprint("skipped (gate N)  : {}".format(totals["skipped"]))
     eprint("cached (resumed)  : {}".format(totals["cached"]))
+    eprint("cups detected     : {}  (run as hybrid direct-elimination cups)".format(totals["cups"]))
     eprint("errors            : {}".format(totals["errors"]))
     eprint("raw dumps + manifest under {}".format(out))
     return 0

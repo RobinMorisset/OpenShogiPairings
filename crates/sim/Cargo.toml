@@ -16,6 +16,10 @@ path = "src/bin/mm-grades.rs"
 name = "fesa-players"
 path = "src/bin/fesa-players.rs"
 
+[[bin]]
+name = "cup-detect"
+path = "src/bin/cup-detect.rs"
+
 [dependencies]
 osp-core = { workspace = true }
 serde = { workspace = true }
