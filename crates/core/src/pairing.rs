@@ -294,6 +294,11 @@ impl Rule {
     }
 
     /// Penalty units for pairing `a` against `b` (before the priority multiplier).
+    ///
+    /// `#[inline]` so that when the caller holds a *constant* rule (the per-rule
+    /// specialization in [`accumulate_edge_rule`]), the `match self` folds to that
+    /// one arm and the body inlines into the O(k²) fill loop.
+    #[inline]
     fn edge_units(self, ctx: &Ctx, a: u32, b: u32) -> i128 {
         let sa = ctx.scores.get_tid(a);
         let sb = ctx.scores.get_tid(b);
@@ -459,13 +464,44 @@ fn scale_ladder(max_total: &[i128]) -> Vec<i128> {
 }
 
 /// Total edge weight for pairing `a` against `b`: `Σ mult[rule] · units`, over the
-/// active rules for this mode.
+/// active rules for this mode. Used off the hot path (explanations, the
+/// alternative-pairing search); the O(k²) cost-matrix fill uses the per-rule
+/// [`accumulate_edge_rule`] instead.
 fn edge_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], a: u32, b: u32) -> i128 {
     rules
         .iter()
         .zip(mult)
         .map(|(rule, m)| m * rule.edge_units(ctx, a, b))
         .sum()
+}
+
+/// Add one rule's contribution to every real edge of the cost matrix: for each
+/// pair `(i, j)`, `+= m · units(ctx, tid_i, tid_j)` on both `(i, j)` and `(j, i)`.
+///
+/// This is the fissioned, per-rule form of the cost fill. `units` is generic and
+/// each call site passes a closure over a *constant* rule, so it monomorphizes to
+/// that rule's arm of [`Rule::edge_units`] with the enum `match` folded away — the
+/// O(k²) inner loop carries no per-edge branch or call. The dispatch on which rule
+/// happens once per rule (see the fill in [`pair_round_weighted`]), not per edge.
+#[inline]
+fn accumulate_edge_rule<F: Fn(&Ctx, u32, u32) -> i128>(
+    cost: &mut [i128],
+    vcount: usize,
+    k: usize,
+    free_tid: &[u32],
+    ctx: &Ctx,
+    m: i128,
+    units: F,
+) {
+    for i in 0..k {
+        let base_i = i * vcount;
+        let ti = free_tid[i];
+        for j in (i + 1)..k {
+            let c = m * units(ctx, ti, free_tid[j]);
+            cost[base_i + j] += c;
+            cost[j * vcount + i] += c;
+        }
+    }
 }
 
 /// Total edge weight for giving `player` the bye, over the active rules.
@@ -1413,11 +1449,30 @@ pub fn pair_round_weighted(
         // `(i, j)` at `i * vcount + j`), rather than a `Vec<Vec>`: one allocation
         // and no per-row pointer-chase feeding the solver.
         let mut cost = vec![0i128; vcount * vcount];
-        for i in 0..k {
-            for j in (i + 1)..k {
-                let c = edge_cost(&ctx, &model.rules, &model.mult, free_tid[i], free_tid[j]);
-                cost[i * vcount + j] = c;
-                cost[j * vcount + i] = c;
+        // Fill by rule, not by edge: each rule adds its contribution to every edge
+        // in its own monomorphized O(k²) loop, so the per-edge `match self` in
+        // `edge_units` folds away (the rule is a constant here). The dispatch on
+        // which rule runs once per rule. Bye-only rules are 0 on every real edge,
+        // so they are skipped entirely rather than adding 0 k² times.
+        macro_rules! fill {
+            ($rule:expr, $m:expr) => {
+                accumulate_edge_rule(&mut cost, vcount, k, &free_tid, &ctx, $m, |ctx, a, b| {
+                    $rule.edge_units(ctx, a, b)
+                })
+            };
+        }
+        for (&rule, &m) in model.rules.iter().zip(&model.mult) {
+            match rule {
+                Rule::Rematch => fill!(Rule::Rematch, m),
+                Rule::AirtightGroups => fill!(Rule::AirtightGroups, m),
+                Rule::ScoreGap => fill!(Rule::ScoreGap, m),
+                Rule::FloatRepeat => fill!(Rule::FloatRepeat, m),
+                Rule::FloaterSelection => fill!(Rule::FloaterSelection, m),
+                Rule::Club => fill!(Rule::Club, m),
+                Rule::Fold => fill!(Rule::Fold, m),
+                Rule::EloGap => fill!(Rule::EloGap, m),
+                // Bye-only rules: 0 on every real edge (they act on the bye edge).
+                Rule::ByeGroup | Rule::ByeSelection => {}
             }
         }
         if need_phantom {
