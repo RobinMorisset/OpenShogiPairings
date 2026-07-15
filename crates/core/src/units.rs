@@ -8,9 +8,13 @@
 //! its inner value, so the only ways in and out are its named constructors and
 //! [`halves`](HalfPoints::halves).
 //!
-//! Both serialize transparently (as a bare JSON number) and export to TypeScript
-//! as `number`, so they stay wire- and TS-compatible with the plain `u32` they
-//! replace — no save-format or frontend change.
+//! Both serialize as a bare JSON number and export to TypeScript as `number`, so
+//! they stay wire- and TS-compatible with the plain `u32` they replace — no
+//! save-format or frontend change. This falls out of serde's default *newtype
+//! struct* handling (a one-field tuple struct forwards to its inner value), so
+//! **do not add `#[serde(transparent)]`**: it is redundant here and only makes
+//! ts-rs emit a "failed to parse serde attribute" warning. The
+//! `serializes_as_a_bare_number` test pins this representation.
 
 use derive_more::{Add, AddAssign, Display, Sum};
 use serde::{Deserialize, Serialize};
@@ -36,7 +40,6 @@ use ts_rs::TS;
     Deserialize,
     TS,
 )]
-#[serde(transparent)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Wins(pub u32);
 
@@ -74,7 +77,6 @@ impl Wins {
     Deserialize,
     TS,
 )]
-#[serde(transparent)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct HalfPoints(u32);
 
@@ -122,5 +124,29 @@ impl PartialEq<u32> for Wins {
 impl PartialEq<u32> for HalfPoints {
     fn eq(&self, other: &u32) -> bool {
         self.0 == *other
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The frontend (and saved tournaments) rely on these being bare numbers on
+    /// the wire, not `{"0": 5}`. This is serde's default newtype-struct
+    /// behaviour, achieved *without* `#[serde(transparent)]` — guard it so a
+    /// refactor can't silently wrap them in an object.
+    #[test]
+    fn serializes_as_a_bare_number() {
+        assert_eq!(serde_json::to_string(&Wins(5)).unwrap(), "5");
+        assert_eq!(
+            serde_json::to_string(&HalfPoints::from_whole(2)).unwrap(),
+            "4"
+        );
+        // ...and round-trips back.
+        assert_eq!(serde_json::from_str::<Wins>("5").unwrap(), Wins(5));
+        assert_eq!(
+            serde_json::from_str::<HalfPoints>("4").unwrap(),
+            HalfPoints::from_halves(4)
+        );
     }
 }
