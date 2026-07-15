@@ -206,8 +206,9 @@ fn active_rules(settings: &TournamentSettings) -> &'static [Rule] {
 /// worst-case bounds (and hence multipliers) are derived from.
 struct Ctx<'a> {
     scores: &'a Scores,
-    by_player: &'a HashMap<Uuid, &'a Player>,
-    fold: &'a HashMap<Uuid, FoldInfo>,
+    /// Fold placement per free player, indexed by tournament number (`None` for a
+    /// non-free player, whose number still indexes the slice).
+    fold: &'a [Option<FoldInfo>],
     round: u32,
     /// Which player each lower group sends up as its ascending floater.
     floater_style: FloaterStyle,
@@ -232,11 +233,15 @@ struct Ctx<'a> {
     max_group: i128,
     /// Number of free players (bounds the bye-selection rule).
     free_count: i128,
-    /// (ELO mode) Rounded estimated ELO per free player; empty in Swiss mode.
-    elo: &'a HashMap<Uuid, i64>,
-    /// (ELO mode) Ascending ELO rank per free player, 0 = weakest; empty in Swiss
-    /// mode.
-    elo_rank: &'a HashMap<Uuid, i128>,
+    /// Normalized club per player, indexed by tournament number (`None` for no /
+    /// unknown club). Pre-normalized so the club rule is a plain comparison.
+    club_norm: &'a [Option<String>],
+    /// (ELO mode) Rounded estimated ELO per free player, indexed by tournament
+    /// number; all zero in Swiss mode.
+    elo: &'a [i64],
+    /// (ELO mode) Ascending ELO rank per free player, 0 = weakest, indexed by
+    /// tournament number; all zero in Swiss mode.
+    elo_rank: &'a [i128],
     /// (ELO mode) Largest rounded-ELO gap among free players (bounds the ELO-gap
     /// rule).
     max_elo_gap: i128,
@@ -256,8 +261,8 @@ fn float_units(last: Option<u32>, round: u32) -> i128 {
 /// ideally sits last (weakest) in its group and an ascending floater first; in
 /// median Swiss, both ideally sit at the median. 0 if the player has no fold info
 /// (shouldn't happen for free players) or its group is a singleton.
-fn floater_units(ctx: &Ctx, id: Uuid, descending: bool) -> i128 {
-    let Some(f) = ctx.fold.get(&id) else {
+fn floater_units(ctx: &Ctx, id: u32, descending: bool) -> i128 {
+    let Some(f) = &ctx.fold[id as usize] else {
         return 0;
     };
     let ideal = match ctx.floater_style {
@@ -291,9 +296,9 @@ impl Rule {
     }
 
     /// Penalty units for pairing `a` against `b` (before the priority multiplier).
-    fn edge_units(self, ctx: &Ctx, a: Uuid, b: Uuid) -> i128 {
-        let sa = ctx.scores.get(&a);
-        let sb = ctx.scores.get(&b);
+    fn edge_units(self, ctx: &Ctx, a: u32, b: u32) -> i128 {
+        let sa = ctx.scores.get_tid(a);
+        let sb = ctx.scores.get_tid(b);
         match self {
             // Rule 1: never play the same opponent twice.
             Rule::Rematch => i128::from(sa.opponents.contains(&b)),
@@ -347,12 +352,8 @@ impl Rule {
                 if !ctx.club_active {
                     return 0;
                 }
-                match (&ctx.by_player[&a].club, &ctx.by_player[&b].club) {
-                    (Some(ca), Some(cb)) => {
-                        let na = TournamentSettings::normalize_club(ca);
-                        let same = na == TournamentSettings::normalize_club(cb);
-                        i128::from(same && !ctx.exempt_clubs.contains(&na))
-                    }
+                match (&ctx.club_norm[a as usize], &ctx.club_norm[b as usize]) {
+                    (Some(na), Some(nb)) => i128::from(na == nb && !ctx.exempt_clubs.contains(na)),
                     _ => 0,
                 }
             }
@@ -365,7 +366,7 @@ impl Rule {
                 if sa.points != sb.points {
                     return 0;
                 }
-                match (ctx.fold.get(&a), ctx.fold.get(&b)) {
+                match (&ctx.fold[a as usize], &ctx.fold[b as usize]) {
                     (Some(fa), Some(fb)) => {
                         let ia = ideal_rank(fa.rank, fa.group_size) as i128;
                         let ib = ideal_rank(fb.rank, fb.group_size) as i128;
@@ -380,8 +381,8 @@ impl Rule {
             Rule::ByeSelection => 0,
             // ELO mode: prefer equal estimated ELO; penalty is the squared gap.
             Rule::EloGap => {
-                let ga = ctx.elo.get(&a).copied().unwrap_or(0);
-                let gb = ctx.elo.get(&b).copied().unwrap_or(0);
+                let ga = ctx.elo[a as usize];
+                let gb = ctx.elo[b as usize];
                 let gap = (ga - gb) as i128;
                 gap * gap
             }
@@ -390,8 +391,8 @@ impl Rule {
 
     /// Penalty units for giving `player` the bye (before the priority multiplier).
     /// A bye repeats the rematch rule (never bye twice) and counts as a downfloat.
-    fn bye_units(self, ctx: &Ctx, player: Uuid) -> i128 {
-        let s = ctx.scores.get(&player);
+    fn bye_units(self, ctx: &Ctx, player: u32) -> i128 {
+        let s = ctx.scores.get_tid(player);
         match self {
             Rule::Rematch => i128::from(s.had_bye),
             // The bye should go to the lowest score group; penalty is the square
@@ -405,7 +406,7 @@ impl Rule {
             // or its median (median Swiss) to take it.
             Rule::FloaterSelection => floater_units(ctx, player, true),
             // ELO mode: the weakest present player (lowest ELO rank) takes the bye.
-            Rule::ByeSelection => ctx.elo_rank.get(&player).copied().unwrap_or(0),
+            Rule::ByeSelection => ctx.elo_rank[player as usize],
             Rule::AirtightGroups | Rule::ScoreGap | Rule::Club | Rule::Fold | Rule::EloGap => 0,
         }
     }
@@ -461,7 +462,7 @@ fn scale_ladder(max_total: &[i128]) -> Vec<i128> {
 
 /// Total edge weight for pairing `a` against `b`: `Σ mult[rule] · units`, over the
 /// active rules for this mode.
-fn edge_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], a: Uuid, b: Uuid) -> i128 {
+fn edge_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], a: u32, b: u32) -> i128 {
     rules
         .iter()
         .zip(mult)
@@ -470,7 +471,7 @@ fn edge_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], a: Uuid, b: Uuid) -> i128
 }
 
 /// Total edge weight for giving `player` the bye, over the active rules.
-fn bye_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], player: Uuid) -> i128 {
+fn bye_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], player: u32) -> i128 {
     rules
         .iter()
         .zip(mult)
@@ -480,6 +481,7 @@ fn bye_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], player: Uuid) -> i128 {
 
 /// Within-group fold placement of a player: its rank in the score group (by
 /// rating, descending) and the group's size.
+#[derive(Clone, Copy)]
 struct FoldInfo {
     rank: usize,
     group_size: usize,
@@ -541,11 +543,17 @@ fn fold_ranks(
 /// the pairing used — no risk of the two drifting apart.
 struct PairingModel<'a> {
     scores: Scores,
+    /// Kept only for the id → tournament-number boundary (seed ordering, and the
+    /// [`Self::tid`] helper the `Uuid`-facing methods use); the hot cost loop never
+    /// touches it.
     by_player: HashMap<Uuid, &'a Player>,
-    fold: HashMap<Uuid, FoldInfo>,
+    /// Per-player data the rules read, all indexed by tournament number so the
+    /// O(k²) cost loop indexes rather than hashes. See [`Ctx`].
+    fold: Vec<Option<FoldInfo>>,
+    club_norm: Vec<Option<String>>,
     exempt_clubs: HashSet<String>,
-    elo: HashMap<Uuid, i64>,
-    elo_rank: HashMap<Uuid, i128>,
+    elo: Vec<i64>,
+    elo_rank: Vec<i128>,
     round: u32,
     floater_style: FloaterStyle,
     club_active: bool,
@@ -623,13 +631,42 @@ impl<'a> PairingModel<'a> {
         let max_group = fold.values().map(|f| f.group_size).max().unwrap_or(0) as i128;
         let rules = active_rules(settings);
 
+        // Transpose the id-keyed per-player data onto tournament-number-indexed
+        // vectors, so the O(k²) cost loop indexes them directly instead of hashing
+        // a Uuid per edge per rule. Every free player has a number (pairing runs
+        // post-finalization), so these placements are total. Clubs are normalized
+        // here, once, rather than on every club-rule evaluation.
+        let cap = scores.tid_capacity();
+        let mut fold_v: Vec<Option<FoldInfo>> = vec![None; cap];
+        for (id, f) in &fold {
+            fold_v[scores.tid_of(id).expect("free player has a number") as usize] = Some(*f);
+        }
+        let mut elo_v = vec![0i64; cap];
+        for (id, &e) in &elo {
+            elo_v[scores.tid_of(id).expect("free player has a number") as usize] = e;
+        }
+        let mut elo_rank_v = vec![0i128; cap];
+        for (id, &r) in &elo_rank {
+            elo_rank_v[scores.tid_of(id).expect("free player has a number") as usize] = r;
+        }
+        let mut club_norm: Vec<Option<String>> = vec![None; cap];
+        for p in players {
+            if let Some(t) = scores.tid_of(&p.id) {
+                club_norm[t as usize] = p
+                    .club
+                    .as_ref()
+                    .map(|c| TournamentSettings::normalize_club(c));
+            }
+        }
+
         let mut model = PairingModel {
             scores,
             by_player,
-            fold,
+            fold: fold_v,
+            club_norm,
             exempt_clubs,
-            elo,
-            elo_rank,
+            elo: elo_v,
+            elo_rank: elo_rank_v,
             round: number,
             floater_style: settings.floater_style,
             club_active: settings.club_protection_active(number),
@@ -658,8 +695,8 @@ impl<'a> PairingModel<'a> {
     fn ctx(&self) -> Ctx<'_> {
         Ctx {
             scores: &self.scores,
-            by_player: &self.by_player,
             fold: &self.fold,
+            club_norm: &self.club_norm,
             round: self.round,
             floater_style: self.floater_style,
             club_active: self.club_active,
@@ -677,14 +714,29 @@ impl<'a> PairingModel<'a> {
         }
     }
 
+    /// The tournament number of a real player — the dense key everything the cost
+    /// functions read is indexed by. Only called for real players (never the
+    /// phantom bye), which always have a number at pairing time.
+    fn tid(&self, id: Uuid) -> u32 {
+        self.scores
+            .tid_of(&id)
+            .expect("a player being paired has a tournament number")
+    }
+
     /// Scalar edge weight for pairing `a` against `b`.
     fn edge_cost(&self, a: Uuid, b: Uuid) -> i128 {
-        edge_cost(&self.ctx(), self.rules, &self.mult, a, b)
+        edge_cost(
+            &self.ctx(),
+            self.rules,
+            &self.mult,
+            self.tid(a),
+            self.tid(b),
+        )
     }
 
     /// Scalar edge weight for giving `player` the bye.
     fn bye_cost(&self, player: Uuid) -> i128 {
-        bye_cost(&self.ctx(), self.rules, &self.mult, player)
+        bye_cost(&self.ctx(), self.rules, &self.mult, self.tid(player))
     }
 
     /// Canonical seed key for a matching vertex. Ordering the vertices by this key
@@ -710,6 +762,7 @@ impl<'a> PairingModel<'a> {
     /// Per-rule penalty units (pre-multiplier) for pairing `a` against `b`, in
     /// priority order (aligned with [`Self::rules`]).
     fn edge_units(&self, a: Uuid, b: Uuid) -> Vec<i128> {
+        let (a, b) = (self.tid(a), self.tid(b));
         let ctx = self.ctx();
         self.rules
             .iter()
@@ -719,6 +772,7 @@ impl<'a> PairingModel<'a> {
 
     /// Per-rule penalty units (pre-multiplier) for giving `player` the bye.
     fn bye_units(&self, player: Uuid) -> Vec<i128> {
+        let player = self.tid(player);
         let ctx = self.ctx();
         self.rules
             .iter()
@@ -1333,10 +1387,15 @@ pub fn pair_round_weighted(
         // (the model itself is order-independent, so this affects ties only).
         free.sort_by_key(|&id| model.seed_key(id));
 
+        // Resolve each free player's tournament number once (k hashes), then fill
+        // the O(k²) cost matrix indexing the model's per-number tables — no hashing
+        // per edge. `ctx` is built once and shared across every edge.
+        let free_tid: Vec<u32> = free.iter().map(|&id| model.tid(id)).collect();
+        let ctx = model.ctx();
         let mut cost = vec![vec![0i128; vcount]; vcount];
         for i in 0..k {
             for j in (i + 1)..k {
-                let c = model.edge_cost(free[i], free[j]);
+                let c = edge_cost(&ctx, model.rules, &model.mult, free_tid[i], free_tid[j]);
                 cost[i][j] = c;
                 cost[j][i] = c;
             }
@@ -1344,7 +1403,7 @@ pub fn pair_round_weighted(
         if need_phantom {
             let p = k;
             for i in 0..k {
-                let c = model.bye_cost(free[i]);
+                let c = bye_cost(&ctx, model.rules, &model.mult, free_tid[i]);
                 cost[i][p] = c;
                 cost[p][i] = c;
             }
@@ -2234,7 +2293,8 @@ mod tests {
         let scores = compute_scores(&p, &settings, &[r1]);
         let by_player: HashMap<Uuid, &Player> = p.iter().map(|q| (q.id, q)).collect();
         let free: Vec<Uuid> = p.iter().map(|q| q.id).collect();
-        let fold = fold_ranks(&scores, &by_player, &free);
+        let free_tid: Vec<u32> = free.iter().map(|id| scores.tid_of(id).unwrap()).collect();
+        let fold_map = fold_ranks(&scores, &by_player, &free);
         let (mut lo, mut hi) = (u32::MAX, 0u32);
         let (mut mm_lo, mut mm_hi) = (u32::MAX, 0u32);
         for &pid in &free {
@@ -2246,12 +2306,25 @@ mod tests {
         }
         let edges = 3i128; // 5 free + phantom bye = 6 vertices → 3 edges
         let exempt_clubs = HashSet::new();
-        let empty_elo: HashMap<Uuid, i64> = HashMap::new();
-        let empty_rank: HashMap<Uuid, i128> = HashMap::new();
+        // Tournament-number-indexed views, as `PairingModel::build` makes them.
+        let cap = scores.tid_capacity();
+        let mut fold: Vec<Option<FoldInfo>> = vec![None; cap];
+        for (id, f) in &fold_map {
+            fold[scores.tid_of(id).unwrap() as usize] = Some(*f);
+        }
+        let mut club_norm: Vec<Option<String>> = vec![None; cap];
+        for q in &p {
+            club_norm[scores.tid_of(&q.id).unwrap() as usize] = q
+                .club
+                .as_ref()
+                .map(|c| TournamentSettings::normalize_club(c));
+        }
+        let empty_elo = vec![0i64; cap];
+        let empty_rank = vec![0i128; cap];
         let ctx = Ctx {
             scores: &scores,
-            by_player: &by_player,
             fold: &fold,
+            club_norm: &club_norm,
             round: 2,
             floater_style: FloaterStyle::Median, // exercise the floater-selection bound
             club_active: true,                   // exercise the club rule's bound
@@ -2261,7 +2334,7 @@ mod tests {
             max_gap: (hi - lo) as i128,
             min_points: lo as i128,
             max_mm_gap: (mm_hi - mm_lo) as i128,
-            max_group: fold.values().map(|f| f.group_size).max().unwrap_or(0) as i128,
+            max_group: fold_map.values().map(|f| f.group_size).max().unwrap_or(0) as i128,
             free_count: free.len() as i128,
             elo: &empty_elo,
             elo_rank: &empty_rank,
@@ -2280,12 +2353,12 @@ mod tests {
             for i in 0..free.len() {
                 for j in (i + 1)..free.len() {
                     assert!(
-                        rule.edge_units(&ctx, free[i], free[j]) * edges <= bound,
+                        rule.edge_units(&ctx, free_tid[i], free_tid[j]) * edges <= bound,
                         "an edge exceeded the rule's total-units bound"
                     );
                 }
                 assert!(
-                    rule.bye_units(&ctx, free[i]) * bye_scale <= bound,
+                    rule.bye_units(&ctx, free_tid[i]) * bye_scale <= bound,
                     "a bye exceeded the rule's total-units bound"
                 );
             }

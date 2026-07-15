@@ -14,7 +14,10 @@ use crate::player::Player;
 use crate::round::{PairingSource, Round, Winner};
 use crate::settings::TournamentSettings;
 
-/// One player's accumulated state going into the next round.
+/// One player's accumulated state going into the next round. Defaultable so a
+/// [`Scores`] table can leave a gap for any tournament number no current player
+/// holds (number 0, and numbers freed by a pre-play removal).
+#[derive(Default)]
 pub(crate) struct PlayerScore {
     /// Total score in **half-point units** (×2): MacMahon starting points plus
     /// victories (the effective winner of a board, and a bye, each a win worth
@@ -27,10 +30,14 @@ pub(crate) struct PlayerScore {
     /// MacMahon starting points, in **half-point units** (×2).
     pub macmahon: u32,
     /// Opponents faced, one entry per game (so a rematch would count twice, e.g.
-    /// in SOS).
-    pub opponents: Vec<Uuid>,
-    /// Opponents defeated (effective winner), one entry per game.
-    pub defeated: Vec<Uuid>,
+    /// in SOS), stored by tournament number — the dense key this table is indexed
+    /// by, so the opponent-based tie-breaks walk them without hashing. Only ever
+    /// holds numbers of players still in the tournament (a player who has played
+    /// can't be removed), so every entry resolves to a real slot.
+    pub opponents: Vec<u32>,
+    /// Opponents defeated (effective winner), one entry per game, by tournament
+    /// number (see [`Self::opponents`]).
+    pub defeated: Vec<u32>,
     /// Cumulative sum of the player's running points total, added up after each
     /// completed round (the "cumulative" tie-break, MacMahon-inclusive). In
     /// **half-point units**, since it sums [`points`](Self::points).
@@ -53,26 +60,54 @@ pub(crate) struct PlayerScore {
     pub last_descended: Option<u32>,
 }
 
-/// Per-player scores keyed by player id.
+/// Per-player scores, stored in a dense vector indexed by tournament number (the
+/// number assigned at finalization, so scoring only runs once every player has
+/// one). `index` maps a player id to their number for the [`Uuid`]-facing
+/// boundary; `ids` is the reverse, for turning a stored number back into the id a
+/// caller expects. Numbers no current player holds (0, and any freed by a
+/// pre-play removal) are gaps, holding a [`PlayerScore::default`].
 pub(crate) struct Scores {
-    by_id: HashMap<Uuid, PlayerScore>,
+    by_tid: Vec<PlayerScore>,
+    index: HashMap<Uuid, u32>,
+    ids: Vec<Uuid>,
 }
 
 impl Scores {
     /// The accumulated state for a known player.
     pub fn get(&self, id: &Uuid) -> &PlayerScore {
-        &self.by_id[id]
+        &self.by_tid[self.index[id] as usize]
+    }
+
+    /// The accumulated state at a tournament number — an [`PlayerScore::opponents`]
+    /// / [`PlayerScore::defeated`] entry, or a [`Self::tid_of`] result. A gap
+    /// number resolves to a default (all-zero) score.
+    pub fn get_tid(&self, tid: u32) -> &PlayerScore {
+        &self.by_tid[tid as usize]
+    }
+
+    /// A player's tournament number, or `None` if they aren't in the tournament.
+    pub fn tid_of(&self, id: &Uuid) -> Option<u32> {
+        self.index.get(id).copied()
+    }
+
+    /// The player id at a tournament number (the inverse of [`Self::tid_of`]).
+    pub fn id_of(&self, tid: u32) -> Uuid {
+        self.ids[tid as usize]
     }
 
     /// A player's total points, or 0 if they aren't in the tournament (e.g. an
     /// opponent that was later removed).
     pub fn points(&self, id: &Uuid) -> u32 {
-        self.by_id.get(id).map_or(0, |s| s.points)
+        self.index
+            .get(id)
+            .map_or(0, |&t| self.by_tid[t as usize].points)
     }
 
-    /// A player's win total, or 0 if they aren't in the tournament.
-    pub fn victories(&self, id: &Uuid) -> u32 {
-        self.by_id.get(id).map_or(0, |s| s.victories)
+    /// The number of tournament-number slots, so a caller can size a parallel
+    /// per-number table. Slot `t` is a valid [`Self::get_tid`] argument for any
+    /// `t < tid_capacity()`.
+    pub fn tid_capacity(&self) -> usize {
+        self.by_tid.len()
     }
 }
 
@@ -151,6 +186,21 @@ pub(crate) fn compute_scores(
         })
         .collect();
 
+    // Tournament number of each player — the dense key the finished table is
+    // indexed by, and what opponent/defeated lists store. Assigned at
+    // finalization, so present for every player whenever scoring runs (which is
+    // only once at least one round exists).
+    let index: HashMap<Uuid, u32> = players
+        .iter()
+        .map(|p| {
+            (
+                p.id,
+                p.tournament_id
+                    .expect("scoring runs only after registration is finalized"),
+            )
+        })
+        .collect();
+
     for round in rounds.iter().filter(|r| r.completed) {
         // A float is judged on the points going *into* the round, so record
         // opponents and floats before applying this round's results.
@@ -171,9 +221,10 @@ pub(crate) fn compute_scores(
             // SOSOS, Buchholz), so it is recorded twice. It still feeds ELO as a
             // single game (that reads the boards directly, not these lists).
             let reps = if board.long { 2 } else { 1 };
+            let (ta, tb) = (index[&a], index[&b]);
             for _ in 0..reps {
-                by_id.get_mut(&a).unwrap().opponents.push(b);
-                by_id.get_mut(&b).unwrap().opponents.push(a);
+                by_id.get_mut(&a).unwrap().opponents.push(tb);
+                by_id.get_mut(&b).unwrap().opponents.push(ta);
             }
 
             // A cup board is a forced bracket pairing, not a Swiss float, so it
@@ -238,8 +289,9 @@ pub(crate) fn compute_scores(
             if let Some(s) = by_id.get_mut(&winner) {
                 s.points += 2 * reps; // a win is 2 half-points (×2 for a long game)
                 s.victories += reps;
+                let tl = index[&loser];
                 for _ in 0..reps {
-                    s.defeated.push(loser);
+                    s.defeated.push(tl);
                 }
             }
         }
@@ -293,7 +345,21 @@ pub(crate) fn compute_scores(
         }
     }
 
-    Scores { by_id }
+    // Transpose the id-keyed accumulator into the dense, tournament-number-indexed
+    // vector the readers walk. Gaps (number 0, any freed by a pre-play removal)
+    // keep a default all-zero score and a nil id — never read, since only present
+    // players' numbers ever appear as opponents.
+    let max_tid = index.values().copied().max().unwrap_or(0) as usize;
+    let mut by_tid: Vec<PlayerScore> = std::iter::repeat_with(PlayerScore::default)
+        .take(max_tid + 1)
+        .collect();
+    let mut ids = vec![Uuid::nil(); max_tid + 1];
+    for (id, score) in by_id {
+        let tid = index[&id] as usize;
+        ids[tid] = id;
+        by_tid[tid] = score;
+    }
+    Scores { by_tid, index, ids }
 }
 
 #[cfg(test)]
@@ -521,9 +587,10 @@ mod tests {
         );
         assert_eq!(scores.get(&a.id).points, 4); // 2 points = 4 half-points
         assert_eq!(scores.get(&a.id).victories, 2);
-        assert_eq!(scores.get(&a.id).defeated, vec![b.id, b.id]); // twice
-        assert_eq!(scores.get(&a.id).opponents, vec![b.id, b.id]);
-        assert_eq!(scores.get(&b.id).opponents, vec![a.id, a.id]);
+        let (atid, btid) = (a.tournament_id.unwrap(), b.tournament_id.unwrap());
+        assert_eq!(scores.get(&a.id).defeated, vec![btid, btid]); // twice
+        assert_eq!(scores.get(&a.id).opponents, vec![btid, btid]);
+        assert_eq!(scores.get(&b.id).opponents, vec![atid, atid]);
         assert_eq!(scores.get(&b.id).points, 0);
         assert_eq!(scores.get(&b.id).victories, 0);
     }
@@ -552,7 +619,10 @@ mod tests {
         );
         assert_eq!(scores.get(&a.id).points, 0);
         assert_eq!(scores.get(&a.id).victories, 0);
-        assert_eq!(scores.get(&a.id).opponents, vec![b.id, b.id]);
+        assert_eq!(
+            scores.get(&a.id).opponents,
+            vec![b.tournament_id.unwrap(), b.tournament_id.unwrap()]
+        );
         assert!(scores.get(&a.id).defeated.is_empty());
     }
 
@@ -638,8 +708,8 @@ mod tests {
         // The win still scores, and both are recorded as opponents faced (so a
         // later Swiss round won't re-pair them).
         assert_eq!(scores.get(&a.id).points, 2); // 1 point = 2 half-points
-        assert_eq!(scores.get(&a.id).opponents, vec![b.id]);
-        assert_eq!(scores.get(&b.id).opponents, vec![a.id]);
+        assert_eq!(scores.get(&a.id).opponents, vec![b.tournament_id.unwrap()]);
+        assert_eq!(scores.get(&b.id).opponents, vec![a.tournament_id.unwrap()]);
         // ...but the cup game left no float history.
         assert_eq!(scores.get(&a.id).last_descended, None);
         assert_eq!(scores.get(&b.id).last_ascended, None);

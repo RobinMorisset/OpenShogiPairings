@@ -154,6 +154,12 @@ pub enum TournamentError {
     /// A player who is seeded in the cup bracket cannot be removed.
     #[error("cannot remove a player seeded in the cup")]
     CannotRemoveCupPlayer,
+    /// A player who has already played a game (appears on a board of a started
+    /// round) cannot be removed — their results are referenced by every opponent's
+    /// score record, so erasing them would corrupt those tie-breaks. Mark them
+    /// absent for future rounds instead.
+    #[error("cannot remove a player who has already played a game")]
+    CannotRemovePlayedPlayer,
     /// The cup bracket referenced an earlier result that is missing (internal
     /// inconsistency — should not happen for a properly gated round).
     #[error("the cup bracket is missing an earlier result")]
@@ -245,14 +251,28 @@ impl Tournament {
 
     /// Remove the player with the given id.
     ///
-    /// Returns [`TournamentError::PlayerNotFound`] if no such player exists, or
+    /// Returns [`TournamentError::PlayerNotFound`] if no such player exists,
     /// [`TournamentError::CannotRemoveCupPlayer`] if the player is seeded in the
-    /// cup bracket (removing them would corrupt it).
+    /// cup bracket (removing them would corrupt it), or
+    /// [`TournamentError::CannotRemovePlayedPlayer`] if the player has already been
+    /// paired into a game (their results are referenced by every opponent's score
+    /// record — mark them absent for future rounds instead).
     pub fn remove_player(&mut self, id: Uuid) -> Result<(), TournamentError> {
         if let Some(cup) = &self.cup {
             if cup.seed_order.contains(&id) {
                 return Err(TournamentError::CannotRemoveCupPlayer);
             }
+        }
+        // A started round's boards are what other players' opponent/defeated lists
+        // are built from; once a player appears on one, removing them would dangle
+        // those references (which the score tables index densely), so forbid it.
+        let has_played = self
+            .rounds
+            .iter()
+            .flat_map(|r| &r.boards)
+            .any(|b| b.player1 == id || b.player2 == id);
+        if has_played {
+            return Err(TournamentError::CannotRemovePlayedPlayer);
         }
         let before = self.players.len();
         self.players.retain(|p| p.id != id);
@@ -279,6 +299,14 @@ impl Tournament {
     /// American grid — so scoring lives in one place rather than being re-derived
     /// by each client.
     pub fn standings(&self) -> Vec<Standing> {
+        // Scoring keys players by their tournament number, which is only assigned
+        // at finalization, so there is nothing safe (or meaningful) to compute
+        // before then — a client showing standings during registration gets an
+        // empty list. (The standings *tab* proper is hidden until a round is
+        // played; this is just the safety floor.)
+        if !self.registration_finalized {
+            return Vec::new();
+        }
         compute_standings(&self.players, &self.settings, &self.rounds)
     }
 
@@ -1464,6 +1492,27 @@ mod tests {
             t.remove_player(id),
             Err(TournamentError::PlayerNotFound(id))
         );
+    }
+
+    #[test]
+    fn cannot_remove_a_player_who_has_played() {
+        let mut t = Tournament::new("Open").unwrap();
+        for n in ["A", "B", "C", "D"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        // Before any round, a player can still be removed.
+        let d = t.players.iter().find(|p| p.last_name == "D").unwrap().id;
+        assert!(t.remove_player(d).is_ok());
+        // Once a round is confirmed, everyone paired onto a board is locked in:
+        // their results are about to feed every opponent's tie-breaks.
+        start_next_round(&mut t);
+        let played = t.rounds[0].boards[0].player1;
+        assert_eq!(
+            t.remove_player(played),
+            Err(TournamentError::CannotRemovePlayedPlayer)
+        );
+        assert_eq!(t.players.len(), 3, "the played player is still present");
     }
 
     #[test]

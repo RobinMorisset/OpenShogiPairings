@@ -104,6 +104,7 @@ impl From<TournamentError> for ApiError {
             | TournamentError::InvalidCupSize { .. }
             | TournamentError::NotEnoughEligiblePlayers { .. }
             | TournamentError::CannotRemoveCupPlayer
+            | TournamentError::CannotRemovePlayedPlayer
             | TournamentError::CupBracketInconsistent
             | TournamentError::EmptyAdjustmentReason
             | TournamentError::ZeroPointAdjustment => ApiError::BadRequest(err.to_string()),

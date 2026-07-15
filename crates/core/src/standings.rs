@@ -137,26 +137,34 @@ pub fn compute_standings(
     // opponent-based tie-breaks are then sums over each player's opponents, in two
     // flavours: `…M` scores an opponent by their points, `…W` by their wins.
     let scores = compute_scores(players, settings, rounds);
-    let score_m = |o: &Uuid| scores.points(o);
-    let score_w = |o: &Uuid| scores.victories(o);
+    // Opponent/defeated lists hold tournament numbers, so scoring an opponent is a
+    // direct table lookup — `…M` by their points, `…W` by their wins.
+    let score_m = |o: &u32| scores.get_tid(*o).points;
+    let score_w = |o: &u32| scores.get_tid(*o).victories;
 
     // The live Bayesian ELO estimate (shown on the Results tab in ELO mode).
     let elos = estimate_elos(players, settings, rounds);
 
-    // SOSM and SOSW first — each needed on its own for the SOSOS metrics.
-    let sosm: HashMap<Uuid, u32> = players
-        .iter()
-        .map(|p| (p.id, scores.get(&p.id).opponents.iter().map(score_m).sum()))
-        .collect();
-    let sosw: HashMap<Uuid, u32> = players
-        .iter()
-        .map(|p| (p.id, scores.get(&p.id).opponents.iter().map(score_w).sum()))
-        .collect();
+    // SOSM and SOSW first — each needed on its own for the SOSOS metrics. Indexed
+    // by tournament number so the SOSOS pass (a sum over opponents, which are
+    // numbers) is a plain array walk.
+    let cap = scores.tid_capacity();
+    let mut sosm = vec![0u32; cap];
+    let mut sosw = vec![0u32; cap];
+    for p in players {
+        let t = scores
+            .tid_of(&p.id)
+            .expect("player has a number when scoring runs") as usize;
+        let s = scores.get_tid(t as u32);
+        sosm[t] = s.opponents.iter().map(score_m).sum();
+        sosw[t] = s.opponents.iter().map(score_w).sum();
+    }
 
     let mut standings: Vec<Standing> = players
         .iter()
         .map(|p| {
-            let s = scores.get(&p.id);
+            let t = scores.tid_of(&p.id).expect("player has a number") as usize;
+            let s = scores.get_tid(t as u32);
             let opp_m: Vec<u32> = s.opponents.iter().map(&score_m).collect();
             let opp_w: Vec<u32> = s.opponents.iter().map(&score_w).collect();
             Standing {
@@ -164,20 +172,12 @@ pub fn compute_standings(
                 victories: s.victories,
                 macmahon: s.macmahon,
                 points: s.points,
-                sosm: sosm[&p.id],
-                sosw: sosw[&p.id],
+                sosm: sosm[t],
+                sosw: sosw[t],
                 sodosm: s.defeated.iter().map(&score_m).sum(),
                 sodosw: s.defeated.iter().map(&score_w).sum(),
-                sososm: s
-                    .opponents
-                    .iter()
-                    .map(|o| sosm.get(o).copied().unwrap_or(0))
-                    .sum(),
-                sososw: s
-                    .opponents
-                    .iter()
-                    .map(|o| sosw.get(o).copied().unwrap_or(0))
-                    .sum(),
+                sososm: s.opponents.iter().map(|&o| sosm[o as usize]).sum(),
+                sososw: s.opponents.iter().map(|&o| sosw[o as usize]).sum(),
                 sosm1: sum_dropping_lowest(opp_m.clone(), 1),
                 sosm2: sum_dropping_lowest(opp_m, 2),
                 sosw1: sum_dropping_lowest(opp_w.clone(), 1),
@@ -187,8 +187,9 @@ pub fn compute_standings(
                 // Filled in below, while the ranking order is computed, since it
                 // depends on which players end up tied on the earlier criteria.
                 dc: 0,
-                opponents: s.opponents.clone(),
-                defeated: s.defeated.clone(),
+                // The output faces callers by id, so translate the numbers back.
+                opponents: s.opponents.iter().map(|&o| scores.id_of(o)).collect(),
+                defeated: s.defeated.iter().map(|&o| scores.id_of(o)).collect(),
                 running_points: s.running_points.clone(),
                 running_wins: s.running_wins.clone(),
                 estimated_elo: elos.get(&p.id).copied().unwrap_or(0.0).round() as i32,
