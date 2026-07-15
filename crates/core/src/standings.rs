@@ -115,10 +115,11 @@ pub struct Standing {
     pub running_wins: Vec<Wins>,
     /// The player's current estimated ELO (rounded), from the Bayesian estimate
     /// that drives the experimental ELO pairing mode (see [`crate::estimate_elos`]).
-    /// Computed regardless of mode; the Results tab only shows it when the ELO
-    /// mode is active. A player with no counted games sits at their prior mean
-    /// (their registration rating, or 600 if unrated).
-    pub estimated_elo: i32,
+    /// `None` outside ELO mode: the estimate is only shown (and only ranks) when
+    /// [`TournamentSettings::elo_estimate_needed`], so in Swiss mode it isn't
+    /// computed at all. When present, a player with no counted games sits at their
+    /// prior mean (their registration rating, or 600 if unrated).
+    pub estimated_elo: Option<i32>,
 }
 
 impl Standing {
@@ -144,8 +145,10 @@ impl Standing {
             Tiebreak::CussW => self.cussw.get(),
             Tiebreak::Dc => self.dc.get(),
             // Ranking metrics are u32; a (non-negative) estimated ELO fits, and a
-            // stray negative estimate floors at 0 for ordering.
-            Tiebreak::EstElo => self.estimated_elo.max(0) as u32,
+            // stray negative estimate floors at 0 for ordering. Only reached when
+            // the estimate is maintained (see the `EstElo` skip in ranking), so it
+            // is `Some`; a missing one sorts as 0.
+            Tiebreak::EstElo => self.estimated_elo.unwrap_or(0).max(0) as u32,
         }
     }
 }
@@ -176,8 +179,11 @@ pub fn compute_standings(
     let score_m = |o: &u32| HalfPoints::from_halves(scores.get_tid(*o).points);
     let score_w = |o: &u32| Wins(scores.get_tid(*o).victories);
 
-    // The live Bayesian ELO estimate (shown on the Results tab in ELO mode).
-    let elos = estimate_elos(players, settings, rounds);
+    // The live Bayesian ELO estimate — only shown, and only ranks, in ELO mode,
+    // so skip the whole (quadrature-heavy) computation in Swiss mode.
+    let elos = settings
+        .elo_estimate_needed()
+        .then(|| estimate_elos(players, settings, rounds));
 
     // SOSM and SOSW first — each needed on its own for the SOSOS metrics. Indexed
     // by tournament number so the SOSOS pass (a sum over opponents, which are
@@ -230,7 +236,9 @@ pub fn compute_standings(
                     .map(|&h| HalfPoints::from_halves(h))
                     .collect(),
                 running_wins: s.running_wins.iter().map(|&w| Wins(w)).collect(),
-                estimated_elo: elos.get(&p.id).copied().unwrap_or(0.0).round() as i32,
+                estimated_elo: elos
+                    .as_ref()
+                    .map(|e| e.get(&p.id).copied().unwrap_or(0.0).round() as i32),
             }
         })
         .collect();
@@ -645,17 +653,24 @@ mod tests {
         let a = player(1, Some(1400));
         let b = player(2, Some(1800));
 
-        let none = compute_standings(&[a.clone(), b.clone()], &TournamentSettings::default(), &[]);
-        let of = |st: &[Standing], id| st.iter().find(|s| s.player_id == id).unwrap().estimated_elo;
+        // The estimate is only computed in ELO mode, so enable it here.
+        let elo_mode = TournamentSettings {
+            elo_pairing_enabled: true,
+            ..Default::default()
+        };
+        let none = compute_standings(&[a.clone(), b.clone()], &elo_mode, &[]);
+        let of = |st: &[Standing], id| {
+            st.iter()
+                .find(|s| s.player_id == id)
+                .unwrap()
+                .estimated_elo
+                .expect("estimate present in ELO mode")
+        };
         assert_eq!(of(&none, a.id), 1400);
         assert_eq!(of(&none, b.id), 1800);
 
         let rounds = vec![round(1, vec![board(a.id, b.id, Winner::Player1)])]; // A upsets B
-        let after = compute_standings(
-            &[a.clone(), b.clone()],
-            &TournamentSettings::default(),
-            &rounds,
-        );
+        let after = compute_standings(&[a.clone(), b.clone()], &elo_mode, &rounds);
         assert!(of(&after, a.id) > 1400, "the winner's estimate rises");
         assert!(of(&after, b.id) < 1800, "the loser's estimate falls");
     }

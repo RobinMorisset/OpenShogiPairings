@@ -99,8 +99,9 @@ running_wins: Array<Wins>,
 /**
  * The player's current estimated ELO (rounded), from the Bayesian estimate
  * that drives the experimental ELO pairing mode (see [`crate::estimate_elos`]).
- * Computed regardless of mode; the Results tab only shows it when the ELO
- * mode is active. A player with no counted games sits at their prior mean
- * (their registration rating, or 600 if unrated).
+ * `None` outside ELO mode: the estimate is only shown (and only ranks) when
+ * [`TournamentSettings::elo_estimate_needed`], so in Swiss mode it isn't
+ * computed at all. When present, a player with no counted games sits at their
+ * prior mean (their registration rating, or 600 if unrated).
  */
-estimated_elo: number, };
+estimated_elo: number | null, };

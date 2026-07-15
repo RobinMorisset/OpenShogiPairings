@@ -427,7 +427,7 @@
           <td>{player.first_name || "—"}</td>
           <td class="num">{player.rating ?? "—"}</td>
           {#if showEstimatedElo}
-            <td class="num est-elo">{standing.estimated_elo}</td>
+            <td class="num est-elo">{standing.estimated_elo ?? "—"}</td>
           {/if}
           <td>{player.nationality ?? "—"}</td>
           <td>{player.club ?? "—"}</td>
