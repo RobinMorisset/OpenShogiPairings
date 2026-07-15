@@ -24,6 +24,7 @@ mod settings;
 pub mod sim;
 mod standings;
 mod tournament;
+mod units;
 
 pub use american_grid::to_grid as american_grid;
 pub use csv_import::{parse_players_csv, CsvImportError};
@@ -47,6 +48,7 @@ pub use standings::{compute_standings, Standing};
 pub use tournament::{
     Tournament, TournamentError, MIN_PLAYERS_PER_ROUND, TOURNAMENT_FORMAT_VERSION,
 };
+pub use units::{HalfPoints, Wins};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

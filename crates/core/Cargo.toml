@@ -10,6 +10,7 @@ serde = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true }
+derive_more = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 tracing = { workspace = true }

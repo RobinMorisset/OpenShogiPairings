@@ -138,7 +138,7 @@ fn row_for(
         player.rating.map(|r| r.to_string()).unwrap_or_default(),
     ];
     row.extend(round_cells);
-    row.push(format_half_points(standing.points));
+    row.push(format_half_points(standing.points.halves()));
     row
 }
 

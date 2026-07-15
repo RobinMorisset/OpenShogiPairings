@@ -16,6 +16,34 @@
 //! recomputing. Each opponent-sum metric comes in a MacMahon-inclusive (`…M`)
 //! and a wins-only (`…W`) flavour, according to how an opponent's "score" is
 //! measured.
+//!
+//! # Relationship to [`crate::scoring`]
+//!
+//! A [`Standing`] is a **derived view**, not a second copy of the data. The raw
+//! per-player accumulation — points, MacMahon start, victories, opponents faced
+//! and beaten — is computed once by [`compute_scores`] (into the internal
+//! `Scores` / `PlayerScore` substrate), and both this module *and* the pairing
+//! engine build on that one result. [`compute_standings`] calls [`compute_scores`]
+//! and then layers the twelve ranking tie-breaks and the live ELO estimate on
+//! top; the pairing engine ([`crate::pairing`]) reads the same substrate directly.
+//!
+//! The substrate and this view are kept as separate types on purpose, rather
+//! than folded into one:
+//!
+//! - **Disjoint extra fields.** `PlayerScore` carries pairing-only float history
+//!   (`last_ascended` / `last_descended` / `had_bye`) that drives the pairing
+//!   rules but is meaningless on a results page; [`Standing`] carries the twelve
+//!   tie-break metrics and `estimated_elo`, which the engine never needs. Neither
+//!   type should pay for the other's fields.
+//! - **Different representation.** The substrate is indexed by dense tournament
+//!   *number* and stores opponents as numbers, so the opponent-sum tie-breaks are
+//!   plain array walks with no hashing — it runs repeatedly inside the matching
+//!   solver. A [`Standing`] instead faces callers by [`Uuid`] and is a flat,
+//!   ranked list, the shape a client consumes.
+//! - **Dependency direction.** Pairing is the engine, standings is presentation.
+//!   Having both depend on the lower-level `scoring` module keeps `pairing` from
+//!   depending on `standings` (and from pulling in ranking/ELO logic it never
+//!   uses).
 
 use std::collections::HashMap;
 
@@ -28,6 +56,7 @@ use crate::player::Player;
 use crate::round::Round;
 use crate::scoring::compute_scores;
 use crate::settings::{Tiebreak, TournamentSettings};
+use crate::units::{HalfPoints, Wins};
 
 /// One player's standing: score and every tie-break metric. The position in the
 /// returned [`compute_standings`] vector is the player's rank.
@@ -36,42 +65,42 @@ use crate::settings::{Tiebreak, TournamentSettings};
 pub struct Standing {
     pub player_id: Uuid,
     /// Games won (effective winner; a bye counts as a win). A whole game count.
-    pub victories: u32,
+    pub victories: Wins,
     /// MacMahon starting points, in **half-point units** (×2).
-    pub macmahon: u32,
+    pub macmahon: HalfPoints,
     /// Total score in **half-point units** (×2): `macmahon + 2·victories`, plus
     /// `1` per half-point absence. Divide by 2 for display.
-    pub points: u32,
+    pub points: HalfPoints,
     /// Sum of opponents' points (**half-point units**, since it sums points).
-    pub sosm: u32,
+    pub sosm: HalfPoints,
     /// Sum of opponents' wins (whole count).
-    pub sosw: u32,
+    pub sosw: Wins,
     /// Sum of defeated opponents' points (**half-point units**).
-    pub sodosm: u32,
+    pub sodosm: HalfPoints,
     /// Sum of defeated opponents' wins (whole count).
-    pub sodosw: u32,
+    pub sodosw: Wins,
     /// Sum of opponents' SOSM (**half-point units**).
-    pub sososm: u32,
+    pub sososm: HalfPoints,
     /// Sum of opponents' SOSW (whole count).
-    pub sososw: u32,
+    pub sososw: Wins,
     /// SOSM dropping the single lowest-scoring opponent (**half-point units**).
-    pub sosm1: u32,
+    pub sosm1: HalfPoints,
     /// SOSM dropping the two lowest-scoring opponents (**half-point units**).
-    pub sosm2: u32,
+    pub sosm2: HalfPoints,
     /// SOSW dropping the single lowest-scoring opponent (whole count).
-    pub sosw1: u32,
+    pub sosw1: Wins,
     /// SOSW dropping the two lowest-scoring opponents (whole count).
-    pub sosw2: u32,
+    pub sosw2: Wins,
     /// Cumulative sum of the running points total after each round
     /// (**half-point units**).
-    pub cussm: u32,
+    pub cussm: HalfPoints,
     /// Cumulative sum of the running win total after each round (whole count).
-    pub cussw: u32,
+    pub cussw: Wins,
     /// Direct confrontation: this player's wins against the other players they
     /// were still tied with once every earlier configured criterion ran out
     /// (0 if that tied group never played a complete round-robin among
     /// themselves, or if `Dc` isn't configured, or wasn't reached).
-    pub dc: u32,
+    pub dc: Wins,
     /// Opponents faced, one entry per game, in round order (a rematch appears
     /// twice). Lets the Results tab show how the opponent-sum tie-breaks were
     /// built without re-deriving who played whom.
@@ -81,9 +110,9 @@ pub struct Standing {
     pub defeated: Vec<Uuid>,
     /// Running points total after each completed round (the sequence CUSSM sums),
     /// in **half-point units**.
-    pub running_points: Vec<u32>,
+    pub running_points: Vec<HalfPoints>,
     /// Running win total after each completed round (the sequence CUSSW sums).
-    pub running_wins: Vec<u32>,
+    pub running_wins: Vec<Wins>,
     /// The player's current estimated ELO (rounded), from the Bayesian estimate
     /// that drives the experimental ELO pairing mode (see [`crate::estimate_elos`]).
     /// Computed regardless of mode; the Results tab only shows it when the ELO
@@ -93,23 +122,27 @@ pub struct Standing {
 }
 
 impl Standing {
-    /// The value of a given ranking criterion for this player.
+    /// The value of a given ranking criterion for this player, as a plain
+    /// ordinal `u32`. Ranking only ever compares a metric against the *same*
+    /// metric, so the typed half-point / win distinction that the fields carry
+    /// collapses to a bare "bigger is better" integer here (half-points in raw
+    /// ×2 units, wins as whole counts — never compared across the two).
     pub fn tiebreak(&self, tb: Tiebreak) -> u32 {
         match tb {
-            Tiebreak::Points => self.points,
-            Tiebreak::SosM => self.sosm,
-            Tiebreak::SosW => self.sosw,
-            Tiebreak::SodosM => self.sodosm,
-            Tiebreak::SodosW => self.sodosw,
-            Tiebreak::SososM => self.sososm,
-            Tiebreak::SososW => self.sososw,
-            Tiebreak::SosM1 => self.sosm1,
-            Tiebreak::SosM2 => self.sosm2,
-            Tiebreak::SosW1 => self.sosw1,
-            Tiebreak::SosW2 => self.sosw2,
-            Tiebreak::CussM => self.cussm,
-            Tiebreak::CussW => self.cussw,
-            Tiebreak::Dc => self.dc,
+            Tiebreak::Points => self.points.halves(),
+            Tiebreak::SosM => self.sosm.halves(),
+            Tiebreak::SosW => self.sosw.get(),
+            Tiebreak::SodosM => self.sodosm.halves(),
+            Tiebreak::SodosW => self.sodosw.get(),
+            Tiebreak::SososM => self.sososm.halves(),
+            Tiebreak::SososW => self.sososw.get(),
+            Tiebreak::SosM1 => self.sosm1.halves(),
+            Tiebreak::SosM2 => self.sosm2.halves(),
+            Tiebreak::SosW1 => self.sosw1.get(),
+            Tiebreak::SosW2 => self.sosw2.get(),
+            Tiebreak::CussM => self.cussm.halves(),
+            Tiebreak::CussW => self.cussw.get(),
+            Tiebreak::Dc => self.dc.get(),
             // Ranking metrics are u32; a (non-negative) estimated ELO fits, and a
             // stray negative estimate floors at 0 for ordering.
             Tiebreak::EstElo => self.estimated_elo.max(0) as u32,
@@ -118,8 +151,9 @@ impl Standing {
 }
 
 /// Sum a list of opponent scores after dropping the `drop` lowest — the
-/// Buchholz-cut family (`drop` = 0 is the plain sum).
-fn sum_dropping_lowest(mut scores: Vec<u32>, drop: usize) -> u32 {
+/// Buchholz-cut family (`drop` = 0 is the plain sum). Generic over the score
+/// unit so it serves both the half-point (`…M`) and win-count (`…W`) flavours.
+fn sum_dropping_lowest<T: Ord + Copy + std::iter::Sum>(mut scores: Vec<T>, drop: usize) -> T {
     scores.sort_unstable();
     scores.into_iter().skip(drop).sum()
 }
@@ -139,8 +173,8 @@ pub fn compute_standings(
     let scores = compute_scores(players, settings, rounds);
     // Opponent/defeated lists hold tournament numbers, so scoring an opponent is a
     // direct table lookup — `…M` by their points, `…W` by their wins.
-    let score_m = |o: &u32| scores.get_tid(*o).points;
-    let score_w = |o: &u32| scores.get_tid(*o).victories;
+    let score_m = |o: &u32| HalfPoints::from_halves(scores.get_tid(*o).points);
+    let score_w = |o: &u32| Wins(scores.get_tid(*o).victories);
 
     // The live Bayesian ELO estimate (shown on the Results tab in ELO mode).
     let elos = estimate_elos(players, settings, rounds);
@@ -149,8 +183,8 @@ pub fn compute_standings(
     // by tournament number so the SOSOS pass (a sum over opponents, which are
     // numbers) is a plain array walk.
     let cap = scores.tid_capacity();
-    let mut sosm = vec![0u32; cap];
-    let mut sosw = vec![0u32; cap];
+    let mut sosm = vec![HalfPoints::ZERO; cap];
+    let mut sosw = vec![Wins::ZERO; cap];
     for p in players {
         let t = scores
             .tid_of(&p.id)
@@ -165,13 +199,13 @@ pub fn compute_standings(
         .map(|p| {
             let t = scores.tid_of(&p.id).expect("player has a number") as usize;
             let s = scores.get_tid(t as u32);
-            let opp_m: Vec<u32> = s.opponents.iter().map(&score_m).collect();
-            let opp_w: Vec<u32> = s.opponents.iter().map(&score_w).collect();
+            let opp_m: Vec<HalfPoints> = s.opponents.iter().map(&score_m).collect();
+            let opp_w: Vec<Wins> = s.opponents.iter().map(&score_w).collect();
             Standing {
                 player_id: p.id,
-                victories: s.victories,
-                macmahon: s.macmahon,
-                points: s.points,
+                victories: Wins(s.victories),
+                macmahon: HalfPoints::from_halves(s.macmahon),
+                points: HalfPoints::from_halves(s.points),
                 sosm: sosm[t],
                 sosw: sosw[t],
                 sodosm: s.defeated.iter().map(&score_m).sum(),
@@ -182,16 +216,20 @@ pub fn compute_standings(
                 sosm2: sum_dropping_lowest(opp_m, 2),
                 sosw1: sum_dropping_lowest(opp_w.clone(), 1),
                 sosw2: sum_dropping_lowest(opp_w, 2),
-                cussm: s.cuss_m,
-                cussw: s.cuss_w,
+                cussm: HalfPoints::from_halves(s.cuss_m),
+                cussw: Wins(s.cuss_w),
                 // Filled in below, while the ranking order is computed, since it
                 // depends on which players end up tied on the earlier criteria.
-                dc: 0,
+                dc: Wins::ZERO,
                 // The output faces callers by id, so translate the numbers back.
                 opponents: s.opponents.iter().map(|&o| scores.id_of(o)).collect(),
                 defeated: s.defeated.iter().map(|&o| scores.id_of(o)).collect(),
-                running_points: s.running_points.clone(),
-                running_wins: s.running_wins.clone(),
+                running_points: s
+                    .running_points
+                    .iter()
+                    .map(|&h| HalfPoints::from_halves(h))
+                    .collect(),
+                running_wins: s.running_wins.iter().map(|&w| Wins(w)).collect(),
                 estimated_elo: elos.get(&p.id).copied().unwrap_or(0.0).round() as i32,
             }
         })
@@ -233,9 +271,9 @@ pub fn compute_standings(
                 match direct_confrontation(&group, &standings) {
                     Some(dc) => {
                         for &i in &group {
-                            standings[i].dc = dc[&standings[i].player_id];
+                            standings[i].dc = Wins(dc[&standings[i].player_id]);
                         }
-                        next_groups.extend(split_by_key(group, |i| standings[i].dc));
+                        next_groups.extend(split_by_key(group, |i| standings[i].dc.get()));
                     }
                     // Not a complete subgraph: DC stays 0 for everyone here, and
                     // the group stays tied going into the next criterion.
@@ -362,7 +400,7 @@ mod tests {
         let standings = compute_standings(&players, &TournamentSettings::default(), &rounds);
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
         // A: 2 points (4 halves) and 2 victories from the long win.
-        assert_eq!((of(a.id).points, of(a.id).victories), (4, 2));
+        assert_eq!((of(a.id).points.halves(), of(a.id).victories.get()), (4, 2));
         // B: beat C once (1 point = 2 halves).
         assert_eq!(of(b.id).points, 2);
         // B counted twice in A's opponent-sums.
@@ -405,9 +443,9 @@ mod tests {
 
         // Points and SOSM are in half-point units (×2).
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
-        assert_eq!((of(a.id).points, of(a.id).sosm), (4, 2));
-        assert_eq!((of(d.id).points, of(d.id).sosm), (2, 6)); // faced A(4)+B(2)
-        assert_eq!((of(b.id).points, of(b.id).sosm), (2, 2)); // faced D(2)+C(0)
+        assert_eq!((of(a.id).points.halves(), of(a.id).sosm.halves()), (4, 2));
+        assert_eq!((of(d.id).points.halves(), of(d.id).sosm.halves()), (2, 6)); // faced A(4)+B(2)
+        assert_eq!((of(b.id).points.halves(), of(b.id).sosm.halves()), (2, 2)); // faced D(2)+C(0)
         assert_eq!(of(c.id).points, 0);
     }
 
@@ -427,11 +465,19 @@ mod tests {
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
         // MacMahon and points are in half-point units (×2); victories are whole.
         assert_eq!(
-            (of(a.id).macmahon, of(a.id).victories, of(a.id).points),
+            (
+                of(a.id).macmahon.halves(),
+                of(a.id).victories.get(),
+                of(a.id).points.halves()
+            ),
             (2, 1, 4)
         );
         assert_eq!(
-            (of(b.id).macmahon, of(b.id).victories, of(b.id).points),
+            (
+                of(b.id).macmahon.halves(),
+                of(b.id).victories.get(),
+                of(b.id).points.halves()
+            ),
             (2, 0, 2)
         );
         assert_eq!(of(a.id).sosm, 2); // opponent B has 1 point (2 halves)
@@ -461,11 +507,19 @@ mod tests {
         // Points in half-point units: A keeps only the win (2 halves), not the
         // dropped MacMahon head start.
         assert_eq!(
-            (of(a.id).macmahon, of(a.id).victories, of(a.id).points),
+            (
+                of(a.id).macmahon.halves(),
+                of(a.id).victories.get(),
+                of(a.id).points.halves()
+            ),
             (0, 1, 2)
         );
         assert_eq!(
-            (of(b.id).macmahon, of(b.id).victories, of(b.id).points),
+            (
+                of(b.id).macmahon.halves(),
+                of(b.id).victories.get(),
+                of(b.id).points.halves()
+            ),
             (0, 0, 0)
         );
     }
@@ -492,8 +546,8 @@ mod tests {
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
         // SOSM/SODOSM are in half-point units (opponents' MacMahon = 2 halves);
         // the W flavours are whole win counts (0 here).
-        assert_eq!((of(a.id).sosm, of(a.id).sosw), (4, 0));
-        assert_eq!((of(a.id).sodosm, of(a.id).sodosw), (4, 0));
+        assert_eq!((of(a.id).sosm.halves(), of(a.id).sosw.get()), (4, 0));
+        assert_eq!((of(a.id).sodosm.halves(), of(a.id).sodosw.get()), (4, 0));
     }
 
     #[test]
@@ -746,10 +800,17 @@ mod tests {
 
         // Points in half-point units (2 points = 4 halves); DC is a whole count.
         assert_eq!(
-            (of(a.id).points, of(b.id).points, of(c.id).points),
+            (
+                of(a.id).points.halves(),
+                of(b.id).points.halves(),
+                of(c.id).points.halves()
+            ),
             (4, 4, 4)
         );
-        assert_eq!((of(a.id).dc, of(b.id).dc, of(c.id).dc), (2, 1, 0));
+        assert_eq!(
+            (of(a.id).dc.get(), of(b.id).dc.get(), of(c.id).dc.get()),
+            (2, 1, 0)
+        );
 
         let pos = |id| standings.iter().position(|s| s.player_id == id).unwrap();
         assert!(pos(a.id) < pos(b.id));
