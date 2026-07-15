@@ -556,15 +556,19 @@ impl<W: Weight> Blossom<W> {
 }
 
 /// Compute a minimum-total-cost **perfect** matching of the `n` vertices, where
-/// `cost[i][j]` is the (symmetric) cost of pairing `i` with `j`. Returns `mate`,
-/// where `mate[i]` is the partner of vertex `i`.
+/// `cost` is the **row-major** `n × n` cost matrix — the cost of pairing `i` with
+/// `j` is `cost[i * n + j]`. Returns `mate`, where `mate[i]` is the partner of
+/// vertex `i`.
 ///
-/// `n` must be even (a perfect matching is otherwise impossible) and `cost` a
-/// full `n × n` matrix; the diagonal is ignored. Costs must be non-negative and
-/// symmetric. On the complete graph every vertex is pairable, so a perfect
-/// matching always exists.
-pub fn min_weight_perfect_matching<W: Weight>(cost: &[Vec<W>]) -> Vec<usize> {
-    let n = cost.len();
+/// `n` must be even (a perfect matching is otherwise impossible) and `cost` must
+/// have exactly `n * n` entries; the diagonal is ignored. Costs must be
+/// non-negative and symmetric. On the complete graph every vertex is pairable, so
+/// a perfect matching always exists.
+///
+/// The matrix is a flat slice, not `&[Vec<_>]`, so a caller building it (and the
+/// solver reading it) touches one contiguous allocation rather than `n` rows.
+pub fn min_weight_perfect_matching<W: Weight>(cost: &[W], n: usize) -> Vec<usize> {
+    assert_eq!(cost.len(), n * n, "cost must be a row-major n×n matrix");
     assert!(
         n.is_multiple_of(2),
         "a perfect matching needs an even vertex count"
@@ -576,8 +580,9 @@ pub fn min_weight_perfect_matching<W: Weight>(cost: &[Vec<W>]) -> Vec<usize> {
     // Reduce min-cost-perfect to max-weight: weight = offset - cost, with offset
     // above every cost so all weights are ≥ 1 (keeping the matching perfect).
     let mut max_cost = W::ZERO;
-    for (i, row) in cost.iter().enumerate() {
-        for (j, &c) in row.iter().enumerate() {
+    for i in 0..n {
+        for j in 0..n {
+            let c = cost[i * n + j];
             if i != j && c > max_cost {
                 max_cost = c;
             }
@@ -589,10 +594,14 @@ pub fn min_weight_perfect_matching<W: Weight>(cost: &[Vec<W>]) -> Vec<usize> {
         let mut pool = pool.borrow_mut();
         let bl = pool.get::<W>(n);
         bl.reset(n);
-        for (i, row) in cost.iter().enumerate() {
+        for i in 0..n {
             for j in (i + 1)..n {
-                debug_assert_eq!(row[j], cost[j][i], "cost matrix must be symmetric");
-                bl.set_edge(i + 1, j + 1, offset - row[j]);
+                debug_assert_eq!(
+                    cost[i * n + j],
+                    cost[j * n + i],
+                    "cost matrix must be symmetric"
+                );
+                bl.set_edge(i + 1, j + 1, offset - cost[i * n + j]);
             }
         }
         bl.solve();
@@ -645,6 +654,13 @@ impl Pool {
 mod tests {
     use super::*;
 
+    /// Flatten a square `Vec<Vec<W>>` into the row-major slice the solver takes.
+    /// The tests keep the readable nested form (and hand it to the oracle as-is);
+    /// this bridges to the flat API at the call.
+    fn flat<W: Copy>(cost: &[Vec<W>]) -> Vec<W> {
+        cost.iter().flatten().copied().collect()
+    }
+
     /// Reference: minimum total cost over all perfect matchings, by exhaustive
     /// recursion. Only usable for tiny `n`, which is exactly what we test against.
     fn brute_min_cost(cost: &[Vec<i128>]) -> i128 {
@@ -690,7 +706,7 @@ mod tests {
     #[test]
     fn trivial_pair() {
         let cost = vec![vec![0, 7], vec![7, 0]];
-        let mate = min_weight_perfect_matching(&cost);
+        let mate = min_weight_perfect_matching(&flat(&cost), cost.len());
         assert_eq!(mate, vec![1, 0]);
     }
 
@@ -725,10 +741,10 @@ mod tests {
         for _ in 0..50 {
             // Dirty the buffer with a large instance, then a small one that reuses
             // it — and interleave sizes so the shrink path is hit repeatedly.
-            let _ = min_weight_perfect_matching(&random_cost(120));
+            let _ = min_weight_perfect_matching(&flat(&random_cost(120)), 120);
             for &n in &[2usize, 4, 6, 8, 10, 4, 8, 2] {
                 let cost = random_cost(n);
-                let mate = min_weight_perfect_matching(&cost);
+                let mate = min_weight_perfect_matching(&flat(&cost), cost.len());
                 assert_eq!(
                     total_of(&cost, &mate),
                     brute_min_cost(&cost),
@@ -748,7 +764,7 @@ mod tests {
             vec![10, 10, 0, 1],
             vec![10, 10, 1, 0],
         ];
-        let mate = min_weight_perfect_matching(&cost);
+        let mate = min_weight_perfect_matching(&flat(&cost), cost.len());
         assert_eq!(total_of(&cost, &mate), 2);
         assert_eq!(mate[0], 1);
         assert_eq!(mate[2], 3);
@@ -776,7 +792,7 @@ mod tests {
                         cost[j][i] = c;
                     }
                 }
-                let mate = min_weight_perfect_matching(&cost);
+                let mate = min_weight_perfect_matching(&flat(&cost), cost.len());
                 let got = total_of(&cost, &mate);
                 let want = brute_min_cost(&cost);
                 assert_eq!(got, want, "n={n}, cost={cost:?}, mate={mate:?}");
@@ -795,7 +811,7 @@ mod tests {
             vec![5, 3, 0, BIG],
             vec![3, 5, BIG, 0],
         ];
-        let mate = min_weight_perfect_matching(&cost);
+        let mate = min_weight_perfect_matching(&flat(&cost), cost.len());
         assert_eq!(brute_min_cost(&cost), total_of(&cost, &mate));
         assert_ne!(
             mate[0], 1,
@@ -813,7 +829,7 @@ mod tests {
             vec![10, 10, 0, 1],
             vec![10, 10, 1, 0],
         ];
-        let mate = min_weight_perfect_matching(&cost);
+        let mate = min_weight_perfect_matching(&flat(&cost), cost.len());
         assert_eq!(mate[0], 1);
         assert_eq!(mate[2], 3);
     }
@@ -856,7 +872,7 @@ mod tests {
                 }
             }
 
-            let base_mate = min_weight_perfect_matching(&cost);
+            let base_mate = min_weight_perfect_matching(&flat(&cost), cost.len());
             let base_cost = total_of(&cost, &base_mate);
 
             // Forbid a handful of edges the solution uses: cost must not improve.
@@ -868,7 +884,7 @@ mod tests {
                 let mut c2 = cost.clone();
                 c2[i][j] = PENALTY;
                 c2[j][i] = PENALTY;
-                let m2 = min_weight_perfect_matching(&c2);
+                let m2 = min_weight_perfect_matching(&flat(&c2), c2.len());
                 assert_ne!(
                     m2[i], j,
                     "n={n}: forbidden solution edge {i}-{j} was still used"
@@ -892,7 +908,7 @@ mod tests {
                     let mut c2 = cost.clone();
                     c2[i][j] = PENALTY;
                     c2[j][i] = PENALTY;
-                    let m2 = min_weight_perfect_matching(&c2);
+                    let m2 = min_weight_perfect_matching(&flat(&c2), c2.len());
                     assert_ne!(m2[i], j, "n={n}: forbidden unused edge {i}-{j} was used");
                     let new_cost = total_of(&cost, &m2);
                     assert_eq!(

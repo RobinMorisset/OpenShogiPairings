@@ -98,28 +98,26 @@ const FLOAT_BASE: i128 = 720;
 ///
 /// The `/ 16` margin covers the solver's internal doubling and its `MAX / 4`
 /// "infinity" sentinel with room to spare.
-fn solve_matching(cost: &[Vec<i128>]) -> Vec<usize> {
-    let max = cost.iter().flatten().copied().max().unwrap_or(0);
+fn solve_matching(cost: &[i128], n: usize) -> Vec<usize> {
+    let max = cost.iter().copied().max().unwrap_or(0);
     if max <= i32::MAX as i128 / 16 {
-        min_weight_perfect_matching(&narrow::<i32>(cost))
+        min_weight_perfect_matching(&narrow::<i32>(cost), n)
     } else if max <= i64::MAX as i128 / 16 {
-        min_weight_perfect_matching(&narrow::<i64>(cost))
+        min_weight_perfect_matching(&narrow::<i64>(cost), n)
     } else {
-        min_weight_perfect_matching(cost)
+        min_weight_perfect_matching(cost, n)
     }
 }
 
-/// Convert an `i128` cost matrix down to a narrower [`Weight`] type. Panics if
-/// a value doesn't fit — callers must check the bound first (see
+/// Convert a row-major `i128` cost matrix down to a narrower [`Weight`] type.
+/// Panics if a value doesn't fit — callers must check the bound first (see
 /// [`solve_matching`]).
-fn narrow<W>(cost: &[Vec<i128>]) -> Vec<Vec<W>>
+fn narrow<W>(cost: &[i128]) -> Vec<W>
 where
     W: Weight + TryFrom<i128>,
     <W as TryFrom<i128>>::Error: std::fmt::Debug,
 {
-    cost.iter()
-        .map(|row| row.iter().map(|&c| W::try_from(c).unwrap()).collect())
-        .collect()
+    cost.iter().map(|&c| W::try_from(c).unwrap()).collect()
 }
 
 /// The pairing rules. The active subset and its priority order depend on the
@@ -1045,14 +1043,14 @@ fn solve_stable(
             model.edge_cost(a, b)
         }
     };
-    let mut cost = vec![vec![0i128; n]; n];
+    let mut cost = vec![0i128; n * n];
     let mut max_c = 0i128;
     for i in 0..n {
         for j in (i + 1)..n {
             let stray = i128::from(!baseline.contains(&unord_pair(verts[i], verts[j])));
             let c = base(verts[i], verts[j]) * stab + stray;
-            cost[i][j] = c;
-            cost[j][i] = c;
+            cost[i * n + j] = c;
+            cost[j * n + i] = c;
             max_c = max_c.max(c);
         }
     }
@@ -1062,13 +1060,13 @@ fn solve_stable(
         for i in 0..n {
             for j in (i + 1)..n {
                 if forbidden.contains(&unord_pair(verts[i], verts[j])) {
-                    cost[i][j] = prohibitive;
-                    cost[j][i] = prohibitive;
+                    cost[i * n + j] = prohibitive;
+                    cost[j * n + i] = prohibitive;
                 }
             }
         }
     }
-    let mate = solve_matching(&cost);
+    let mate = solve_matching(&cost, n);
     let mut seen = vec![false; n];
     let mut pairs = Vec::new();
     for i in 0..n {
@@ -1392,23 +1390,26 @@ pub fn pair_round_weighted(
         // per edge. `ctx` is built once and shared across every edge.
         let free_tid: Vec<u32> = free.iter().map(|&id| model.tid(id)).collect();
         let ctx = model.ctx();
-        let mut cost = vec![vec![0i128; vcount]; vcount];
+        // Row-major `vcount × vcount` cost matrix in one flat allocation (entry
+        // `(i, j)` at `i * vcount + j`), rather than a `Vec<Vec>`: one allocation
+        // and no per-row pointer-chase feeding the solver.
+        let mut cost = vec![0i128; vcount * vcount];
         for i in 0..k {
             for j in (i + 1)..k {
                 let c = edge_cost(&ctx, model.rules, &model.mult, free_tid[i], free_tid[j]);
-                cost[i][j] = c;
-                cost[j][i] = c;
+                cost[i * vcount + j] = c;
+                cost[j * vcount + i] = c;
             }
         }
         if need_phantom {
             let p = k;
             for i in 0..k {
                 let c = bye_cost(&ctx, model.rules, &model.mult, free_tid[i]);
-                cost[i][p] = c;
-                cost[p][i] = c;
+                cost[i * vcount + p] = c;
+                cost[p * vcount + i] = c;
             }
         }
-        let mate = solve_matching(&cost);
+        let mate = solve_matching(&cost, vcount);
         let mut seen = vec![false; vcount];
         for i in 0..vcount {
             if seen[i] {
@@ -1480,7 +1481,12 @@ mod tests {
             vec![10, 10, huge_unit, 0],
         ];
         for cost in [small, medium, huge] {
-            assert_eq!(solve_matching(&cost), min_weight_perfect_matching(&cost));
+            let n = cost.len();
+            let flat: Vec<i128> = cost.iter().flatten().copied().collect();
+            assert_eq!(
+                solve_matching(&flat, n),
+                min_weight_perfect_matching(&flat, n)
+            );
         }
     }
 
