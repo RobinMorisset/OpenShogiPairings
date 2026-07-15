@@ -121,6 +121,12 @@
     tournament?.rounds.find((r) => `round-${r.number}` === activeTab) ?? null,
   );
 
+  // The Results (standings) tab only appears once a round has been played:
+  // before that everyone just sits at their MacMahon start, so there is nothing
+  // to rank (and the server returns no standings until registration is
+  // finalized anyway).
+  const showResults = $derived((tournament?.rounds.length ?? 0) > 0);
+
   // The tabs in the order they're rendered below, so the arrow-key shortcuts can
   // step through them. Kept in sync by construction with the markup order.
   const tabOrder = $derived(
@@ -128,7 +134,7 @@
       ? [
           "settings",
           "players",
-          "results",
+          ...(showResults ? ["results"] : []),
           ...tournament.rounds.map((r) => `round-${r.number}`),
           ...(tournament.draft ? ["draft"] : []),
         ]
@@ -297,7 +303,7 @@
     const valid = new Set([
       "settings",
       "players",
-      "results",
+      ...(showResults ? ["results"] : []),
       ...tournament.rounds.map((r) => `round-${r.number}`),
       ...(tournament.draft ? ["draft"] : []),
     ]);
@@ -799,15 +805,17 @@
         >
           {$_("app.tabPlayers", { values: { count: tournament.players.length } })}
         </button>
-        <button
-          type="button"
-          class="tab"
-          class:active={activeTab === "results"}
-          data-testid="tab-results"
-          onclick={() => (activeTab = "results")}
-        >
-          {$_("app.tabResults")}
-        </button>
+        {#if showResults}
+          <button
+            type="button"
+            class="tab"
+            class:active={activeTab === "results"}
+            data-testid="tab-results"
+            onclick={() => (activeTab = "results")}
+          >
+            {$_("app.tabResults")}
+          </button>
+        {/if}
         {#each tournament.rounds as round (round.number)}
           <button
             type="button"
