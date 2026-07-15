@@ -85,7 +85,15 @@ struct Edge<W> {
 struct Blossom<W> {
     n: usize,
     n_x: usize,
-    g: Vec<Vec<Edge<W>>>,
+    /// The `sz × sz` edge matrix, row-major in a single allocation: entry `(u, v)`
+    /// is at `u * stride + v` (see [`Blossom::g`]). One block, rather than a
+    /// `Vec<Vec>`, so the algorithm's column scans (`for u { g[u][x] }` in
+    /// `set_slack`/`update_slack`, the hot path) stay in one strided region the
+    /// prefetcher can follow instead of chasing `n` separate heap rows.
+    g: Vec<Edge<W>>,
+    /// Row stride of `g` — the allocated width `2 * n_cap + 1` for the largest
+    /// instance seen, so a reused buffer keeps a consistent layout.
+    stride: usize,
     lab: Vec<W>,
     mate: Vec<usize>,
     slack: Vec<usize>,
@@ -110,7 +118,8 @@ impl<W: Weight> Blossom<W> {
         Blossom {
             n,
             n_x: n,
-            g: vec![vec![nil_edge; sz]; sz],
+            g: vec![nil_edge; sz * sz],
+            stride: sz,
             lab: vec![W::ZERO; sz],
             mate: vec![0; sz],
             slack: vec![0; sz],
@@ -139,16 +148,17 @@ impl<W: Weight> Blossom<W> {
         self.n = n;
         self.n_x = n;
         let sz = 2 * n + 1;
-        if self.g.len() < sz {
+        if sz > self.stride {
+            // A larger instance than any before: reallocate the buffers wide enough
+            // (the old contents are stale and would be overwritten anyway, so there
+            // is nothing to copy). `g` is laid out at the new stride from here on.
             let nil = Edge {
                 u: 0,
                 v: 0,
                 w: W::ZERO,
             };
-            self.g.resize(sz, Vec::new());
-            for row in &mut self.g {
-                row.resize(sz, nil);
-            }
+            self.stride = sz;
+            self.g = vec![nil; sz * sz];
             self.flower_from.resize(sz, Vec::new());
             for row in &mut self.flower_from {
                 row.resize(n + 1, 0);
@@ -164,10 +174,23 @@ impl<W: Weight> Blossom<W> {
         }
     }
 
+    /// Edge `(u, v)` of the flattened matrix (returned by value — `Edge` is `Copy`).
+    #[inline]
+    fn g(&self, u: usize, v: usize) -> Edge<W> {
+        self.g[u * self.stride + v]
+    }
+
+    /// Mutable edge `(u, v)`, for the few sites that overwrite an edge or zero its
+    /// weight in place.
+    #[inline]
+    fn g_mut(&mut self, u: usize, v: usize) -> &mut Edge<W> {
+        &mut self.g[u * self.stride + v]
+    }
+
     fn set_edge(&mut self, u: usize, v: usize, w: W) {
-        self.g[u][v] = Edge { u, v, w };
+        *self.g_mut(u, v) = Edge { u, v, w };
         // Reverse orientation: endpoints swapped (field-named, not positional).
-        self.g[v][u] = Edge { u: v, v: u, w };
+        *self.g_mut(v, u) = Edge { u: v, v: u, w };
     }
 
     /// Reduced cost (slack) of an edge; zero means the edge is tight.
@@ -176,7 +199,7 @@ impl<W: Weight> Blossom<W> {
     }
 
     fn update_slack(&mut self, u: usize, x: usize) {
-        if self.slack[x] == 0 || self.e_delta(self.g[u][x]) < self.e_delta(self.g[self.slack[x]][x])
+        if self.slack[x] == 0 || self.e_delta(self.g(u, x)) < self.e_delta(self.g(self.slack[x], x))
         {
             self.slack[x] = u;
         }
@@ -185,7 +208,7 @@ impl<W: Weight> Blossom<W> {
     fn set_slack(&mut self, x: usize) {
         self.slack[x] = 0;
         for u in 1..=self.n {
-            if self.g[u][x].w > W::ZERO && self.st[u] != x && self.s[self.st[u]] == 0 {
+            if self.g(u, x).w > W::ZERO && self.st[u] != x && self.s[self.st[u]] == 0 {
                 self.update_slack(u, x);
             }
         }
@@ -232,9 +255,9 @@ impl<W: Weight> Blossom<W> {
     }
 
     fn set_match(&mut self, u: usize, v: usize) {
-        self.mate[u] = self.g[u][v].v;
+        self.mate[u] = self.g(u, v).v;
         if u > self.n {
-            let e = self.g[u][v];
+            let e = self.g(u, v);
             let xr = self.flower_from[u][e.u];
             let pr = self.get_pr(u, xr);
             // The recursive `set_match` on a child touches only that child's cycle,
@@ -318,8 +341,8 @@ impl<W: Weight> Blossom<W> {
 
         self.set_st(b, b);
         for x in 1..=self.n_x {
-            self.g[b][x].w = W::ZERO;
-            self.g[x][b].w = W::ZERO;
+            self.g_mut(b, x).w = W::ZERO;
+            self.g_mut(x, b).w = W::ZERO;
         }
         for x in 1..=self.n {
             self.flower_from[b][x] = 0;
@@ -331,12 +354,12 @@ impl<W: Weight> Blossom<W> {
         while mi < self.flower[b].len() {
             let xs = self.flower[b][mi];
             for x in 1..=self.n_x {
-                let gxsx = self.g[xs][x];
-                let gxxs = self.g[x][xs];
-                let gbx = self.g[b][x];
+                let gxsx = self.g(xs, x);
+                let gxxs = self.g(x, xs);
+                let gbx = self.g(b, x);
                 if gbx.w == W::ZERO || self.e_delta(gxsx) < self.e_delta(gbx) {
-                    self.g[b][x] = gxsx;
-                    self.g[x][b] = gxxs;
+                    *self.g_mut(b, x) = gxsx;
+                    *self.g_mut(x, b) = gxxs;
                 }
             }
             for x in 1..=self.n {
@@ -358,7 +381,7 @@ impl<W: Weight> Blossom<W> {
             self.set_st(m, m);
             mi += 1;
         }
-        let xr = self.flower_from[b][self.g[b][self.pa[b]].u];
+        let xr = self.flower_from[b][self.g(b, self.pa[b]).u];
         // `get_pr` may reverse `flower[b][1..]`; every index below reads it after,
         // and `set_slack`/`q_push` never mutate it, so no clone is needed.
         let pr = self.get_pr(b, xr);
@@ -366,7 +389,7 @@ impl<W: Weight> Blossom<W> {
         while i < pr {
             let xs = self.flower[b][i];
             let xns = self.flower[b][i + 1];
-            self.pa[xs] = self.g[xns][xs].u;
+            self.pa[xs] = self.g(xns, xs).u;
             self.s[xs] = 1;
             self.s[xns] = 0;
             self.slack[xs] = 0;
@@ -435,9 +458,9 @@ impl<W: Weight> Blossom<W> {
                     continue;
                 }
                 for v in 1..=self.n {
-                    if self.g[u][v].w > W::ZERO && self.st[u] != self.st[v] {
-                        if self.e_delta(self.g[u][v]) == W::ZERO {
-                            if self.on_found_edge(self.g[u][v]) {
+                    if self.g(u, v).w > W::ZERO && self.st[u] != self.st[v] {
+                        if self.e_delta(self.g(u, v)) == W::ZERO {
+                            if self.on_found_edge(self.g(u, v)) {
                                 return true;
                             }
                         } else {
@@ -455,7 +478,7 @@ impl<W: Weight> Blossom<W> {
             }
             for x in 1..=self.n_x {
                 if self.st[x] == x && self.slack[x] != 0 {
-                    let delta = self.e_delta(self.g[self.slack[x]][x]);
+                    let delta = self.e_delta(self.g(self.slack[x], x));
                     if self.s[x] == -1 {
                         d = d.min(delta);
                     } else if self.s[x] == 0 {
@@ -489,8 +512,8 @@ impl<W: Weight> Blossom<W> {
                 if self.st[x] == x
                     && self.slack[x] != 0
                     && self.st[self.slack[x]] != x
-                    && self.e_delta(self.g[self.slack[x]][x]) == W::ZERO
-                    && self.on_found_edge(self.g[self.slack[x]][x])
+                    && self.e_delta(self.g(self.slack[x], x)) == W::ZERO
+                    && self.on_found_edge(self.g(self.slack[x], x))
                 {
                     return true;
                 }
@@ -520,8 +543,8 @@ impl<W: Weight> Blossom<W> {
         for u in 1..=self.n {
             for v in 1..=self.n {
                 self.flower_from[u][v] = if u == v { u } else { 0 };
-                if self.g[u][v].w > w_max {
-                    w_max = self.g[u][v].w;
+                if self.g(u, v).w > w_max {
+                    w_max = self.g(u, v).w;
                 }
             }
         }
