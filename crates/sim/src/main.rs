@@ -337,6 +337,15 @@ fn run(args: Args) -> Result<(), String> {
     };
 
     let names = player_names(&base);
+    // Tournament number per player — a *deterministic* tie-break key for the
+    // aggregation's rankings (a player's `Uuid` is regenerated randomly on every
+    // import, so ordering by it would make equal-probability ties non-reproducible
+    // across processes).
+    let tid_of: HashMap<Uuid, u32> = base
+        .players
+        .iter()
+        .filter_map(|p| p.tournament_id.map(|t| (p.id, t)))
+        .collect();
     let observed = observed_report(&base, &overrides, &oracle, &args.thresholds);
     let mut reports = Vec::new();
     let mut dump = args
@@ -365,7 +374,12 @@ fn run(args: Args) -> Result<(), String> {
         if let Some(buf) = &mut strengths_dump {
             append_strength_rows(buf, name, &outcomes, &names);
         }
-        reports.push(aggregate(name.clone(), &outcomes, &args.thresholds));
+        reports.push(aggregate(
+            name.clone(),
+            &outcomes,
+            &args.thresholds,
+            &tid_of,
+        ));
     }
     if let (Some(path), Some(buf)) = (&args.dump_runs, &dump) {
         std::fs::write(path, buf).map_err(|e| format!("writing {}: {e}", path.display()))?;
@@ -644,7 +658,14 @@ fn append_strength_rows(
     }
 }
 
-fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> VariantReport {
+fn aggregate(
+    name: String,
+    outcomes: &[RunOutcome],
+    thresholds: &[f64],
+    tid_of: &HashMap<Uuid, u32>,
+) -> VariantReport {
+    // Deterministic tie-break: a player's tournament number (never their random id).
+    let tid = |id: &Uuid| tid_of.get(id).copied().unwrap_or(u32::MAX);
     let runs = outcomes.len();
 
     let mut pooled: Vec<f64> = outcomes
@@ -712,6 +733,7 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
             .p
             .partial_cmp(&a.top1.p)
             .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| tid(&a.player).cmp(&tid(&b.player)))
     });
 
     // Cup champions: count each player's titles across the runs that produced one.
@@ -732,6 +754,7 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
         b.1.p
             .partial_cmp(&a.1.p)
             .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| tid(&a.0).cmp(&tid(&b.0)))
     });
 
     let per_run_interest: Vec<f64> = outcomes.iter().map(|o| o.interest).collect();
@@ -759,6 +782,7 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
         shortfall[b]
             .partial_cmp(&shortfall[a])
             .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| tid(&ids[a]).cmp(&tid(&ids[b])))
     });
     let runs_f = runs.max(1) as f64;
     let interest_by_player: HashMap<Uuid, (f64, f64)> = ids
