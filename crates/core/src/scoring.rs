@@ -140,56 +140,11 @@ pub(crate) fn compute_scores(
     let estimated_elos = settings
         .macmahon_from_estimate_active()
         .then(|| crate::elo::estimate_elos(players, settings, rounds));
-    let mut by_id: HashMap<Uuid, PlayerScore> = players
-        .iter()
-        .map(|p| {
-            // The rating the ELO thresholds see: the rounded live estimate when
-            // estimate-based MacMahon is active, else the static registration
-            // rating. A player with no counted games sits at their prior mean, so
-            // every player has an estimate.
-            let mm_rating = match &estimated_elos {
-                Some(est) => Some(
-                    est.get(&p.id)
-                        .copied()
-                        .unwrap_or(crate::elo::UNRATED_PRIOR_MEAN)
-                        .round() as u32,
-                ),
-                None => p.rating,
-            };
-            // All point-like quantities are kept in half-point units (×2) so a
-            // later half-point absence adds an exact `1`.
-            let macmahon = settings.macmahon_points_at(mm_rating, p.grade, rounds_played) * 2;
-            // Manual bonuses/maluses are folded in alongside MacMahon starting
-            // points, before any round is replayed, so they shape both the
-            // standings and the score-gap pairing weight from here on. They are
-            // whole-point deltas, so doubled into half-point units. The effective
-            // score can't go below zero.
-            let adjustment: i32 = p.adjustments.iter().map(|a| a.delta).sum();
-            let points = (macmahon as i32 + adjustment * 2).max(0) as u32;
-            (
-                p.id,
-                PlayerScore {
-                    points,
-                    victories: 0,
-                    macmahon,
-                    opponents: Vec::new(),
-                    defeated: Vec::new(),
-                    cuss_m: 0,
-                    cuss_w: 0,
-                    running_points: Vec::new(),
-                    running_wins: Vec::new(),
-                    had_bye: false,
-                    last_ascended: None,
-                    last_descended: None,
-                },
-            )
-        })
-        .collect();
-
-    // Tournament number of each player — the dense key the finished table is
-    // indexed by, and what opponent/defeated lists store. Assigned at
-    // finalization, so present for every player whenever scoring runs (which is
-    // only once at least one round exists).
+    // Tournament number of each player — the dense key everything is stored by,
+    // and what opponent/defeated lists hold. Assigned at finalization, so present
+    // for every player whenever scoring runs (only once at least one round
+    // exists). This is the one per-player hash table left: the score records
+    // accumulate straight into a number-indexed vector, no id-keyed intermediate.
     let index: HashMap<Uuid, u32> = players
         .iter()
         .map(|p| {
@@ -200,6 +155,53 @@ pub(crate) fn compute_scores(
             )
         })
         .collect();
+    let max_tid = players
+        .iter()
+        .map(|p| p.tournament_id.unwrap())
+        .max()
+        .unwrap_or(0) as usize;
+
+    // Gaps (number 0, and numbers freed by a pre-play removal) keep a default
+    // all-zero score and a nil id — never read, since only present players' numbers
+    // appear as opponents. `real_tids` lists the present players' numbers for the
+    // per-round cumulative pass, which must visit every real player but not a gap.
+    let mut by_tid: Vec<PlayerScore> = std::iter::repeat_with(PlayerScore::default)
+        .take(max_tid + 1)
+        .collect();
+    let mut ids = vec![Uuid::nil(); max_tid + 1];
+    let mut real_tids: Vec<u32> = Vec::with_capacity(players.len());
+    for p in players {
+        // The rating the ELO thresholds see: the rounded live estimate when
+        // estimate-based MacMahon is active, else the static registration rating.
+        // A player with no counted games sits at their prior mean, so every player
+        // has an estimate.
+        let mm_rating = match &estimated_elos {
+            Some(est) => Some(
+                est.get(&p.id)
+                    .copied()
+                    .unwrap_or(crate::elo::UNRATED_PRIOR_MEAN)
+                    .round() as u32,
+            ),
+            None => p.rating,
+        };
+        // All point-like quantities are kept in half-point units (×2) so a later
+        // half-point absence adds an exact `1`.
+        let macmahon = settings.macmahon_points_at(mm_rating, p.grade, rounds_played) * 2;
+        // Manual bonuses/maluses are folded in alongside MacMahon starting points,
+        // before any round is replayed, so they shape both the standings and the
+        // score-gap pairing weight from here on. They are whole-point deltas, so
+        // doubled into half-point units. The effective score can't go below zero.
+        let adjustment: i32 = p.adjustments.iter().map(|a| a.delta).sum();
+        let points = (macmahon as i32 + adjustment * 2).max(0) as u32;
+        let t = p.tournament_id.unwrap() as usize;
+        ids[t] = p.id;
+        real_tids.push(t as u32);
+        by_tid[t] = PlayerScore {
+            points,
+            macmahon,
+            ..PlayerScore::default()
+        };
+    }
 
     for round in rounds.iter().filter(|r| r.completed) {
         // A float is judged on the points going *into* the round, so record
@@ -212,19 +214,22 @@ pub(crate) fn compute_scores(
             if board.no_show.is_some() {
                 continue;
             }
-            let (a, b) = (board.player1, board.player2);
-            if !by_id.contains_key(&a) || !by_id.contains_key(&b) {
+            // Resolve both players to their numbers once — the only hashing this
+            // hot per-board loop does. Skip a board with a since-absent player (its
+            // number is gone), matching the old both-present guard.
+            let (Some(&ta), Some(&tb)) = (index.get(&board.player1), index.get(&board.player2))
+            else {
                 continue;
-            }
+            };
+            let (ta, tb) = (ta as usize, tb as usize);
             // A long board (two rounds, two points) counts as *two* games against
             // the same opponent for the opponent-based tie-breaks (SOS, SODOS,
             // SOSOS, Buchholz), so it is recorded twice. It still feeds ELO as a
             // single game (that reads the boards directly, not these lists).
             let reps = if board.long { 2 } else { 1 };
-            let (ta, tb) = (index[&a], index[&b]);
             for _ in 0..reps {
-                by_id.get_mut(&a).unwrap().opponents.push(tb);
-                by_id.get_mut(&b).unwrap().opponents.push(ta);
+                by_tid[ta].opponents.push(tb as u32);
+                by_tid[tb].opponents.push(ta as u32);
             }
 
             // A cup board is a forced bracket pairing, not a Swiss float, so it
@@ -237,22 +242,23 @@ pub(crate) fn compute_scores(
             // Direction from the frozen float, else from the live difference.
             let diff = board
                 .points_diff
-                .unwrap_or_else(|| by_id[&a].points as i32 - by_id[&b].points as i32);
+                .unwrap_or_else(|| by_tid[ta].points as i32 - by_tid[tb].points as i32);
             match diff.cmp(&0) {
                 Ordering::Greater => {
                     // a had more points → a downfloats, b upfloats.
-                    by_id.get_mut(&a).unwrap().last_descended = Some(round.number);
-                    by_id.get_mut(&b).unwrap().last_ascended = Some(round.number);
+                    by_tid[ta].last_descended = Some(round.number);
+                    by_tid[tb].last_ascended = Some(round.number);
                 }
                 Ordering::Less => {
-                    by_id.get_mut(&a).unwrap().last_ascended = Some(round.number);
-                    by_id.get_mut(&b).unwrap().last_descended = Some(round.number);
+                    by_tid[ta].last_ascended = Some(round.number);
+                    by_tid[tb].last_descended = Some(round.number);
                 }
                 Ordering::Equal => {}
             }
         }
         if let Some(bye) = round.bye {
-            if let Some(s) = by_id.get_mut(&bye) {
+            if let Some(&t) = index.get(&bye) {
+                let s = &mut by_tid[t as usize];
                 s.had_bye = true;
                 s.last_descended = Some(round.number); // a bye is a downfloat
             }
@@ -261,7 +267,8 @@ pub(crate) fn compute_scores(
         // downfloat they can't be given twice.
         for board in &round.boards {
             if let Some(present) = board.no_show_opponent() {
-                if let Some(s) = by_id.get_mut(&present) {
+                if let Some(&t) = index.get(&present) {
+                    let s = &mut by_tid[t as usize];
                     s.had_bye = true;
                     s.last_descended = Some(round.number);
                 }
@@ -269,7 +276,8 @@ pub(crate) fn compute_scores(
         }
         // A cup bye (an unopposed bracket advance) is a bye all the same.
         for &player in &round.cup_byes {
-            if let Some(s) = by_id.get_mut(&player) {
+            if let Some(&t) = index.get(&player) {
+                let s = &mut by_tid[t as usize];
                 s.had_bye = true;
                 s.last_descended = Some(round.number);
             }
@@ -286,17 +294,19 @@ pub(crate) fn compute_scores(
             // as two games against the same opponent for the point/victory totals
             // and the opponent-based tie-breaks; it stays a single game for ELO.
             let reps = if board.long { 2 } else { 1 };
-            if let Some(s) = by_id.get_mut(&winner) {
+            if let Some(&tw) = index.get(&winner) {
+                let tl = index[&loser];
+                let s = &mut by_tid[tw as usize];
                 s.points += 2 * reps; // a win is 2 half-points (×2 for a long game)
                 s.victories += reps;
-                let tl = index[&loser];
                 for _ in 0..reps {
                     s.defeated.push(tl);
                 }
             }
         }
         if let Some(bye) = round.bye {
-            if let Some(s) = by_id.get_mut(&bye) {
+            if let Some(&t) = index.get(&bye) {
+                let s = &mut by_tid[t as usize];
                 s.points += 2; // a win is 2 half-points
                 s.victories += 1;
             }
@@ -305,10 +315,11 @@ pub(crate) fn compute_scores(
         // for a bye. The absentee scores nothing (like an absence).
         for board in &round.boards {
             if let Some(present) = board.no_show_opponent() {
-                if let Some(s) = by_id.get_mut(&present) {
+                if let Some(&t) = index.get(&present) {
                     // A long board resolved by forfeit still scores its long
                     // weight (two points), unless the referee demoted it.
                     let reps = if board.long { 2 } else { 1 };
+                    let s = &mut by_tid[t as usize];
                     s.points += 2 * reps; // a win is 2 half-points (×2 for a long game)
                     s.victories += reps;
                 }
@@ -316,7 +327,8 @@ pub(crate) fn compute_scores(
         }
         // A cup bye scores the free point too — the player advanced unopposed.
         for &player in &round.cup_byes {
-            if let Some(s) = by_id.get_mut(&player) {
+            if let Some(&t) = index.get(&player) {
+                let s = &mut by_tid[t as usize];
                 s.points += 2; // a win is 2 half-points
                 s.victories += 1;
             }
@@ -327,8 +339,8 @@ pub(crate) fn compute_scores(
         // board and stays at 0.
         if settings.half_point_absences {
             for id in &round.absent {
-                if let Some(s) = by_id.get_mut(id) {
-                    s.points += 1;
+                if let Some(&t) = index.get(id) {
+                    by_tid[t as usize].points += 1;
                 }
             }
         }
@@ -336,8 +348,10 @@ pub(crate) fn compute_scores(
         // Cumulative tie-break: after this round is scored, add every player's
         // running total to their running sum. A round the player sat out still
         // contributes their (unchanged) total, matching the classic "cumulative"
-        // definition of a sum over the sequence of rounds.
-        for s in by_id.values_mut() {
+        // definition of a sum over the sequence of rounds. Visits the present
+        // players (by their numbers), never the gap slots.
+        for &t in &real_tids {
+            let s = &mut by_tid[t as usize];
             s.cuss_m += s.points;
             s.cuss_w += s.victories;
             s.running_points.push(s.points);
@@ -345,20 +359,6 @@ pub(crate) fn compute_scores(
         }
     }
 
-    // Transpose the id-keyed accumulator into the dense, tournament-number-indexed
-    // vector the readers walk. Gaps (number 0, any freed by a pre-play removal)
-    // keep a default all-zero score and a nil id — never read, since only present
-    // players' numbers ever appear as opponents.
-    let max_tid = index.values().copied().max().unwrap_or(0) as usize;
-    let mut by_tid: Vec<PlayerScore> = std::iter::repeat_with(PlayerScore::default)
-        .take(max_tid + 1)
-        .collect();
-    let mut ids = vec![Uuid::nil(); max_tid + 1];
-    for (id, score) in by_id {
-        let tid = index[&id] as usize;
-        ids[tid] = id;
-        by_tid[tid] = score;
-    }
     Scores { by_tid, index, ids }
 }
 
