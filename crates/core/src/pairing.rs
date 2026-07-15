@@ -563,7 +563,7 @@ struct PairingModel<'a> {
     max_group: i128,
     free_count: i128,
     max_elo_gap: i128,
-    rules: &'static [Rule],
+    rules: Vec<Rule>,
     mult: Vec<i128>,
 }
 
@@ -627,7 +627,22 @@ impl<'a> PairingModel<'a> {
         let k = free.len();
         let vcount = k + usize::from(need_phantom);
         let max_group = fold.values().map(|f| f.group_size).max().unwrap_or(0) as i128;
-        let rules = active_rules(settings);
+        // The active rules, minus the two whole-round no-ops: `AirtightGroups` with
+        // its window closed and `Club` with protection off both return 0 for every
+        // edge and bye, and (having max-total 0) leave every other rule's
+        // multiplier unchanged — so dropping them here is exact, and spares the
+        // O(k²) cost loop a per-edge branch and call each.
+        let club_active = settings.club_protection_active(number);
+        let airtight_active = settings.airtight_groups_active(number);
+        let rules: Vec<Rule> = active_rules(settings)
+            .iter()
+            .copied()
+            .filter(|r| match r {
+                Rule::AirtightGroups => airtight_active,
+                Rule::Club => club_active,
+                _ => true,
+            })
+            .collect();
 
         // Transpose the id-keyed per-player data onto tournament-number-indexed
         // vectors, so the O(k²) cost loop indexes them directly instead of hashing
@@ -667,8 +682,8 @@ impl<'a> PairingModel<'a> {
             elo_rank: elo_rank_v,
             round: number,
             floater_style: settings.floater_style,
-            club_active: settings.club_protection_active(number),
-            airtight_active: settings.airtight_groups_active(number),
+            club_active,
+            airtight_active,
             edges: (vcount / 2) as i128,
             max_gap: hi.saturating_sub(lo) as i128,
             min_points: lo as i128,
@@ -683,7 +698,11 @@ impl<'a> PairingModel<'a> {
         // build the ladder in a second pass, once the rest of the model exists.
         let max_total: Vec<i128> = {
             let ctx = model.ctx();
-            rules.iter().map(|r| r.max_total_units(&ctx)).collect()
+            model
+                .rules
+                .iter()
+                .map(|r| r.max_total_units(&ctx))
+                .collect()
         };
         model.mult = scale_ladder(&max_total);
         model
@@ -725,7 +744,7 @@ impl<'a> PairingModel<'a> {
     fn edge_cost(&self, a: Uuid, b: Uuid) -> i128 {
         edge_cost(
             &self.ctx(),
-            self.rules,
+            &self.rules,
             &self.mult,
             self.tid(a),
             self.tid(b),
@@ -734,7 +753,7 @@ impl<'a> PairingModel<'a> {
 
     /// Scalar edge weight for giving `player` the bye.
     fn bye_cost(&self, player: Uuid) -> i128 {
-        bye_cost(&self.ctx(), self.rules, &self.mult, self.tid(player))
+        bye_cost(&self.ctx(), &self.rules, &self.mult, self.tid(player))
     }
 
     /// Canonical seed key for a matching vertex. Ordering the vertices by this key
@@ -778,8 +797,8 @@ impl<'a> PairingModel<'a> {
             .collect()
     }
 
-    fn rules(&self) -> &'static [Rule] {
-        self.rules
+    fn rules(&self) -> &[Rule] {
+        &self.rules
     }
 }
 
@@ -1396,7 +1415,7 @@ pub fn pair_round_weighted(
         let mut cost = vec![0i128; vcount * vcount];
         for i in 0..k {
             for j in (i + 1)..k {
-                let c = edge_cost(&ctx, model.rules, &model.mult, free_tid[i], free_tid[j]);
+                let c = edge_cost(&ctx, &model.rules, &model.mult, free_tid[i], free_tid[j]);
                 cost[i * vcount + j] = c;
                 cost[j * vcount + i] = c;
             }
@@ -1404,7 +1423,7 @@ pub fn pair_round_weighted(
         if need_phantom {
             let p = k;
             for i in 0..k {
-                let c = bye_cost(&ctx, model.rules, &model.mult, free_tid[i]);
+                let c = bye_cost(&ctx, &model.rules, &model.mult, free_tid[i]);
                 cost[i * vcount + p] = c;
                 cost[p * vcount + i] = c;
             }
