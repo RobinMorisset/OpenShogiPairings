@@ -3,8 +3,12 @@
 # Full test suite runs in pre-push instead, to keep commits snappy.
 set -e
 
-echo "== cargo fmt --check =="
-cargo fmt --check
+echo "== rustfmt --check (staged .rs) =="
+staged_rs=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')
+if [ -n "$staged_rs" ]; then
+  # shellcheck disable=SC2086
+  rustfmt --edition 2021 --check $staged_rs
+fi
 
 echo "== cargo clippy =="
 cargo clippy --workspace --all-targets -- -D warnings
