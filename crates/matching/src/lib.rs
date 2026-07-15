@@ -28,6 +28,8 @@
 //! not ported from any codebase — and is checked against a brute-force oracle in
 //! the tests below.
 
+use std::any::{Any, TypeId};
+use std::cell::RefCell;
 use std::collections::VecDeque;
 
 /// Edge-weight type for the blossom solver: a signed integer wide enough to
@@ -40,6 +42,9 @@ pub trait Weight:
     + std::ops::Sub<Output = Self>
     + std::ops::AddAssign
     + std::ops::SubAssign
+    // `'static` lets the per-thread solver pool key its reusable `Blossom<W>`
+    // buffers by `TypeId`; every integer weight type satisfies it.
+    + 'static
 {
     const ZERO: Self;
     const ONE: Self;
@@ -117,6 +122,45 @@ impl<W: Weight> Blossom<W> {
             flower: vec![Vec::new(); sz],
             q: VecDeque::new(),
             t: 0,
+        }
+    }
+
+    /// Prepare a (possibly reused) solver for an `n`-vertex instance, growing the
+    /// working buffers if this instance is larger than any this solver has seen.
+    ///
+    /// No stale data needs clearing: `solve`/`matching` re-initialize every piece
+    /// of live state within `1..=2n` each run, the complete-graph `set_edge`
+    /// overwrites every real edge, and a super-vertex's row/column is zeroed when
+    /// its blossom is formed — so a buffer left over from an earlier (larger or
+    /// smaller) instance is correct as long as it is big enough. Growth only ever
+    /// extends the buffers (indices `1..=2n` are all a smaller `n` could have
+    /// touched), never truncates.
+    fn reset(&mut self, n: usize) {
+        self.n = n;
+        self.n_x = n;
+        let sz = 2 * n + 1;
+        if self.g.len() < sz {
+            let nil = Edge {
+                u: 0,
+                v: 0,
+                w: W::ZERO,
+            };
+            self.g.resize(sz, Vec::new());
+            for row in &mut self.g {
+                row.resize(sz, nil);
+            }
+            self.flower_from.resize(sz, Vec::new());
+            for row in &mut self.flower_from {
+                row.resize(n + 1, 0);
+            }
+            self.lab.resize(sz, W::ZERO);
+            self.mate.resize(sz, 0);
+            self.slack.resize(sz, 0);
+            self.st.resize(sz, 0);
+            self.pa.resize(sz, 0);
+            self.s.resize(sz, -1);
+            self.vis.resize(sz, 0);
+            self.flower.resize(sz, Vec::new());
         }
     }
 
@@ -518,16 +562,60 @@ pub fn min_weight_perfect_matching<W: Weight>(cost: &[Vec<W>]) -> Vec<usize> {
     }
     let offset = max_cost + W::ONE;
 
-    let mut bl = Blossom::new(n);
-    for (i, row) in cost.iter().enumerate() {
-        for j in (i + 1)..n {
-            debug_assert_eq!(row[j], cost[j][i], "cost matrix must be symmetric");
-            bl.set_edge(i + 1, j + 1, offset - row[j]);
+    POOL.with(|pool| {
+        let mut pool = pool.borrow_mut();
+        let bl = pool.get::<W>(n);
+        bl.reset(n);
+        for (i, row) in cost.iter().enumerate() {
+            for j in (i + 1)..n {
+                debug_assert_eq!(row[j], cost[j][i], "cost matrix must be symmetric");
+                bl.set_edge(i + 1, j + 1, offset - row[j]);
+            }
         }
-    }
-    bl.solve();
+        bl.solve();
+        (1..=n).map(|u| bl.mate[u] - 1).collect()
+    })
+}
 
-    (1..=n).map(|u| bl.mate[u] - 1).collect()
+thread_local! {
+    /// Per-thread reuse of the solver's O(n²) working buffers (see [`Pool`]).
+    static POOL: RefCell<Pool> = const { RefCell::new(Pool::new()) };
+}
+
+/// A per-thread cache of reusable [`Blossom`] solvers, one per weight type. The
+/// solver's buffers are the dominant allocation — `g` alone is `(2n+1)²` edges —
+/// and a caller like osp-sim runs thousands of same-sized matchings per thread,
+/// so keeping the buffers and merely [`Blossom::reset`]ting them between calls
+/// turns those per-call allocations into one per thread.
+///
+/// It is keyed by [`TypeId`] because the solver is generic over `W` while a
+/// thread-local is not; with only the handful of integer weight types in use a
+/// linear scan of the slots is cheaper than a map.
+struct Pool {
+    slots: Vec<(TypeId, Box<dyn Any>)>,
+}
+
+impl Pool {
+    const fn new() -> Self {
+        Pool { slots: Vec::new() }
+    }
+
+    /// The reusable solver for weight type `W`, created (sized for `n`) on first
+    /// use for this type on this thread.
+    fn get<W: Weight>(&mut self, n: usize) -> &mut Blossom<W> {
+        let tid = TypeId::of::<W>();
+        let idx = match self.slots.iter().position(|(t, _)| *t == tid) {
+            Some(i) => i,
+            None => {
+                self.slots.push((tid, Box::new(Blossom::<W>::new(n))));
+                self.slots.len() - 1
+            }
+        };
+        self.slots[idx]
+            .1
+            .downcast_mut::<Blossom<W>>()
+            .expect("each slot holds the Blossom<W> its TypeId keys")
+    }
 }
 
 #[cfg(test)]
@@ -581,6 +669,50 @@ mod tests {
         let cost = vec![vec![0, 7], vec![7, 0]];
         let mate = min_weight_perfect_matching(&cost);
         assert_eq!(mate, vec![1, 0]);
+    }
+
+    #[test]
+    fn reuses_buffers_across_shrinking_sizes() {
+        // The per-thread solver pool keeps a buffer sized for the largest instance
+        // seen, so a later *smaller* solve runs on a buffer holding a bigger
+        // instance's stale edges (some now in the super-vertex index range). This
+        // is the case the ascending brute-force test never hits. Solve a large
+        // instance to grow-and-dirty the buffer, then check small instances — which
+        // now reuse it — against the exhaustive oracle.
+        let mut seed: u64 = 0x243F6A8885A308D3;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let mut random_cost = |n: usize| {
+            let mut cost = vec![vec![0i128; n]; n];
+            #[allow(clippy::needless_range_loop)]
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let c = (next() % 1000) as i128;
+                    cost[i][j] = c;
+                    cost[j][i] = c;
+                }
+            }
+            cost
+        };
+
+        for _ in 0..50 {
+            // Dirty the buffer with a large instance, then a small one that reuses
+            // it — and interleave sizes so the shrink path is hit repeatedly.
+            let _ = min_weight_perfect_matching(&random_cost(120));
+            for &n in &[2usize, 4, 6, 8, 10, 4, 8, 2] {
+                let cost = random_cost(n);
+                let mate = min_weight_perfect_matching(&cost);
+                assert_eq!(
+                    total_of(&cost, &mate),
+                    brute_min_cost(&cost),
+                    "reused buffer gave a suboptimal matching at n={n}"
+                );
+            }
+        }
     }
 
     #[test]
