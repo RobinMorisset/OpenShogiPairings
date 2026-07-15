@@ -151,8 +151,13 @@ impl<W: Weight> Blossom<W> {
         if x <= self.n {
             self.q.push_back(x);
         } else {
-            for c in self.flower[x].clone() {
+            // Recursing into a child never mutates `flower[x]` itself, so index it
+            // in place rather than cloning the whole cycle each call.
+            let mut i = 0;
+            while i < self.flower[x].len() {
+                let c = self.flower[x][i];
                 self.q_push(c);
+                i += 1;
             }
         }
     }
@@ -160,8 +165,11 @@ impl<W: Weight> Blossom<W> {
     fn set_st(&mut self, x: usize, b: usize) {
         self.st[x] = b;
         if x > self.n {
-            for c in self.flower[x].clone() {
+            let mut i = 0;
+            while i < self.flower[x].len() {
+                let c = self.flower[x][i];
                 self.set_st(c, b);
+                i += 1;
             }
         }
     }
@@ -185,10 +193,14 @@ impl<W: Weight> Blossom<W> {
             let e = self.g[u][v];
             let xr = self.flower_from[u][e.u];
             let pr = self.get_pr(u, xr);
-            let fu = self.flower[u].clone();
+            // The recursive `set_match` on a child touches only that child's cycle,
+            // so `flower[u]` is stable until the `rotate_left` below — index it in
+            // place instead of cloning.
             let mut i = 0;
             while i < pr {
-                self.set_match(fu[i], fu[i ^ 1]);
+                let a = self.flower[u][i];
+                let b = self.flower[u][i ^ 1];
+                self.set_match(a, b);
                 i += 1;
             }
             self.set_match(xr, v);
@@ -268,8 +280,12 @@ impl<W: Weight> Blossom<W> {
         for x in 1..=self.n {
             self.flower_from[b][x] = 0;
         }
-        let members = self.flower[b].clone();
-        for xs in members {
+        // `b` is a fresh index distinct from every member `xs`, so writing row/col
+        // `b` never disturbs the `xs` rows we read — the cycle is stable, index it
+        // in place rather than cloning.
+        let mut mi = 0;
+        while mi < self.flower[b].len() {
+            let xs = self.flower[b][mi];
             for x in 1..=self.n_x {
                 let gxsx = self.g[xs][x];
                 let gxxs = self.g[x][xs];
@@ -284,22 +300,28 @@ impl<W: Weight> Blossom<W> {
                     self.flower_from[b][x] = xs;
                 }
             }
+            mi += 1;
         }
         self.set_slack(b);
     }
 
     fn expand_blossom(&mut self, b: usize) {
-        let members = self.flower[b].clone();
-        for &m in &members {
+        // `set_st` only descends into each member's own sub-cycle, so `flower[b]`
+        // is stable here — index it rather than cloning.
+        let mut mi = 0;
+        while mi < self.flower[b].len() {
+            let m = self.flower[b][mi];
             self.set_st(m, m);
+            mi += 1;
         }
         let xr = self.flower_from[b][self.g[b][self.pa[b]].u];
+        // `get_pr` may reverse `flower[b][1..]`; every index below reads it after,
+        // and `set_slack`/`q_push` never mutate it, so no clone is needed.
         let pr = self.get_pr(b, xr);
-        let fb = self.flower[b].clone();
         let mut i = 0;
         while i < pr {
-            let xs = fb[i];
-            let xns = fb[i + 1];
+            let xs = self.flower[b][i];
+            let xns = self.flower[b][i + 1];
             self.pa[xs] = self.g[xns][xs].u;
             self.s[xs] = 1;
             self.s[xns] = 0;
@@ -310,9 +332,12 @@ impl<W: Weight> Blossom<W> {
         }
         self.s[xr] = 1;
         self.pa[xr] = self.pa[b];
-        for &xs in &fb[(pr + 1)..] {
+        let mut idx = pr + 1;
+        while idx < self.flower[b].len() {
+            let xs = self.flower[b][idx];
             self.s[xs] = -1;
             self.set_slack(xs);
+            idx += 1;
         }
         self.st[b] = 0;
     }
