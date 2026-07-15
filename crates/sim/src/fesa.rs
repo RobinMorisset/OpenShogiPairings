@@ -115,7 +115,7 @@ pub fn list_url(date: Ymd) -> String {
 /// Latin-1 list has it precomposed. Folding to a bare-ASCII key makes the match
 /// robust to all of these. Names genuinely absent from the list still don't match
 /// (they fall back to the grid rating) — folding only removes accent noise.
-fn fold_name(s: &str) -> String {
+pub(crate) fn fold_name(s: &str) -> String {
     let folded: String = s
         .to_lowercase()
         .chars()

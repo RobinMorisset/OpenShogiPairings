@@ -24,7 +24,8 @@ use osp_core::sim::{
     welfare_shortfall, CupConfig, OracleModel, RunOutcome, StrengthMap,
 };
 use osp_core::{
-    decode_latin1, estimate_elos, import_fesa_results, Player, Tournament, TournamentSettings,
+    decode_latin1, estimate_elos, import_fesa_results, reconstruct_cup_from_final, Player,
+    Tournament, TournamentSettings,
 };
 
 use stats::{diff_stats, mean, mean_ci95, paired_diff, spearman, wilson, DiffStats, Proportion};
@@ -142,6 +143,20 @@ struct Args {
     )]
     cup_nations: Vec<String>,
 
+    /// Reconstruct the cup roster from its two finalists — the gold and silver
+    /// medalists' names — instead of a nationality filter. The exact bracket is read
+    /// backward from the final (`Cup`-agnostic), so it is immune to the stale seeding
+    /// ratings, declined entries and borderline nationalities that defeat a
+    /// top-N-by-rating guess (the WOSC / European Championship case). Give both names;
+    /// size is derived. Mutually exclusive with --cup-size/--cup-nations.
+    #[arg(
+        long,
+        value_name = "NAME",
+        num_args = 2,
+        conflicts_with_all = ["cup_size", "cup_nations"]
+    )]
+    cup_final: Vec<String>,
+
     /// One or more |ELO diff| thresholds T for reporting P(|diff| > T).
     #[arg(long = "threshold", value_name = "T", default_values_t = [400.0_f64])]
     thresholds: Vec<f64>,
@@ -170,6 +185,35 @@ fn main() {
     if let Err(e) = run(Args::parse()) {
         eprintln!("error: {e}");
         std::process::exit(1);
+    }
+}
+
+/// Find the unique base player whose name matches `name` — a full name in any
+/// order (e.g. "Jean Fortin"), accent-folded and word-based, so a player's last-
+/// and first-name words must all appear in it. Errors unless exactly one matches.
+fn find_player_by_name(base: &Tournament, name: &str) -> Result<Uuid, String> {
+    let target: HashSet<String> = fesa::fold_name(name)
+        .split_whitespace()
+        .map(String::from)
+        .collect();
+    let matches: Vec<Uuid> = base
+        .players
+        .iter()
+        .filter(|p| {
+            let last = fesa::fold_name(&p.last_name);
+            let first = fesa::fold_name(&p.first_name);
+            last.split_whitespace().all(|w| target.contains(w))
+                && first.split_whitespace().all(|w| target.contains(w))
+        })
+        .map(|p| p.id)
+        .collect();
+    match matches.as_slice() {
+        [id] => Ok(*id),
+        [] => Err(format!("no player matches cup finalist {name:?}")),
+        many => Err(format!(
+            "{} players match cup finalist {name:?}",
+            many.len()
+        )),
     }
 }
 
@@ -226,9 +270,29 @@ fn run(args: Args) -> Result<(), String> {
         StrengthMap::new()
     };
 
-    // Cup format: compute eligibility (nationality + attendance) from the base's
-    // real rounds, once, and apply it across all variants.
-    let cup = if let Some(size) = args.cup_size {
+    // Cup format: compute the eligible set from the base's real rounds, once, and
+    // apply it across all variants — either reconstructed exactly from the two
+    // finalists, or by nationality + attendance.
+    let cup = if !args.cup_final.is_empty() {
+        let gold = find_player_by_name(&base, &args.cup_final[0])?;
+        let silver = find_player_by_name(&base, &args.cup_final[1])?;
+        let (size, roster) =
+            reconstruct_cup_from_final(&base.rounds, gold, silver).ok_or_else(|| {
+                format!(
+                    "could not reconstruct a power-of-two cup bracket from finalists {:?} / {:?} \
+                 (did they reach the final?)",
+                    args.cup_final[0], args.cup_final[1]
+                )
+            })?;
+        eprintln!(
+            "cup: size {size} reconstructed from finalists {:?} / {:?}",
+            args.cup_final[0], args.cup_final[1]
+        );
+        Some(CupConfig {
+            eligible: roster.into_iter().collect(),
+            size,
+        })
+    } else if let Some(size) = args.cup_size {
         if !osp_core::CUP_SIZES.contains(&size) {
             return Err(format!(
                 "--cup-size must be one of {:?}",

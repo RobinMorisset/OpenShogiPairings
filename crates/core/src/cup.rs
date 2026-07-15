@@ -15,6 +15,8 @@
 //! the final itself; after that round everyone — champion included — is in the
 //! Swiss pool.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
@@ -290,6 +292,166 @@ fn decide(rounds: &[Round], k: u32, a: Uuid, b: Uuid) -> Option<CupResult> {
     })
 }
 
+/// Whether `seeds` (a power-of-two set of players) played a single-elimination
+/// knockout over the recorded `rounds` — *irrespective of the bracket's seeding or
+/// fold* — returning the champion if so. Each bracket round must be a **closed
+/// internal matching**: every still-alive player faces another still-alive player
+/// on a decided board, halving the field until one remains; rounds where the field
+/// does not play entirely within itself (the Swiss pool, or a long-game gap round)
+/// are skipped.
+///
+/// This is the seeding-robust test for "was this tournament actually run as a
+/// top-`size` cup", unlike [`Cup::podium`], which replays one *specific* seeded
+/// fold and so is thrown off by the near-tie seeding perturbations real events pick
+/// up from slightly stale rating lists (a WOSC seeded off last month's list still
+/// plays a standard bracket, just with a few close seeds a position or two out).
+pub fn knockout_champion(rounds: &[Round], seeds: &[Uuid]) -> Option<Uuid> {
+    let n = seeds.len();
+    if n < 2 || !n.is_power_of_two() {
+        return None;
+    }
+    let mut frontier: HashSet<Uuid> = seeds.iter().copied().collect();
+    if frontier.len() != n {
+        return None; // duplicate seeds
+    }
+    let max_round = rounds.iter().map(|r| r.number).max().unwrap_or(0);
+    let mut r = 1u32;
+    for _ in 0..n.trailing_zeros() {
+        let winners = loop {
+            if r > max_round {
+                return None; // ran out of rounds before the field resolved
+            }
+            let found = frontier_round_winners(rounds, r, &frontier);
+            r += 1;
+            if let Some(w) = found {
+                break w;
+            }
+        };
+        frontier = winners;
+    }
+    (frontier.len() == 1).then(|| frontier.into_iter().next().unwrap())
+}
+
+/// Reconstruct the exact roster of a hybrid tournament's cup from its two
+/// finalists (e.g. a championship's gold and silver medalists), working *backward*
+/// from the final: the finalists' game is the final, each finalist's game in the
+/// previous bracket round is a semifinal (their opponents the two beaten
+/// semifinalists), and so on — the frontier doubles each round until it stops
+/// growing. Returns `(size, roster)` with `size` a power of two, or `None` if the
+/// two never met or the frontier doesn't resolve to a clean power-of-two bracket.
+///
+/// Unlike a seeded reconstruction, the roster is read straight off the played
+/// games, so it is immune to the stale seeding ratings, declined entries and
+/// borderline nationalities that make a top-`size`-by-rating guess unreliable —
+/// all that's needed is who reached the final. Long-game gap rounds (where the
+/// alive players are mid-game and record no new pairing) are skipped automatically.
+pub fn reconstruct_cup_from_final(
+    rounds: &[Round],
+    gold: Uuid,
+    silver: Uuid,
+) -> Option<(u32, Vec<Uuid>)> {
+    let max_round = rounds.iter().map(|r| r.number).max()?;
+    // The final is the latest round in which the two finalists actually met.
+    let final_round = (1..=max_round)
+        .rev()
+        .find(|&r| played(rounds, r, gold, silver))?;
+
+    let mut frontier: HashSet<Uuid> = [gold, silver].into_iter().collect();
+    let mut r = final_round;
+    loop {
+        // The previous bracket round: the latest earlier round where *every* still-
+        // alive player has a game against a distinct opponent not already alive
+        // (their beaten predecessor). Earlier rounds where that fails are gap rounds.
+        let mut found = None;
+        for rp in (1..r).rev() {
+            if let Some(opps) = frontier_predecessors(rounds, rp, &frontier) {
+                found = Some((rp, opps));
+                break;
+            }
+        }
+        match found {
+            Some((rp, opps)) => {
+                frontier.extend(opps);
+                r = rp;
+            }
+            None => break,
+        }
+    }
+
+    let size = frontier.len() as u32;
+    (size >= 2 && size.is_power_of_two()).then(|| (size, frontier.into_iter().collect()))
+}
+
+/// Whether a board between `a` and `b` exists in round `r`.
+fn played(rounds: &[Round], r: u32, a: Uuid, b: Uuid) -> bool {
+    rounds.iter().find(|rd| rd.number == r).is_some_and(|rd| {
+        rd.boards
+            .iter()
+            .any(|bd| (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a))
+    })
+}
+
+/// The beaten predecessors if, in round `r`, every `frontier` player has a board
+/// against a distinct opponent *outside* the frontier; else `None` (a gap round, or
+/// a round where the field played itself or someone twice).
+fn frontier_predecessors(rounds: &[Round], r: u32, frontier: &HashSet<Uuid>) -> Option<Vec<Uuid>> {
+    let round = rounds.iter().find(|rd| rd.number == r)?;
+    let mut opps = Vec::with_capacity(frontier.len());
+    let mut seen = HashSet::with_capacity(frontier.len());
+    for &p in frontier {
+        let board = round
+            .boards
+            .iter()
+            .find(|b| b.player1 == p || b.player2 == p)?;
+        let opp = if board.player1 == p {
+            board.player2
+        } else {
+            board.player1
+        };
+        if frontier.contains(&opp) || !seen.insert(opp) {
+            return None;
+        }
+        opps.push(opp);
+    }
+    Some(opps)
+}
+
+/// The winners if, in round `r`, every player of `frontier` faces another
+/// `frontier` player on a decided board (a closed internal matching); else `None`.
+fn frontier_round_winners(
+    rounds: &[Round],
+    r: u32,
+    frontier: &HashSet<Uuid>,
+) -> Option<HashSet<Uuid>> {
+    let round = rounds.iter().find(|rd| rd.number == r)?;
+    let mut winners = HashSet::with_capacity(frontier.len() / 2);
+    let mut matched: HashSet<Uuid> = HashSet::with_capacity(frontier.len());
+    for &p in frontier {
+        if matched.contains(&p) {
+            continue;
+        }
+        let board = round
+            .boards
+            .iter()
+            .find(|b| b.player1 == p || b.player2 == p)?;
+        let opp = if board.player1 == p {
+            board.player2
+        } else {
+            board.player1
+        };
+        if !frontier.contains(&opp) {
+            return None; // plays outside the set -> not a bracket round
+        }
+        match decide(rounds, r, p, opp)? {
+            CupResult::Winner { winner, .. } => winners.insert(winner),
+            CupResult::BothAbsent => return None,
+        };
+        matched.insert(p);
+        matched.insert(opp);
+    }
+    (winners.len() == frontier.len() / 2).then_some(winners)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,6 +494,46 @@ mod tests {
         assert_eq!((m[1].player1, m[1].player2), (seeds[1], seeds[6]));
         assert_eq!((m[3].player1, m[3].player2), (seeds[3], seeds[4]));
         assert!(matches!(m[0].stage, CupStage::Quarterfinal));
+    }
+
+    #[test]
+    fn reconstruct_cup_from_final_recovers_the_roster_backward() {
+        let s = ids(8);
+        let rounds = [
+            cup_round(
+                1,
+                &[
+                    (s[0], s[7], CupStage::Quarterfinal),
+                    (s[1], s[6], CupStage::Quarterfinal),
+                    (s[2], s[5], CupStage::Quarterfinal),
+                    (s[3], s[4], CupStage::Quarterfinal),
+                ],
+            ),
+            cup_round(
+                2,
+                &[
+                    (s[0], s[3], CupStage::Semifinal),
+                    (s[1], s[2], CupStage::Semifinal),
+                ],
+            ),
+            cup_round(
+                3,
+                &[
+                    (s[0], s[1], CupStage::Final),
+                    (s[2], s[3], CupStage::SmallFinal),
+                ],
+            ),
+        ];
+        // From the two finalists s0 (gold) and s1 (silver), the whole 8-player
+        // bracket is recovered — no seeding, nationality or attendance needed.
+        let (size, roster) = reconstruct_cup_from_final(&rounds, s[0], s[1]).unwrap();
+        assert_eq!(size, 8);
+        assert_eq!(
+            roster.into_iter().collect::<HashSet<_>>(),
+            s.iter().copied().collect::<HashSet<_>>()
+        );
+        // Two players who never met can't be a final.
+        assert!(reconstruct_cup_from_final(&rounds, s[0], s[4]).is_none());
     }
 
     #[test]

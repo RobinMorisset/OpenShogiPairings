@@ -146,11 +146,48 @@ def prefers_half_point_absences(result_file):
     return len(_ABSENT_HALF.findall(text)) > len(_ABSENT_ZERO.findall(text))
 
 
+_ESC_FINALS = None  # lazily-loaded {year: [gold, silver]} medal table
+_WOSC_RE = re.compile(r"wosc|world open shogi championship", re.IGNORECASE)
+
+
+def _esc_finals():
+    global _ESC_FINALS
+    if _ESC_FINALS is None:
+        path = Path(__file__).resolve().parent / "esc_finals.json"
+        _ESC_FINALS = json.loads(path.read_text())["finals"] if path.exists() else {}
+    return _ESC_FINALS
+
+
+def wosc_finalists(result_file):
+    """For an individual WOSC (World/European Championship — matched by name, not a
+    `team` event), the (gold, silver) medalist names for its year, so osp-sim can
+    reconstruct the exact cup bracket backward from the final. None otherwise. The
+    ESC is played as a top-32 European hybrid cup, but its exact roster (stale seed
+    ratings, declined entries, borderline nationalities) is only reliably recovered
+    from who reached the final — hence the medal table rather than a nationality
+    filter."""
+    stem = result_file.stem.lower()
+    hay = stem + " " + result_file.read_text(encoding="latin-1").split("\n", 1)[0].lower()
+    if "team" in hay or not _WOSC_RE.search(hay):
+        return None
+    years = re.findall(r"(?:19|20)\d{2}", result_file.stem)
+    for y in years:  # event year is the first 4-digit year in the filename
+        pair = _esc_finals().get(y)
+        if pair:
+            return tuple(pair)
+    return None
+
+
 def detect_cup(result_file):
-    """(size, nation) when the file was run as a single-elimination cup among the
-    top 2^N players of its most common nationality, else None. Delegates to
-    cup-detect, which reuses osp-core's cup seeding + bracket replay, so a hit is a
-    tournament osp-sim can reproduce as that hybrid cup. Raises on a tool failure."""
+    """How this file was run as a hybrid direct-elimination cup, or None:
+      ("final", gold, silver) — a WOSC: reconstruct the roster from the finalists;
+      ("nations", size, nats) — a national championship: the top-2^N of the most
+                                common nationality, structurally verified.
+    Raises on a tool failure. The WOSC branch is checked first (by name); everything
+    else goes to cup-detect for structural verification."""
+    fin = wosc_finalists(result_file)
+    if fin:
+        return ("final", fin[0], fin[1])
     proc = subprocess.run(
         [str(bin_path("cup-detect")), str(result_file)], capture_output=True, text=True
     )
@@ -159,8 +196,17 @@ def detect_cup(result_file):
     out = proc.stdout.strip()
     if not out:
         return None
-    size, nation = out.split(",", 1)
-    return int(size), nation
+    size, nats = out.split(":", 1)
+    return ("nations", int(size), nats)
+
+
+def _cup_str(cup):
+    """Manifest string for a detected/applied cup, or '' for none."""
+    if not cup:
+        return ""
+    if cup[0] == "final":
+        return "final:{} / {}".format(cup[1], cup[2])
+    return "{}:{}".format(cup[1], cup[2])  # ("nations", size, nats)
 
 
 # ----------------------------------------------------------------------------
@@ -285,11 +331,18 @@ def stage_configs(result_file, out, season, stem, ns, letters, keep_going):
     return kinds, info
 
 
+class CupReconstructError(RuntimeError):
+    """A WOSC --cup-final run whose finalists don't reconstruct a bracket (e.g. a
+    side event that isn't the championship) — the caller drops the cup and retries."""
+
+
 def run_osp_sim(result_file, cfg_dir, kinds, dump_path, cup, args):
     """Invoke osp-sim for one tournament, writing the per-run dump. When `cup` is
-    (size, nation), the run reproduces the hybrid direct-elimination cup, so the
-    cup rounds are bracket-paired rather than Swiss — the faithful format for a
-    tournament that was actually a cup. Raises on failure (osp-sim's stderr)."""
+    given, the run reproduces the hybrid direct-elimination cup (cup rounds are
+    bracket-paired rather than Swiss — the faithful format): ("final", gold, silver)
+    reconstructs the exact roster from the finalists; ("nations", size, nats) uses a
+    nationality filter. Raises on failure; a WOSC whose finalists don't reconstruct
+    raises CupReconstructError so the caller can drop the cup and retry."""
     dump_path.parent.mkdir(parents=True, exist_ok=True)
     config_files = [str(cfg_dir / (k + ".json")) for k in kinds]
     cmd = [
@@ -301,12 +354,16 @@ def run_osp_sim(result_file, cfg_dir, kinds, dump_path, cup, args):
         "--configs", *config_files,
         "--dump-runs", str(dump_path),
     ]
-    if cup:
-        size, nation = cup
-        cmd += ["--cup-size", str(size), "--cup-nations", nation]
+    if cup and cup[0] == "final":
+        cmd += ["--cup-final", cup[1], cup[2]]
+    elif cup and cup[0] == "nations":
+        cmd += ["--cup-size", str(cup[1]), "--cup-nations", cup[2]]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
-        raise RuntimeError("osp-sim failed on {}:\n{}".format(result_file, proc.stderr.strip()))
+        err = proc.stderr.strip()
+        if cup and cup[0] == "final" and ("could not reconstruct" in err or "cup finalist" in err):
+            raise CupReconstructError(err)
+        raise RuntimeError("osp-sim failed on {}:\n{}".format(result_file, err))
 
 
 def phase_run(args):
@@ -383,24 +440,31 @@ def phase_run(args):
                 return 1
 
             players = info["players"] or ""
-            cup_str = "{}:{}".format(*info["cup"]) if info.get("cup") else ""
             if info["error"]:
-                writer.writerow([season.name, rf.name, stem, "error", players, 0, "", "", cup_str, info["error"].replace("\n", " ")])
+                writer.writerow([season.name, rf.name, stem, "error", players, 0, "", "", _cup_str(info["cup"]), info["error"].replace("\n", " ")])
                 totals["errors"] += 1
                 s["errors"] += 1
                 continue
 
             if not kinds:  # skipped (gate N yielded no thresholds)
-                writer.writerow([season.name, rf.name, stem, info["skip"], players, 0, "", "", cup_str, ""])
+                writer.writerow([season.name, rf.name, stem, info["skip"], players, 0, "", "", _cup_str(info["cup"]), ""])
                 totals["skipped"] += 1
                 s["skipped"] += 1
                 continue
 
+            cup = info["cup"]
+            cfg_dir_run = out / "configs" / season.name / stem
             try:
-                run_osp_sim(rf, out / "configs" / season.name / stem, kinds, dump_path, info["cup"], args)
+                try:
+                    run_osp_sim(rf, cfg_dir_run, kinds, dump_path, cup, args)
+                except CupReconstructError:
+                    # WOSC-named file that isn't the championship (finalists absent /
+                    # never met): drop the cup and run it as a plain event.
+                    cup = None
+                    run_osp_sim(rf, cfg_dir_run, kinds, dump_path, None, args)
             except RuntimeError as e:
                 if args.keep_going:
-                    writer.writerow([season.name, rf.name, stem, "error", players, len(kinds), "|".join(kinds), int(info["half_abs"]), cup_str, str(e).replace("\n", " ")])
+                    writer.writerow([season.name, rf.name, stem, "error", players, len(kinds), "|".join(kinds), int(info["half_abs"]), _cup_str(info["cup"]), str(e).replace("\n", " ")])
                     totals["errors"] += 1
                     s["errors"] += 1
                     continue
@@ -409,6 +473,7 @@ def phase_run(args):
                 manifest.close()
                 return 1
 
+            cup_str = _cup_str(cup)
             writer.writerow([
                 season.name, rf.name, stem, "run", players, len(kinds), "|".join(kinds), int(info["half_abs"]), cup_str, "",
             ])

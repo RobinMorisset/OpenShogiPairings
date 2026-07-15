@@ -1,0 +1,30 @@
+{
+  "_comment": "European Shogi Championship (WOSC individual) finalists per year: [gold, silver]. Their game is the cup final; the roster is reconstructed backward from it (osp-sim --cup-final). Source: https://fesashogi.eu/european-championships/",
+  "finals": {
+    "2025": ["Anton Starykevich", "Uladzislau Zakrzheuski"],
+    "2024": ["Jean Fortin", "Frank Rövekamp"],
+    "2023": ["Anton Starykevich", "Thomas Leiter"],
+    "2022": ["Uladzislau Zakrzheuski", "Jean Fortin"],
+    "2021": ["Sergey Korchitsky", "Vincent Tanyan"],
+    "2019": ["Vincent Tanyan", "Thomas Leiter"],
+    "2018": ["Thomas Leiter", "Jean Fortin"],
+    "2017": ["Vincent Tanyan", "Sergey Korchitsky"],
+    "2016": ["Jean Fortin", "Vincent Tanyan"],
+    "2015": ["Jean Fortin", "Sergei Krivoshey"],
+    "2014": ["Karolina Styczynska", "Marco Dietmayer"],
+    "2013": ["Sergey Korchitsky", "Victor Zapara"],
+    "2012": ["Thomas Leiter", "Sergey Korchitsky"],
+    "2011": ["Jean Fortin", "Boris Mirnik"],
+    "2010": ["Jean Fortin", "Gergely Buglyo"],
+    "2009": ["Jean Fortin", "Karl Wartlick"],
+    "2008": ["Artem Kolomiyets", "Karl Wartlick"],
+    "2007": ["Victor Zapara", "Boris Mirnik"],
+    "2006": ["Arend van Oosten", "Frank Roevekamp"],
+    "2005": ["Artem Kolomiyets", "Arend van Oosten"],
+    "2004": ["Yuji Kikuta", "Hideki Tashiro"],
+    "2003": ["Yoshiyuki Uemura", "Thore Angqvist"],
+    "2002": ["Boris Mirnik", "Eric Cheymol"],
+    "2001": ["Frederic Pottier", "Gert Schnider"],
+    "2000": ["Tony Hosking", "Kei Ichiyanagi"]
+  }
+}
