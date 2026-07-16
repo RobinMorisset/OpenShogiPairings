@@ -82,6 +82,8 @@ use crate::scoring::{compute_scores, Scores};
 use crate::settings::{FloaterStyle, TournamentSettings};
 use crate::units::{HalfPoints, TournamentId};
 
+use typed_index_collections::{TiSlice, TiVec};
+
 // --- Weighted matching ----------------------------------------------------
 
 /// Numerator of the float-repeat penalty, divided by the number of rounds since
@@ -206,7 +208,7 @@ struct Ctx<'a> {
     scores: &'a Scores,
     /// Fold placement per free player, indexed by tournament number (`None` for a
     /// non-free player, whose number still indexes the slice).
-    fold: &'a [Option<FoldInfo>],
+    fold: &'a TiSlice<TournamentId, Option<FoldInfo>>,
     round: u32,
     /// Which player each lower group sends up as its ascending floater.
     floater_style: FloaterStyle,
@@ -233,13 +235,13 @@ struct Ctx<'a> {
     free_count: i128,
     /// Normalized club per player, indexed by tournament number (`None` for no /
     /// unknown club). Pre-normalized so the club rule is a plain comparison.
-    club_norm: &'a [Option<String>],
+    club_norm: &'a TiSlice<TournamentId, Option<String>>,
     /// (ELO mode) Rounded estimated ELO per free player, indexed by tournament
     /// number; all zero in Swiss mode.
-    elo: &'a [i64],
+    elo: &'a TiSlice<TournamentId, i64>,
     /// (ELO mode) Ascending ELO rank per free player, 0 = weakest, indexed by
     /// tournament number; all zero in Swiss mode.
-    elo_rank: &'a [i128],
+    elo_rank: &'a TiSlice<TournamentId, i128>,
     /// (ELO mode) Largest rounded-ELO gap among free players (bounds the ELO-gap
     /// rule).
     max_elo_gap: i128,
@@ -259,8 +261,8 @@ fn float_units(last: Option<u32>, round: u32) -> i128 {
 /// ideally sits last (weakest) in its group and an ascending floater first; in
 /// median Swiss, both ideally sit at the median. 0 if the player has no fold info
 /// (shouldn't happen for free players) or its group is a singleton.
-fn floater_units(ctx: &Ctx, id: u32, descending: bool) -> i128 {
-    let Some(f) = &ctx.fold[id as usize] else {
+fn floater_units(ctx: &Ctx, id: TournamentId, descending: bool) -> i128 {
+    let Some(f) = &ctx.fold[id] else {
         return 0;
     };
     let ideal = match ctx.floater_style {
@@ -299,12 +301,12 @@ impl Rule {
     /// specialization in [`accumulate_edge_rule`]), the `match self` folds to that
     /// one arm and the body inlines into the O(k²) fill loop.
     #[inline]
-    fn edge_units(self, ctx: &Ctx, a: u32, b: u32) -> i128 {
-        let sa = ctx.scores.get_tid(TournamentId(a));
-        let sb = ctx.scores.get_tid(TournamentId(b));
+    fn edge_units(self, ctx: &Ctx, a: TournamentId, b: TournamentId) -> i128 {
+        let sa = ctx.scores.get_tid(a);
+        let sb = ctx.scores.get_tid(b);
         match self {
             // Rule 1: never play the same opponent twice.
-            Rule::Rematch => i128::from(sa.opponents.contains(&TournamentId(b))),
+            Rule::Rematch => i128::from(sa.opponents.contains(&b)),
             // Rule 2: bye-only rule, real boards are neutral.
             Rule::ByeGroup => 0,
             // Rule 3 (optional, first N rounds): forbid crossing MacMahon groups;
@@ -351,7 +353,7 @@ impl Rule {
             Rule::Club => {
                 // Only in the rule set when protection is active (inactive rules
                 // are filtered out upstream), so no `club_active` check.
-                match (&ctx.club_norm[a as usize], &ctx.club_norm[b as usize]) {
+                match (&ctx.club_norm[a], &ctx.club_norm[b]) {
                     (Some(na), Some(nb)) => i128::from(na == nb && !ctx.exempt_clubs.contains(na)),
                     _ => 0,
                 }
@@ -365,7 +367,7 @@ impl Rule {
                 if sa.points != sb.points {
                     return 0;
                 }
-                match (&ctx.fold[a as usize], &ctx.fold[b as usize]) {
+                match (&ctx.fold[a], &ctx.fold[b]) {
                     (Some(fa), Some(fb)) => {
                         let ia = ideal_rank(fa.rank, fa.group_size) as i128;
                         let ib = ideal_rank(fb.rank, fb.group_size) as i128;
@@ -380,8 +382,8 @@ impl Rule {
             Rule::ByeSelection => 0,
             // ELO mode: prefer equal estimated ELO; penalty is the squared gap.
             Rule::EloGap => {
-                let ga = ctx.elo[a as usize];
-                let gb = ctx.elo[b as usize];
+                let ga = ctx.elo[a];
+                let gb = ctx.elo[b];
                 let gap = (ga - gb) as i128;
                 gap * gap
             }
@@ -390,8 +392,8 @@ impl Rule {
 
     /// Penalty units for giving `player` the bye (before the priority multiplier).
     /// A bye repeats the rematch rule (never bye twice) and counts as a downfloat.
-    fn bye_units(self, ctx: &Ctx, player: u32) -> i128 {
-        let s = ctx.scores.get_tid(TournamentId(player));
+    fn bye_units(self, ctx: &Ctx, player: TournamentId) -> i128 {
+        let s = ctx.scores.get_tid(player);
         match self {
             Rule::Rematch => i128::from(s.had_bye),
             // The bye should go to the lowest score group; penalty is the square
@@ -405,7 +407,7 @@ impl Rule {
             // or its median (median Swiss) to take it.
             Rule::FloaterSelection => floater_units(ctx, player, true),
             // ELO mode: the weakest present player (lowest ELO rank) takes the bye.
-            Rule::ByeSelection => ctx.elo_rank[player as usize],
+            Rule::ByeSelection => ctx.elo_rank[player],
             Rule::AirtightGroups | Rule::ScoreGap | Rule::Club | Rule::Fold | Rule::EloGap => 0,
         }
     }
@@ -464,6 +466,7 @@ fn scale_ladder(max_total: &[i128]) -> Vec<i128> {
 /// alternative-pairing search); the O(k²) cost-matrix fill uses the per-rule
 /// [`accumulate_edge_rule`] instead.
 fn edge_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], a: u32, b: u32) -> i128 {
+    let (a, b) = (TournamentId(a), TournamentId(b));
     rules
         .iter()
         .zip(mult)
@@ -482,11 +485,11 @@ fn edge_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], a: u32, b: u32) -> i128 {
 /// [`min_weight_perfect_matching`] reads the matrix as symmetric, taking just
 /// `cost[i*n + j]` for `i < j`.
 #[inline]
-fn accumulate_edge_rule<F: Fn(&Ctx, u32, u32) -> i128>(
+fn accumulate_edge_rule<F: Fn(&Ctx, TournamentId, TournamentId) -> i128>(
     cost: &mut [i128],
     vcount: usize,
     k: usize,
-    free_tid: &[u32],
+    free_tid: &[TournamentId],
     ctx: &Ctx,
     m: i128,
     units: F,
@@ -501,7 +504,7 @@ fn accumulate_edge_rule<F: Fn(&Ctx, u32, u32) -> i128>(
 }
 
 /// Total edge weight for giving `player` the bye, over the active rules.
-fn bye_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], player: u32) -> i128 {
+fn bye_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], player: TournamentId) -> i128 {
     rules
         .iter()
         .zip(mult)
@@ -533,31 +536,24 @@ fn ideal_rank(rank: usize, group_size: usize) -> usize {
 /// for a stable, reproducible ordering.
 fn fold_ranks(
     scores: &Scores,
-    rating_by_tid: &[u32],
-    free: &[u32],
+    rating_by_tid: &TiSlice<TournamentId, u32>,
+    free: &[TournamentId],
     cap: usize,
-) -> Vec<Option<FoldInfo>> {
+) -> TiVec<TournamentId, Option<FoldInfo>> {
     // Group the free players (by tournament number) by their points.
-    let mut groups: HashMap<HalfPoints, Vec<u32>> = HashMap::new();
+    let mut groups: HashMap<HalfPoints, Vec<TournamentId>> = HashMap::new();
     for &t in free {
-        groups
-            .entry(scores.get_tid(TournamentId(t)).points)
-            .or_default()
-            .push(t);
+        groups.entry(scores.get_tid(t).points).or_default().push(t);
     }
     // Result indexed by tournament number (`None` for a non-free player).
-    let mut info = vec![None; cap];
+    let mut info: TiVec<TournamentId, Option<FoldInfo>> = vec![None; cap].into();
     for group in groups.values_mut() {
         // Highest rating first; ties broken by tournament number (the key itself)
         // for a stable, reproducible ordering.
-        group.sort_by(|&x, &y| {
-            rating_by_tid[y as usize]
-                .cmp(&rating_by_tid[x as usize])
-                .then(x.cmp(&y))
-        });
+        group.sort_by(|&x, &y| rating_by_tid[y].cmp(&rating_by_tid[x]).then(x.cmp(&y)));
         let m = group.len();
         for (rank, &t) in group.iter().enumerate() {
-            info[t as usize] = Some(FoldInfo {
+            info[t] = Some(FoldInfo {
                 rank,
                 group_size: m,
             });
@@ -577,11 +573,11 @@ struct PairingModel {
     scores: Scores,
     /// Per-player data the rules read, all indexed by tournament number so the
     /// O(k²) cost loop indexes rather than hashes. See [`Ctx`].
-    fold: Vec<Option<FoldInfo>>,
-    club_norm: Vec<Option<String>>,
+    fold: TiVec<TournamentId, Option<FoldInfo>>,
+    club_norm: TiVec<TournamentId, Option<String>>,
     exempt_clubs: HashSet<String>,
-    elo: Vec<i64>,
-    elo_rank: Vec<i128>,
+    elo: TiVec<TournamentId, i64>,
+    elo_rank: TiVec<TournamentId, i128>,
     round: u32,
     floater_style: FloaterStyle,
     club_active: bool,
@@ -612,28 +608,34 @@ impl PairingModel {
     ) -> Self {
         let scores = compute_scores(players, settings, completed_rounds);
         let cap = scores.tid_capacity();
+        // `free` is the list of tournament numbers as the matching/boards see them
+        // (`u32`); `free_tid` is the same list as `TournamentId`s, the key the
+        // per-number tables below are indexed by — so the score loops and fold
+        // ranking index those tables directly, with no per-access cast.
+        let free_tid: Vec<TournamentId> = free.iter().map(|&t| TournamentId(t)).collect();
 
         // Per-player data the rules read, indexed by tournament number and built
-        // straight from `players` (whose number is a field — no hashing). `free` is
-        // already the list of numbers. Clubs are normalized here, once.
-        let mut rating_by_tid = vec![1u32; cap];
-        let mut club_norm: Vec<Option<String>> = vec![None; cap];
+        // straight from `players` (whose number is a field — no hashing). Clubs are
+        // normalized here, once.
+        let mut rating_by_tid: TiVec<TournamentId, u32> = vec![1u32; cap].into();
+        let mut club_norm: TiVec<TournamentId, Option<String>> = vec![None; cap].into();
         for p in players {
             if let Some(t) = p.tournament_id {
-                rating_by_tid[t as usize] = p.rating.unwrap_or(1);
-                club_norm[t as usize] = p
+                let t = TournamentId(t);
+                rating_by_tid[t] = p.rating.unwrap_or(1);
+                club_norm[t] = p
                     .club
                     .as_ref()
                     .map(|c| TournamentSettings::normalize_club(c));
             }
         }
 
-        let fold = fold_ranks(&scores, &rating_by_tid, free, cap);
+        let fold = fold_ranks(&scores, &rating_by_tid, &free_tid, cap);
 
         let (mut lo, mut hi) = (u32::MAX, 0u32);
         let (mut mm_lo, mut mm_hi) = (u32::MAX, 0u32);
-        for &t in free {
-            let s = scores.get_tid(TournamentId(t));
+        for &t in &free_tid {
+            let s = scores.get_tid(t);
             lo = lo.min(s.points.halves());
             hi = hi.max(s.points.halves());
             mm_lo = mm_lo.min(s.macmahon.halves());
@@ -644,29 +646,33 @@ impl PairingModel {
         // Either ELO mode: a live estimate per free player (rounded), its ascending
         // rank (0 = weakest, for the bye-selection rule), and the widest gap (for
         // the ladder bound), all indexed by tournament number. All zero in Swiss.
-        let (elo, elo_rank, max_elo_gap) = if settings.elo_estimate_needed() {
+        let (elo, elo_rank, max_elo_gap): (
+            TiVec<TournamentId, i64>,
+            TiVec<TournamentId, i128>,
+            i128,
+        ) = if settings.elo_estimate_needed() {
             let est = estimate_elos(players, settings, completed_rounds);
-            let mut elo = vec![0i64; cap];
+            let mut elo: TiVec<TournamentId, i64> = vec![0i64; cap].into();
             for p in players {
                 if let Some(t) = p.tournament_id {
                     let e = est.get(&p.id).copied().unwrap_or(UNRATED_PRIOR_MEAN);
-                    elo[t as usize] = e.round() as i64;
+                    elo[TournamentId(t)] = e.round() as i64;
                 }
             }
             // Ascending ELO; ties by tournament number (which is the key itself).
-            let mut order = free.to_vec();
-            order.sort_by(|&x, &y| elo[x as usize].cmp(&elo[y as usize]).then(x.cmp(&y)));
-            let mut elo_rank = vec![0i128; cap];
+            let mut order = free_tid.clone();
+            order.sort_by(|&x, &y| elo[x].cmp(&elo[y]).then(x.cmp(&y)));
+            let mut elo_rank: TiVec<TournamentId, i128> = vec![0i128; cap].into();
             for (rank, &t) in order.iter().enumerate() {
-                elo_rank[t as usize] = rank as i128;
+                elo_rank[t] = rank as i128;
             }
-            let (elo_lo, elo_hi) = free
+            let (elo_lo, elo_hi) = free_tid
                 .iter()
-                .map(|&t| elo[t as usize])
+                .map(|&t| elo[t])
                 .fold((i64::MAX, i64::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
             (elo, elo_rank, (elo_hi - elo_lo).max(0) as i128)
         } else {
-            (vec![0i64; cap], vec![0i128; cap], 0)
+            (vec![0i64; cap].into(), vec![0i128; cap].into(), 0)
         };
 
         let k = free.len();
@@ -757,15 +763,17 @@ impl PairingModel {
         edge_cost(&self.ctx(), &self.rules, &self.mult, a, b)
     }
 
-    /// Scalar edge weight for giving player number `player` the bye.
+    /// Scalar edge weight for giving player number `player` the bye. Takes the
+    /// board-facing `u32` number and wraps it for the number-indexed tables.
     fn bye_cost(&self, player: u32) -> i128 {
-        bye_cost(&self.ctx(), &self.rules, &self.mult, player)
+        bye_cost(&self.ctx(), &self.rules, &self.mult, TournamentId(player))
     }
 
     /// Per-rule penalty units (pre-multiplier) for pairing `a` against `b`, in
     /// priority order (aligned with [`Self::rules`]).
     fn edge_units(&self, a: u32, b: u32) -> Vec<i128> {
         let ctx = self.ctx();
+        let (a, b) = (TournamentId(a), TournamentId(b));
         self.rules
             .iter()
             .map(|r| r.edge_units(&ctx, a, b))
@@ -775,6 +783,7 @@ impl PairingModel {
     /// Per-rule penalty units (pre-multiplier) for giving `player` the bye.
     fn bye_units(&self, player: u32) -> Vec<i128> {
         let ctx = self.ctx();
+        let player = TournamentId(player);
         self.rules
             .iter()
             .map(|r| r.bye_units(&ctx, player))
@@ -1389,10 +1398,11 @@ pub fn pair_round_weighted(
         // order-independent, so this affects ties only).
         free.sort_unstable();
 
-        // `free` is already the list of tournament numbers, so it indexes the
-        // model's per-number tables directly — no per-edge or per-vertex hashing.
+        // `free` is the tournament numbers in matching-vertex order; `free_tid` is
+        // the same list typed as `TournamentId`, so the edge/bye scoring indexes the
+        // model's per-number tables directly — no per-edge or per-vertex cast.
         // `ctx` is built once and shared across every edge.
-        let free_tid = &free;
+        let free_tid: Vec<TournamentId> = free.iter().map(|&t| TournamentId(t)).collect();
         let ctx = model.ctx();
         // Row-major `vcount × vcount` cost matrix in one flat allocation (entry
         // `(i, j)` at `i * vcount + j`), rather than a `Vec<Vec>`: one allocation
@@ -1406,7 +1416,7 @@ pub fn pair_round_weighted(
         // the matrix as symmetric — so there is no symmetric store or mirror pass.
         macro_rules! fill {
             ($rule:expr, $m:expr) => {
-                accumulate_edge_rule(&mut cost, vcount, k, free_tid, &ctx, $m, |ctx, a, b| {
+                accumulate_edge_rule(&mut cost, vcount, k, &free_tid, &ctx, $m, |ctx, a, b| {
                     $rule.edge_units(ctx, a, b)
                 })
             };
@@ -2504,11 +2514,11 @@ mod tests {
         };
         let scores = compute_scores(&p, &settings, &[r1]);
         let free: Vec<u32> = p.iter().map(|q| q.tournament_id.unwrap()).collect();
-        let free_tid = &free;
+        let free_tid: Vec<TournamentId> = free.iter().map(|&t| TournamentId(t)).collect();
         let (mut lo, mut hi) = (u32::MAX, 0u32);
         let (mut mm_lo, mut mm_hi) = (u32::MAX, 0u32);
-        for &pid in &free {
-            let s = scores.get_tid(TournamentId(pid));
+        for &t in &free_tid {
+            let s = scores.get_tid(t);
             lo = lo.min(s.points.halves());
             hi = hi.max(s.points.halves());
             mm_lo = mm_lo.min(s.macmahon.halves());
@@ -2518,19 +2528,19 @@ mod tests {
         let exempt_clubs = HashSet::new();
         // Tournament-number-indexed views, as `PairingModel::build` makes them.
         let cap = scores.tid_capacity();
-        let mut rating_by_tid = vec![1u32; cap];
-        let mut club_norm: Vec<Option<String>> = vec![None; cap];
+        let mut rating_by_tid: TiVec<TournamentId, u32> = vec![1u32; cap].into();
+        let mut club_norm: TiVec<TournamentId, Option<String>> = vec![None; cap].into();
         for q in &p {
-            let t = q.tournament_id.unwrap();
-            rating_by_tid[t as usize] = q.rating.unwrap_or(1);
-            club_norm[t as usize] = q
+            let t = TournamentId(q.tournament_id.unwrap());
+            rating_by_tid[t] = q.rating.unwrap_or(1);
+            club_norm[t] = q
                 .club
                 .as_ref()
                 .map(|c| TournamentSettings::normalize_club(c));
         }
-        let fold = fold_ranks(&scores, &rating_by_tid, &free, cap);
-        let empty_elo = vec![0i64; cap];
-        let empty_rank = vec![0i128; cap];
+        let fold = fold_ranks(&scores, &rating_by_tid, &free_tid, cap);
+        let empty_elo: TiVec<TournamentId, i64> = vec![0i64; cap].into();
+        let empty_rank: TiVec<TournamentId, i128> = vec![0i128; cap].into();
         let ctx = Ctx {
             scores: &scores,
             fold: &fold,

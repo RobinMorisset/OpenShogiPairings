@@ -145,7 +145,7 @@ impl From<Wins> for HalfPoints {
 /// `TournamentId` — so `table[tid]` needs no `as usize` at the call site; the one
 /// cast lives here. Purely internal (the wire/`Player` identifier stays a plain
 /// `u32`), so it carries no serde/`TS` derives.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TournamentId(pub u32);
 
 /// `usize` → `TournamentId`, for `TiVec` key generation (e.g. `push`).
