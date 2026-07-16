@@ -74,6 +74,7 @@ pub(crate) struct Scores {
 
 impl Scores {
     /// The accumulated state for a known player.
+    #[cfg(test)]
     pub fn get(&self, id: &Uuid) -> &PlayerScore {
         &self.by_tid[self.index[id] as usize]
     }
@@ -97,6 +98,7 @@ impl Scores {
 
     /// A player's total points, or 0 if they aren't in the tournament (e.g. an
     /// opponent that was later removed).
+    #[cfg(test)]
     pub fn points(&self, id: &Uuid) -> u32 {
         self.index
             .get(id)
@@ -214,14 +216,10 @@ pub(crate) fn compute_scores(
             if board.no_show.is_some() {
                 continue;
             }
-            // Resolve both players to their numbers once — the only hashing this
-            // hot per-board loop does. Skip a board with a since-absent player (its
-            // number is gone), matching the old both-present guard.
-            let (Some(&ta), Some(&tb)) = (index.get(&board.player1), index.get(&board.player2))
-            else {
-                continue;
-            };
-            let (ta, tb) = (ta as usize, tb as usize);
+            // Boards carry tournament numbers, so the score table is indexed
+            // directly — no Uuid→number lookup, and every board player is a current
+            // player (a played player can't be removed), so its slot is real.
+            let (ta, tb) = (board.player1 as usize, board.player2 as usize);
             // A long board (two rounds, two points) counts as *two* games against
             // the same opponent for the opponent-based tie-breaks (SOS, SODOS,
             // SOSOS, Buchholz), so it is recorded twice. It still feeds ELO as a
@@ -257,30 +255,24 @@ pub(crate) fn compute_scores(
             }
         }
         if let Some(bye) = round.bye {
-            if let Some(&t) = index.get(&bye) {
-                let s = &mut by_tid[t as usize];
-                s.had_bye = true;
-                s.last_descended = Some(round.number); // a bye is a downfloat
-            }
+            let s = &mut by_tid[bye as usize];
+            s.had_bye = true;
+            s.last_descended = Some(round.number); // a bye is a downfloat
         }
         // A no-show has the same effect on the player who showed up as a bye: a
         // downfloat they can't be given twice.
         for board in &round.boards {
             if let Some(present) = board.no_show_opponent() {
-                if let Some(&t) = index.get(&present) {
-                    let s = &mut by_tid[t as usize];
-                    s.had_bye = true;
-                    s.last_descended = Some(round.number);
-                }
+                let s = &mut by_tid[present as usize];
+                s.had_bye = true;
+                s.last_descended = Some(round.number);
             }
         }
         // A cup bye (an unopposed bracket advance) is a bye all the same.
         for &player in &round.cup_byes {
-            if let Some(&t) = index.get(&player) {
-                let s = &mut by_tid[t as usize];
-                s.had_bye = true;
-                s.last_descended = Some(round.number);
-            }
+            let s = &mut by_tid[player as usize];
+            s.had_bye = true;
+            s.last_descended = Some(round.number);
         }
 
         // Apply this round's results (effective winner scores).
@@ -294,54 +286,43 @@ pub(crate) fn compute_scores(
             // as two games against the same opponent for the point/victory totals
             // and the opponent-based tie-breaks; it stays a single game for ELO.
             let reps = if board.long { 2 } else { 1 };
-            if let Some(&tw) = index.get(&winner) {
-                let tl = index[&loser];
-                let s = &mut by_tid[tw as usize];
-                s.points += 2 * reps; // a win is 2 half-points (×2 for a long game)
-                s.victories += reps;
-                for _ in 0..reps {
-                    s.defeated.push(tl);
-                }
+            let s = &mut by_tid[winner as usize];
+            s.points += 2 * reps; // a win is 2 half-points (×2 for a long game)
+            s.victories += reps;
+            for _ in 0..reps {
+                s.defeated.push(loser);
             }
         }
         if let Some(bye) = round.bye {
-            if let Some(&t) = index.get(&bye) {
-                let s = &mut by_tid[t as usize];
-                s.points += 2; // a win is 2 half-points
-                s.victories += 1;
-            }
+            let s = &mut by_tid[bye as usize];
+            s.points += 2; // a win is 2 half-points
+            s.victories += 1;
         }
         // The player who showed up on a no-show board scores the free point, as
         // for a bye. The absentee scores nothing (like an absence).
         for board in &round.boards {
             if let Some(present) = board.no_show_opponent() {
-                if let Some(&t) = index.get(&present) {
-                    // A long board resolved by forfeit still scores its long
-                    // weight (two points), unless the referee demoted it.
-                    let reps = if board.long { 2 } else { 1 };
-                    let s = &mut by_tid[t as usize];
-                    s.points += 2 * reps; // a win is 2 half-points (×2 for a long game)
-                    s.victories += reps;
-                }
+                // A long board resolved by forfeit still scores its long weight
+                // (two points), unless the referee demoted it.
+                let reps = if board.long { 2 } else { 1 };
+                let s = &mut by_tid[present as usize];
+                s.points += 2 * reps; // a win is 2 half-points (×2 for a long game)
+                s.victories += reps;
             }
         }
         // A cup bye scores the free point too — the player advanced unopposed.
         for &player in &round.cup_byes {
-            if let Some(&t) = index.get(&player) {
-                let s = &mut by_tid[t as usize];
-                s.points += 2; // a win is 2 half-points
-                s.victories += 1;
-            }
+            let s = &mut by_tid[player as usize];
+            s.points += 2; // a win is 2 half-points
+            s.victories += 1;
         }
         // A deliberate absence scores half a point when the referee enabled it
         // (a `0=` in the cross-table): +1 half-point, but not a win. `round.absent`
         // is the sat-out set (no board this round); a no-show forfeit is on a
         // board and stays at 0.
         if settings.half_point_absences {
-            for id in &round.absent {
-                if let Some(&t) = index.get(id) {
-                    by_tid[t as usize].points += 1;
-                }
+            for &id in &round.absent {
+                by_tid[id as usize].points += 1;
             }
         }
 
@@ -395,7 +376,12 @@ mod tests {
             number: 1,
             boards: vec![Board {
                 result: Some(Winner::Player1),
-                ..Board::pending(a.id, b.id, Some(2), PairingSource::Swiss)
+                ..Board::pending(
+                    a.tournament_id.unwrap(),
+                    b.tournament_id.unwrap(),
+                    Some(2),
+                    PairingSource::Swiss,
+                )
             }],
             bye: None,
             cup_byes: Vec::new(),
@@ -422,7 +408,12 @@ mod tests {
             number: 1,
             boards: vec![Board {
                 result: Some(Winner::Player1),
-                ..Board::pending(a.id, b.id, None, PairingSource::Swiss)
+                ..Board::pending(
+                    a.tournament_id.unwrap(),
+                    b.tournament_id.unwrap(),
+                    None,
+                    PairingSource::Swiss,
+                )
             }],
             bye: None,
             cup_byes: Vec::new(),
@@ -449,7 +440,12 @@ mod tests {
             number: 1,
             boards: vec![Board {
                 no_show: Some(NoShow::Player2), // player2 (B) is absent
-                ..Board::pending(a.id, b.id, Some(0), PairingSource::Swiss)
+                ..Board::pending(
+                    a.tournament_id.unwrap(),
+                    b.tournament_id.unwrap(),
+                    Some(0),
+                    PairingSource::Swiss,
+                )
             }],
             bye: None,
             cup_byes: Vec::new(),
@@ -482,7 +478,12 @@ mod tests {
             number: 1,
             boards: vec![Board {
                 no_show: Some(NoShow::Both),
-                ..Board::pending(a.id, b.id, Some(0), PairingSource::Swiss)
+                ..Board::pending(
+                    a.tournament_id.unwrap(),
+                    b.tournament_id.unwrap(),
+                    Some(0),
+                    PairingSource::Swiss,
+                )
             }],
             bye: None,
             cup_byes: Vec::new(),
@@ -509,7 +510,7 @@ mod tests {
             number: 1,
             boards: Vec::new(),
             bye: None,
-            cup_byes: vec![a.id],
+            cup_byes: vec![a.tournament_id.unwrap()],
             absent: Vec::new(),
             completed: true,
         };
@@ -535,11 +536,16 @@ mod tests {
             number: 1,
             boards: vec![Board {
                 result: Some(Winner::Player1),
-                ..Board::pending(b.id, c.id, Some(0), PairingSource::Swiss)
+                ..Board::pending(
+                    b.tournament_id.unwrap(),
+                    c.tournament_id.unwrap(),
+                    Some(0),
+                    PairingSource::Swiss,
+                )
             }],
             bye: None,
             cup_byes: Vec::new(),
-            absent: vec![a.id],
+            absent: vec![a.tournament_id.unwrap()],
             completed: true,
         };
         let players = [a.clone(), b.clone(), c.clone()];
@@ -573,7 +579,12 @@ mod tests {
             boards: vec![Board {
                 result: Some(Winner::Player1),
                 long: true,
-                ..Board::pending(a.id, b.id, Some(0), PairingSource::Swiss)
+                ..Board::pending(
+                    a.tournament_id.unwrap(),
+                    b.tournament_id.unwrap(),
+                    Some(0),
+                    PairingSource::Swiss,
+                )
             }],
             bye: None,
             cup_byes: Vec::new(),
@@ -605,7 +616,12 @@ mod tests {
             number: 1,
             boards: vec![Board {
                 long: true,
-                ..Board::pending(a.id, b.id, Some(0), PairingSource::Swiss)
+                ..Board::pending(
+                    a.tournament_id.unwrap(),
+                    b.tournament_id.unwrap(),
+                    Some(0),
+                    PairingSource::Swiss,
+                )
             }],
             bye: None,
             cup_byes: Vec::new(),
@@ -637,7 +653,12 @@ mod tests {
             boards: vec![Board {
                 no_show: Some(NoShow::Player2),
                 long: true,
-                ..Board::pending(a.id, b.id, Some(0), PairingSource::Swiss)
+                ..Board::pending(
+                    a.tournament_id.unwrap(),
+                    b.tournament_id.unwrap(),
+                    Some(0),
+                    PairingSource::Swiss,
+                )
             }],
             bye: None,
             cup_byes: Vec::new(),
@@ -687,8 +708,8 @@ mod tests {
             boards: vec![Board {
                 result: Some(Winner::Player1),
                 ..Board::pending(
-                    a.id,
-                    b.id,
+                    a.tournament_id.unwrap(),
+                    b.tournament_id.unwrap(),
                     Some(5),
                     PairingSource::Cup {
                         stage: CupStage::Final,
@@ -732,7 +753,12 @@ mod tests {
                 number: i as u32 + 1,
                 boards: vec![Board {
                     result: Some(Winner::Player1), // A wins every game
-                    ..Board::pending(a.id, o.id, Some(0), PairingSource::Swiss)
+                    ..Board::pending(
+                        a.tournament_id.unwrap(),
+                        o.tournament_id.unwrap(),
+                        Some(0),
+                        PairingSource::Swiss,
+                    )
                 }],
                 bye: None,
                 cup_byes: Vec::new(),

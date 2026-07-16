@@ -191,12 +191,12 @@ fn main() {
 /// Find the unique base player whose name matches `name` — a full name in any
 /// order (e.g. "Jean Fortin"), accent-folded and word-based, so a player's last-
 /// and first-name words must all appear in it. Errors unless exactly one matches.
-fn find_player_by_name(base: &Tournament, name: &str) -> Result<Uuid, String> {
+fn find_player_by_name(base: &Tournament, name: &str) -> Result<u32, String> {
     let target: HashSet<String> = fesa::fold_name(name)
         .split_whitespace()
         .map(String::from)
         .collect();
-    let matches: Vec<Uuid> = base
+    let matches: Vec<u32> = base
         .players
         .iter()
         .filter(|p| {
@@ -205,7 +205,7 @@ fn find_player_by_name(base: &Tournament, name: &str) -> Result<Uuid, String> {
             last.split_whitespace().all(|w| target.contains(w))
                 && first.split_whitespace().all(|w| target.contains(w))
         })
-        .map(|p| p.id)
+        .filter_map(|p| p.tournament_id)
         .collect();
     match matches.as_slice() {
         [id] => Ok(*id),
@@ -288,10 +288,16 @@ fn run(args: Args) -> Result<(), String> {
             "cup: size {size} reconstructed from finalists {:?} / {:?}",
             args.cup_final[0], args.cup_final[1]
         );
-        Some(CupConfig {
-            eligible: roster.into_iter().collect(),
-            size,
-        })
+        let eligible = roster
+            .into_iter()
+            .filter_map(|t| {
+                base.players
+                    .iter()
+                    .find(|p| p.tournament_id == Some(t))
+                    .map(|p| p.id)
+            })
+            .collect();
+        Some(CupConfig { eligible, size })
     } else if let Some(size) = args.cup_size {
         if !osp_core::CUP_SIZES.contains(&size) {
             return Err(format!(
@@ -337,15 +343,6 @@ fn run(args: Args) -> Result<(), String> {
     };
 
     let names = player_names(&base);
-    // Tournament number per player — a *deterministic* tie-break key for the
-    // aggregation's rankings (a player's `Uuid` is regenerated randomly on every
-    // import, so ordering by it would make equal-probability ties non-reproducible
-    // across processes).
-    let tid_of: HashMap<Uuid, u32> = base
-        .players
-        .iter()
-        .filter_map(|p| p.tournament_id.map(|t| (p.id, t)))
-        .collect();
     let observed = observed_report(&base, &overrides, &oracle, &args.thresholds);
     let mut reports = Vec::new();
     let mut dump = args
@@ -374,12 +371,7 @@ fn run(args: Args) -> Result<(), String> {
         if let Some(buf) = &mut strengths_dump {
             append_strength_rows(buf, name, &outcomes, &names);
         }
-        reports.push(aggregate(
-            name.clone(),
-            &outcomes,
-            &args.thresholds,
-            &tid_of,
-        ));
+        reports.push(aggregate(name.clone(), &outcomes, &args.thresholds));
     }
     if let (Some(path), Some(buf)) = (&args.dump_runs, &dump) {
         std::fs::write(path, buf).map_err(|e| format!("writing {}: {e}", path.display()))?;
@@ -485,8 +477,9 @@ fn load_overrides(path: &Path, base: &Tournament) -> Result<StrengthMap, String>
             .parse()
             .map_err(|_| format!("strength key '{key}' is not a tournament number"))?;
         match id_of.get(&number) {
-            Some(&id) => {
-                map.insert(id, elo);
+            Some(_) => {
+                // Strengths are keyed by tournament number, which is the JSON key.
+                map.insert(number, elo);
             }
             None => {
                 eprintln!("warning: strength override for #{number} matches no player; ignored")
@@ -543,7 +536,7 @@ struct VariantReport {
     players: Vec<PlayerProb>,
     /// Per-player probability (with CI) of taking the direct-elimination cup, over
     /// all runs, sorted best first. Empty when no cup was configured.
-    cup_champions: Vec<(Uuid, Proportion)>,
+    cup_champions: Vec<(u32, Proportion)>,
     /// Per-run mean |ELO diff| (one value per run) — the run-level replications the
     /// CI and paired comparisons are computed from.
     per_run_mean_diff: Vec<f64>,
@@ -559,20 +552,20 @@ struct VariantReport {
     per_run_interest: Vec<f64>,
     /// Each player's pooled game interest across runs: (mean interest, mean games
     /// per tournament).
-    interest_by_player: HashMap<Uuid, (f64, f64)>,
+    interest_by_player: HashMap<u32, (f64, f64)>,
     /// The (up to) 5 players whose dull games most lowered `interest`, worst first.
-    worst_interest: Vec<Uuid>,
+    worst_interest: Vec<u32>,
 }
 
 struct PlayerProb {
-    player: Uuid,
+    player: u32,
     top1: Proportion,
     top3: f64,
 }
 
 /// Strength order (strongest first) for a strength map.
-fn strength_order(strengths: &StrengthMap) -> Vec<Uuid> {
-    let mut ids: Vec<Uuid> = strengths.keys().copied().collect();
+fn strength_order(strengths: &StrengthMap) -> Vec<u32> {
+    let mut ids: Vec<u32> = strengths.keys().copied().collect();
     ids.sort_by(|a, b| {
         strengths[b]
             .partial_cmp(&strengths[a])
@@ -582,13 +575,13 @@ fn strength_order(strengths: &StrengthMap) -> Vec<Uuid> {
 }
 
 /// True-strength order (strongest first) for one run.
-fn true_order(out: &RunOutcome) -> Vec<Uuid> {
+fn true_order(out: &RunOutcome) -> Vec<u32> {
     strength_order(&out.strengths)
 }
 
 /// Top-1 hit for one run: 1.0 if the standings winner is the truly-strongest
 /// player, else 0.0 (0.0 too if either order is empty).
-fn top1_hit(final_order: &[Uuid], true_ord: &[Uuid]) -> f64 {
+fn top1_hit(final_order: &[u32], true_ord: &[u32]) -> f64 {
     match (final_order.first(), true_ord.first()) {
         (Some(w), Some(b)) if w == b => 1.0,
         _ => 0.0,
@@ -596,7 +589,7 @@ fn top1_hit(final_order: &[Uuid], true_ord: &[Uuid]) -> f64 {
 }
 
 /// Players ordered by descending ELO estimate, ties broken by tournament number.
-fn estimate_order(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<Uuid> {
+fn estimate_order(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<u32> {
     let mut ids: Vec<&Player> = players.iter().collect();
     ids.sort_by(|a, b| {
         let ea = estimate.get(&a.id).copied().unwrap_or(f64::MIN);
@@ -605,7 +598,7 @@ fn estimate_order(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<Uuid
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| a.tournament_id.cmp(&b.tournament_id))
     });
-    ids.into_iter().map(|p| p.id).collect()
+    ids.into_iter().filter_map(|p| p.tournament_id).collect()
 }
 
 /// Append one CSV row per run: the run's mean |diff|, fraction of games over the
@@ -616,7 +609,7 @@ fn append_run_rows(
     variant: &str,
     outcomes: &[RunOutcome],
     thresholds: &[f64],
-    names: &HashMap<Uuid, String>,
+    names: &HashMap<u32, String>,
 ) {
     let first_t = thresholds.first().copied().unwrap_or(400.0);
     for (i, o) in outcomes.iter().enumerate() {
@@ -648,7 +641,7 @@ fn append_strength_rows(
     buf: &mut String,
     variant: &str,
     outcomes: &[RunOutcome],
-    names: &HashMap<Uuid, String>,
+    names: &HashMap<u32, String>,
 ) {
     for (i, o) in outcomes.iter().enumerate() {
         for (id, strength) in &o.strengths {
@@ -658,14 +651,8 @@ fn append_strength_rows(
     }
 }
 
-fn aggregate(
-    name: String,
-    outcomes: &[RunOutcome],
-    thresholds: &[f64],
-    tid_of: &HashMap<Uuid, u32>,
-) -> VariantReport {
+fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> VariantReport {
     // Deterministic tie-break: a player's tournament number (never their random id).
-    let tid = |id: &Uuid| tid_of.get(id).copied().unwrap_or(u32::MAX);
     let runs = outcomes.len();
 
     let mut pooled: Vec<f64> = outcomes
@@ -706,8 +693,8 @@ fn aggregate(
         .collect();
 
     // Victory counts.
-    let mut top1: HashMap<Uuid, usize> = HashMap::new();
-    let mut top3: HashMap<Uuid, usize> = HashMap::new();
+    let mut top1: HashMap<u32, usize> = HashMap::new();
+    let mut top3: HashMap<u32, usize> = HashMap::new();
     for o in outcomes {
         if let Some(&w) = o.final_order.first() {
             *top1.entry(w).or_default() += 1;
@@ -733,20 +720,20 @@ fn aggregate(
             .p
             .partial_cmp(&a.top1.p)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| tid(&a.player).cmp(&tid(&b.player)))
+            .then_with(|| a.player.cmp(&b.player))
     });
 
     // Cup champions: count each player's titles across the runs that produced one.
     // The probability is over *all* runs (a run with no champion — no cup, or a
     // double no-show final — simply isn't a win for anyone), so the column reads as
     // "P(this player wins the cup)".
-    let mut cup_wins: HashMap<Uuid, usize> = HashMap::new();
+    let mut cup_wins: HashMap<u32, usize> = HashMap::new();
     for o in outcomes {
         if let Some(c) = o.cup_champion {
             *cup_wins.entry(c).or_default() += 1;
         }
     }
-    let mut cup_champions: Vec<(Uuid, Proportion)> = cup_wins
+    let mut cup_champions: Vec<(u32, Proportion)> = cup_wins
         .into_iter()
         .map(|(id, n)| (id, wilson(n, runs)))
         .collect();
@@ -754,7 +741,7 @@ fn aggregate(
         b.1.p
             .partial_cmp(&a.1.p)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| tid(&a.0).cmp(&tid(&b.0)))
+            .then_with(|| a.0.cmp(&b.0))
     });
 
     let per_run_interest: Vec<f64> = outcomes.iter().map(|o| o.interest).collect();
@@ -762,7 +749,7 @@ fn aggregate(
     // Pool each player's game interest across all runs (sum of entropies / games),
     // then rank players by their contribution to the welfare shortfall — the ones
     // whose consistently dull games most lowered `interest`.
-    let mut pool: HashMap<Uuid, (f64, u64)> = HashMap::new();
+    let mut pool: HashMap<u32, (f64, u64)> = HashMap::new();
     for o in outcomes {
         for &(id, sum_h, games) in &o.player_interest {
             let e = pool.entry(id).or_insert((0.0, 0));
@@ -770,7 +757,7 @@ fn aggregate(
             e.1 += games as u64;
         }
     }
-    let ids: Vec<Uuid> = pool.keys().copied().collect();
+    let ids: Vec<u32> = pool.keys().copied().collect();
     let values: Vec<f64> = ids
         .iter()
         .map(|id| pool[id].0 / pool[id].1 as f64)
@@ -782,15 +769,15 @@ fn aggregate(
         shortfall[b]
             .partial_cmp(&shortfall[a])
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| tid(&ids[a]).cmp(&tid(&ids[b])))
+            .then_with(|| ids[a].cmp(&ids[b]))
     });
     let runs_f = runs.max(1) as f64;
-    let interest_by_player: HashMap<Uuid, (f64, f64)> = ids
+    let interest_by_player: HashMap<u32, (f64, f64)> = ids
         .iter()
         .enumerate()
         .map(|(i, &id)| (id, (values[i], pool[&id].1 as f64 / runs_f)))
         .collect();
-    let worst_interest: Vec<Uuid> = order.iter().take(5).map(|&i| ids[i]).collect();
+    let worst_interest: Vec<u32> = order.iter().take(5).map(|&i| ids[i]).collect();
 
     VariantReport {
         name,
@@ -825,8 +812,8 @@ struct ObservedReport {
     hit_rate: f64,
     interest: f64,
     /// Finishing rank (0-based) of each player in the real standings.
-    rank_of: HashMap<Uuid, usize>,
-    winner: Option<Uuid>,
+    rank_of: HashMap<u32, usize>,
+    winner: Option<u32>,
 }
 
 /// Build the observed report from the base's real results, or `None` if the base
@@ -860,7 +847,16 @@ fn observed_report(
     let diff = diff_stats(&pooled, thresholds);
     pooled.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-    let final_order: Vec<Uuid> = base.standings().into_iter().map(|s| s.player_id).collect();
+    let tid_of: HashMap<Uuid, u32> = base
+        .players
+        .iter()
+        .filter_map(|p| p.tournament_id.map(|t| (p.id, t)))
+        .collect();
+    let final_order: Vec<u32> = base
+        .standings()
+        .into_iter()
+        .filter_map(|s| tid_of.get(&s.player_id).copied())
+        .collect();
     let true_ord = strength_order(&strengths);
     let estimate = estimate_elos(&base.players, &base.settings, &base.rounds);
     let est_ord = estimate_order(&base.players, &estimate);
@@ -884,15 +880,12 @@ fn observed_report(
 
 // --- output ----------------------------------------------------------------
 
-fn player_names(base: &Tournament) -> HashMap<Uuid, String> {
+fn player_names(base: &Tournament) -> HashMap<u32, String> {
     base.players
         .iter()
-        .map(|p| {
-            let label = match p.tournament_id {
-                Some(n) => format!("#{n} {}", p.last_name),
-                None => p.last_name.clone(),
-            };
-            (p.id, label)
+        .filter_map(|p| {
+            let t = p.tournament_id?;
+            Some((t, format!("#{t} {}", p.last_name)))
         })
         .collect()
 }
@@ -900,7 +893,7 @@ fn player_names(base: &Tournament) -> HashMap<Uuid, String> {
 fn print_report(
     reports: &[VariantReport],
     observed: Option<&ObservedReport>,
-    names: &HashMap<Uuid, String>,
+    names: &HashMap<u32, String>,
     rounds: u32,
     runs: u64,
     seed: u64,
@@ -1072,7 +1065,7 @@ fn print_report(
 
     // Open winner: rank-1 in the overall standings. Union of the top few players
     // across variants, with an extra column for each player's real finishing rank.
-    let mut shown: Vec<Uuid> = Vec::new();
+    let mut shown: Vec<u32> = Vec::new();
     for r in reports {
         for pp in r.players.iter().take(6) {
             if !shown.contains(&pp.player) {
@@ -1145,7 +1138,7 @@ fn print_report(
     // shortfalls, with each player's pooled mean game interest per variant (`*`
     // marks that variant's own worst-5). `g` is the player's mean games per
     // tournament — a low count (absences) is why the metric discounts them.
-    let mut dull_shown: Vec<Uuid> = Vec::new();
+    let mut dull_shown: Vec<u32> = Vec::new();
     for r in reports {
         for id in &r.worst_interest {
             if !dull_shown.contains(id) {

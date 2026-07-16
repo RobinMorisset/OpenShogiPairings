@@ -73,7 +73,6 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use uuid::Uuid;
 
 use crate::elo::{estimate_elos, UNRATED_PRIOR_MEAN};
 use crate::matching::{min_weight_perfect_matching, Weight};
@@ -533,32 +532,31 @@ fn ideal_rank(rank: usize, group_size: usize) -> usize {
 /// for a stable, reproducible ordering.
 fn fold_ranks(
     scores: &Scores,
-    by_player: &HashMap<Uuid, &Player>,
-    free: &[Uuid],
-) -> HashMap<Uuid, FoldInfo> {
-    // Rating for seeding; unrated players count as 1 (per the fold rule).
-    let rating = |id: &Uuid| by_player[id].rating.unwrap_or(1);
-    let tnum = |id: &Uuid| by_player[id].tournament_id.unwrap_or(u32::MAX);
-    let mut groups: HashMap<u32, Vec<Uuid>> = HashMap::new();
-    for &id in free {
-        groups.entry(scores.get(&id).points).or_default().push(id);
+    rating_by_tid: &[u32],
+    free: &[u32],
+    cap: usize,
+) -> Vec<Option<FoldInfo>> {
+    // Group the free players (by tournament number) by their points.
+    let mut groups: HashMap<u32, Vec<u32>> = HashMap::new();
+    for &t in free {
+        groups.entry(scores.get_tid(t).points).or_default().push(t);
     }
-    let mut info = HashMap::new();
+    // Result indexed by tournament number (`None` for a non-free player).
+    let mut info = vec![None; cap];
     for group in groups.values_mut() {
-        group.sort_by(|x, y| {
-            rating(y)
-                .cmp(&rating(x))
-                .then_with(|| tnum(x).cmp(&tnum(y)))
+        // Highest rating first; ties broken by tournament number (the key itself)
+        // for a stable, reproducible ordering.
+        group.sort_by(|&x, &y| {
+            rating_by_tid[y as usize]
+                .cmp(&rating_by_tid[x as usize])
+                .then(x.cmp(&y))
         });
         let m = group.len();
-        for (rank, id) in group.iter().enumerate() {
-            info.insert(
-                *id,
-                FoldInfo {
-                    rank,
-                    group_size: m,
-                },
-            );
+        for (rank, &t) in group.iter().enumerate() {
+            info[t as usize] = Some(FoldInfo {
+                rank,
+                group_size: m,
+            });
         }
     }
     info
@@ -571,12 +569,8 @@ fn fold_ranks(
 /// (scores, fold ranks, ELO estimates, the multiplier ladder) and lends a [`Ctx`]
 /// on demand, so an explanation is scored against the *identical* construction
 /// the pairing used — no risk of the two drifting apart.
-struct PairingModel<'a> {
+struct PairingModel {
     scores: Scores,
-    /// Kept only for the id → tournament-number boundary (seed ordering, and the
-    /// [`Self::tid`] helper the `Uuid`-facing methods use); the hot cost loop never
-    /// touches it.
-    by_player: HashMap<Uuid, &'a Player>,
     /// Per-player data the rules read, all indexed by tournament number so the
     /// O(k²) cost loop indexes rather than hashes. See [`Ctx`].
     fold: Vec<Option<FoldInfo>>,
@@ -599,27 +593,43 @@ struct PairingModel<'a> {
     mult: Vec<i128>,
 }
 
-impl<'a> PairingModel<'a> {
+impl PairingModel {
     /// Build the model for the given `free` set (the players the matching will
     /// pair). `need_phantom` is whether a bye vertex participates, so the edge
     /// count — and hence the derived multipliers — match the matching that was or
     /// will be solved.
     fn build(
         number: u32,
-        players: &'a [Player],
+        players: &[Player],
         settings: &TournamentSettings,
         completed_rounds: &[Round],
-        free: &[Uuid],
+        free: &[u32],
         need_phantom: bool,
     ) -> Self {
         let scores = compute_scores(players, settings, completed_rounds);
-        let by_player: HashMap<Uuid, &Player> = players.iter().map(|p| (p.id, p)).collect();
-        let fold = fold_ranks(&scores, &by_player, free);
+        let cap = scores.tid_capacity();
+
+        // Per-player data the rules read, indexed by tournament number and built
+        // straight from `players` (whose number is a field — no hashing). `free` is
+        // already the list of numbers. Clubs are normalized here, once.
+        let mut rating_by_tid = vec![1u32; cap];
+        let mut club_norm: Vec<Option<String>> = vec![None; cap];
+        for p in players {
+            if let Some(t) = p.tournament_id {
+                rating_by_tid[t as usize] = p.rating.unwrap_or(1);
+                club_norm[t as usize] = p
+                    .club
+                    .as_ref()
+                    .map(|c| TournamentSettings::normalize_club(c));
+            }
+        }
+
+        let fold = fold_ranks(&scores, &rating_by_tid, free, cap);
 
         let (mut lo, mut hi) = (u32::MAX, 0u32);
         let (mut mm_lo, mut mm_hi) = (u32::MAX, 0u32);
-        for &id in free {
-            let s = scores.get(&id);
+        for &t in free {
+            let s = scores.get_tid(t);
             lo = lo.min(s.points);
             hi = hi.max(s.points);
             mm_lo = mm_lo.min(s.macmahon);
@@ -627,38 +637,42 @@ impl<'a> PairingModel<'a> {
         }
         let exempt_clubs = settings.exempt_clubs_normalized();
 
-        // Either ELO mode: a live estimate per free player (rounded), its
-        // ascending rank (0 = weakest, for the bye-selection rule, pure ELO mode
-        // only), and the widest gap (for the ladder bound). All empty / zero in
-        // Swiss mode.
+        // Either ELO mode: a live estimate per free player (rounded), its ascending
+        // rank (0 = weakest, for the bye-selection rule), and the widest gap (for
+        // the ladder bound), all indexed by tournament number. All zero in Swiss.
         let (elo, elo_rank, max_elo_gap) = if settings.elo_estimate_needed() {
             let est = estimate_elos(players, settings, completed_rounds);
-            let elo: HashMap<Uuid, i64> = free
-                .iter()
-                .map(|&id| {
-                    let e = est.get(&id).copied().unwrap_or(UNRATED_PRIOR_MEAN);
-                    (id, e.round() as i64)
-                })
-                .collect();
-            let tnum = |id: &Uuid| by_player[id].tournament_id.unwrap_or(u32::MAX);
+            let mut elo = vec![0i64; cap];
+            for p in players {
+                if let Some(t) = p.tournament_id {
+                    let e = est.get(&p.id).copied().unwrap_or(UNRATED_PRIOR_MEAN);
+                    elo[t as usize] = e.round() as i64;
+                }
+            }
+            // Ascending ELO; ties by tournament number (which is the key itself).
             let mut order = free.to_vec();
-            order.sort_by(|x, y| elo[x].cmp(&elo[y]).then_with(|| tnum(x).cmp(&tnum(y))));
-            let elo_rank: HashMap<Uuid, i128> = order
+            order.sort_by(|&x, &y| elo[x as usize].cmp(&elo[y as usize]).then(x.cmp(&y)));
+            let mut elo_rank = vec![0i128; cap];
+            for (rank, &t) in order.iter().enumerate() {
+                elo_rank[t as usize] = rank as i128;
+            }
+            let (elo_lo, elo_hi) = free
                 .iter()
-                .enumerate()
-                .map(|(rank, id)| (*id, rank as i128))
-                .collect();
-            let (elo_lo, elo_hi) = elo
-                .values()
-                .fold((i64::MAX, i64::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+                .map(|&t| elo[t as usize])
+                .fold((i64::MAX, i64::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
             (elo, elo_rank, (elo_hi - elo_lo).max(0) as i128)
         } else {
-            (HashMap::new(), HashMap::new(), 0)
+            (vec![0i64; cap], vec![0i128; cap], 0)
         };
 
         let k = free.len();
         let vcount = k + usize::from(need_phantom);
-        let max_group = fold.values().map(|f| f.group_size).max().unwrap_or(0) as i128;
+        let max_group = fold
+            .iter()
+            .flatten()
+            .map(|f| f.group_size)
+            .max()
+            .unwrap_or(0) as i128;
         // The active rules, minus the two whole-round no-ops: `AirtightGroups` with
         // its window closed and `Club` with protection off both return 0 for every
         // edge and bye, and (having max-total 0) leave every other rule's
@@ -676,42 +690,13 @@ impl<'a> PairingModel<'a> {
             })
             .collect();
 
-        // Transpose the id-keyed per-player data onto tournament-number-indexed
-        // vectors, so the O(k²) cost loop indexes them directly instead of hashing
-        // a Uuid per edge per rule. Every free player has a number (pairing runs
-        // post-finalization), so these placements are total. Clubs are normalized
-        // here, once, rather than on every club-rule evaluation.
-        let cap = scores.tid_capacity();
-        let mut fold_v: Vec<Option<FoldInfo>> = vec![None; cap];
-        for (id, f) in &fold {
-            fold_v[scores.tid_of(id).expect("free player has a number") as usize] = Some(*f);
-        }
-        let mut elo_v = vec![0i64; cap];
-        for (id, &e) in &elo {
-            elo_v[scores.tid_of(id).expect("free player has a number") as usize] = e;
-        }
-        let mut elo_rank_v = vec![0i128; cap];
-        for (id, &r) in &elo_rank {
-            elo_rank_v[scores.tid_of(id).expect("free player has a number") as usize] = r;
-        }
-        let mut club_norm: Vec<Option<String>> = vec![None; cap];
-        for p in players {
-            if let Some(t) = scores.tid_of(&p.id) {
-                club_norm[t as usize] = p
-                    .club
-                    .as_ref()
-                    .map(|c| TournamentSettings::normalize_club(c));
-            }
-        }
-
         let mut model = PairingModel {
             scores,
-            by_player,
-            fold: fold_v,
+            fold,
             club_norm,
             exempt_clubs,
-            elo: elo_v,
-            elo_rank: elo_rank_v,
+            elo,
+            elo_rank,
             round: number,
             floater_style: settings.floater_style,
             club_active,
@@ -763,55 +748,19 @@ impl<'a> PairingModel<'a> {
         }
     }
 
-    /// The tournament number of a real player — the dense key everything the cost
-    /// functions read is indexed by. Only called for real players (never the
-    /// phantom bye), which always have a number at pairing time.
-    fn tid(&self, id: Uuid) -> u32 {
-        self.scores
-            .tid_of(&id)
-            .expect("a player being paired has a tournament number")
+    /// Scalar edge weight for pairing numbers `a` against `b`.
+    fn edge_cost(&self, a: u32, b: u32) -> i128 {
+        edge_cost(&self.ctx(), &self.rules, &self.mult, a, b)
     }
 
-    /// Scalar edge weight for pairing `a` against `b`.
-    fn edge_cost(&self, a: Uuid, b: Uuid) -> i128 {
-        edge_cost(
-            &self.ctx(),
-            &self.rules,
-            &self.mult,
-            self.tid(a),
-            self.tid(b),
-        )
-    }
-
-    /// Scalar edge weight for giving `player` the bye.
-    fn bye_cost(&self, player: Uuid) -> i128 {
-        bye_cost(&self.ctx(), &self.rules, &self.mult, self.tid(player))
-    }
-
-    /// Canonical seed key for a matching vertex. Ordering the vertices by this key
-    /// makes the pairing a pure function of tournament *state* rather than of the
-    /// order players were registered/imported in: a real player sorts by
-    /// tournament number (seed), while the [`PHANTOM`] bye and any not-yet-seeded
-    /// player sort last. The id is a final tie-break so the order is *total* even
-    /// before finalization or in the (guarded-against) event two players share a
-    /// number. See the module docs on determinism and tie-breaking.
-    fn seed_key(&self, id: Uuid) -> (u32, Uuid) {
-        if id == PHANTOM {
-            (u32::MAX, id)
-        } else {
-            let seed = self
-                .by_player
-                .get(&id)
-                .and_then(|p| p.tournament_id)
-                .unwrap_or(u32::MAX);
-            (seed, id)
-        }
+    /// Scalar edge weight for giving player number `player` the bye.
+    fn bye_cost(&self, player: u32) -> i128 {
+        bye_cost(&self.ctx(), &self.rules, &self.mult, player)
     }
 
     /// Per-rule penalty units (pre-multiplier) for pairing `a` against `b`, in
     /// priority order (aligned with [`Self::rules`]).
-    fn edge_units(&self, a: Uuid, b: Uuid) -> Vec<i128> {
-        let (a, b) = (self.tid(a), self.tid(b));
+    fn edge_units(&self, a: u32, b: u32) -> Vec<i128> {
         let ctx = self.ctx();
         self.rules
             .iter()
@@ -820,8 +769,7 @@ impl<'a> PairingModel<'a> {
     }
 
     /// Per-rule penalty units (pre-multiplier) for giving `player` the bye.
-    fn bye_units(&self, player: Uuid) -> Vec<i128> {
-        let player = self.tid(player);
+    fn bye_units(&self, player: u32) -> Vec<i128> {
         let ctx = self.ctx();
         self.rules
             .iter()
@@ -853,10 +801,10 @@ pub struct RuleContribution {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct BoardLedger {
-    pub player1: Uuid,
+    pub player1: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub player2: Option<Uuid>,
+    pub player2: Option<u32>,
     pub contributions: Vec<RuleContribution>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -888,7 +836,7 @@ pub struct RoundExplanation {
 
 /// Turn a per-rule unit vector (aligned with `rules`, priority order) into a
 /// ledger: keep only the rules that fired, and note the highest-priority one.
-fn ledger(player1: Uuid, player2: Option<Uuid>, rules: &[Rule], units: &[i128]) -> BoardLedger {
+fn ledger(player1: u32, player2: Option<u32>, rules: &[Rule], units: &[i128]) -> BoardLedger {
     let contributions: Vec<RuleContribution> = rules
         .iter()
         .zip(units)
@@ -932,12 +880,12 @@ pub fn explain_pairing(
     players: &[Player],
     settings: &TournamentSettings,
     completed_rounds: &[Round],
-    swiss_boards: &[(Uuid, Uuid)],
-    bye: Option<Uuid>,
+    swiss_boards: &[(u32, u32)],
+    bye: Option<u32>,
 ) -> RoundExplanation {
     // The Swiss free set the round was paired from: both players of every Swiss
     // board, plus the bye. With a bye the count is odd, so a phantom participates.
-    let mut free: Vec<Uuid> = swiss_boards.iter().flat_map(|&(a, b)| [a, b]).collect();
+    let mut free: Vec<u32> = swiss_boards.iter().flat_map(|&(a, b)| [a, b]).collect();
     if let Some(b) = bye {
         free.push(b);
     }
@@ -987,13 +935,13 @@ pub fn explain_pairing(
 
 // --- Counterfactual ("why not pair A and B?") -----------------------------
 
-/// Sentinel vertex standing in for the bye in a matching. Real player ids are v4
-/// UUIDs, never the nil UUID, so this can't collide with a player. Also used by
+/// Sentinel vertex standing in for the bye in a matching. Real tournament numbers
+/// are `>= 1`, so `0` can never collide with a player. Also used by
 /// `tournament` as the wire value meaning "the bye" in a counterfactual probe.
-pub(crate) const PHANTOM: Uuid = Uuid::nil();
+pub(crate) const PHANTOM: u32 = 0;
 
 /// Normalized (order-independent) edge, so `(a, b)` and `(b, a)` are one key.
-fn unord_pair(a: Uuid, b: Uuid) -> (Uuid, Uuid) {
+fn unord_pair(a: u32, b: u32) -> (u32, u32) {
     if a <= b {
         (a, b)
     } else {
@@ -1032,7 +980,7 @@ pub struct RuleDelta {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct AffectedCycle {
-    pub players: Vec<Uuid>,
+    pub players: Vec<u32>,
 }
 
 /// The consequence of forcing a pairing the engine didn't choose: which boards
@@ -1072,10 +1020,10 @@ pub struct Counterfactual {
 /// exists — which it always does on a complete graph of ≥ 4 vertices.
 fn solve_stable(
     model: &PairingModel,
-    verts: &[Uuid],
-    baseline: &HashSet<(Uuid, Uuid)>,
-    forbidden: &HashSet<(Uuid, Uuid)>,
-) -> Vec<(Uuid, Uuid)> {
+    verts: &[u32],
+    baseline: &HashSet<(u32, u32)>,
+    forbidden: &HashSet<(u32, u32)>,
+) -> Vec<(u32, u32)> {
     let n = verts.len();
     if n < 2 {
         return Vec::new();
@@ -1083,9 +1031,9 @@ fn solve_stable(
     // Canonical vertex order by seed, matching `pair_round_weighted`, so the
     // counterfactual re-solve breaks ties the same way the real pairing does.
     let mut verts = verts.to_vec();
-    verts.sort_by_key(|&id| model.seed_key(id));
+    verts.sort_unstable();
     let stab = (n / 2) as i128 + 1; // strictly above the largest stability total
-    let base = |a: Uuid, b: Uuid| -> i128 {
+    let base = |a: u32, b: u32| -> i128 {
         if a == PHANTOM {
             model.bye_cost(b)
         } else if b == PHANTOM {
@@ -1134,21 +1082,18 @@ fn solve_stable(
 
 /// Decompose the symmetric difference of two perfect matchings into its
 /// alternating cycles — the disjoint rings of players whose partners differ.
-fn alternating_cycles(
-    m0: &HashSet<(Uuid, Uuid)>,
-    m1: &HashSet<(Uuid, Uuid)>,
-) -> Vec<AffectedCycle> {
+fn alternating_cycles(m0: &HashSet<(u32, u32)>, m1: &HashSet<(u32, u32)>) -> Vec<AffectedCycle> {
     // Adjacency over the changed edges. Every vertex in the symmetric difference
     // has exactly one edge from each matching, so its degree here is exactly 2.
-    let mut adj: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    let mut adj: HashMap<u32, Vec<u32>> = HashMap::new();
     for &(a, b) in m0.symmetric_difference(m1) {
         adj.entry(a).or_default().push(b);
         adj.entry(b).or_default().push(a);
     }
 
-    let mut visited: HashSet<Uuid> = HashSet::new();
+    let mut visited: HashSet<u32> = HashSet::new();
     let mut cycles = Vec::new();
-    let mut starts: Vec<Uuid> = adj.keys().copied().collect();
+    let mut starts: Vec<u32> = adj.keys().copied().collect();
     starts.sort(); // deterministic cycle order
     for start in starts {
         if visited.contains(&start) {
@@ -1156,7 +1101,7 @@ fn alternating_cycles(
         }
         let mut order = Vec::new();
         let mut cur = start;
-        let mut prev: Option<Uuid> = None;
+        let mut prev: Option<u32> = None;
         loop {
             visited.insert(cur);
             order.push(cur);
@@ -1190,15 +1135,15 @@ pub enum CounterfactualMode {
 
 /// The Swiss free set, the pairing model, and the confirmed matching `M0` (with
 /// the bye as a phantom edge) — the shared setup for either counterfactual.
-fn baseline_matching<'a>(
+fn baseline_matching(
     number: u32,
-    players: &'a [Player],
+    players: &[Player],
     settings: &TournamentSettings,
     completed_rounds: &[Round],
-    swiss_boards: &[(Uuid, Uuid)],
-    bye: Option<Uuid>,
-) -> (PairingModel<'a>, Vec<Uuid>, bool, HashSet<(Uuid, Uuid)>) {
-    let mut free: Vec<Uuid> = swiss_boards.iter().flat_map(|&(x, y)| [x, y]).collect();
+    swiss_boards: &[(u32, u32)],
+    bye: Option<u32>,
+) -> (PairingModel, Vec<u32>, bool, HashSet<(u32, u32)>) {
+    let mut free: Vec<u32> = swiss_boards.iter().flat_map(|&(x, y)| [x, y]).collect();
     if let Some(p) = bye {
         free.push(p);
     }
@@ -1211,7 +1156,7 @@ fn baseline_matching<'a>(
         &free,
         need_phantom,
     );
-    let mut m0: HashSet<(Uuid, Uuid)> = swiss_boards
+    let mut m0: HashSet<(u32, u32)> = swiss_boards
         .iter()
         .map(|&(x, y)| unord_pair(x, y))
         .collect();
@@ -1226,11 +1171,11 @@ fn baseline_matching<'a>(
 /// boards as ledgers.
 fn diff_matchings(
     model: &PairingModel,
-    m0: &HashSet<(Uuid, Uuid)>,
-    m1: &HashSet<(Uuid, Uuid)>,
+    m0: &HashSet<(u32, u32)>,
+    m1: &HashSet<(u32, u32)>,
 ) -> Counterfactual {
     let rules = model.rules();
-    let units_of = |e: &(Uuid, Uuid)| -> Vec<i128> {
+    let units_of = |e: &(u32, u32)| -> Vec<i128> {
         let (x, y) = *e;
         if x == PHANTOM {
             model.bye_units(y)
@@ -1240,7 +1185,7 @@ fn diff_matchings(
             model.edge_units(x, y)
         }
     };
-    let ledger_of = |e: &(Uuid, Uuid)| -> BoardLedger {
+    let ledger_of = |e: &(u32, u32)| -> BoardLedger {
         let (x, y) = *e;
         if x == PHANTOM {
             ledger(y, None, rules, &model.bye_units(y))
@@ -1276,7 +1221,7 @@ fn diff_matchings(
         .collect();
 
     // The new boards (added edges), sorted for a stable order, as ledgers.
-    let mut added: Vec<(Uuid, Uuid)> = m1.difference(m0).copied().collect();
+    let mut added: Vec<(u32, u32)> = m1.difference(m0).copied().collect();
     added.sort();
     let changed: Vec<BoardLedger> = added.iter().map(ledger_of).collect();
 
@@ -1298,10 +1243,10 @@ pub fn counterfactual_force(
     players: &[Player],
     settings: &TournamentSettings,
     completed_rounds: &[Round],
-    swiss_boards: &[(Uuid, Uuid)],
-    bye: Option<Uuid>,
-    a: Uuid,
-    b: Uuid,
+    swiss_boards: &[(u32, u32)],
+    bye: Option<u32>,
+    a: u32,
+    b: u32,
 ) -> Counterfactual {
     let (model, free, need_phantom, m0) = baseline_matching(
         number,
@@ -1316,12 +1261,12 @@ pub fn counterfactual_force(
     // the full counterfactual matching. The phantom stays in play for the rest
     // *unless* it's one side of the forced pair itself (forcing someone onto the
     // bye) — it's already spoken for then, not up for grabs again.
-    let mut verts: Vec<Uuid> = free.iter().copied().filter(|&v| v != a && v != b).collect();
+    let mut verts: Vec<u32> = free.iter().copied().filter(|&v| v != a && v != b).collect();
     if need_phantom && a != PHANTOM && b != PHANTOM {
         verts.push(PHANTOM);
     }
     let no_forbidden = HashSet::new();
-    let mut m1: HashSet<(Uuid, Uuid)> = solve_stable(&model, &verts, &m0, &no_forbidden)
+    let mut m1: HashSet<(u32, u32)> = solve_stable(&model, &verts, &m0, &no_forbidden)
         .into_iter()
         .collect();
     m1.insert(unord_pair(a, b));
@@ -1339,10 +1284,10 @@ pub fn counterfactual_forbid(
     players: &[Player],
     settings: &TournamentSettings,
     completed_rounds: &[Round],
-    swiss_boards: &[(Uuid, Uuid)],
-    bye: Option<Uuid>,
-    a: Uuid,
-    b: Uuid,
+    swiss_boards: &[(u32, u32)],
+    bye: Option<u32>,
+    a: u32,
+    b: u32,
 ) -> Counterfactual {
     let (model, free, need_phantom, m0) = baseline_matching(
         number,
@@ -1357,8 +1302,8 @@ pub fn counterfactual_forbid(
     if need_phantom {
         verts.push(PHANTOM);
     }
-    let forbidden: HashSet<(Uuid, Uuid)> = [unord_pair(a, b)].into_iter().collect();
-    let m1: HashSet<(Uuid, Uuid)> = solve_stable(&model, &verts, &m0, &forbidden)
+    let forbidden: HashSet<(u32, u32)> = [unord_pair(a, b)].into_iter().collect();
+    let m1: HashSet<(u32, u32)> = solve_stable(&model, &verts, &m0, &forbidden)
         .into_iter()
         .collect();
 
@@ -1377,15 +1322,16 @@ pub fn pair_round_weighted(
     players: &[Player],
     settings: &TournamentSettings,
     completed_rounds: &[Round],
-    present: &[Uuid],
+    present: &[u32],
     forced_boards: &[Board],
-    forced_bye: Option<Uuid>,
+    forced_bye: Option<u32>,
 ) -> Round {
     let scores = compute_scores(players, settings, completed_rounds);
     // The float frozen onto each board: points(player1) − points(player2) now.
-    let diff = |p1: Uuid, p2: Uuid| scores.points(&p1) as i32 - scores.points(&p2) as i32;
+    let diff =
+        |p1: u32, p2: u32| scores.get_tid(p1).points as i32 - scores.get_tid(p2).points as i32;
 
-    let mut placed: HashSet<Uuid> = HashSet::new();
+    let mut placed: HashSet<u32> = HashSet::new();
     for board in forced_boards {
         placed.insert(board.player1);
         placed.insert(board.player2);
@@ -1393,7 +1339,7 @@ pub fn pair_round_weighted(
     if let Some(bye) = forced_bye {
         placed.insert(bye);
     }
-    let mut free: Vec<Uuid> = present
+    let mut free: Vec<u32> = present
         .iter()
         .copied()
         .filter(|id| !placed.contains(id))
@@ -1430,16 +1376,17 @@ pub fn pair_round_weighted(
             need_phantom,
         );
 
-        // Order the matching's vertices canonically by seed, so which of several
-        // equally-optimal pairings the solver returns depends only on tournament
-        // state — not on the order players were registered, imported, or reloaded
-        // (the model itself is order-independent, so this affects ties only).
-        free.sort_by_key(|&id| model.seed_key(id));
+        // Order the matching's vertices canonically by seed (the tournament
+        // number is the seed), so which of several equally-optimal pairings the
+        // solver returns depends only on tournament state — not on the order
+        // players were registered, imported, or reloaded (the model itself is
+        // order-independent, so this affects ties only).
+        free.sort_unstable();
 
-        // Resolve each free player's tournament number once (k hashes), then fill
-        // the O(k²) cost matrix indexing the model's per-number tables — no hashing
-        // per edge. `ctx` is built once and shared across every edge.
-        let free_tid: Vec<u32> = free.iter().map(|&id| model.tid(id)).collect();
+        // `free` is already the list of tournament numbers, so it indexes the
+        // model's per-number tables directly — no per-edge or per-vertex hashing.
+        // `ctx` is built once and shared across every edge.
+        let free_tid = &free;
         let ctx = model.ctx();
         // Row-major `vcount × vcount` cost matrix in one flat allocation (entry
         // `(i, j)` at `i * vcount + j`), rather than a `Vec<Vec>`: one allocation
@@ -1453,7 +1400,7 @@ pub fn pair_round_weighted(
         // the matrix as symmetric — so there is no symmetric store or mirror pass.
         macro_rules! fill {
             ($rule:expr, $m:expr) => {
-                accumulate_edge_rule(&mut cost, vcount, k, &free_tid, &ctx, $m, |ctx, a, b| {
+                accumulate_edge_rule(&mut cost, vcount, k, free_tid, &ctx, $m, |ctx, a, b| {
                     $rule.edge_units(ctx, a, b)
                 })
             };
@@ -1522,6 +1469,7 @@ mod tests {
     use super::*;
     use crate::round::Winner;
     use crate::settings::MacMahonThreshold;
+    use uuid::Uuid;
 
     // --- solve_matching's width dispatch -----------------------------------
 
@@ -1579,7 +1527,7 @@ mod tests {
         }
     }
 
-    fn completed_round(number: u32, boards: &[(Uuid, Uuid, Winner)], bye: Option<Uuid>) -> Round {
+    fn completed_round(number: u32, boards: &[(u32, u32, Winner)], bye: Option<u32>) -> Round {
         Round {
             number,
             boards: boards
@@ -1596,7 +1544,7 @@ mod tests {
         }
     }
 
-    fn unord(a: Uuid, b: Uuid) -> (Uuid, Uuid) {
+    fn unord(a: u32, b: u32) -> (u32, u32) {
         if a < b {
             (a, b)
         } else {
@@ -1604,7 +1552,7 @@ mod tests {
         }
     }
 
-    fn board_pairs(round: &Round) -> HashSet<(Uuid, Uuid)> {
+    fn board_pairs(round: &Round) -> HashSet<(u32, u32)> {
         round
             .boards
             .iter()
@@ -1628,7 +1576,7 @@ mod tests {
             player(5, Some(1000), None),
             player(6, Some(1000), None),
         ];
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let settings = elo_settings();
 
         let forward = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);
@@ -1637,7 +1585,7 @@ mod tests {
         // slice and the present list.
         let mut p_rev = p.clone();
         p_rev.reverse();
-        let present_rev: Vec<Uuid> = present.iter().rev().copied().collect();
+        let present_rev: Vec<u32> = present.iter().rev().copied().collect();
         let reversed = pair_round_weighted(1, &p_rev, &settings, &[], &present_rev, &[], None);
 
         assert_eq!(board_pairs(&forward), board_pairs(&reversed));
@@ -1653,12 +1601,20 @@ mod tests {
         let r1 = completed_round(
             1,
             &[
-                (p[0].id, p[1].id, Winner::Player1),
-                (p[2].id, p[3].id, Winner::Player1),
+                (
+                    p[0].tournament_id.unwrap(),
+                    p[1].tournament_id.unwrap(),
+                    Winner::Player1,
+                ),
+                (
+                    p[2].tournament_id.unwrap(),
+                    p[3].tournament_id.unwrap(),
+                    Winner::Player1,
+                ),
             ],
             None,
         );
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
         let round = pair_round_weighted(
             2,
@@ -1674,16 +1630,30 @@ mod tests {
         assert_eq!(round.boards.len(), 2);
         let pairs = board_pairs(&round);
         // Same-score, no rematch: winners together, losers together.
-        assert!(pairs.contains(&unord(p[0].id, p[2].id)));
-        assert!(pairs.contains(&unord(p[1].id, p[3].id)));
+        assert!(pairs.contains(&unord(
+            p[0].tournament_id.unwrap(),
+            p[2].tournament_id.unwrap()
+        )));
+        assert!(pairs.contains(&unord(
+            p[1].tournament_id.unwrap(),
+            p[3].tournament_id.unwrap()
+        )));
     }
 
     #[test]
     fn weighted_avoids_repeat_bye() {
         let p: Vec<Player> = (1..=3).map(|i| player(i, Some(1500), None)).collect();
         // Round 1: p0 beat p1; p2 took the bye (so p0 and p2 have 1 victory).
-        let r1 = completed_round(1, &[(p[0].id, p[1].id, Winner::Player1)], Some(p[2].id));
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let r1 = completed_round(
+            1,
+            &[(
+                p[0].tournament_id.unwrap(),
+                p[1].tournament_id.unwrap(),
+                Winner::Player1,
+            )],
+            Some(p[2].tournament_id.unwrap()),
+        );
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
         let round = pair_round_weighted(
             2,
@@ -1697,10 +1667,13 @@ mod tests {
 
         // p2 already had a bye, so it must fall elsewhere; giving it to p1 also
         // leaves the same-score board p0 vs p2.
-        assert_eq!(round.bye, Some(p[1].id));
+        assert_eq!(round.bye, Some(p[1].tournament_id.unwrap()));
         assert_eq!(
             board_pairs(&round),
-            HashSet::from([unord(p[0].id, p[2].id)])
+            HashSet::from([unord(
+                p[0].tournament_id.unwrap(),
+                p[2].tournament_id.unwrap()
+            )])
         );
     }
 
@@ -1715,12 +1688,20 @@ mod tests {
         let r1 = completed_round(
             1,
             &[
-                (p[0].id, p[1].id, Winner::Player1),
-                (p[2].id, p[3].id, Winner::Player1),
+                (
+                    p[0].tournament_id.unwrap(),
+                    p[1].tournament_id.unwrap(),
+                    Winner::Player1,
+                ),
+                (
+                    p[2].tournament_id.unwrap(),
+                    p[3].tournament_id.unwrap(),
+                    Winner::Player1,
+                ),
             ],
-            Some(p[4].id),
+            Some(p[4].tournament_id.unwrap()),
         );
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
         let round = pair_round_weighted(
             2,
@@ -1733,7 +1714,10 @@ mod tests {
         );
 
         let bye = round.bye.expect("odd field needs a bye");
-        assert!(bye == p[1].id || bye == p[3].id, "bye went to a leader");
+        assert!(
+            bye == p[1].tournament_id.unwrap() || bye == p[3].tournament_id.unwrap(),
+            "bye went to a leader"
+        );
     }
 
     #[test]
@@ -1746,14 +1730,27 @@ mod tests {
         let r1 = completed_round(
             1,
             &[
-                (p[0].id, p[1].id, Winner::Player1), // A beats B
-                (p[2].id, p[3].id, Winner::Player1), // C beats D
+                (
+                    p[0].tournament_id.unwrap(),
+                    p[1].tournament_id.unwrap(),
+                    Winner::Player1,
+                ), // A beats B
+                (
+                    p[2].tournament_id.unwrap(),
+                    p[3].tournament_id.unwrap(),
+                    Winner::Player1,
+                ), // C beats D
             ],
             None,
         );
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         // A (1 pt) vs D (0 pt), forced.
-        let forced = vec![Board::pending(p[0].id, p[3].id, None, PairingSource::Swiss)];
+        let forced = vec![Board::pending(
+            p[0].tournament_id.unwrap(),
+            p[3].tournament_id.unwrap(),
+            None,
+            PairingSource::Swiss,
+        )];
 
         let round = pair_round_weighted(
             2,
@@ -1772,7 +1769,9 @@ mod tests {
         let ad = round
             .boards
             .iter()
-            .find(|b| b.player1 == p[0].id && b.player2 == p[3].id)
+            .find(|b| {
+                b.player1 == p[0].tournament_id.unwrap() && b.player2 == p[3].tournament_id.unwrap()
+            })
             .expect("forced board present");
         assert_eq!(ad.points_diff, Some(2));
     }
@@ -1798,15 +1797,24 @@ mod tests {
             number: 1,
             boards: vec![Board {
                 result: Some(Winner::Player1),
-                ..Board::pending(a.id, b.id, Some(0), PairingSource::Swiss)
+                ..Board::pending(
+                    a.tournament_id.unwrap(),
+                    b.tournament_id.unwrap(),
+                    Some(0),
+                    PairingSource::Swiss,
+                )
             }],
             bye: None,
             cup_byes: Vec::new(),
-            absent: vec![c.id],
+            absent: vec![c.tournament_id.unwrap()],
             completed: true,
         };
 
-        let present = vec![a.id, b.id, c.id];
+        let present = vec![
+            a.tournament_id.unwrap(),
+            b.tournament_id.unwrap(),
+            c.tournament_id.unwrap(),
+        ];
         let round = pair_round_weighted(
             2,
             &players,
@@ -1817,13 +1825,14 @@ mod tests {
             None,
         );
 
-        assert_eq!(round.bye, Some(b.id)); // lowest score takes the bye
+        assert_eq!(round.bye, Some(b.tournament_id.unwrap())); // lowest score takes the bye
         let ac = round
             .boards
             .iter()
             .find(|bd| {
-                (bd.player1 == a.id && bd.player2 == c.id)
-                    || (bd.player1 == c.id && bd.player2 == a.id)
+                (bd.player1 == a.tournament_id.unwrap() && bd.player2 == c.tournament_id.unwrap())
+                    || (bd.player1 == c.tournament_id.unwrap()
+                        && bd.player2 == a.tournament_id.unwrap())
             })
             .expect("A vs C paired");
         assert_eq!(ac.points_diff.unwrap().abs(), 1); // A(2) vs C(1) — an odd float
@@ -1841,7 +1850,7 @@ mod tests {
             player(3, Some(1000), None),
             player(4, Some(900), None),
         ];
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let settings = TournamentSettings {
             macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
@@ -1851,11 +1860,17 @@ mod tests {
 
         let pairs = board_pairs(&round);
         assert!(
-            pairs.contains(&unord(p[0].id, p[1].id)),
+            pairs.contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[1].tournament_id.unwrap()
+            )),
             "top MacMahon group paired within itself"
         );
         assert!(
-            pairs.contains(&unord(p[2].id, p[3].id)),
+            pairs.contains(&unord(
+                p[2].tournament_id.unwrap(),
+                p[3].tournament_id.unwrap()
+            )),
             "bottom MacMahon group paired within itself"
         );
     }
@@ -1875,7 +1890,7 @@ mod tests {
     #[test]
     fn weighted_avoids_pairing_club_mates_when_protection_on() {
         let p = two_clubs_where_fold_pairs_mates();
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let settings = TournamentSettings {
             club_protection_enabled: true,
             ..Default::default()
@@ -1884,7 +1899,13 @@ mod tests {
         let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);
 
         assert_eq!(round.boards.len(), 2);
-        let club_of = |id: Uuid| p.iter().find(|q| q.id == id).unwrap().club.clone();
+        let club_of = |id: u32| {
+            p.iter()
+                .find(|q| q.tournament_id.unwrap() == id)
+                .unwrap()
+                .club
+                .clone()
+        };
         for b in &round.boards {
             assert_ne!(
                 club_of(b.player1),
@@ -1899,7 +1920,7 @@ mod tests {
         // With protection off (the default), the club rule is silent, so the fold
         // ideal wins and club-mates X-X / Y-Y are paired.
         let p = two_clubs_where_fold_pairs_mates();
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
         let round = pair_round_weighted(
             1,
@@ -1913,11 +1934,17 @@ mod tests {
 
         let pairs = board_pairs(&round);
         assert!(
-            pairs.contains(&unord(p[0].id, p[2].id)),
+            pairs.contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[2].tournament_id.unwrap()
+            )),
             "fold pairs the X club-mates"
         );
         assert!(
-            pairs.contains(&unord(p[1].id, p[3].id)),
+            pairs.contains(&unord(
+                p[1].tournament_id.unwrap(),
+                p[3].tournament_id.unwrap()
+            )),
             "fold pairs the Y club-mates"
         );
     }
@@ -1934,7 +1961,7 @@ mod tests {
             player(3, Some(1800), Some("Home")),
             player(4, Some(1700), None),
         ];
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
         let exempt = TournamentSettings {
             club_protection_enabled: true,
@@ -1943,7 +1970,10 @@ mod tests {
         };
         let round = pair_round_weighted(1, &p, &exempt, &[], &present, &[], None);
         assert!(
-            board_pairs(&round).contains(&unord(p[0].id, p[2].id)),
+            board_pairs(&round).contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[2].tournament_id.unwrap()
+            )),
             "exempt club-mates should be paired by the fold"
         );
 
@@ -1953,7 +1983,10 @@ mod tests {
         };
         let round = pair_round_weighted(1, &p, &protected, &[], &present, &[], None);
         assert!(
-            !board_pairs(&round).contains(&unord(p[0].id, p[2].id)),
+            !board_pairs(&round).contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[2].tournament_id.unwrap()
+            )),
             "non-exempt club-mates should not be paired"
         );
     }
@@ -1963,7 +1996,7 @@ mod tests {
         // Protection limited to round 1: round 2 must ignore clubs, so the fold
         // ideal (club-mate pairs) wins again.
         let p = two_clubs_where_fold_pairs_mates();
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let settings = TournamentSettings {
             club_protection_enabled: true,
             club_protection_rounds: Some(1),
@@ -1974,11 +2007,17 @@ mod tests {
         let round = pair_round_weighted(2, &p, &settings, &[], &present, &[], None);
         let pairs = board_pairs(&round);
         assert!(
-            pairs.contains(&unord(p[0].id, p[2].id)),
+            pairs.contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[2].tournament_id.unwrap()
+            )),
             "past the window, fold pairs X-X"
         );
         assert!(
-            pairs.contains(&unord(p[1].id, p[3].id)),
+            pairs.contains(&unord(
+                p[1].tournament_id.unwrap(),
+                p[3].tournament_id.unwrap()
+            )),
             "past the window, fold pairs Y-Y"
         );
     }
@@ -2005,14 +2044,30 @@ mod tests {
             macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
         };
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let r1 = completed_round(
             1,
             &[
-                (p[0].id, p[1].id, Winner::Player2), // p1 beats p0 (top group upset)
-                (p[2].id, p[3].id, Winner::Player1), // p2 beats p3
-                (p[4].id, p[5].id, Winner::Player2), // p5 beats p4 (bottom group upset)
-                (p[6].id, p[7].id, Winner::Player1), // p6 beats p7
+                (
+                    p[0].tournament_id.unwrap(),
+                    p[1].tournament_id.unwrap(),
+                    Winner::Player2,
+                ), // p1 beats p0 (top group upset)
+                (
+                    p[2].tournament_id.unwrap(),
+                    p[3].tournament_id.unwrap(),
+                    Winner::Player1,
+                ), // p2 beats p3
+                (
+                    p[4].tournament_id.unwrap(),
+                    p[5].tournament_id.unwrap(),
+                    Winner::Player2,
+                ), // p5 beats p4 (bottom group upset)
+                (
+                    p[6].tournament_id.unwrap(),
+                    p[7].tournament_id.unwrap(),
+                    Winner::Player1,
+                ), // p6 beats p7
             ],
             None,
         );
@@ -2028,7 +2083,14 @@ mod tests {
             &[],
             None,
         );
-        let top: HashSet<Uuid> = [p[0].id, p[1].id, p[2].id, p[3].id].into_iter().collect();
+        let top: HashSet<u32> = [
+            p[0].tournament_id.unwrap(),
+            p[1].tournament_id.unwrap(),
+            p[2].tournament_id.unwrap(),
+            p[3].tournament_id.unwrap(),
+        ]
+        .into_iter()
+        .collect();
         let crosses = round_off
             .boards
             .iter()
@@ -2071,20 +2133,43 @@ mod tests {
             airtight_groups_rounds: Some(1),
             ..Default::default()
         };
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let r1 = completed_round(
             1,
             &[
-                (p[0].id, p[1].id, Winner::Player2),
-                (p[2].id, p[3].id, Winner::Player1),
-                (p[4].id, p[5].id, Winner::Player2),
-                (p[6].id, p[7].id, Winner::Player1),
+                (
+                    p[0].tournament_id.unwrap(),
+                    p[1].tournament_id.unwrap(),
+                    Winner::Player2,
+                ),
+                (
+                    p[2].tournament_id.unwrap(),
+                    p[3].tournament_id.unwrap(),
+                    Winner::Player1,
+                ),
+                (
+                    p[4].tournament_id.unwrap(),
+                    p[5].tournament_id.unwrap(),
+                    Winner::Player2,
+                ),
+                (
+                    p[6].tournament_id.unwrap(),
+                    p[7].tournament_id.unwrap(),
+                    Winner::Player1,
+                ),
             ],
             None,
         );
 
         let round = pair_round_weighted(2, &p, &settings, &[r1], &present, &[], None);
-        let top: HashSet<Uuid> = [p[0].id, p[1].id, p[2].id, p[3].id].into_iter().collect();
+        let top: HashSet<u32> = [
+            p[0].tournament_id.unwrap(),
+            p[1].tournament_id.unwrap(),
+            p[2].tournament_id.unwrap(),
+            p[3].tournament_id.unwrap(),
+        ]
+        .into_iter()
+        .collect();
         let crosses = round
             .boards
             .iter()
@@ -2115,17 +2200,23 @@ mod tests {
             player(3, Some(1500), None),
             player(4, Some(1450), None),
         ];
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
         let round = pair_round_weighted(1, &p, &elo_settings(), &[], &present, &[], None);
 
         let pairs = board_pairs(&round);
         assert!(
-            pairs.contains(&unord(p[0].id, p[1].id)),
+            pairs.contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[1].tournament_id.unwrap()
+            )),
             "closest pair 2000-1950"
         );
         assert!(
-            pairs.contains(&unord(p[2].id, p[3].id)),
+            pairs.contains(&unord(
+                p[2].tournament_id.unwrap(),
+                p[3].tournament_id.unwrap()
+            )),
             "closest pair 1500-1450"
         );
     }
@@ -2137,11 +2228,15 @@ mod tests {
         let p: Vec<Player> = (1..=5)
             .map(|i| player(i, Some(2000 - (i - 1) * 300), None))
             .collect();
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
         let round = pair_round_weighted(1, &p, &elo_settings(), &[], &present, &[], None);
 
-        assert_eq!(round.bye, Some(p[4].id), "the weakest player takes the bye");
+        assert_eq!(
+            round.bye,
+            Some(p[4].tournament_id.unwrap()),
+            "the weakest player takes the bye"
+        );
         assert_eq!(round.boards.len(), 2);
     }
 
@@ -2157,15 +2252,23 @@ mod tests {
             player(3, Some(1500), None),
             player(4, Some(1450), None),
         ];
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let settings = elo_settings();
 
         // 1950 (p1) beat 2000 (p0); 1450 (p3) beat 1500 (p2).
         let r1 = completed_round(
             1,
             &[
-                (p[1].id, p[0].id, Winner::Player1),
-                (p[3].id, p[2].id, Winner::Player1),
+                (
+                    p[1].tournament_id.unwrap(),
+                    p[0].tournament_id.unwrap(),
+                    Winner::Player1,
+                ),
+                (
+                    p[3].tournament_id.unwrap(),
+                    p[2].tournament_id.unwrap(),
+                    Winner::Player1,
+                ),
             ],
             None,
         );
@@ -2173,15 +2276,27 @@ mod tests {
         let round = pair_round_weighted(2, &p, &settings, &[r1], &present, &[], None);
         let pairs = board_pairs(&round);
         // No rematch of the round-1 boards.
-        assert!(!pairs.contains(&unord(p[0].id, p[1].id)));
-        assert!(!pairs.contains(&unord(p[2].id, p[3].id)));
+        assert!(!pairs.contains(&unord(
+            p[0].tournament_id.unwrap(),
+            p[1].tournament_id.unwrap()
+        )));
+        assert!(!pairs.contains(&unord(
+            p[2].tournament_id.unwrap(),
+            p[3].tournament_id.unwrap()
+        )));
         // Winners (raised estimates) meet, losers meet.
         assert!(
-            pairs.contains(&unord(p[1].id, p[3].id)),
+            pairs.contains(&unord(
+                p[1].tournament_id.unwrap(),
+                p[3].tournament_id.unwrap()
+            )),
             "the two winners are paired"
         );
         assert!(
-            pairs.contains(&unord(p[0].id, p[2].id)),
+            pairs.contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[2].tournament_id.unwrap()
+            )),
             "the two losers are paired"
         );
     }
@@ -2197,7 +2312,7 @@ mod tests {
             player(3, Some(1800), None), // X2 (weakest)
             player(4, Some(1000), None), // Y (lower group)
         ];
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let settings = TournamentSettings {
             macmahon_thresholds: vec![MacMahonThreshold::elo(1500)], // X0..X2 on 1 point, Y on 0
             ..Default::default()
@@ -2205,7 +2320,10 @@ mod tests {
 
         let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);
         assert!(
-            board_pairs(&round).contains(&unord(p[2].id, p[3].id)),
+            board_pairs(&round).contains(&unord(
+                p[2].tournament_id.unwrap(),
+                p[3].tournament_id.unwrap()
+            )),
             "the weakest of the upper group should float down"
         );
     }
@@ -2222,7 +2340,7 @@ mod tests {
             player(3, Some(1300), None), // L1 (median)
             player(4, Some(1200), None), // L2
         ];
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let base = TournamentSettings {
             macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
@@ -2234,7 +2352,10 @@ mod tests {
         };
         let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], None);
         assert!(
-            board_pairs(&round).contains(&unord(p[0].id, p[1].id)),
+            board_pairs(&round).contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[1].tournament_id.unwrap()
+            )),
             "classic Swiss floats up the strongest of the group (L0)"
         );
 
@@ -2244,7 +2365,10 @@ mod tests {
         };
         let round = pair_round_weighted(1, &p, &median, &[], &present, &[], None);
         assert!(
-            board_pairs(&round).contains(&unord(p[0].id, p[2].id)),
+            board_pairs(&round).contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[2].tournament_id.unwrap()
+            )),
             "median Swiss floats up the median of the group (L1)"
         );
     }
@@ -2260,7 +2384,7 @@ mod tests {
             player(3, Some(1800), None), // X2 (weakest)
             player(4, Some(1000), None), // Y (lower group)
         ];
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let base = TournamentSettings {
             macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
@@ -2272,7 +2396,10 @@ mod tests {
         };
         let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], None);
         assert!(
-            board_pairs(&round).contains(&unord(p[2].id, p[3].id)),
+            board_pairs(&round).contains(&unord(
+                p[2].tournament_id.unwrap(),
+                p[3].tournament_id.unwrap()
+            )),
             "classic Swiss floats down the weakest of the group (X2)"
         );
 
@@ -2282,7 +2409,10 @@ mod tests {
         };
         let round = pair_round_weighted(1, &p, &median, &[], &present, &[], None);
         assert!(
-            board_pairs(&round).contains(&unord(p[1].id, p[3].id)),
+            board_pairs(&round).contains(&unord(
+                p[1].tournament_id.unwrap(),
+                p[3].tournament_id.unwrap()
+            )),
             "median Swiss floats down the median of the group (X1)"
         );
     }
@@ -2299,7 +2429,7 @@ mod tests {
             player(4, Some(1400), None), // P3
             player(5, Some(1200), None), // P4 (weakest)
         ];
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
         let classic = TournamentSettings {
             floater_style: FloaterStyle::Classic,
@@ -2308,7 +2438,7 @@ mod tests {
         let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], None);
         assert_eq!(
             round.bye,
-            Some(p[4].id),
+            Some(p[4].tournament_id.unwrap()),
             "classic Swiss gives the bye to the weakest of the group (P4)"
         );
 
@@ -2319,7 +2449,7 @@ mod tests {
         let round = pair_round_weighted(1, &p, &median, &[], &present, &[], None);
         assert_eq!(
             round.bye,
-            Some(p[2].id),
+            Some(p[2].tournament_id.unwrap()),
             "median Swiss gives the bye to the median of the group (P2)"
         );
     }
@@ -2354,7 +2484,7 @@ mod tests {
             player(4, Some(1400), Some("Y")),
             player(5, Some(1200), None),
         ];
-        let id = |i: usize| p[i].id;
+        let id = |i: usize| p[i].tournament_id.unwrap();
         let r1 = completed_round(
             1,
             &[
@@ -2368,14 +2498,12 @@ mod tests {
             ..Default::default()
         };
         let scores = compute_scores(&p, &settings, &[r1]);
-        let by_player: HashMap<Uuid, &Player> = p.iter().map(|q| (q.id, q)).collect();
-        let free: Vec<Uuid> = p.iter().map(|q| q.id).collect();
-        let free_tid: Vec<u32> = free.iter().map(|id| scores.tid_of(id).unwrap()).collect();
-        let fold_map = fold_ranks(&scores, &by_player, &free);
+        let free: Vec<u32> = p.iter().map(|q| q.tournament_id.unwrap()).collect();
+        let free_tid = &free;
         let (mut lo, mut hi) = (u32::MAX, 0u32);
         let (mut mm_lo, mut mm_hi) = (u32::MAX, 0u32);
         for &pid in &free {
-            let s = scores.get(&pid);
+            let s = scores.get_tid(pid);
             lo = lo.min(s.points);
             hi = hi.max(s.points);
             mm_lo = mm_lo.min(s.macmahon);
@@ -2385,17 +2513,17 @@ mod tests {
         let exempt_clubs = HashSet::new();
         // Tournament-number-indexed views, as `PairingModel::build` makes them.
         let cap = scores.tid_capacity();
-        let mut fold: Vec<Option<FoldInfo>> = vec![None; cap];
-        for (id, f) in &fold_map {
-            fold[scores.tid_of(id).unwrap() as usize] = Some(*f);
-        }
+        let mut rating_by_tid = vec![1u32; cap];
         let mut club_norm: Vec<Option<String>> = vec![None; cap];
         for q in &p {
-            club_norm[scores.tid_of(&q.id).unwrap() as usize] = q
+            let t = q.tournament_id.unwrap();
+            rating_by_tid[t as usize] = q.rating.unwrap_or(1);
+            club_norm[t as usize] = q
                 .club
                 .as_ref()
                 .map(|c| TournamentSettings::normalize_club(c));
         }
+        let fold = fold_ranks(&scores, &rating_by_tid, &free, cap);
         let empty_elo = vec![0i64; cap];
         let empty_rank = vec![0i128; cap];
         let ctx = Ctx {
@@ -2411,7 +2539,12 @@ mod tests {
             max_gap: (hi - lo) as i128,
             min_points: lo as i128,
             max_mm_gap: (mm_hi - mm_lo) as i128,
-            max_group: fold_map.values().map(|f| f.group_size).max().unwrap_or(0) as i128,
+            max_group: fold
+                .iter()
+                .flatten()
+                .map(|f| f.group_size)
+                .max()
+                .unwrap_or(0) as i128,
             free_count: free.len() as i128,
             elo: &empty_elo,
             elo_rank: &empty_rank,
@@ -2460,7 +2593,10 @@ mod tests {
         let p: Vec<Player> = (1..=4)
             .map(|i| player(i, Some(2000 - i * 10), None))
             .collect();
-        let boards = [(p[0].id, p[1].id), (p[2].id, p[3].id)];
+        let boards = [
+            (p[0].tournament_id.unwrap(), p[1].tournament_id.unwrap()),
+            (p[2].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
+        ];
 
         let ex = explain_pairing(1, &p, &TournamentSettings::default(), &[], &boards, None);
 
@@ -2487,7 +2623,10 @@ mod tests {
         let p: Vec<Player> = (1..=4)
             .map(|i| player(i, Some(2000 - i * 10), None))
             .collect();
-        let boards = [(p[0].id, p[2].id), (p[1].id, p[3].id)];
+        let boards = [
+            (p[0].tournament_id.unwrap(), p[2].tournament_id.unwrap()),
+            (p[1].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
+        ];
 
         let ex = explain_pairing(1, &p, &TournamentSettings::default(), &[], &boards, None);
 
@@ -2514,10 +2653,10 @@ mod tests {
             macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
         };
-        let present: Vec<Uuid> = p.iter().map(|x| x.id).collect();
+        let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);
 
-        let boards: Vec<(Uuid, Uuid)> = round
+        let boards: Vec<(u32, u32)> = round
             .boards
             .iter()
             .map(|b| (b.player1, b.player2))
@@ -2525,7 +2664,7 @@ mod tests {
         let ex = explain_pairing(1, &p, &settings, &[], &boards, round.bye);
 
         // Re-derive the units independently through a fresh model and compare.
-        let mut free: Vec<Uuid> = boards.iter().flat_map(|&(a, b)| [a, b]).collect();
+        let mut free: Vec<u32> = boards.iter().flat_map(|&(a, b)| [a, b]).collect();
         if let Some(b) = round.bye {
             free.push(b);
         }
@@ -2545,7 +2684,7 @@ mod tests {
 
     // --- Counterfactual ---------------------------------------------------
 
-    fn changed_pairs(cf: &Counterfactual) -> HashSet<(Uuid, Uuid)> {
+    fn changed_pairs(cf: &Counterfactual) -> HashSet<(u32, u32)> {
         cf.changed
             .iter()
             .map(|b| unord(b.player1, b.player2.unwrap_or(PHANTOM)))
@@ -2560,7 +2699,10 @@ mod tests {
         let p: Vec<Player> = (1..=4)
             .map(|i| player(i, Some(2000 - i * 10), None))
             .collect();
-        let boards = [(p[0].id, p[2].id), (p[1].id, p[3].id)];
+        let boards = [
+            (p[0].tournament_id.unwrap(), p[2].tournament_id.unwrap()),
+            (p[1].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
+        ];
 
         let cf = counterfactual_force(
             1,
@@ -2569,18 +2711,24 @@ mod tests {
             &[],
             &boards,
             None,
-            p[0].id,
-            p[1].id,
+            p[0].tournament_id.unwrap(),
+            p[1].tournament_id.unwrap(),
         );
 
         assert!(cf.scoped_out.is_none());
         let changed = changed_pairs(&cf);
         assert!(
-            changed.contains(&unord(p[0].id, p[1].id)),
+            changed.contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[1].tournament_id.unwrap()
+            )),
             "the forced board appears"
         );
         assert!(
-            changed.contains(&unord(p[2].id, p[3].id)),
+            changed.contains(&unord(
+                p[2].tournament_id.unwrap(),
+                p[3].tournament_id.unwrap()
+            )),
             "its forced completion appears"
         );
         assert_eq!(changed.len(), 2);
@@ -2594,7 +2742,10 @@ mod tests {
         let p: Vec<Player> = (1..=4)
             .map(|i| player(i, Some(2000 - i * 10), None))
             .collect();
-        let boards = [(p[0].id, p[2].id), (p[1].id, p[3].id)];
+        let boards = [
+            (p[0].tournament_id.unwrap(), p[2].tournament_id.unwrap()),
+            (p[1].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
+        ];
 
         let cf = counterfactual_force(
             1,
@@ -2603,8 +2754,8 @@ mod tests {
             &[],
             &boards,
             None,
-            p[0].id,
-            p[2].id,
+            p[0].tournament_id.unwrap(),
+            p[2].tournament_id.unwrap(),
         );
 
         assert!(cf.changed.is_empty());
@@ -2619,7 +2770,10 @@ mod tests {
         let p: Vec<Player> = (1..=4)
             .map(|i| player(i, Some(2000 - i * 10), None))
             .collect();
-        let boards = [(p[0].id, p[2].id), (p[1].id, p[3].id)];
+        let boards = [
+            (p[0].tournament_id.unwrap(), p[2].tournament_id.unwrap()),
+            (p[1].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
+        ];
 
         let cf = counterfactual_force(
             1,
@@ -2628,8 +2782,8 @@ mod tests {
             &[],
             &boards,
             None,
-            p[0].id,
-            p[1].id,
+            p[0].tournament_id.unwrap(),
+            p[1].tournament_id.unwrap(),
         );
 
         let fold = cf.cost_delta.iter().find(|d| d.rule == RuleId::Fold);
@@ -2651,11 +2805,13 @@ mod tests {
             &p,
             &TournamentSettings::default(),
             &[],
-            &p.iter().map(|x| x.id).collect::<Vec<_>>(),
+            &p.iter()
+                .map(|x| x.tournament_id.unwrap())
+                .collect::<Vec<_>>(),
             &[],
             None,
         );
-        let boards: Vec<(Uuid, Uuid)> = round
+        let boards: Vec<(u32, u32)> = round
             .boards
             .iter()
             .map(|b| (b.player1, b.player2))
@@ -2689,7 +2845,10 @@ mod tests {
         let p: Vec<Player> = (1..=4)
             .map(|i| player(i, Some(2000 - i * 10), None))
             .collect();
-        let boards = [(p[0].id, p[2].id), (p[1].id, p[3].id)];
+        let boards = [
+            (p[0].tournament_id.unwrap(), p[2].tournament_id.unwrap()),
+            (p[1].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
+        ];
 
         let cf = counterfactual_forbid(
             1,
@@ -2698,13 +2857,16 @@ mod tests {
             &[],
             &boards,
             None,
-            p[0].id,
-            p[2].id,
+            p[0].tournament_id.unwrap(),
+            p[2].tournament_id.unwrap(),
         );
 
         let changed = changed_pairs(&cf);
         assert!(
-            !changed.contains(&unord(p[0].id, p[2].id)),
+            !changed.contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[2].tournament_id.unwrap()
+            )),
             "the forbidden board is gone"
         );
         assert!(!cf.changed.is_empty());
@@ -2721,7 +2883,10 @@ mod tests {
         let p: Vec<Player> = (1..=4)
             .map(|i| player(i, Some(2000 - i * 10), None))
             .collect();
-        let boards = [(p[0].id, p[2].id), (p[1].id, p[3].id)];
+        let boards = [
+            (p[0].tournament_id.unwrap(), p[2].tournament_id.unwrap()),
+            (p[1].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
+        ];
 
         let cf = counterfactual_forbid(
             1,
@@ -2730,8 +2895,8 @@ mod tests {
             &[],
             &boards,
             None,
-            p[0].id,
-            p[1].id,
+            p[0].tournament_id.unwrap(),
+            p[1].tournament_id.unwrap(),
         );
 
         assert!(cf.changed.is_empty());
@@ -2749,11 +2914,13 @@ mod tests {
             &p,
             &TournamentSettings::default(),
             &[],
-            &p.iter().map(|x| x.id).collect::<Vec<_>>(),
+            &p.iter()
+                .map(|x| x.tournament_id.unwrap())
+                .collect::<Vec<_>>(),
             &[],
             None,
         );
-        let boards: Vec<(Uuid, Uuid)> = round
+        let boards: Vec<(u32, u32)> = round
             .boards
             .iter()
             .map(|b| (b.player1, b.player2))
@@ -2796,11 +2963,13 @@ mod tests {
             &p,
             &TournamentSettings::default(),
             &[],
-            &p.iter().map(|x| x.id).collect::<Vec<_>>(),
+            &p.iter()
+                .map(|x| x.tournament_id.unwrap())
+                .collect::<Vec<_>>(),
             &[],
             None,
         );
-        let boards: Vec<(Uuid, Uuid)> = round
+        let boards: Vec<(u32, u32)> = round
             .boards
             .iter()
             .map(|b| (b.player1, b.player2))

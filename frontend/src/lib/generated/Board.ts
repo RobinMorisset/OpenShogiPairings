@@ -8,7 +8,14 @@ import type { Winner } from "./Winner";
  * A single board (game) in a round: two paired players and, once played, a
  * result. `result` is `None` while the game hasn't been played yet.
  */
-export type Board = { player1: string, player2: string, 
+export type Board = { 
+/**
+ * The two players, by **tournament number** (`Player::tournament_id`), the
+ * dense per-tournament key — not the registration `Uuid`. Rounds are only
+ * created after finalization, when every player has a number, so scoring and
+ * pairing index players directly without a `Uuid → number` lookup.
+ */
+player1: number, player2: number, 
 /**
  * The *actual* winner of the game, used for end-of-tournament ELO and for
  * the sign shown in the results cell. `None` until the game is decided.

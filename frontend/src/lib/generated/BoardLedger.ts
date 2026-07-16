@@ -7,4 +7,4 @@ import type { RuleId } from "./RuleId";
  * priority order, plus the highest-priority one — the rule that "bound" the
  * pairing. `player2` is `None` for the bye.
  */
-export type BoardLedger = { player1: string, player2?: string, contributions: Array<RuleContribution>, binding?: RuleId, };
+export type BoardLedger = { player1: number, player2?: number, contributions: Array<RuleContribution>, binding?: RuleId, };

@@ -364,7 +364,7 @@ mod tests {
         }
     }
 
-    fn board(a: Uuid, b: Uuid, winner: Winner) -> Board {
+    fn board(a: u32, b: u32, winner: Winner) -> Board {
         Board {
             result: Some(winner),
             ..Board::pending(a, b, None, PairingSource::Swiss)
@@ -395,11 +395,33 @@ mod tests {
         let long_ab = Board {
             result: Some(Winner::Player1),
             long: true,
-            ..Board::pending(a.id, b.id, None, PairingSource::Swiss)
+            ..Board::pending(
+                a.tournament_id.unwrap(),
+                b.tournament_id.unwrap(),
+                None,
+                PairingSource::Swiss,
+            )
         };
         let rounds = vec![
-            round(1, vec![long_ab, board(c.id, d.id, Winner::Player1)]),
-            round(2, vec![board(b.id, c.id, Winner::Player1)]),
+            round(
+                1,
+                vec![
+                    long_ab,
+                    board(
+                        c.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ),
+                ],
+            ),
+            round(
+                2,
+                vec![board(
+                    b.tournament_id.unwrap(),
+                    c.tournament_id.unwrap(),
+                    Winner::Player1,
+                )],
+            ),
         ];
         let players = vec![a.clone(), b.clone(), c.clone(), d.clone()];
         let standings = compute_standings(&players, &TournamentSettings::default(), &rounds);
@@ -428,15 +450,31 @@ mod tests {
             round(
                 1,
                 vec![
-                    board(a.id, c.id, Winner::Player1), // A beats C
-                    board(b.id, d.id, Winner::Player2), // D beats B
+                    board(
+                        a.tournament_id.unwrap(),
+                        c.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ), // A beats C
+                    board(
+                        b.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player2,
+                    ), // D beats B
                 ],
             ),
             round(
                 2,
                 vec![
-                    board(a.id, d.id, Winner::Player1), // A beats D
-                    board(b.id, c.id, Winner::Player1), // B beats C
+                    board(
+                        a.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ), // A beats D
+                    board(
+                        b.tournament_id.unwrap(),
+                        c.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ), // B beats C
                 ],
             ),
         ];
@@ -460,7 +498,14 @@ mod tests {
         // starts at 1 MacMahon point (now 2 after the win), B at 1.
         let a = player(1, Some(2000));
         let b = player(2, Some(1600));
-        let rounds = vec![round(1, vec![board(a.id, b.id, Winner::Player1)])];
+        let rounds = vec![round(
+            1,
+            vec![board(
+                a.tournament_id.unwrap(),
+                b.tournament_id.unwrap(),
+                Winner::Player1,
+            )],
+        )];
         let settings = TournamentSettings {
             macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
             ..Default::default()
@@ -498,7 +543,14 @@ mod tests {
         // win, so A is on 1 point rather than 2.
         let a = player(1, Some(2000));
         let b = player(2, Some(1000));
-        let rounds = vec![round(1, vec![board(a.id, b.id, Winner::Player1)])];
+        let rounds = vec![round(
+            1,
+            vec![board(
+                a.tournament_id.unwrap(),
+                b.tournament_id.unwrap(),
+                Winner::Player1,
+            )],
+        )];
         let settings = TournamentSettings {
             macmahon_thresholds: vec![MacMahonThreshold {
                 criterion: ThresholdCriterion::Elo { value: 1500 },
@@ -540,8 +592,22 @@ mod tests {
         let b = player(2, Some(1800));
         let c = player(3, Some(1700));
         let rounds = vec![
-            round(1, vec![board(a.id, b.id, Winner::Player1)]),
-            round(2, vec![board(a.id, c.id, Winner::Player1)]),
+            round(
+                1,
+                vec![board(
+                    a.tournament_id.unwrap(),
+                    b.tournament_id.unwrap(),
+                    Winner::Player1,
+                )],
+            ),
+            round(
+                2,
+                vec![board(
+                    a.tournament_id.unwrap(),
+                    c.tournament_id.unwrap(),
+                    Winner::Player1,
+                )],
+            ),
         ];
         let settings = TournamentSettings {
             macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
@@ -568,22 +634,46 @@ mod tests {
             round(
                 1,
                 vec![
-                    board(a.id, b.id, Winner::Player1),
-                    board(c.id, d.id, Winner::Player1),
+                    board(
+                        a.tournament_id.unwrap(),
+                        b.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ),
+                    board(
+                        c.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ),
                 ],
             ),
             round(
                 2,
                 vec![
-                    board(a.id, c.id, Winner::Player1),
-                    board(b.id, d.id, Winner::Player1),
+                    board(
+                        a.tournament_id.unwrap(),
+                        c.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ),
+                    board(
+                        b.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ),
                 ],
             ),
             round(
                 3,
                 vec![
-                    board(a.id, d.id, Winner::Player1),
-                    board(b.id, c.id, Winner::Player1),
+                    board(
+                        a.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ),
+                    board(
+                        b.tournament_id.unwrap(),
+                        c.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ),
                 ],
             ),
         ];
@@ -611,22 +701,46 @@ mod tests {
             round(
                 1,
                 vec![
-                    board(a.id, b.id, Winner::Player1),
-                    board(c.id, d.id, Winner::Player1),
+                    board(
+                        a.tournament_id.unwrap(),
+                        b.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ),
+                    board(
+                        c.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ),
                 ],
             ),
             round(
                 2,
                 vec![
-                    board(a.id, c.id, Winner::Player2),
-                    board(b.id, d.id, Winner::Player1),
+                    board(
+                        a.tournament_id.unwrap(),
+                        c.tournament_id.unwrap(),
+                        Winner::Player2,
+                    ),
+                    board(
+                        b.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ),
                 ],
             ),
             round(
                 3,
                 vec![
-                    board(a.id, d.id, Winner::Player1),
-                    board(b.id, c.id, Winner::Player2),
+                    board(
+                        a.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ),
+                    board(
+                        b.tournament_id.unwrap(),
+                        c.tournament_id.unwrap(),
+                        Winner::Player2,
+                    ),
                 ],
             ),
         ];
@@ -666,7 +780,14 @@ mod tests {
         assert_eq!(of(&none, a.id), 1400);
         assert_eq!(of(&none, b.id), 1800);
 
-        let rounds = vec![round(1, vec![board(a.id, b.id, Winner::Player1)])]; // A upsets B
+        let rounds = vec![round(
+            1,
+            vec![board(
+                a.tournament_id.unwrap(),
+                b.tournament_id.unwrap(),
+                Winner::Player1,
+            )],
+        )]; // A upsets B
         let after = compute_standings(&[a.clone(), b.clone()], &elo_mode, &rounds);
         assert!(of(&after, a.id) > 1400, "the winner's estimate rises");
         assert!(of(&after, b.id) < 1800, "the loser's estimate falls");
@@ -722,17 +843,41 @@ mod tests {
             round(
                 1,
                 vec![
-                    board(e.id, a.id, Winner::Player1), // E beats A
-                    board(f.id, c.id, Winner::Player2), // C beats F
-                    board(b.id, d.id, Winner::Player2), // D beats B
+                    board(
+                        e.tournament_id.unwrap(),
+                        a.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ), // E beats A
+                    board(
+                        f.tournament_id.unwrap(),
+                        c.tournament_id.unwrap(),
+                        Winner::Player2,
+                    ), // C beats F
+                    board(
+                        b.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player2,
+                    ), // D beats B
                 ],
             ),
             round(
                 2,
                 vec![
-                    board(e.id, b.id, Winner::Player2), // B beats E
-                    board(f.id, d.id, Winner::Player1), // F beats D
-                    board(a.id, c.id, Winner::Player2), // C beats A
+                    board(
+                        e.tournament_id.unwrap(),
+                        b.tournament_id.unwrap(),
+                        Winner::Player2,
+                    ), // B beats E
+                    board(
+                        f.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ), // F beats D
+                    board(
+                        a.tournament_id.unwrap(),
+                        c.tournament_id.unwrap(),
+                        Winner::Player2,
+                    ), // C beats A
                 ],
             ),
         ];
@@ -788,19 +933,49 @@ mod tests {
             round(
                 1,
                 vec![
-                    board(a.id, b.id, Winner::Player1), // A beats B
-                    board(c.id, d.id, Winner::Player1), // C beats D
+                    board(
+                        a.tournament_id.unwrap(),
+                        b.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ), // A beats B
+                    board(
+                        c.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ), // C beats D
                 ],
             ),
             round(
                 2,
                 vec![
-                    board(a.id, c.id, Winner::Player1), // A beats C
-                    board(b.id, d.id, Winner::Player1), // B beats D
+                    board(
+                        a.tournament_id.unwrap(),
+                        c.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ), // A beats C
+                    board(
+                        b.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ), // B beats D
                 ],
             ),
-            round(3, vec![board(b.id, c.id, Winner::Player1)]), // B beats C
-            round(4, vec![board(c.id, e.id, Winner::Player1)]), // C beats E
+            round(
+                3,
+                vec![board(
+                    b.tournament_id.unwrap(),
+                    c.tournament_id.unwrap(),
+                    Winner::Player1,
+                )],
+            ), // B beats C
+            round(
+                4,
+                vec![board(
+                    c.tournament_id.unwrap(),
+                    e.tournament_id.unwrap(),
+                    Winner::Player1,
+                )],
+            ), // C beats E
         ];
         let players = vec![a.clone(), b.clone(), c.clone(), d.clone(), e.clone()];
         let settings = TournamentSettings {
@@ -844,15 +1019,31 @@ mod tests {
             round(
                 1,
                 vec![
-                    board(a.id, c.id, Winner::Player1), // A beats C
-                    board(b.id, d.id, Winner::Player1), // B beats D
+                    board(
+                        a.tournament_id.unwrap(),
+                        c.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ), // A beats C
+                    board(
+                        b.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player1,
+                    ), // B beats D
                 ],
             ),
             round(
                 2,
                 vec![
-                    board(a.id, d.id, Winner::Player2), // D beats A
-                    board(b.id, c.id, Winner::Player2), // C beats B
+                    board(
+                        a.tournament_id.unwrap(),
+                        d.tournament_id.unwrap(),
+                        Winner::Player2,
+                    ), // D beats A
+                    board(
+                        b.tournament_id.unwrap(),
+                        c.tournament_id.unwrap(),
+                        Winner::Player2,
+                    ), // C beats B
                 ],
             ),
         ];

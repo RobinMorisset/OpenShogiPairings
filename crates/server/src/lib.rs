@@ -530,7 +530,7 @@ mod tests {
         assert_eq!(rounds.len(), 1);
         assert_eq!(rounds[0]["number"], 1);
         assert_eq!(rounds[0]["boards"].as_array().unwrap().len(), 1); // 3 → 1 board
-        assert!(rounds[0]["bye"].is_string()); // + a bye
+        assert!(rounds[0]["bye"].is_number()); // + a bye
     }
 
     #[tokio::test]

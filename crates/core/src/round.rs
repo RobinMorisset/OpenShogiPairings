@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use uuid::Uuid;
 
 /// Which player won a board. Colour (sente/gote) is chosen at random per game
 /// and isn't tracked, so the result is simply which of the two players won.
@@ -167,8 +166,12 @@ pub enum NoShow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Board {
-    pub player1: Uuid,
-    pub player2: Uuid,
+    /// The two players, by **tournament number** (`Player::tournament_id`), the
+    /// dense per-tournament key — not the registration `Uuid`. Rounds are only
+    /// created after finalization, when every player has a number, so scoring and
+    /// pairing index players directly without a `Uuid → number` lookup.
+    pub player1: u32,
+    pub player2: u32,
     /// The *actual* winner of the game, used for end-of-tournament ELO and for
     /// the sign shown in the results cell. `None` until the game is decided.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -214,8 +217,8 @@ impl Board {
     /// A not-yet-played board between two players, tagged with how it was paired
     /// and (for engine pairings) its frozen float.
     pub fn pending(
-        player1: Uuid,
-        player2: Uuid,
+        player1: u32,
+        player2: u32,
         points_diff: Option<i32>,
         source: PairingSource,
     ) -> Self {
@@ -270,7 +273,7 @@ impl Board {
     /// The id of the player who *did* show up — the one credited the free point,
     /// exactly like a bye — when exactly one side was a no-show. `None` when both
     /// showed up or [`NoShow::Both`] (neither did, so nobody is credited).
-    pub fn no_show_opponent(&self) -> Option<Uuid> {
+    pub fn no_show_opponent(&self) -> Option<u32> {
         match self.no_show {
             Some(NoShow::Player1) => Some(self.player2),
             Some(NoShow::Player2) => Some(self.player1),
@@ -294,7 +297,7 @@ impl Board {
 
     /// The loser (effective) of a decided board, if any — the side that isn't the
     /// effective winner. `None` while the board is unplayed.
-    pub fn effective_loser(&self, wiel_rule: bool) -> Option<Uuid> {
+    pub fn effective_loser(&self, wiel_rule: bool) -> Option<u32> {
         self.effective_winner(wiel_rule).map(|w| match w {
             Winner::Player1 => self.player2,
             Winner::Player2 => self.player1,
@@ -302,7 +305,7 @@ impl Board {
     }
 
     /// The player id of the effective winner, if the board is decided.
-    pub fn winner_id(&self, wiel_rule: bool) -> Option<Uuid> {
+    pub fn winner_id(&self, wiel_rule: bool) -> Option<u32> {
         self.effective_winner(wiel_rule).map(|w| match w {
             Winner::Player1 => self.player1,
             Winner::Player2 => self.player2,
@@ -319,7 +322,7 @@ pub struct Round {
     pub number: u32,
     pub boards: Vec<Board>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bye: Option<Uuid>,
+    pub bye: Option<u32>,
     /// Cup players who advance this round without an opponent — the rare cup bye
     /// that arises when the player they would have faced vanished (both players
     /// in a feeding bracket match were no-shows). Credited a point exactly like
@@ -327,12 +330,12 @@ pub struct Round {
     /// Separate from `bye` because several can occur at once and a Swiss bye may
     /// coexist with them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub cup_byes: Vec<Uuid>,
+    pub cup_byes: Vec<u32>,
     /// Players marked absent for this round (excluded from pairing). Recorded so
     /// the next round's draft can default to the same absentees, and so a
     /// deliberate absence is distinguishable from a late joiner.
     #[serde(default)]
-    pub absent: Vec<Uuid>,
+    pub absent: Vec<u32>,
     /// Whether the round has been completed (all games played and locked in).
     /// A new round must not be started until the current one is completed.
     #[serde(default)]
@@ -362,12 +365,12 @@ pub struct RoundDraft {
     pub number: u32,
     /// Players marked absent (excluded from pairing).
     #[serde(default)]
-    pub absent: Vec<Uuid>,
+    pub absent: Vec<u32>,
     /// Pairings the referee has fixed by hand (the `result` field is unused
     /// here). Remaining present players are paired automatically.
     #[serde(default)]
     pub forced_boards: Vec<Board>,
     /// A player forced to take the bye (only valid with an odd present count).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub forced_bye: Option<Uuid>,
+    pub forced_bye: Option<u32>,
 }

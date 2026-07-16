@@ -30,7 +30,7 @@ cup_podium: CupPodium | null,
  * Players the cup will pair in the round being drafted, so the draft UI can
  * keep them out of the Swiss customization. Empty otherwise.
  */
-draft_cup_players: Array<string>, 
+draft_cup_players: Array<number>, 
 /**
  * Suggested handicap per board, indexed like `tournament.rounds[i].boards[j]`.
  * Computed from current ratings regardless of `handicap_policy` — the

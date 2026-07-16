@@ -93,7 +93,7 @@ pub fn import_american_grid(text: &str) -> Result<Tournament, GridImportError> {
 pub(crate) fn build_tournament(
     name: Option<&str>,
     rows: Vec<RawRow>,
-) -> Result<(Tournament, HashMap<u32, uuid::Uuid>), GridImportError> {
+) -> Result<(Tournament, HashMap<u32, u32>), GridImportError> {
     if rows.is_empty() {
         return Err(GridImportError::NoPlayers);
     }
@@ -120,11 +120,11 @@ pub(crate) fn build_tournament(
     {
         tournament.settings.half_point_absences = true;
     }
-    let mut id_of: HashMap<u32, uuid::Uuid> = HashMap::new();
+    let mut uuid_of: HashMap<u32, uuid::Uuid> = HashMap::new();
     let mut ordered = rows.clone();
     ordered.sort_by_key(|r| r.number);
     for row in &ordered {
-        if id_of.contains_key(&row.number) {
+        if uuid_of.contains_key(&row.number) {
             return Err(GridImportError::DuplicateNumber(row.number));
         }
         let id = tournament
@@ -138,9 +138,21 @@ pub(crate) fn build_tournament(
                 club: None,
             })?
             .id;
-        id_of.insert(row.number, id);
+        uuid_of.insert(row.number, id);
     }
     tournament.finalize_registration()?;
+
+    // Rounds are tid-native, so map each grid "Nr" to the tournament number
+    // finalization assigned (by rating, so generally *not* the grid Nr).
+    let tid_by_uuid: HashMap<uuid::Uuid, u32> = tournament
+        .players
+        .iter()
+        .filter_map(|p| p.tournament_id.map(|t| (p.id, t)))
+        .collect();
+    let id_of: HashMap<u32, u32> = uuid_of
+        .iter()
+        .map(|(&nr, uid)| (nr, tid_by_uuid[uid]))
+        .collect();
 
     let by_number: HashMap<u32, &RawRow> = rows.iter().map(|r| (r.number, r)).collect();
 
@@ -156,11 +168,11 @@ fn rebuild_round(
     r: usize,
     rows: &[RawRow],
     by_number: &HashMap<u32, &RawRow>,
-    id_of: &HashMap<u32, uuid::Uuid>,
+    id_of: &HashMap<u32, u32>,
 ) -> Result<(), GridImportError> {
     let round_number = r as u32 + 1;
-    let mut absent: Vec<uuid::Uuid> = Vec::new();
-    let mut byes: Vec<uuid::Uuid> = Vec::new();
+    let mut absent: Vec<u32> = Vec::new();
+    let mut byes: Vec<u32> = Vec::new();
     let mut forced_boards: Vec<Board> = Vec::new();
     // (a, b, outcome-from-a's-view, handicap) for each game, collected once.
     let mut results: Vec<(u32, u32, Outcome, Option<Handicap>)> = Vec::new();
@@ -232,7 +244,7 @@ fn rebuild_round(
     // round's real bye and demote the rest to absences, warning about it.
     let mut byes = byes.into_iter();
     let forced_bye = byes.next();
-    let demoted: Vec<uuid::Uuid> = byes.collect();
+    let demoted: Vec<u32> = byes.collect();
     if !demoted.is_empty() {
         tracing::warn!(
             round = round_number,
@@ -531,7 +543,10 @@ mod tests {
 
     /// The board in a round that pairs the two named players.
     fn board<'a>(t: &'a Tournament, round: usize, a: &str, b: &str) -> &'a Board {
-        let (ai, bi) = (player(t, a).id, player(t, b).id);
+        let (ai, bi) = (
+            player(t, a).tournament_id.unwrap(),
+            player(t, b).tournament_id.unwrap(),
+        );
         t.rounds[round]
             .boards
             .iter()
@@ -565,12 +580,18 @@ Nr Name          Nat Elo  1   2   Pts
         assert_eq!(player(&t, "Beta").nationality.as_deref(), Some("JP"));
 
         // Byes landed on the right players.
-        assert_eq!(t.rounds[0].bye, Some(player(&t, "Gamma").id));
-        assert_eq!(t.rounds[1].bye, Some(player(&t, "Beta").id));
+        assert_eq!(
+            t.rounds[0].bye,
+            Some(player(&t, "Gamma").tournament_id.unwrap())
+        );
+        assert_eq!(
+            t.rounds[1].bye,
+            Some(player(&t, "Beta").tournament_id.unwrap())
+        );
 
         // Alpha beat Beta in round 1.
         let b = board(&t, 0, "Alpha", "Beta");
-        let alpha_is_p1 = b.player1 == player(&t, "Alpha").id;
+        let alpha_is_p1 = b.player1 == player(&t, "Alpha").tournament_id.unwrap();
         assert_eq!(
             b.effective_winner(false),
             Some(if alpha_is_p1 {
@@ -616,7 +637,7 @@ Nr Name       Nat Elo  1        Pts
         let game = b.handicap.expect("handicap set");
         assert_eq!(game.handicap, Handicap::Rook);
         // The giver is the higher-rated player, High.
-        let high_side = if b.player1 == player(&t, "High").id {
+        let high_side = if b.player1 == player(&t, "High").tournament_id.unwrap() {
             Winner::Player1
         } else {
             Winner::Player2
@@ -700,7 +721,10 @@ Nr Name    Nat Elo  1   Pts
 3  [C] [c] FR  1500 [0-] 0
 ";
         let t = import_american_grid(grid).unwrap();
-        assert_eq!(t.rounds[0].absent, vec![player(&t, "C").id]);
+        assert_eq!(
+            t.rounds[0].absent,
+            vec![player(&t, "C").tournament_id.unwrap()]
+        );
         assert_eq!(t.rounds[0].bye, None);
     }
 
@@ -718,8 +742,13 @@ Nr Name    Nat Elo  1   Pts
 4  [D] [d] FR  1700 [3-] 0
 ";
         let t = import_american_grid(grid).unwrap();
-        assert!(t.rounds[0].absent.contains(&player(&t, "B").id));
-        assert_eq!(t.rounds[0].bye, Some(player(&t, "A").id));
+        assert!(t.rounds[0]
+            .absent
+            .contains(&player(&t, "B").tournament_id.unwrap()));
+        assert_eq!(
+            t.rounds[0].bye,
+            Some(player(&t, "A").tournament_id.unwrap())
+        );
         let of = |last| {
             t.standings()
                 .into_iter()
@@ -746,7 +775,10 @@ Nr Name    Nat Elo  1   Pts
 ";
         let t = import_american_grid(grid).unwrap();
         assert!(t.settings.half_point_absences);
-        assert_eq!(t.rounds[0].absent, vec![player(&t, "C").id]);
+        assert_eq!(
+            t.rounds[0].absent,
+            vec![player(&t, "C").tournament_id.unwrap()]
+        );
         let of = |last| {
             t.standings()
                 .into_iter()
@@ -843,8 +875,8 @@ Nr Name    Nat Elo  1    Pts
         assert_eq!(t.rounds.len(), 1);
         let r = &t.rounds[0];
         // A (first in the file) keeps the bye; B is demoted to an absence.
-        assert_eq!(r.bye, Some(player(&t, "A").id));
-        assert_eq!(r.absent, vec![player(&t, "B").id]);
+        assert_eq!(r.bye, Some(player(&t, "A").tournament_id.unwrap()));
+        assert_eq!(r.absent, vec![player(&t, "B").tournament_id.unwrap()]);
         // The real game between C and D is still reconstructed and decided.
         assert!(board(&t, 0, "C", "D").result.is_some());
     }

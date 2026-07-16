@@ -9,7 +9,7 @@ export type Round = {
 /**
  * 1-based round number.
  */
-number: number, boards: Array<Board>, bye?: string | null, 
+number: number, boards: Array<Board>, bye?: number | null, 
 /**
  * Cup players who advance this round without an opponent — the rare cup bye
  * that arises when the player they would have faced vanished (both players
@@ -18,13 +18,13 @@ number: number, boards: Array<Board>, bye?: string | null,
  * Separate from `bye` because several can occur at once and a Swiss bye may
  * coexist with them.
  */
-cup_byes?: Array<string>, 
+cup_byes?: Array<number>, 
 /**
  * Players marked absent for this round (excluded from pairing). Recorded so
  * the next round's draft can default to the same absentees, and so a
  * deliberate absence is distinguishable from a late joiner.
  */
-absent: Array<string>, 
+absent: Array<number>, 
 /**
  * Whether the round has been completed (all games played and locked in).
  * A new round must not be started until the current one is completed.

@@ -258,19 +258,27 @@ impl Tournament {
     /// paired into a game (their results are referenced by every opponent's score
     /// record — mark them absent for future rounds instead).
     pub fn remove_player(&mut self, id: Uuid) -> Result<(), TournamentError> {
-        if let Some(cup) = &self.cup {
-            if cup.seed_order.contains(&id) {
+        // The player's tournament number, if finalized. A not-yet-numbered player is
+        // on no board and in no cup seed (both are keyed by number).
+        let tid = self
+            .players
+            .iter()
+            .find(|p| p.id == id)
+            .and_then(|p| p.tournament_id);
+        if let (Some(t), Some(cup)) = (tid, &self.cup) {
+            if cup.seed_order.contains(&t) {
                 return Err(TournamentError::CannotRemoveCupPlayer);
             }
         }
         // A started round's boards are what other players' opponent/defeated lists
         // are built from; once a player appears on one, removing them would dangle
         // those references (which the score tables index densely), so forbid it.
-        let has_played = self
-            .rounds
-            .iter()
-            .flat_map(|r| &r.boards)
-            .any(|b| b.player1 == id || b.player2 == id);
+        let has_played = tid.is_some_and(|t| {
+            self.rounds
+                .iter()
+                .flat_map(|r| &r.boards)
+                .any(|b| b.player1 == t || b.player2 == t)
+        });
         if has_played {
             return Err(TournamentError::CannotRemovePlayedPlayer);
         }
@@ -375,7 +383,7 @@ impl Tournament {
             let seed_order = eligible
                 .into_iter()
                 .take(size as usize)
-                .map(|p| p.id)
+                .map(|p| p.tournament_id.expect("finalized players have a number"))
                 .collect();
             self.cup = Some(Cup { size, seed_order });
         }
@@ -456,7 +464,7 @@ impl Tournament {
     /// The players the cup bracket will pair in the round currently being drafted
     /// (empty when there is no draft, no cup, or the draft round is past the cup).
     /// Lets clients keep those players out of the Swiss customization UI.
-    pub fn draft_cup_players(&self) -> Vec<Uuid> {
+    pub fn draft_cup_players(&self) -> Vec<u32> {
         let (Some(draft), Some(cup)) = (&self.draft, &self.cup) else {
             return Vec::new();
         };
@@ -539,16 +547,20 @@ impl Tournament {
                 round: stale.number,
             });
         }
-        let existing: HashSet<Uuid> = self.players.iter().map(|p| p.id).collect();
+        let existing: HashSet<u32> = self
+            .players
+            .iter()
+            .filter_map(|p| p.tournament_id)
+            .collect();
         // Default the new draft's absentees to the previous round's absentees,
         // plus anyone who was a no-show there — a no-show reads as "didn't turn
         // up", so it should carry over the same way an explicit absence does (the
         // referee can still uncheck it).
-        let default_absent: Vec<Uuid> = self
+        let default_absent: Vec<u32> = self
             .rounds
             .last()
             .map(|r| {
-                let mut absent: Vec<Uuid> = r.absent.clone();
+                let mut absent: Vec<u32> = r.absent.clone();
                 for board in &r.boards {
                     for (side, id) in [
                         (Winner::Player1, board.player1),
@@ -578,14 +590,18 @@ impl Tournament {
     /// confirmed; here we only check that every referenced player exists.
     pub fn update_draft(
         &mut self,
-        absent: Vec<Uuid>,
+        absent: Vec<u32>,
         forced_boards: Vec<Board>,
-        forced_bye: Option<Uuid>,
+        forced_bye: Option<u32>,
     ) -> Result<&RoundDraft, TournamentError> {
         if self.draft.is_none() {
             return Err(TournamentError::NoDraft);
         }
-        let known: HashSet<Uuid> = self.players.iter().map(|p| p.id).collect();
+        let known: HashSet<u32> = self
+            .players
+            .iter()
+            .filter_map(|p| p.tournament_id)
+            .collect();
         let referenced = absent
             .iter()
             .chain(forced_boards.iter().flat_map(|b| [&b.player1, &b.player2]))
@@ -633,12 +649,14 @@ impl Tournament {
     ) -> Result<&Round, TournamentError> {
         let draft = self.draft.clone().ok_or(TournamentError::NoDraft)?;
 
-        let absent: HashSet<Uuid> = draft.absent.iter().copied().collect();
-        let present: Vec<Uuid> = self
+        let absent: HashSet<u32> = draft.absent.iter().copied().collect();
+        // Present players, by tournament number (rounds are tid-native). Every
+        // player has a number here — a round is only confirmed post-finalization.
+        let present: Vec<u32> = self
             .players
             .iter()
-            .map(|p| p.id)
-            .filter(|id| !absent.contains(id))
+            .filter_map(|p| p.tournament_id)
+            .filter(|t| !absent.contains(t))
             .collect();
         if present.len() < MIN_PLAYERS_PER_ROUND {
             return Err(TournamentError::NotEnoughPresentPlayers {
@@ -671,7 +689,7 @@ impl Tournament {
             })
             .collect();
         let cup_byes = cup_pairings.byes;
-        let cup_players: HashSet<Uuid> = cup_boards
+        let cup_players: HashSet<u32> = cup_boards
             .iter()
             .flat_map(|b| [b.player1, b.player2])
             .chain(cup_byes.iter().copied())
@@ -680,7 +698,7 @@ impl Tournament {
         // Players still busy on an unresolved long game (a two-round board started
         // in an earlier round). They sit out this round's pairing entirely — like
         // cup players — while their long game finishes.
-        let busy_long: HashSet<Uuid> = self
+        let busy_long: HashSet<u32> = self
             .rounds
             .iter()
             .flat_map(|r| &r.boards)
@@ -689,15 +707,15 @@ impl Tournament {
             .collect();
 
         // The Swiss pool: present players not taken by the cup and not mid-long-game.
-        let swiss_present: Vec<Uuid> = present
+        let swiss_present: Vec<u32> = present
             .iter()
             .copied()
             .filter(|id| !cup_players.contains(id) && !busy_long.contains(id))
             .collect();
-        let swiss_set: HashSet<Uuid> = swiss_present.iter().copied().collect();
+        let swiss_set: HashSet<u32> = swiss_present.iter().copied().collect();
 
         // Validate the referee's forced boards/bye against the Swiss pool.
-        let mut placed: HashSet<Uuid> = HashSet::new();
+        let mut placed: HashSet<u32> = HashSet::new();
         for board in &draft.forced_boards {
             if board.player1 == board.player2 {
                 return Err(TournamentError::InvalidDraft(
@@ -777,11 +795,18 @@ impl Tournament {
         // Skipped by the simulator (see `confirm_round_unordered`): it never shows
         // the boards, and a full standings computation per round is the cost.
         if order_boards_for_display {
-            let rank_of: HashMap<Uuid, usize> = self
+            // Standings face callers by id; boards store numbers. Map through each
+            // player's number (this path is display-only, off the hot sim loop).
+            let tid_of: HashMap<Uuid, u32> = self
+                .players
+                .iter()
+                .filter_map(|p| p.tournament_id.map(|t| (p.id, t)))
+                .collect();
+            let rank_of: HashMap<u32, usize> = self
                 .standings()
                 .into_iter()
                 .enumerate()
-                .map(|(rank, s)| (s.player_id, rank))
+                .filter_map(|(rank, s)| tid_of.get(&s.player_id).map(|&t| (t, rank)))
                 .collect();
             boards.sort_by_key(|b| {
                 let is_cup = matches!(b.source, PairingSource::Cup { .. });
@@ -823,7 +848,7 @@ impl Tournament {
             .ok_or(TournamentError::RoundNotFound(round_number))?;
         let round = &self.rounds[idx];
         let completed = &self.rounds[..idx];
-        let swiss_boards: Vec<(Uuid, Uuid)> = round
+        let swiss_boards: Vec<(u32, u32)> = round
             .boards
             .iter()
             .filter(|b| matches!(b.source, PairingSource::Swiss))
@@ -851,8 +876,8 @@ impl Tournament {
     pub fn explain_counterfactual(
         &self,
         round_number: u32,
-        a: Uuid,
-        b: Uuid,
+        a: u32,
+        b: u32,
         mode: CounterfactualMode,
     ) -> Result<Counterfactual, TournamentError> {
         let idx = self
@@ -862,7 +887,7 @@ impl Tournament {
             .ok_or(TournamentError::RoundNotFound(round_number))?;
         let round = &self.rounds[idx];
         let completed = &self.rounds[..idx];
-        let swiss_boards: Vec<(Uuid, Uuid)> = round
+        let swiss_boards: Vec<(u32, u32)> = round
             .boards
             .iter()
             .filter(|bd| matches!(bd.source, PairingSource::Swiss))
@@ -873,7 +898,7 @@ impl Tournament {
         // `PHANTOM` stands for the bye itself (the nil UUID, never a real player
         // id) — it's in scope exactly when this round actually has a Swiss bye
         // to negotiate.
-        let in_swiss = |id: Uuid| {
+        let in_swiss = |id: u32| {
             round.bye == Some(id) || swiss_boards.iter().any(|&(x, y)| x == id || y == id)
         };
         for id in [a, b] {
@@ -927,7 +952,7 @@ impl Tournament {
     /// pairing would discard them). The pair is validated by the re-pairing path
     /// exactly like any referee-forced board/bye (must be a present Swiss
     /// player, neither a cup player nor already forced elsewhere).
-    pub fn force_pairing(&mut self, a: Uuid, b: Uuid) -> Result<&Round, TournamentError> {
+    pub fn force_pairing(&mut self, a: u32, b: u32) -> Result<&Round, TournamentError> {
         let round = self.rounds.last().ok_or(TournamentError::NoCurrentRound)?;
         if round.completed {
             return Err(TournamentError::RoundHasResults);
@@ -969,7 +994,7 @@ impl Tournament {
 
     /// Why `id` is out of the engine's hands for `round`: forced, a cup player,
     /// or sitting out. Errors only if `id` isn't a player at all.
-    fn scope_reason(&self, round: &Round, id: Uuid) -> Result<ScopeReason, TournamentError> {
+    fn scope_reason(&self, round: &Round, id: u32) -> Result<ScopeReason, TournamentError> {
         if round.absent.contains(&id) {
             return Ok(ScopeReason::Absent);
         }
@@ -983,10 +1008,10 @@ impl Tournament {
                 });
             }
         }
-        if self.player(id).is_some() {
+        if self.players.iter().any(|p| p.tournament_id == Some(id)) {
             Ok(ScopeReason::Absent)
         } else {
-            Err(TournamentError::PlayerNotFound(id))
+            Err(TournamentError::PlayerNotFound(Uuid::nil()))
         }
     }
 
@@ -1208,11 +1233,6 @@ impl Tournament {
         }
     }
 
-    /// Immutable access to a player by id.
-    fn player(&self, id: Uuid) -> Option<&Player> {
-        self.players.iter().find(|p| p.id == id)
-    }
-
     /// Mutable access to a player by id, or [`TournamentError::PlayerNotFound`].
     fn player_mut(&mut self, id: Uuid) -> Result<&mut Player, TournamentError> {
         self.players
@@ -1221,9 +1241,13 @@ impl Tournament {
             .ok_or(TournamentError::PlayerNotFound(id))
     }
 
-    /// A player's registration rating, if the player exists and is rated.
-    fn player_rating(&self, id: Uuid) -> Option<u32> {
-        self.player(id).and_then(|p| p.rating)
+    /// A player's registration rating (by tournament number, as boards carry), if
+    /// the player exists and is rated.
+    fn player_rating(&self, tid: u32) -> Option<u32> {
+        self.players
+            .iter()
+            .find(|p| p.tournament_id == Some(tid))
+            .and_then(|p| p.rating)
     }
 
     /// Immutable access to a board by round number and index.
@@ -1528,7 +1552,13 @@ mod tests {
         // Once a round is confirmed, everyone paired onto a board is locked in:
         // their results are about to feed every opponent's tie-breaks.
         start_next_round(&mut t);
-        let played = t.rounds[0].boards[0].player1;
+        let played_tid = t.rounds[0].boards[0].player1;
+        let played = t
+            .players
+            .iter()
+            .find(|p| p.tournament_id == Some(played_tid))
+            .unwrap()
+            .id;
         assert_eq!(
             t.remove_player(played),
             Err(TournamentError::CannotRemovePlayedPlayer)
@@ -1834,10 +1864,19 @@ mod tests {
     #[test]
     fn draft_defaults_absent_to_previous_round() {
         let mut t = Tournament::new("Cup").unwrap();
-        let a = t.add_player(named("A")).unwrap().id;
-        let b = t.add_player(named("B")).unwrap().id;
-        let c = t.add_player(named("C")).unwrap().id;
+        t.add_player(named("A")).unwrap();
+        t.add_player(named("B")).unwrap();
+        t.add_player(named("C")).unwrap();
         t.finalize_registration().unwrap();
+        let tid = |t: &Tournament, last: &str| {
+            t.players
+                .iter()
+                .find(|p| p.last_name == last)
+                .unwrap()
+                .tournament_id
+                .unwrap()
+        };
+        let (a, b, c) = (tid(&t, "A"), tid(&t, "B"), tid(&t, "C"));
 
         // Round 1: C absent, A vs B.
         t.prepare_round().unwrap();
@@ -1856,11 +1895,21 @@ mod tests {
     #[test]
     fn confirm_honors_forced_pairing_and_bye() {
         let mut t = Tournament::new("Cup").unwrap();
-        let ids: Vec<Uuid> = ["A", "B", "C", "D", "E"]
-            .iter()
-            .map(|n| t.add_player(named(n)).unwrap().id)
-            .collect();
+        for n in ["A", "B", "C", "D", "E"] {
+            t.add_player(named(n)).unwrap();
+        }
         t.finalize_registration().unwrap();
+        let ids: Vec<u32> = ["A", "B", "C", "D", "E"]
+            .iter()
+            .map(|n| {
+                t.players
+                    .iter()
+                    .find(|p| p.last_name == *n)
+                    .unwrap()
+                    .tournament_id
+                    .unwrap()
+            })
+            .collect();
         t.prepare_round().unwrap();
         // Force A vs C, and E as the bye (5 present → odd, ok).
         let forced = vec![Board::pending(ids[0], ids[2], None, PairingSource::Swiss)];
@@ -1938,17 +1987,16 @@ mod tests {
     #[test]
     fn force_pairing_onto_the_bye_reassigns_the_sit_out() {
         let mut t = Tournament::new("Cup").unwrap();
-        let ids: Vec<Uuid> = ["A", "B", "C"]
-            .iter()
-            .map(|n| t.add_player(named(n)).unwrap().id)
-            .collect();
+        for n in ["A", "B", "C"] {
+            t.add_player(named(n)).unwrap();
+        }
         t.finalize_registration().unwrap();
         t.prepare_round().unwrap();
         t.confirm_round().unwrap();
 
         let r1 = t.rounds.last().unwrap();
         let bye = r1.bye.expect("odd count byes someone");
-        let playing = ids.iter().copied().find(|&id| id != bye).unwrap();
+        let playing = r1.boards[0].player1;
 
         let round = t.force_pairing(playing, PHANTOM).unwrap();
         assert_eq!(round.number, 1, "the same round is re-paired");
@@ -2005,11 +2053,16 @@ mod tests {
 
         // Rank is by the standings entering this round (no completed rounds yet,
         // so purely tournament number, which was assigned by ELO descending).
-        let rank_of: HashMap<Uuid, usize> = t
+        let tid_of: HashMap<Uuid, u32> = t
+            .players
+            .iter()
+            .filter_map(|p| p.tournament_id.map(|tid| (p.id, tid)))
+            .collect();
+        let rank_of: HashMap<u32, usize> = t
             .standings()
             .into_iter()
             .enumerate()
-            .map(|(rank, s)| (s.player_id, rank))
+            .map(|(rank, s)| (tid_of[&s.player_id], rank))
             .collect();
         let ranks: Vec<usize> = t
             .rounds
@@ -2052,9 +2105,16 @@ mod tests {
         let high = t.add_player(rated("High", 2000)).unwrap().id;
         let _low = t.add_player(rated("Low", 1000)).unwrap().id;
         t.finalize_registration().unwrap();
+        let high_tid = t
+            .players
+            .iter()
+            .find(|p| p.id == high)
+            .unwrap()
+            .tournament_id
+            .unwrap();
         start_next_round(&mut t);
 
-        let p1_is_high = t.rounds[0].boards[0].player1 == high;
+        let p1_is_high = t.rounds[0].boards[0].player1 == high_tid;
 
         // Give a 4-piece handicap. Whoever actually loses, the giver (High)
         // scores the effective point.
@@ -2142,11 +2202,18 @@ mod tests {
         let rated_id = t.add_player(rated("Rated", 1800)).unwrap().id;
         t.add_player(named("Unrated")).unwrap();
         t.finalize_registration().unwrap();
+        let rated_tid = t
+            .players
+            .iter()
+            .find(|p| p.id == rated_id)
+            .unwrap()
+            .tournament_id
+            .unwrap();
         start_next_round(&mut t);
         t.set_board_handicap(1, 0, Some(Handicap::TwoPiece))
             .unwrap();
         let board = &t.rounds[0].boards[0];
-        let giver_side = if board.player1 == rated_id {
+        let giver_side = if board.player1 == rated_tid {
             Winner::Player1
         } else {
             Winner::Player2
@@ -2197,8 +2264,20 @@ mod tests {
         id
     }
 
+    /// The tournament number assigned to a registered player (only valid after
+    /// `finalize_registration`).
+    fn tid(t: &Tournament, id: Uuid) -> u32 {
+        t.players
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .tournament_id
+            .unwrap()
+    }
+
     /// Find the board (in the round with the given number) pairing `a` and `b`.
     fn find_board(t: &Tournament, rnum: u32, a: Uuid, b: Uuid) -> Option<&Board> {
+        let (a, b) = (tid(t, a), tid(t, b));
         t.rounds
             .iter()
             .find(|r| r.number == rnum)?
@@ -2209,6 +2288,7 @@ mod tests {
 
     /// Record `winner` beating `loser` on their board in round `rnum`.
     fn decide(t: &mut Tournament, rnum: u32, winner: Uuid, loser: Uuid) {
+        let (winner, loser) = (tid(t, winner), tid(t, loser));
         let round = t.rounds.iter().find(|r| r.number == rnum).unwrap();
         let idx = round
             .boards
@@ -2246,6 +2326,7 @@ mod tests {
 
     /// Mark the board pairing `a` and `b` in round `rnum` as a double no-show.
     fn no_show_both(t: &mut Tournament, rnum: u32, a: Uuid, b: Uuid) {
+        let (a, b) = (tid(t, a), tid(t, b));
         let round = t.rounds.iter().find(|r| r.number == rnum).unwrap();
         let idx = round
             .boards
@@ -2268,7 +2349,8 @@ mod tests {
         let n9 = add_rated(&mut t, "N9", 1250, false);
         let n10 = add_rated(&mut t, "N10", 1200, false);
         t.finalize_registration_with(Some(8)).unwrap();
-        assert_eq!(t.cup.as_ref().unwrap().seed_order, s); // seeded by rating
+        let s_tid: Vec<u32> = s.iter().map(|&id| tid(&t, id)).collect();
+        assert_eq!(t.cup.as_ref().unwrap().seed_order, s_tid); // seeded by rating
 
         // Round 1 — quarterfinals fold the seeds, the two non-eligibles play Swiss.
         t.prepare_round().unwrap();
@@ -2304,7 +2386,7 @@ mod tests {
             t.rounds[1]
                 .boards
                 .iter()
-                .find(|b| b.player1 == s[4] || b.player2 == s[4])
+                .find(|b| b.player1 == s_tid[4] || b.player2 == s_tid[4])
                 .unwrap()
                 .source,
             PairingSource::Swiss
@@ -2333,10 +2415,10 @@ mod tests {
         decide_rest(&mut t, 3);
 
         let podium = t.cup_podium().unwrap();
-        assert_eq!(podium.champion, Some(s[0]));
-        assert_eq!(podium.runner_up, Some(s[1]));
-        assert_eq!(podium.third, Some(s[3]));
-        assert_eq!(podium.fourth, Some(s[2]));
+        assert_eq!(podium.champion, Some(s_tid[0]));
+        assert_eq!(podium.runner_up, Some(s_tid[1]));
+        assert_eq!(podium.third, Some(s_tid[3]));
+        assert_eq!(podium.fourth, Some(s_tid[2]));
     }
 
     #[test]
@@ -2353,6 +2435,7 @@ mod tests {
         let n9 = add_rated(&mut t, "N9", 1250, false);
         let n10 = add_rated(&mut t, "N10", 1200, false);
         t.finalize_registration_with(Some(8)).unwrap();
+        let s_tid: Vec<u32> = s.iter().map(|&id| tid(&t, id)).collect();
 
         // Round 1: quarterfinals (cup) plus one Swiss board (n9 vs n10).
         t.prepare_round().unwrap();
@@ -2402,7 +2485,7 @@ mod tests {
         assert!(r2
             .boards
             .iter()
-            .all(|b| !s.contains(&b.player1) && !s.contains(&b.player2)));
+            .all(|b| !s_tid.contains(&b.player1) && !s_tid.contains(&b.player2)));
 
         // Complete round 2; round 3 can't be prepared until the long QFs resolve.
         decide_rest(&mut t, 2);
@@ -2436,6 +2519,7 @@ mod tests {
         add_rated(&mut t, "N9", 1250, false);
         add_rated(&mut t, "N10", 1200, false);
         t.finalize_registration_with(Some(8)).unwrap();
+        let s_tid: Vec<u32> = s.iter().map(|&id| tid(&t, id)).collect();
 
         // Round 1 (QF). The top match (s0 v s7) is a double no-show — neither
         // shows up — so it produces no winner. The other three top seeds win.
@@ -2463,11 +2547,14 @@ mod tests {
         // now Swiss-paired. As no-shows they default to absent in the new draft,
         // so clear that to keep them in the round (the referee's call).
         let draft = t.prepare_round().unwrap();
-        assert!(draft.absent.contains(&s[0]) && draft.absent.contains(&s[7]));
+        assert!(draft.absent.contains(&s_tid[0]) && draft.absent.contains(&s_tid[7]));
         t.update_draft(Vec::new(), Vec::new(), None).unwrap();
         t.confirm_round().unwrap();
-        assert!(t.rounds[1].cup_byes.contains(&s[3]), "s3 gets the cup bye");
-        for dropped in [s[0], s[7]] {
+        assert!(
+            t.rounds[1].cup_byes.contains(&s_tid[3]),
+            "s3 gets the cup bye"
+        );
+        for dropped in [s_tid[0], s_tid[7]] {
             let board = t.rounds[1]
                 .boards
                 .iter()
@@ -2488,9 +2575,9 @@ mod tests {
         decide_rest(&mut t, 3);
 
         let podium = t.cup_podium().unwrap();
-        assert_eq!(podium.champion, Some(s[1]));
-        assert_eq!(podium.runner_up, Some(s[3]));
-        assert_eq!(podium.third, Some(s[2]));
+        assert_eq!(podium.champion, Some(s_tid[1]));
+        assert_eq!(podium.runner_up, Some(s_tid[3]));
+        assert_eq!(podium.third, Some(s_tid[2]));
         assert_eq!(podium.fourth, None); // the fourth-place slot never existed
     }
 
@@ -2504,6 +2591,7 @@ mod tests {
         add_rated(&mut t, "N9", 1250, false);
         add_rated(&mut t, "N10", 1200, false);
         t.finalize_registration_with(Some(8)).unwrap();
+        let s_tid: Vec<u32> = s.iter().map(|&id| tid(&t, id)).collect();
 
         // Play a clean bracket down to the final round.
         t.prepare_round().unwrap();
@@ -2530,8 +2618,8 @@ mod tests {
         let podium = t.cup_podium().unwrap();
         assert_eq!(podium.champion, None);
         assert_eq!(podium.runner_up, None);
-        assert_eq!(podium.third, Some(s[3]));
-        assert_eq!(podium.fourth, Some(s[2]));
+        assert_eq!(podium.third, Some(s_tid[3]));
+        assert_eq!(podium.fourth, Some(s_tid[2]));
     }
 
     #[test]
@@ -2594,7 +2682,7 @@ mod tests {
         // Mark the top seed absent — their QF board is still generated (unplayed),
         // to be forfeited by the referee.
         t.prepare_round().unwrap();
-        t.update_draft(vec![s[0]], vec![], None).unwrap();
+        t.update_draft(vec![tid(&t, s[0])], vec![], None).unwrap();
         t.confirm_round().unwrap();
         let board = find_board(&t, 1, s[0], s[7]).expect("bracket board created despite absence");
         assert!(matches!(board.source, PairingSource::Cup { .. }));

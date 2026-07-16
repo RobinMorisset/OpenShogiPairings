@@ -11,4 +11,4 @@ size: number,
 /**
  * The seeded players, seed 1..size (index 0 = top seed). Frozen at finalize.
  */
-seed_order: Array<string>, };
+seed_order: Array<number>, };

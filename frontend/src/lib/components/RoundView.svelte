@@ -32,12 +32,12 @@
     explanation?: RoundExplanation | null;
     /** Ask what forcing/forbidding the pairing `a`–`b` would cost. Absent =
      *  probe disabled. */
-    onProbe?: (a: string, b: string, mode: CounterfactualMode) => Promise<Counterfactual>;
+    onProbe?: (a: number, b: number, mode: CounterfactualMode) => Promise<Counterfactual>;
     /** Whether this round can be re-paired (it is the current round and has no
      *  recorded results). Gates the "force this pairing" action. */
     canForce?: boolean;
     /** Apply a forced pairing: re-pair the round with `a`–`b` fixed. */
-    onForcePairing?: (a: string, b: string) => Promise<void>;
+    onForcePairing?: (a: number, b: number) => Promise<void>;
     /** Register a click on a board's player (toggles the winner). */
     onClickWinner: (boardIndex: number, clicked: Winner) => void;
     /** Set/clear the "a draw occurred" flag on a board. */
@@ -98,14 +98,20 @@
     onSetNoShow(index, toggledNoShow(board.no_show, side));
   }
 
-  // Resolve player ids to display names.
-  const byId = $derived(new Map(players.map((p) => [p.id, p])));
+  // Resolve tournament numbers to display names.
+  const byId = $derived(
+    new Map(
+      players
+        .filter((p): p is Player & { tournament_id: number } => p.tournament_id != null)
+        .map((p) => [p.tournament_id, p]),
+    ),
+  );
 
   // --- Pairing explanation -------------------------------------------------
 
   // Order-independent key for a board's two players, to align a ledger (which
   // covers only Swiss boards, in engine order) with the displayed boards.
-  function pairKey(a: string, b: string): string {
+  function pairKey(a: number, b: number): string {
     return a < b ? `${a}|${b}` : `${b}|${a}`;
   }
 
@@ -185,12 +191,15 @@
 
   // --- Counterfactual probe ("why not pair A and B?") ----------------------
 
-  const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+  // The bye sentinel used by the server's counterfactual/force-pairing APIs
+  // (`PHANTOM = 0u32`) — never a real player, since tournament numbers start
+  // at 1.
+  const PHANTOM = 0;
 
   // The engine-paired players of this round (Swiss boards + the bye), the only
   // ones a counterfactual can reason about, sorted by name for the pickers.
   const swissPlayers = $derived.by(() => {
-    const ids = new Set<string>();
+    const ids = new Set<number>();
     for (const b of round.boards) {
       if (!b.source || b.source.kind === "swiss") {
         ids.add(b.player1);
@@ -203,8 +212,8 @@
 
   let probeOpen = $state(false);
   let probeMode = $state<CounterfactualMode>("force");
-  let probeA = $state("");
-  let probeB = $state("");
+  let probeA = $state<number | "">("");
+  let probeB = $state<number | "">("");
   let probeBusy = $state(false);
   let probeResult = $state<Counterfactual | null>(null);
   // The mode the current result was computed for (so the "force" action only
@@ -241,14 +250,14 @@
   // bye-taker's "opponent" is the bye sentinel, so forbidding it reads as
   // forbidding the bye itself (i.e. forcing them to play).
   const opponentOf = $derived.by(() => {
-    const m = new Map<string, string>();
+    const m = new Map<number, number>();
     for (const b of round.boards) {
       if (!b.source || b.source.kind === "swiss") {
         m.set(b.player1, b.player2);
         m.set(b.player2, b.player1);
       }
     }
-    if (round.bye) m.set(round.bye, NIL_UUID);
+    if (round.bye) m.set(round.bye, PHANTOM);
     return m;
   });
 
@@ -256,16 +265,16 @@
   // opponent, so it needs a single pick — the partner is derived. Force ("why
   // not?") proposes a new pairing, so it needs both.
   const forbidPartner = $derived(
-    probeMode === "forbid" ? opponentOf.get(probeA) : undefined,
+    probeMode === "forbid" && probeA !== "" ? opponentOf.get(probeA) : undefined,
   );
   const effectiveB = $derived(probeMode === "force" ? probeB : (forbidPartner ?? ""));
 
   const canProbe = $derived(
-    !!onProbe && !!probeA && !!effectiveB && probeA !== effectiveB && !probeBusy,
+    !!onProbe && probeA !== "" && effectiveB !== "" && probeA !== effectiveB && !probeBusy,
   );
 
   async function runProbe() {
-    if (!onProbe || !canProbe) return;
+    if (!onProbe || !canProbe || probeA === "" || effectiveB === "") return;
     probeBusy = true;
     probeError = "";
     probeResult = null;
@@ -291,7 +300,7 @@
   );
 
   async function applyForce() {
-    if (!onForcePairing || !canApplyForce) return;
+    if (!onForcePairing || !canApplyForce || probeA === "" || probeB === "") return;
     const a = probeA;
     const b = probeB;
     probeBusy = true;
@@ -307,8 +316,8 @@
     }
   }
 
-  function probeName(id: string): string {
-    return id === NIL_UUID ? $_("roundView.probe.bye") : name(id);
+  function probeName(id: number): string {
+    return id === PHANTOM ? $_("roundView.probe.bye") : name(id);
   }
 
   // A changed board as readable text: "X vs Y" or "X takes the bye".
@@ -329,7 +338,7 @@
     (probeResult?.cost_delta ?? []).filter((d) => d.units < 0).map((d) => ruleLabel(d.rule)),
   );
 
-  function name(id: string): string {
+  function name(id: number): string {
     const p = byId.get(id);
     if (!p) return $_("roundView.unknownPlayer");
     const full = `${p.last_name} ${p.first_name}`.trim();
@@ -741,7 +750,7 @@
                   <option value={id}>{name(id)}</option>
                 {/each}
                 {#if round.bye}
-                  <option value={NIL_UUID}>{$_("roundView.probe.bye")}</option>
+                  <option value={PHANTOM}>{$_("roundView.probe.bye")}</option>
                 {/if}
               </select>
             {:else}

@@ -5,4 +5,4 @@
  * couldn't be determined — e.g. both players of the final (or the small final)
  * were no-shows, so there is no champion / third to award.
  */
-export type CupPodium = { champion: string | null, runner_up: string | null, third: string | null, fourth: string | null, };
+export type CupPodium = { champion: number | null, runner_up: number | null, third: number | null, fourth: number | null, };

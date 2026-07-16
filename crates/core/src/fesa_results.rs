@@ -23,8 +23,6 @@
 
 use std::collections::HashMap;
 
-use uuid::Uuid;
-
 use crate::grid_import::{build_tournament, parse_cell, Cell, GridImportError, RawRow};
 use crate::player::Grade;
 use crate::tournament::Tournament;
@@ -36,9 +34,7 @@ const DEFAULT_LAST_NAME_WIDTH: usize = 18;
 /// Parse a FESA result table, returning the replayed tournament and each player's
 /// post-tournament strength (`ELO + (+/-)`, or the `*` rating for a pre-unrated
 /// player) keyed by player id.
-pub fn import_fesa_results(
-    text: &str,
-) -> Result<(Tournament, HashMap<Uuid, f64>), GridImportError> {
+pub fn import_fesa_results(text: &str) -> Result<(Tournament, HashMap<u32, f64>), GridImportError> {
     let mut title: Option<String> = None;
     let mut data: Vec<(usize, &str)> = Vec::new();
 
@@ -353,13 +349,13 @@ mod tests {
     use super::*;
     use crate::decode_latin1;
 
-    fn load(fixture: &str) -> (Tournament, HashMap<Uuid, f64>) {
+    fn load(fixture: &str) -> (Tournament, HashMap<u32, f64>) {
         let path = format!("{}/tests/fixtures/{fixture}", env!("CARGO_MANIFEST_DIR"));
         let bytes = std::fs::read(&path).expect("fixture present");
         import_fesa_results(&decode_latin1(&bytes)).expect("parses")
     }
 
-    fn wosc() -> (Tournament, HashMap<Uuid, f64>) {
+    fn wosc() -> (Tournament, HashMap<u32, f64>) {
         load("results_WOSC_2024.txt")
     }
 
@@ -385,10 +381,10 @@ mod tests {
         // Kobayashi Taichi: pre-ELO 2567 (for pairing) + 15 = 2582 strength.
         let kob = find(&t, "Kobayashi", "Taichi");
         assert_eq!(kob.rating, Some(2567));
-        assert_eq!(strengths[&kob.id], 2582.0);
+        assert_eq!(strengths[&kob.tournament_id.unwrap()], 2582.0);
         // A negative delta: Leiter 2326 - 27 = 2299.
         let leiter = find(&t, "Leiter", "Thomas");
-        assert_eq!(strengths[&leiter.id], 2299.0);
+        assert_eq!(strengths[&leiter.tournament_id.unwrap()], 2299.0);
     }
 
     #[test]
@@ -398,7 +394,7 @@ mod tests {
         // strength = 2337.
         let haya = find(&t, "Hayakawa", "Akio");
         assert_eq!(haya.rating, None);
-        assert_eq!(strengths[&haya.id], 2337.0);
+        assert_eq!(strengths[&haya.tournament_id.unwrap()], 2337.0);
     }
 
     #[test]
@@ -407,15 +403,15 @@ mod tests {
         // Multi-word last name.
         let vdl = find(&t, "van der Lubbe", "Lex");
         assert_eq!(vdl.rating, Some(1929));
-        assert_eq!(strengths[&vdl.id], 1916.0); // 1929 - 13
-                                                // Multi-word first name.
+        assert_eq!(strengths[&vdl.tournament_id.unwrap()], 1916.0); // 1929 - 13
+                                                                    // Multi-word first name.
         let nguyen = find(&t, "Nguyen", "Anh Tuan");
-        assert_eq!(strengths[&nguyen.id], 1861.0); // 1881 - 20
-                                                   // An 18-char last name splits from its first name.
+        assert_eq!(strengths[&nguyen.tournament_id.unwrap()], 1861.0); // 1881 - 20
+                                                                       // An 18-char last name splits from its first name.
         find(&t, "Fernandez Nogueira", "Anna");
         // A 3-digit-number (offset) row still parses.
         let ozal = find(&t, "\u{d6}zal", "Berke"); // "Özal", row 100
-        assert_eq!(strengths[&ozal.id], 1496.0); // 1499 - 3
+        assert_eq!(strengths[&ozal.tournament_id.unwrap()], 1496.0); // 1499 - 3
     }
 
     #[test]
@@ -428,12 +424,12 @@ mod tests {
         assert!(t.rounds.iter().all(|r| r.completed));
         let nguyen = find(&t, "Nguyen", "Anh Tuan");
         assert_eq!(nguyen.rating, Some(1862));
-        assert_eq!(strengths[&nguyen.id], 1869.0); // 1862 + 7 (delta past the MMS "1")
+        assert_eq!(strengths[&nguyen.tournament_id.unwrap()], 1869.0); // 1862 + 7 (delta past the MMS "1")
 
         // A pre-unrated player with a single-digit `*` rating ("1*").
         let anais = find(&t, "Massis", "Ana\u{ef}s"); // "Anaïs"
         assert_eq!(anais.rating, None);
-        assert_eq!(strengths[&anais.id], 1.0);
+        assert_eq!(strengths[&anais.tournament_id.unwrap()], 1.0);
     }
 
     #[test]
@@ -441,7 +437,7 @@ mod tests {
         let (t, strengths) = load("results_CdF_2025.txt");
         assert_eq!(t.rounds.len(), 6);
         let pucher = find(&t, "Pucher", "Olivier");
-        assert_eq!(strengths[&pucher.id], 1873.0); // 1887 - 14
+        assert_eq!(strengths[&pucher.tournament_id.unwrap()], 1873.0); // 1887 - 14
     }
 
     #[test]
@@ -466,8 +462,8 @@ mod tests {
         assert_eq!(t.rounds.len(), 2);
         assert!(t.rounds.iter().all(|r| r.completed));
         // Beta's round-2 no-show landed them in the absent set and scored nothing.
-        let beta = find(&t, "Beta", "Bob").id;
-        assert!(t.rounds[1].absent.contains(&beta));
+        let beta = find(&t, "Beta", "Bob");
+        assert!(t.rounds[1].absent.contains(&beta.tournament_id.unwrap()));
         let points = |id| {
             t.standings()
                 .into_iter()
@@ -475,7 +471,7 @@ mod tests {
                 .unwrap()
                 .points
         };
-        assert_eq!(points(beta), 0);
+        assert_eq!(points(beta.id), 0);
         assert_eq!(points(find(&t, "Alpha", "Ann").id), 4); // win + bye = 2 pts = 4 halves
     }
 
@@ -539,8 +535,8 @@ mod tests {
         assert_eq!(t.rounds.len(), 3);
         assert!(t.rounds.iter().all(|r| r.completed));
         // Beta beat Gamma in round 3 despite the annotation.
-        let beta = find(&t, "Beta", "Bob").id;
-        let gamma = find(&t, "Gamma", "Cid").id;
+        let beta = find(&t, "Beta", "Bob").tournament_id.unwrap();
+        let gamma = find(&t, "Gamma", "Cid").tournament_id.unwrap();
         let win = t.rounds[2]
             .boards
             .iter()
@@ -596,11 +592,11 @@ mod tests {
         let senaj = find(&t, "Senaj", "Aurel");
         assert_eq!(senaj.rating, Some(88));
         assert_eq!(senaj.grade, Some(Grade::kyu(3)));
-        assert_eq!(strengths[&senaj.id], 96.0); // 88 + 8
+        assert_eq!(strengths[&senaj.tournament_id.unwrap()], 96.0); // 88 + 8
         let novak = find(&t, "Novak", "Jan");
         assert_eq!(novak.rating, Some(9));
         assert_eq!(novak.grade, Some(Grade::dan(2)));
-        assert_eq!(strengths[&novak.id], 6.0); // 9 - 3
+        assert_eq!(strengths[&novak.tournament_id.unwrap()], 6.0); // 9 - 3
     }
 
     #[test]

@@ -16,7 +16,7 @@ number: number,
 /**
  * Players marked absent (excluded from pairing).
  */
-absent: Array<string>, 
+absent: Array<number>, 
 /**
  * Pairings the referee has fixed by hand (the `result` field is unused
  * here). Remaining present players are paired automatically.
@@ -25,4 +25,4 @@ forced_boards: Array<Board>,
 /**
  * A player forced to take the bye (only valid with an odd present count).
  */
-forced_bye?: string | null, };
+forced_bye?: number | null, };

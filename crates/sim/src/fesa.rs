@@ -153,7 +153,9 @@ pub fn match_fesa(rated: &[RatedPlayer], base: &Tournament) -> (StrengthMap, usi
     let mut map = StrengthMap::new();
     for p in &base.players {
         if let Some(&elo) = by_name.get(&(fold_name(&p.last_name), fold_name(&p.first_name))) {
-            map.insert(p.id, f64::from(elo));
+            if let Some(t) = p.tournament_id {
+                map.insert(t, f64::from(elo));
+            }
         }
     }
     let matched = map.len();
@@ -309,7 +311,7 @@ mod tests {
     #[test]
     fn match_fesa_maps_by_name_case_insensitively_and_counts() {
         let mut base = Tournament::new("T").unwrap();
-        let a = base
+        let a_id = base
             .add_player(NewPlayer {
                 last_name: "Goix".into(),
                 first_name: Some("Nicolas".into()),
@@ -318,7 +320,7 @@ mod tests {
             })
             .unwrap()
             .id;
-        let b = base
+        let b_id = base
             .add_player(NewPlayer {
                 last_name: "Cheymol".into(),
                 first_name: Some("Jean".into()),
@@ -327,6 +329,9 @@ mod tests {
             })
             .unwrap()
             .id;
+        base.finalize_registration().unwrap();
+        let a = tid(&base, a_id);
+        let b = tid(&base, b_id);
 
         let rated = vec![
             RatedPlayer {
@@ -356,8 +361,8 @@ mod tests {
         // not the rating — and leaves the unmatched player out (stays provisional).
         let (games, gmatched) = match_games(&rated, &base);
         assert_eq!(gmatched, 1);
-        assert_eq!(games[&a], 40);
-        assert!(!games.contains_key(&b));
+        assert_eq!(games[&a_id], 40);
+        assert!(!games.contains_key(&b_id));
     }
 
     fn rated(last: &str, first: &str, rating: u32) -> RatedPlayer {
@@ -375,9 +380,12 @@ mod tests {
     fn folding_matches_across_accents_and_composition() {
         let mut base = Tournament::new("T").unwrap();
         // Grid without the accent the list carries.
-        let frederik = player(&mut base, "Wietholter", "Frederik");
+        let frederik_id = player(&mut base, "Wietholter", "Frederik");
         // Grid with a *decomposed* (NFD) accent: "André" as 'e' + U+0301.
-        let andre = player(&mut base, "Muller", "Andre\u{0301}");
+        let andre_id = player(&mut base, "Muller", "Andre\u{0301}");
+        base.finalize_registration().unwrap();
+        let frederik = tid(&base, frederik_id);
+        let andre = tid(&base, andre_id);
 
         let list = vec![
             rated("Wietholter", "Frédérik", 1698), // precomposed accents in the list
@@ -401,6 +409,16 @@ mod tests {
         .id
     }
 
+    /// The tournament number assigned to a registered player (post-finalization).
+    fn tid(base: &Tournament, id: uuid::Uuid) -> u32 {
+        base.players
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .tournament_id
+            .unwrap()
+    }
+
     #[test]
     fn overrides_from_a_repo_fixture_parse_and_match_without_network() {
         // Reads a checked-in, synthetic FESA list through the real fixed-width
@@ -410,9 +428,13 @@ mod tests {
             "/tests/fixtures/fesa-ratinglist-sample.txt"
         );
         let mut base = Tournament::new("T").unwrap();
-        let cheymol = player(&mut base, "Cheymol", "Jean");
-        let goix = player(&mut base, "Goix", "Nicolas");
-        let ghost = player(&mut base, "Ghost", "Nobody"); // absent from the list
+        let cheymol_id = player(&mut base, "Cheymol", "Jean");
+        let goix_id = player(&mut base, "Goix", "Nicolas");
+        let ghost_id = player(&mut base, "Ghost", "Nobody"); // absent from the list
+        base.finalize_registration().unwrap();
+        let cheymol = tid(&base, cheymol_id);
+        let goix = tid(&base, goix_id);
+        let ghost = tid(&base, ghost_id);
 
         let (map, matched) = overrides_from_list(path, &base).unwrap();
         assert_eq!(matched, 2);

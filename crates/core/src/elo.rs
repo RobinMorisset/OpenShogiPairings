@@ -419,7 +419,12 @@ pub fn estimate_elos(
     let looseness_unrated = settings.elo_upward_looseness_unrated();
     let n = players.len();
 
-    let index: HashMap<Uuid, usize> = players.iter().enumerate().map(|(i, p)| (p.id, i)).collect();
+    // Boards reference players by tournament number, so index by number here.
+    let index: HashMap<u32, usize> = players
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| p.tournament_id.map(|t| (t, i)))
+        .collect();
     let mut theta = vec![0.0_f64; n];
     let mut mean = vec![0.0_f64; n];
     let mut penalties: Vec<PriorPenalty> = Vec::with_capacity(n);
@@ -574,18 +579,27 @@ pub fn estimate_elos(
         }
     }
 
-    index.into_iter().map(|(id, i)| (id, theta[i])).collect()
+    // Output keyed by player id (positions align with `players`).
+    players
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.id, theta[i]))
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::round::{Board, HandicapGame, PairingSource};
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static NEXT_TID: AtomicU32 = AtomicU32::new(1);
 
     fn player(rating: Option<u32>) -> Player {
+        let tid = NEXT_TID.fetch_add(1, Ordering::Relaxed);
         Player {
             id: Uuid::new_v4(),
-            tournament_id: None,
+            tournament_id: Some(tid),
             last_name: "P".into(),
             first_name: String::new(),
             rating,
@@ -609,20 +623,14 @@ mod tests {
         }
     }
 
-    fn win(a: Uuid, b: Uuid) -> Board {
+    fn win(a: u32, b: u32) -> Board {
         Board {
             result: Some(Winner::Player1),
             ..Board::pending(a, b, None, PairingSource::Swiss)
         }
     }
 
-    fn handicap_board(
-        a: Uuid,
-        b: Uuid,
-        result: Winner,
-        handicap: Handicap,
-        giver: Winner,
-    ) -> Board {
+    fn handicap_board(a: u32, b: u32, result: Winner, handicap: Handicap, giver: Winner) -> Board {
         Board {
             result: Some(result),
             handicap: Some(HandicapGame { handicap, giver }),
@@ -647,7 +655,10 @@ mod tests {
     fn a_win_raises_the_winner_and_lowers_the_loser() {
         let a = player(Some(1500));
         let b = player(Some(1500));
-        let r = decided(1, vec![win(a.id, b.id)]);
+        let r = decided(
+            1,
+            vec![win(a.tournament_id.unwrap(), b.tournament_id.unwrap())],
+        );
         let elos = estimate_elos(
             &[a.clone(), b.clone()],
             &TournamentSettings::default(),
@@ -668,7 +679,13 @@ mod tests {
         let mut winner = player(Some(1100));
         winner.fesa_games = Some(50);
         let loser = player(Some(1600));
-        let r = decided(1, vec![win(winner.id, loser.id)]);
+        let r = decided(
+            1,
+            vec![win(
+                winner.tournament_id.unwrap(),
+                loser.tournament_id.unwrap(),
+            )],
+        );
         let elos = estimate_elos(
             &[winner.clone(), loser.clone()],
             &TournamentSettings::default(),
@@ -685,7 +702,10 @@ mod tests {
     fn a_bigger_multiplier_moves_the_estimate_more() {
         let a = player(Some(1500));
         let b = player(Some(1500));
-        let r = decided(1, vec![win(a.id, b.id)]);
+        let r = decided(
+            1,
+            vec![win(a.tournament_id.unwrap(), b.tournament_id.unwrap())],
+        );
         let base = TournamentSettings::default();
         let hot = TournamentSettings {
             elo_k_multiplier_percent: 400,
@@ -707,7 +727,13 @@ mod tests {
         // hundreds of points — the uncertainty-proportional cap in action.
         let newcomer = player(None);
         let strong = player(Some(1600));
-        let r = decided(1, vec![win(newcomer.id, strong.id)]);
+        let r = decided(
+            1,
+            vec![win(
+                newcomer.tournament_id.unwrap(),
+                strong.tournament_id.unwrap(),
+            )],
+        );
         let elos = estimate_elos(
             &[newcomer.clone(), strong.clone()],
             &TournamentSettings::default(),
@@ -743,7 +769,13 @@ mod tests {
         // prior, so the estimate moves further. A tiny K barely moves it.
         let newcomer = player(None);
         let strong = player(Some(1600));
-        let r = decided(1, vec![win(newcomer.id, strong.id)]);
+        let r = decided(
+            1,
+            vec![win(
+                newcomer.tournament_id.unwrap(),
+                strong.tournament_id.unwrap(),
+            )],
+        );
         let shift = |k: u32| {
             let settings = TournamentSettings {
                 elo_unrated_k: k,
@@ -784,7 +816,16 @@ mod tests {
         ];
         let r = decided(
             1,
-            vec![win(established.id, o1.id), win(provisional.id, o2.id)],
+            vec![
+                win(
+                    established.tournament_id.unwrap(),
+                    o1.tournament_id.unwrap(),
+                ),
+                win(
+                    provisional.tournament_id.unwrap(),
+                    o2.tournament_id.unwrap(),
+                ),
+            ],
         );
         let elos = estimate_elos(&players, &TournamentSettings::default(), &[r]);
 
@@ -810,7 +851,13 @@ mod tests {
         let o2 = player(Some(1500));
 
         let players = vec![few.clone(), enough.clone(), o1.clone(), o2.clone()];
-        let r = decided(1, vec![win(few.id, o1.id), win(enough.id, o2.id)]);
+        let r = decided(
+            1,
+            vec![
+                win(few.tournament_id.unwrap(), o1.tournament_id.unwrap()),
+                win(enough.tournament_id.unwrap(), o2.tournament_id.unwrap()),
+            ],
+        );
         let elos = estimate_elos(&players, &TournamentSettings::default(), &[r]);
         assert!(
             elos[&few.id] - 1500.0 > elos[&enough.id] - 1500.0,
@@ -824,7 +871,12 @@ mod tests {
         let b = player(Some(1500));
         let drawn = Board {
             drawn: true,
-            ..Board::pending(a.id, b.id, None, PairingSource::Swiss)
+            ..Board::pending(
+                a.tournament_id.unwrap(),
+                b.tournament_id.unwrap(),
+                None,
+                PairingSource::Swiss,
+            )
         };
         let elos = estimate_elos(
             &[a.clone(), b.clone()],
@@ -859,8 +911,8 @@ mod tests {
         let giver = player(Some(1800));
         let receiver = player(Some(1500));
         let board = handicap_board(
-            giver.id,
-            receiver.id,
+            giver.tournament_id.unwrap(),
+            receiver.tournament_id.unwrap(),
             Winner::Player1,
             Handicap::Rook,
             Winner::Player1,
@@ -887,7 +939,13 @@ mod tests {
         let even = estimate_elos(
             &players,
             &settings,
-            &[decided(1, vec![win(giver.id, receiver.id)])],
+            &[decided(
+                1,
+                vec![win(
+                    giver.tournament_id.unwrap(),
+                    receiver.tournament_id.unwrap(),
+                )],
+            )],
         );
         let handi = estimate_elos(
             &players,
@@ -895,8 +953,8 @@ mod tests {
             &[decided(
                 1,
                 vec![handicap_board(
-                    giver.id,
-                    receiver.id,
+                    giver.tournament_id.unwrap(),
+                    receiver.tournament_id.unwrap(),
                     Winner::Player1,
                     Handicap::Rook,
                     Winner::Player1,
@@ -926,7 +984,15 @@ mod tests {
         let mut prev_gain = f64::INFINITY;
         for k in 0..3 {
             let rounds: Vec<Round> = (0..=k)
-                .map(|i| decided(i as u32 + 1, vec![win(hero.id, opps[i].id)]))
+                .map(|i| {
+                    decided(
+                        i as u32 + 1,
+                        vec![win(
+                            hero.tournament_id.unwrap(),
+                            opps[i].tournament_id.unwrap(),
+                        )],
+                    )
+                })
                 .collect();
             let elos = estimate_elos(&all, &TournamentSettings::default(), &rounds);
             let now = elos[&hero.id];
@@ -991,7 +1057,16 @@ mod tests {
             .map(|i| {
                 decided(
                     i as u32 + 1,
-                    vec![win(riser.id, r_opps[i].id), win(f_opps[i].id, faller.id)],
+                    vec![
+                        win(
+                            riser.tournament_id.unwrap(),
+                            r_opps[i].tournament_id.unwrap(),
+                        ),
+                        win(
+                            f_opps[i].tournament_id.unwrap(),
+                            faller.tournament_id.unwrap(),
+                        ),
+                    ],
                 )
             })
             .collect();
@@ -1045,7 +1120,12 @@ mod tests {
         let rounds: Vec<Round> = opps
             .iter()
             .enumerate()
-            .map(|(i, o)| decided(i as u32 + 1, vec![win(hero.id, o.id)]))
+            .map(|(i, o)| {
+                decided(
+                    i as u32 + 1,
+                    vec![win(hero.tournament_id.unwrap(), o.tournament_id.unwrap())],
+                )
+            })
             .collect();
 
         let est = |settings: &TournamentSettings| estimate_elos(&all, settings, &rounds)[&hero.id];
@@ -1080,7 +1160,15 @@ mod tests {
         let rounds_u: Vec<Round> = opps_u
             .iter()
             .enumerate()
-            .map(|(i, o)| decided(i as u32 + 1, vec![win(newcomer.id, o.id)]))
+            .map(|(i, o)| {
+                decided(
+                    i as u32 + 1,
+                    vec![win(
+                        newcomer.tournament_id.unwrap(),
+                        o.tournament_id.unwrap(),
+                    )],
+                )
+            })
             .collect();
         let climb = |s: &TournamentSettings| estimate_elos(&all_u, s, &rounds_u)[&newcomer.id];
         let gauss_u = climb(&TournamentSettings::default());
@@ -1102,7 +1190,12 @@ mod tests {
         let rounds_e: Vec<Round> = opps_e
             .iter()
             .enumerate()
-            .map(|(i, o)| decided(i as u32 + 1, vec![win(hero.id, o.id)]))
+            .map(|(i, o)| {
+                decided(
+                    i as u32 + 1,
+                    vec![win(hero.tournament_id.unwrap(), o.tournament_id.unwrap())],
+                )
+            })
             .collect();
         let est_e = |s: &TournamentSettings| estimate_elos(&all_e, s, &rounds_e)[&hero.id];
         let gauss_e = est_e(&TournamentSettings::default());
@@ -1136,8 +1229,20 @@ mod tests {
         b.fesa_games = Some(50);
         let all = vec![newcomer.clone(), a.clone(), b.clone()];
         let rounds = vec![
-            decided(1, vec![win(newcomer.id, a.id)]), // newcomer beats A
-            decided(2, vec![win(b.id, newcomer.id)]), // B beats newcomer
+            decided(
+                1,
+                vec![win(
+                    newcomer.tournament_id.unwrap(),
+                    a.tournament_id.unwrap(),
+                )],
+            ), // newcomer beats A
+            decided(
+                2,
+                vec![win(
+                    b.tournament_id.unwrap(),
+                    newcomer.tournament_id.unwrap(),
+                )],
+            ), // B beats newcomer
         ];
         let est = |shape, center: u32| {
             let settings = TournamentSettings {
@@ -1181,7 +1286,15 @@ mod tests {
         let rounds: Vec<Round> = opps
             .iter()
             .enumerate()
-            .map(|(i, o)| decided(i as u32 + 1, vec![win(o.id, newcomer.id)]))
+            .map(|(i, o)| {
+                decided(
+                    i as u32 + 1,
+                    vec![win(
+                        o.tournament_id.unwrap(),
+                        newcomer.tournament_id.unwrap(),
+                    )],
+                )
+            })
             .collect();
         let est = estimate_elos(&all, &flat_unrated(), &rounds)[&newcomer.id];
         assert!(
@@ -1202,7 +1315,15 @@ mod tests {
         let rounds: Vec<Round> = opps
             .iter()
             .enumerate()
-            .map(|(i, o)| decided(i as u32 + 1, vec![win(newcomer.id, o.id)]))
+            .map(|(i, o)| {
+                decided(
+                    i as u32 + 1,
+                    vec![win(
+                        newcomer.tournament_id.unwrap(),
+                        o.tournament_id.unwrap(),
+                    )],
+                )
+            })
             .collect();
         let est = estimate_elos(&all, &flat_unrated(), &rounds)[&newcomer.id];
         assert!(
@@ -1231,8 +1352,20 @@ mod tests {
         let all = vec![rated.clone(), newcomer.clone(), strong.clone()];
         // The rated 1600 loses to the 2000; the newcomer beats the 2000.
         let rounds = vec![
-            decided(1, vec![win(strong.id, rated.id)]),
-            decided(2, vec![win(newcomer.id, strong.id)]),
+            decided(
+                1,
+                vec![win(
+                    strong.tournament_id.unwrap(),
+                    rated.tournament_id.unwrap(),
+                )],
+            ),
+            decided(
+                2,
+                vec![win(
+                    newcomer.tournament_id.unwrap(),
+                    strong.tournament_id.unwrap(),
+                )],
+            ),
         ];
         let settings = TournamentSettings {
             elo_k_multiplier_percent: 0,
@@ -1282,7 +1415,13 @@ mod tests {
         // the prior mean.
         let newcomer = player(None);
         let strong = player(Some(1600));
-        let r = decided(1, vec![win(newcomer.id, strong.id)]);
+        let r = decided(
+            1,
+            vec![win(
+                newcomer.tournament_id.unwrap(),
+                strong.tournament_id.unwrap(),
+            )],
+        );
 
         // Shape stays Gaussian (default); only the unrated upward looseness moves.
         let climb = |unrated_pct: u32| {
@@ -1342,7 +1481,15 @@ mod tests {
         let mut all = vec![hero.clone()];
         all.extend(opps.iter().cloned());
         let rounds: Vec<Round> = (0..10)
-            .map(|i| decided(i as u32 + 1, vec![win(hero.id, opps[i].id)]))
+            .map(|i| {
+                decided(
+                    i as u32 + 1,
+                    vec![win(
+                        hero.tournament_id.unwrap(),
+                        opps[i].tournament_id.unwrap(),
+                    )],
+                )
+            })
             .collect();
 
         let shift = |s: &TournamentSettings| estimate_elos(&all, s, &rounds)[&hero.id] - 1500.0;

@@ -444,9 +444,9 @@ export function prepareRound(cupSize?: number): Promise<TournamentResponse> {
 
 /** The draft customization sent to the server. */
 export interface DraftUpdate {
-  absent: string[];
-  forced_boards: { player1: string; player2: string }[];
-  forced_bye?: string | null;
+  absent: number[];
+  forced_boards: { player1: number; player2: number }[];
+  forced_bye?: number | null;
 }
 
 /** Edit the current draft (absent set, forced pairings, forced bye). */
@@ -472,8 +472,8 @@ export function fetchRoundExplanation(
 /** Explain what forcing (or forbidding) the pairing `a`–`b` in a round would cost. */
 export function fetchCounterfactual(
   roundNumber: number,
-  a: string,
-  b: string,
+  a: number,
+  b: number,
   mode: CounterfactualMode = "force",
 ): Promise<Counterfactual> {
   return request<Counterfactual>(
@@ -484,7 +484,7 @@ export function fetchCounterfactual(
 
 /** Force the pairing `a`–`b` onto the current round (re-pairs it around that
  *  board). Fails if the round already has recorded results. */
-export function forcePairing(a: string, b: string): Promise<TournamentResponse> {
+export function forcePairing(a: number, b: number): Promise<TournamentResponse> {
   return request<TournamentResponse>(scopedPath("/rounds/force-pairing"), {
     method: "POST",
     body: JSON.stringify({ a, b }),

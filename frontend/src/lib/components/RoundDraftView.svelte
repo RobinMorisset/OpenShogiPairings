@@ -7,7 +7,7 @@
     draft: RoundDraft;
     players: Player[];
     /** Players the cup bracket will pair this round (not Swiss-customizable). */
-    cupPlayers?: string[];
+    cupPlayers?: number[];
     /** Push the edited draft to the server. */
     onUpdate: (update: DraftUpdate) => void;
     /** Confirm the draft: pair remaining players and start the round. */
@@ -24,7 +24,14 @@
     busy = false,
   }: Props = $props();
 
-  const byId = $derived(new Map(players.map((p) => [p.id, p])));
+  // Round drafting only happens once registration is finalized (or for a
+  // player added afterwards, which gets a number immediately on registration),
+  // so every player here is guaranteed a `tournament_id`.
+  function tid(p: Player): number {
+    return p.tournament_id!;
+  }
+
+  const byId = $derived(new Map(players.map((p) => [tid(p), p])));
   const absentSet = $derived(new Set(draft.absent));
   const cupSet = $derived(new Set(cupPlayers));
   const forcedIds = $derived(
@@ -40,22 +47,28 @@
   const allSorted = $derived([...players].sort(byNumber));
   // The Swiss pool: present players the cup hasn't already taken.
   const present = $derived(
-    allSorted.filter((p) => !absentSet.has(p.id) && !cupSet.has(p.id)),
+    allSorted.filter((p) => !absentSet.has(tid(p)) && !cupSet.has(tid(p))),
   );
   // Present players not already fixed into a forced pairing / bye.
-  const forceable = $derived(present.filter((p) => !forcedIds.has(p.id)));
+  const forceable = $derived(present.filter((p) => !forcedIds.has(tid(p))));
 
   // Cup players the referee has marked absent — their bracket game is still
   // created, so the referee is warned to record the forfeit.
   const absentCupPlayers = $derived(
-    allSorted.filter((p) => cupSet.has(p.id) && absentSet.has(p.id)),
+    allSorted.filter((p) => cupSet.has(tid(p)) && absentSet.has(tid(p))),
   );
 
-  function label(id: string): string {
+  function label(id: number): string {
     const p = byId.get(id);
     if (!p) return "(unknown)";
     const num = p.tournament_id != null ? `${p.tournament_id}. ` : "";
     return `${num}${p.last_name} ${p.first_name}`.trim();
+  }
+
+  /** Parse a `<select>`'s raw string value into a tournament number, or `""`
+   *  for the empty/placeholder option. */
+  function parseId(raw: string): number | "" {
+    return raw === "" ? "" : Number(raw);
   }
 
   /** The current draft as an update payload. */
@@ -70,7 +83,7 @@
     };
   }
 
-  function toggleAbsent(id: string) {
+  function toggleAbsent(id: number) {
     const willBeAbsent = !absentSet.has(id);
     const update = base();
     update.absent = willBeAbsent
@@ -88,11 +101,11 @@
 
   // Transient selection for the "add forced pairing" controls. As soon as
   // both are picked, the pairing is forced immediately — no separate button.
-  let pairA = $state("");
-  let pairB = $state("");
+  let pairA = $state<number | "">("");
+  let pairB = $state<number | "">("");
 
   function addForcedPair() {
-    if (!pairA || !pairB || pairA === pairB) return;
+    if (pairA === "" || pairB === "" || pairA === pairB) return;
     const update = base();
     update.forced_boards = [...update.forced_boards, { player1: pairA, player2: pairB }];
     pairA = "";
@@ -100,12 +113,12 @@
     onUpdate(update);
   }
 
-  function selectPairA(id: string) {
+  function selectPairA(id: number | "") {
     pairA = id;
     addForcedPair();
   }
 
-  function selectPairB(id: string) {
+  function selectPairB(id: number | "") {
     pairB = id;
     addForcedPair();
   }
@@ -116,9 +129,9 @@
     onUpdate(update);
   }
 
-  function setForcedBye(id: string) {
+  function setForcedBye(id: number | "") {
     const update = base();
-    update.forced_bye = id || null;
+    update.forced_bye = id === "" ? null : id;
     onUpdate(update);
   }
 
@@ -157,7 +170,7 @@
         absentCupPlayers.length === 1
           ? "roundDraftView.absentCupWarningSingular"
           : "roundDraftView.absentCupWarningPlural",
-        { values: { names: absentCupPlayers.map((p) => label(p.id)).join(", ") } },
+        { values: { names: absentCupPlayers.map((p) => label(tid(p))).join(", ") } },
       )}
     </p>
   {/if}
@@ -170,11 +183,11 @@
         <label class="chk">
           <input
             type="checkbox"
-            checked={absentSet.has(p.id)}
+            checked={absentSet.has(tid(p))}
             disabled={busy}
-            onchange={() => toggleAbsent(p.id)}
+            onchange={() => toggleAbsent(tid(p))}
           />
-          {label(p.id)}{#if cupSet.has(p.id)}<span class="cup-tag">{$_("roundDraftView.cupTag")}</span>{/if}
+          {label(tid(p))}{#if cupSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.cupTag")}</span>{/if}
         </label>
       {/each}
     </div>
@@ -202,23 +215,23 @@
       <select
         value={pairA}
         disabled={busy}
-        onchange={(e) => selectPairA(e.currentTarget.value)}
+        onchange={(e) => selectPairA(parseId(e.currentTarget.value))}
       >
         <option value="">{$_("roundDraftView.playerEllipsis")}</option>
         {#each forceable as p (p.id)}
-          <option value={p.id}>{label(p.id)}</option>
+          <option value={tid(p)}>{label(tid(p))}</option>
         {/each}
       </select>
       <span class="vs">{$_("roundDraftView.vs")}</span>
       <select
         value={pairB}
         disabled={busy}
-        onchange={(e) => selectPairB(e.currentTarget.value)}
+        onchange={(e) => selectPairB(parseId(e.currentTarget.value))}
       >
         <option value="">{$_("roundDraftView.playerEllipsis")}</option>
         {#each forceable as p (p.id)}
-          {#if p.id !== pairA}
-            <option value={p.id}>{label(p.id)}</option>
+          {#if tid(p) !== pairA}
+            <option value={tid(p)}>{label(tid(p))}</option>
           {/if}
         {/each}
       </select>
@@ -231,12 +244,12 @@
     <select
       value={draft.forced_bye ?? ""}
       disabled={busy || present.length % 2 === 0}
-      onchange={(e) => setForcedBye(e.currentTarget.value)}
+      onchange={(e) => setForcedBye(parseId(e.currentTarget.value))}
     >
       <option value="">{$_("roundDraftView.automaticBye")}</option>
       {#each present as p (p.id)}
-        {#if !forcedIds.has(p.id) || draft.forced_bye === p.id}
-          <option value={p.id}>{label(p.id)}</option>
+        {#if !forcedIds.has(tid(p)) || draft.forced_bye === tid(p)}
+          <option value={tid(p)}>{label(tid(p))}</option>
         {/if}
       {/each}
     </select>

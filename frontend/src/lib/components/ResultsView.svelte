@@ -56,12 +56,13 @@
   // Player id → medal, from the cup podium (the table order stays pure-Swiss).
   // A place can be null when a double no-show left it undetermined (e.g. both
   // finalists absent), so each medal is awarded only if its winner exists.
+  // Cup podium places are tournament numbers, not registration ids.
   const medalOf = $derived.by(() => {
-    const m = new Map<string, string>();
+    const m = new Map<number, string>();
     if (cupPodium) {
-      if (cupPodium.champion) m.set(cupPodium.champion, "🥇");
-      if (cupPodium.runner_up) m.set(cupPodium.runner_up, "🥈");
-      if (cupPodium.third) m.set(cupPodium.third, "🥉");
+      if (cupPodium.champion != null) m.set(cupPodium.champion, "🥇");
+      if (cupPodium.runner_up != null) m.set(cupPodium.runner_up, "🥈");
+      if (cupPodium.third != null) m.set(cupPodium.third, "🥉");
     }
     return m;
   });
@@ -69,13 +70,25 @@
   // One column per completed round.
   const completedRounds = $derived(tournament.rounds.filter((r) => r.completed));
 
-  // Map player UUID → their tournament number, for opponent references.
-  const numberOf = $derived(
-    new Map(tournament.players.map((p) => [p.id, p.tournament_id])),
-  );
-
   // Rows follow the server's ranked order, joined to each player's details.
   const byId = $derived(new Map(tournament.players.map((p) => [p.id, p])));
+
+  // Boards, byes and the cup podium all reference players by their tournament
+  // number (`Player.tournament_id`), not the registration id — this maps
+  // number → player for those lookups. Rounds only exist once registration is
+  // finalized, at which point every player has a number.
+  const byTid = $derived(
+    new Map(
+      tournament.players
+        .filter((p): p is Player & { tournament_id: number } => p.tournament_id != null)
+        .map((p) => [p.tournament_id, p]),
+    ),
+  );
+
+  /** A player's tournament number — guaranteed present once rounds exist. */
+  function tid(p: Player): number {
+    return p.tournament_id!;
+  }
 
   // Standings keyed by player id, so a cell can look up an opponent's metrics
   // when explaining how a tie-break was summed.
@@ -85,6 +98,12 @@
   // (e.g. an opponent removed after the game).
   const nameOf = (id: string): string => {
     const p = byId.get(id);
+    return p ? `${p.last_name} ${p.first_name}`.trim() : "—";
+  };
+
+  // Same as `nameOf`, but for a player referenced by tournament number.
+  const nameOfTid = (id: number): string => {
+    const p = byTid.get(id);
     return p ? `${p.last_name} ${p.first_name}`.trim() : "—";
   };
 
@@ -140,19 +159,18 @@
   // known in the next round, so it shows a `0−` placeholder in the starting
   // column and its result in the following column — matching the American Grid.
   function longAwareCell(player: Player, i: number): Cell {
+    const pid = tid(player);
     const onLong = (round: Round) =>
-      round.boards.find(
-        (b) => b.long && (b.player1 === player.id || b.player2 === player.id),
-      );
+      round.boards.find((b) => b.long && (b.player1 === pid || b.player2 === pid));
     const here = onLong(completedRounds[i]);
     if (here) {
-      const opp = here.player1 === player.id ? here.player2 : here.player1;
-      return { kind: "long-pending", opponentName: nameOf(opp) };
+      const opp = here.player1 === pid ? here.player2 : here.player1;
+      return { kind: "long-pending", opponentName: nameOfTid(opp) };
     }
     if (i > 0) {
       const prev = completedRounds[i - 1];
       const idx = prev.boards.findIndex(
-        (b) => b.long && (b.player1 === player.id || b.player2 === player.id),
+        (b) => b.long && (b.player1 === pid || b.player2 === pid),
       );
       if (idx >= 0) return cellForBoard(player, prev, prev.boards[idx], idx);
     }
@@ -160,19 +178,18 @@
   }
 
   function cellFor(player: Player, round: Round): Cell {
+    const pid = tid(player);
     // The Swiss bye and the (rare) cup bye both read as a free point.
-    if (round.bye === player.id || (round.cup_byes ?? []).includes(player.id))
+    if (round.bye === pid || (round.cup_byes ?? []).includes(pid))
       return { kind: "bye" };
-    const boardIdx = round.boards.findIndex(
-      (b) => b.player1 === player.id || b.player2 === player.id,
-    );
+    const boardIdx = round.boards.findIndex((b) => b.player1 === pid || b.player2 === pid);
     if (boardIdx < 0) {
       // No board and not the bye: absent. It scores a half point (a `0=`
       // half-bye) when the tournament awards absences half a point *and* the
       // player is in this round's absent list — matching the server's scoring.
       const half =
         (tournament.settings.half_point_absences ?? false) &&
-        (round.absent ?? []).includes(player.id);
+        (round.absent ?? []).includes(pid);
       return { kind: "absent", half };
     }
     return cellForBoard(player, round, round.boards[boardIdx], boardIdx);
@@ -180,12 +197,11 @@
 
   /** The cross-table cell for a specific board (played / no-show / pending). */
   function cellForBoard(player: Player, round: Round, board: Board, boardIdx: number): Cell {
-    const isP1 = board.player1 === player.id;
+    const isP1 = board.player1 === tid(player);
     const side: Winner = isP1 ? "player1" : "player2";
-    const opponentUuid = isP1 ? board.player2 : board.player1;
-    const opponentId = numberOf.get(opponentUuid);
-    const opponent = opponentId != null ? String(opponentId) : "?";
-    const opponentName = nameOf(opponentUuid);
+    const opponentTid = isP1 ? board.player2 : board.player1;
+    const opponent = String(opponentTid);
+    const opponentName = nameOfTid(opponentTid);
     if (board.no_show) {
       // This side is a no-show for a single absence on their side, or when both
       // players were absent; otherwise they are the one who showed up.
@@ -385,13 +401,13 @@
     <div class="podium">
       <span class="cup-title">{$_("resultsView.cup")}</span>
       {#if cupPodium.champion}
-        <span>🥇 <strong>{nameOf(cupPodium.champion)}</strong></span>
+        <span>🥇 <strong>{nameOfTid(cupPodium.champion)}</strong></span>
       {/if}
       {#if cupPodium.runner_up}
-        <span>🥈 {nameOf(cupPodium.runner_up)}</span>
+        <span>🥈 {nameOfTid(cupPodium.runner_up)}</span>
       {/if}
       {#if cupPodium.third}
-        <span>🥉 {nameOf(cupPodium.third)}</span>
+        <span>🥉 {nameOfTid(cupPodium.third)}</span>
       {/if}
     </div>
   {/if}
@@ -423,7 +439,7 @@
       {#each rows as { standing, player } (player.id)}
         <tr>
           <td class="num">{player.tournament_id ?? "—"}</td>
-          <td>{#if medalOf.has(player.id)}<span class="medal">{medalOf.get(player.id)}</span> {/if}{player.last_name}</td>
+          <td>{#if player.tournament_id != null && medalOf.has(player.tournament_id)}<span class="medal">{medalOf.get(player.tournament_id)}</span> {/if}{player.last_name}</td>
           <td>{player.first_name || "—"}</td>
           <td class="num">{player.rating ?? "—"}</td>
           {#if showEstimatedElo}

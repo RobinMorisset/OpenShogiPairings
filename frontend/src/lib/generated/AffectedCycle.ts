@@ -5,4 +5,4 @@
  * alternating cycle of (baseline △ counterfactual), ordered for storytelling.
  * The bye appears as the nil sentinel so clients can render it as "(bye)".
  */
-export type AffectedCycle = { players: Array<string>, };
+export type AffectedCycle = { players: Array<number>, };

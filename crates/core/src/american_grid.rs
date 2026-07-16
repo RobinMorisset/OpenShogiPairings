@@ -43,12 +43,18 @@ const COLUMN_SEP: &str = " ";
 pub fn to_grid(tournament: &Tournament, standings: &[Standing]) -> String {
     let players_by_id: HashMap<Uuid, &Player> =
         tournament.players.iter().map(|p| (p.id, p)).collect();
-    // Final rank = 1-based position in the standings; used for the `Nr` column
-    // and to renumber opponents referenced in the round cells.
-    let rank_of: HashMap<Uuid, u32> = standings
+    // Boards reference players by tournament number, so key the rank (1-based
+    // standings position, used for the `Nr` column and to renumber opponents in
+    // the round cells) by that number too.
+    let tid_of: HashMap<Uuid, u32> = tournament
+        .players
+        .iter()
+        .filter_map(|p| p.tournament_id.map(|t| (p.id, t)))
+        .collect();
+    let rank_of: HashMap<u32, u32> = standings
         .iter()
         .enumerate()
-        .map(|(i, s)| (s.player_id, i as u32 + 1))
+        .filter_map(|(i, s)| tid_of.get(&s.player_id).map(|&t| (t, i as u32 + 1)))
         .collect();
     let completed: Vec<&Round> = tournament.rounds.iter().filter(|r| r.completed).collect();
 
@@ -110,11 +116,19 @@ fn row_for(
     player: &Player,
     standing: &Standing,
     rounds: &[&Round],
-    rank_of: &HashMap<Uuid, u32>,
+    rank_of: &HashMap<u32, u32>,
     half_point_absences: bool,
 ) -> Vec<String> {
     let mut round_cells: Vec<String> = (0..rounds.len())
-        .map(|i| long_aware_cell(player.id, i, rounds, rank_of, half_point_absences))
+        .map(|i| {
+            long_aware_cell(
+                player.tournament_id.unwrap_or(0),
+                i,
+                rounds,
+                rank_of,
+                half_point_absences,
+            )
+        })
         .collect();
     // Wrap the whole block in a single literal bracket pair. Done in place so a
     // one-round tournament yields `[cell]` (both edits land on the same cell).
@@ -126,7 +140,7 @@ fn row_for(
 
     let mut row = vec![
         rank_of
-            .get(&player.id)
+            .get(&player.tournament_id.unwrap_or(0))
             .map_or_else(|| "?".into(), |r| r.to_string()),
         if player.rating.is_none() {
             "N".into()
@@ -159,13 +173,13 @@ fn format_half_points(half: u32) -> String {
 /// its decisive result in the following column. Everything else defers to
 /// [`round_cell`].
 fn long_aware_cell(
-    player_id: Uuid,
+    player_id: u32,
     i: usize,
     rounds: &[&Round],
-    rank_of: &HashMap<Uuid, u32>,
+    rank_of: &HashMap<u32, u32>,
     half_point_absences: bool,
 ) -> String {
-    fn on_long(round: &Round, player_id: Uuid) -> Option<&Board> {
+    fn on_long(round: &Round, player_id: u32) -> Option<&Board> {
         round
             .boards
             .iter()
@@ -191,9 +205,9 @@ fn long_aware_cell(
 /// `0#` for a no-show, or `<opponent><marker><handicap?>` for a game. The
 /// opponent is their final rank.
 fn round_cell(
-    player_id: Uuid,
+    player_id: u32,
     round: &Round,
-    rank_of: &HashMap<Uuid, u32>,
+    rank_of: &HashMap<u32, u32>,
     half_point_absences: bool,
 ) -> String {
     // The Swiss bye and the (rare) cup bye both read as a free point.
@@ -215,7 +229,7 @@ fn round_cell(
 /// The cell for a player's actual board: `0#`/`0+` for a no-show, otherwise
 /// `<opponent-rank><marker><handicap?>`. Shared by the ordinary round rendering
 /// and by the second-round column that carries a long game's result.
-fn game_cell(board: &Board, player_id: Uuid, rank_of: &HashMap<Uuid, u32>) -> String {
+fn game_cell(board: &Board, player_id: u32, rank_of: &HashMap<u32, u32>) -> String {
     let is_player1 = board.player1 == player_id;
     let side = if is_player1 {
         Winner::Player1
@@ -291,9 +305,20 @@ mod tests {
     use super::*;
     use crate::round::{Handicap, HandicapGame, NoShow, PairingSource};
 
+    /// The tournament number assigned to a registered player (only valid after
+    /// `finalize_registration`).
+    fn tid(t: &Tournament, id: Uuid) -> u32 {
+        t.players
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .tournament_id
+            .unwrap()
+    }
+
     /// Build a finalized two-player tournament (P1 rated 2000, P2 1000) plus one
     /// completed round whose single board is configured by `configure`.
-    fn one_board(configure: impl FnOnce(&mut Board)) -> (Tournament, Uuid, Uuid) {
+    fn one_board(configure: impl FnOnce(&mut Board)) -> (Tournament, u32, u32) {
         let mut t = Tournament::new("Test Cup").unwrap();
         let p1 = t
             .add_player(crate::player::NewPlayer {
@@ -316,6 +341,8 @@ mod tests {
             .unwrap()
             .id;
         t.finalize_registration().unwrap();
+        let p1 = tid(&t, p1);
+        let p2 = tid(&t, p2);
 
         let mut board = Board {
             result: Some(Winner::Player1),
@@ -403,6 +430,8 @@ mod tests {
         let a = t.add_player(named("A")).unwrap().id;
         let b = t.add_player(named("B")).unwrap().id;
         t.finalize_registration().unwrap();
+        let a = tid(&t, a);
+        let b = tid(&t, b);
         t.rounds.push(Round {
             number: 1,
             boards: vec![Board {
@@ -436,6 +465,9 @@ mod tests {
         let b = t.add_player(named("B")).unwrap().id;
         let c = t.add_player(named("C")).unwrap().id;
         t.finalize_registration().unwrap();
+        let a = tid(&t, a);
+        let b = tid(&t, b);
+        let c = tid(&t, c);
         // A vs B played; C sits out as the bye; nobody absent.
         t.rounds.push(Round {
             number: 1,

@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+#[cfg(test)]
 use uuid::Uuid;
 
 /// Summary of a pooled distribution of absolute ELO differences.
@@ -103,12 +104,12 @@ pub fn wilson(successes: usize, n: usize) -> Proportion {
 /// Spearman rank correlation between two orderings of the **same** set of ids
 /// (each a permutation, rank 0 = first). Returns 1.0 for identical orders, -1.0
 /// for exact reverse. Falls back to 0.0 if the two don't cover the same ids.
-pub fn spearman(order_a: &[Uuid], order_b: &[Uuid]) -> f64 {
+pub fn spearman<T: Copy + Eq + std::hash::Hash>(order_a: &[T], order_b: &[T]) -> f64 {
     let n = order_a.len();
     if n != order_b.len() || n < 2 {
         return if n < 2 { 1.0 } else { 0.0 };
     }
-    let rank_b: HashMap<Uuid, usize> = order_b.iter().enumerate().map(|(i, id)| (*id, i)).collect();
+    let rank_b: HashMap<T, usize> = order_b.iter().enumerate().map(|(i, id)| (*id, i)).collect();
     let mut sum_d2 = 0i64;
     for (rank_a, id) in order_a.iter().enumerate() {
         let Some(&rb) = rank_b.get(id) else {

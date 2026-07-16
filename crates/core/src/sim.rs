@@ -32,9 +32,9 @@ use crate::round::Winner;
 use crate::settings::TournamentSettings;
 use crate::tournament::{Tournament, TournamentError, MIN_PLAYERS_PER_ROUND};
 
-/// Ground-truth strengths (ELO scale) keyed by player id — the "true" playing
+/// Ground-truth strengths (ELO scale) keyed by tournament number — the "true" playing
 /// strength outcomes are drawn from, distinct from a registration rating.
-pub type StrengthMap = HashMap<Uuid, f64>;
+pub type StrengthMap = HashMap<u32, f64>;
 
 /// The settings-independent "truth model" the simulator draws each player's
 /// ground-truth strength from — the oracle-prior knobs, shared by every settings
@@ -102,7 +102,8 @@ pub fn cup_eligibility(
     nations: &HashSet<String>,
     attendance_rounds: usize,
 ) -> HashSet<Uuid> {
-    let absent_early: HashSet<Uuid> = base
+    // Absence is recorded by tournament number (rounds are tid-native).
+    let absent_early: HashSet<u32> = base
         .rounds
         .iter()
         .take(attendance_rounds)
@@ -115,7 +116,7 @@ pub fn cup_eligibility(
                 .as_deref()
                 .is_some_and(|n| nations.contains(n))
         })
-        .filter(|p| !absent_early.contains(&p.id))
+        .filter(|p| p.tournament_id.is_none_or(|t| !absent_early.contains(&t)))
         .map(|p| p.id)
         .collect()
 }
@@ -165,7 +166,8 @@ pub fn sample_strengths(
 ) -> StrengthMap {
     players
         .iter()
-        .map(|p| {
+        .filter_map(|p| {
+            let tid = p.tournament_id?;
             let (prior_mean, prior_std) = oracle_prior(
                 p,
                 oracle.provisional,
@@ -174,14 +176,14 @@ pub fn sample_strengths(
             );
             // The override (post-tournament / known) strength is the mean to jitter
             // around; fall back to the registration rating when there is none.
-            let center = overrides.get(&p.id).copied().unwrap_or(prior_mean);
+            let center = overrides.get(&tid).copied().unwrap_or(prior_mean);
             // A player who was unrated at registration but has a post-tournament
             // result (an override) is, by definition, *provisionally* rated — we
             // have a tournament's worth of evidence on them. Jitter at the
             // provisional width for that result, not the very broad "truly unknown"
             // unrated width, which would wildly over-disperse a player we actually
             // know. A genuinely unrated player (no override) keeps the broad width.
-            let std = if p.rating.is_none() && overrides.contains_key(&p.id) {
+            let std = if p.rating.is_none() && overrides.contains_key(&tid) {
                 oracle_provisional_width(center, oracle.provisional)
             } else {
                 prior_std
@@ -191,7 +193,7 @@ pub fn sample_strengths(
             } else {
                 sample_normal(rng, center, oracle.jitter * std)
             };
-            (p.id, strength)
+            Some((tid, strength))
         })
         .collect()
 }
@@ -303,9 +305,9 @@ pub fn welfare_shortfall(values: &[f64], weights: &[f64]) -> Vec<f64> {
 pub fn player_game_interest(
     tournament: &Tournament,
     strengths: &StrengthMap,
-) -> Vec<(Uuid, f64, u32)> {
-    let mut sum: HashMap<Uuid, f64> = HashMap::new();
-    let mut count: HashMap<Uuid, u32> = HashMap::new();
+) -> Vec<(u32, f64, u32)> {
+    let mut sum: HashMap<u32, f64> = HashMap::new();
+    let mut count: HashMap<u32, u32> = HashMap::new();
     for round in &tournament.rounds {
         for board in &round.boards {
             if board.result.is_none() {
@@ -342,10 +344,10 @@ pub fn interest_welfare(tournament: &Tournament, strengths: &StrengthMap) -> f64
 #[derive(Debug, Clone)]
 pub struct RunOutcome {
     /// Final standings order (rank 1 first) by the configured score/tie-breaks.
-    pub final_order: Vec<Uuid>,
+    pub final_order: Vec<u32>,
     /// Final order (rank 1 first) by the Bayesian ELO estimate instead — the
     /// second lens on ranking fidelity (see the design's §4.3).
-    pub estimated_order: Vec<Uuid>,
+    pub estimated_order: Vec<u32>,
     /// Absolute ground-truth strength gap of every played game.
     pub game_diffs: Vec<f64>,
     /// The ground-truth strengths used this run, so aggregation can score the
@@ -354,20 +356,20 @@ pub struct RunOutcome {
     /// The direct-elimination cup champion this run, when a cup was configured and
     /// its final was decided. `None` for a pure-Swiss run, or if a double no-show
     /// left the final undetermined.
-    pub cup_champion: Option<Uuid>,
+    pub cup_champion: Option<u32>,
     /// The game-interest metric for this run: the game-weighted Sen welfare of the
     /// players' mean game interest (see [`interest_welfare`]). Higher = better.
     pub interest: f64,
     /// Per-player game interest this run — `(player, Σ entropy, #games)` — retained
     /// so aggregation can pool it across runs and name the players whose dull games
     /// most lowered `interest` (see [`player_game_interest`]).
-    pub player_interest: Vec<(Uuid, f64, u32)>,
+    pub player_interest: Vec<(u32, f64, u32)>,
 }
 
 impl RunOutcome {
     /// The tournament winner (rank-1 finisher), or `None` if there were no
     /// players. Uses the existing tie-break chain — no special ties handling.
-    pub fn winner(&self) -> Option<Uuid> {
+    pub fn winner(&self) -> Option<u32> {
         self.final_order.first().copied()
     }
 }
@@ -450,7 +452,7 @@ fn game_uniform(run_seed: u64, lo: u32, hi: u32, rematch: u32) -> f64 {
 }
 
 /// How many times `a` and `b` have already met in `prior` rounds (unordered).
-fn prior_meetings(prior: &[crate::round::Round], a: Uuid, b: Uuid) -> u32 {
+fn prior_meetings(prior: &[crate::round::Round], a: u32, b: u32) -> u32 {
     prior
         .iter()
         .flat_map(|r| &r.boards)
@@ -495,14 +497,6 @@ fn autofill_last_round(
     let last_idx = tournament.rounds.len() - 1;
     let round_number = tournament.rounds[last_idx].number;
 
-    // The game-outcome key is the players' (deterministic) tournament numbers, not
-    // their (per-import-random) ids — see [`game_uniform`].
-    let tid_of: HashMap<Uuid, u32> = tournament
-        .players
-        .iter()
-        .filter_map(|p| p.tournament_id.map(|t| (p.id, t)))
-        .collect();
-
     // Decide winners first (immutable borrow), then write them (mutable borrow).
     let decisions: Vec<(usize, Winner)> = {
         let (prior, rest) = tournament.rounds.split_at(last_idx);
@@ -513,11 +507,13 @@ fn autofill_last_round(
             .enumerate()
             .filter(|(_, b)| b.result.is_none())
             .map(|(i, b)| {
+                // Boards already carry the players' tournament numbers — the
+                // deterministic game-outcome key (see [`game_uniform`]).
                 let rematch = prior_meetings(prior, b.player1, b.player2);
                 let winner = decide_board(
                     run_seed,
-                    tid_of[&b.player1],
-                    tid_of[&b.player2],
+                    b.player1,
+                    b.player2,
                     strengths[&b.player1],
                     strengths[&b.player2],
                     rematch,
@@ -535,7 +531,7 @@ fn autofill_last_round(
 
 /// Players ordered by descending ELO estimate, ties broken by tournament number
 /// (deterministic), so the estimate gives a total finishing order too.
-fn order_by_estimate(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<Uuid> {
+fn order_by_estimate(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<u32> {
     let mut ids: Vec<&Player> = players.iter().collect();
     ids.sort_by(|a, b| {
         let ea = estimate.get(&a.id).copied().unwrap_or(f64::MIN);
@@ -544,7 +540,7 @@ fn order_by_estimate(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<U
             .unwrap_or(Ordering::Equal)
             .then_with(|| a.tournament_id.cmp(&b.tournament_id))
     });
-    ids.into_iter().map(|p| p.id).collect()
+    ids.into_iter().filter_map(|p| p.tournament_id).collect()
 }
 
 /// Simulate one whole tournament: sample strengths, then play `rounds` rounds,
@@ -596,10 +592,16 @@ pub fn simulate_run(
         autofill_last_round(&mut tournament, &strengths, run_seed)?;
     }
 
+    // Finishing order as tournament numbers (standings face callers by id).
+    let tid_of: HashMap<Uuid, u32> = tournament
+        .players
+        .iter()
+        .filter_map(|p| p.tournament_id.map(|t| (p.id, t)))
+        .collect();
     let final_order = tournament
         .standings()
         .into_iter()
-        .map(|s| s.player_id)
+        .filter_map(|s| tid_of.get(&s.player_id).copied())
         .collect();
     let estimate = estimate_elos(
         &tournament.players,
@@ -652,6 +654,7 @@ mod tests {
         for &(name, rating) in players {
             t.add_player(rated(name, rating)).unwrap();
         }
+        t.finalize_registration().unwrap();
         t
     }
 
@@ -669,7 +672,7 @@ mod tests {
     #[test]
     fn overrides_are_taken_exactly_at_zero_jitter() {
         let t = tournament_with(&[("A", 1500), ("B", 1500)]);
-        let a = t.players[0].id;
+        let a = t.players[0].tournament_id.unwrap();
         let mut overrides = StrengthMap::new();
         overrides.insert(a, 2222.0);
         let mut rng = ChaCha8Rng::seed_from_u64(1);
@@ -689,7 +692,7 @@ mod tests {
         // is 1480: with jitter on, the ground truth must scatter around 1480 (the
         // post value), not the 1259 registration rating.
         let t = tournament_with(&[("Real", 1259), ("B", 1500)]);
-        let real = t.players[0].id;
+        let real = t.players[0].tournament_id.unwrap();
         let mut overrides = StrengthMap::new();
         overrides.insert(real, 1480.0);
         let mut rng = ChaCha8Rng::seed_from_u64(3);
@@ -728,20 +731,31 @@ mod tests {
         // 2337 (σ≈75), not the very broad "truly unknown" unrated width (σ≈350). A
         // second unrated player with no override keeps the broad width.
         let mut t = Tournament::new("Sim").unwrap();
+        t.add_player(NewPlayer {
+            last_name: "Rated-post".into(),
+            ..Default::default() // rating None
+        })
+        .unwrap();
+        t.add_player(NewPlayer {
+            last_name: "Unknown".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        t.finalize_registration().unwrap();
         let with_result = t
-            .add_player(NewPlayer {
-                last_name: "Rated-post".into(),
-                ..Default::default() // rating None
-            })
+            .players
+            .iter()
+            .find(|p| p.last_name == "Rated-post")
             .unwrap()
-            .id;
+            .tournament_id
+            .unwrap();
         let still_unrated = t
-            .add_player(NewPlayer {
-                last_name: "Unknown".into(),
-                ..Default::default()
-            })
+            .players
+            .iter()
+            .find(|p| p.last_name == "Unknown")
             .unwrap()
-            .id;
+            .tournament_id
+            .unwrap();
         let mut overrides = StrengthMap::new();
         overrides.insert(with_result, 2337.0);
 
@@ -790,8 +804,8 @@ mod tests {
             &OracleModel::new(0.0, 2.0),
             &mut rng,
         );
-        assert_eq!(s[&t.players[0].id], 1500.0);
-        assert_eq!(s[&t.players[1].id], 1800.0);
+        assert_eq!(s[&t.players[0].tournament_id.unwrap()], 1500.0);
+        assert_eq!(s[&t.players[1].tournament_id.unwrap()], 1800.0);
     }
 
     #[test]
@@ -804,8 +818,23 @@ mod tests {
         let mut weak = rated("Weak", 800);
         weak.fesa_games = Some(50);
         let mut t = Tournament::new("Sim").unwrap();
-        let strong_id = t.add_player(strong).unwrap().id;
-        let weak_id = t.add_player(weak).unwrap().id;
+        t.add_player(strong).unwrap();
+        t.add_player(weak).unwrap();
+        t.finalize_registration().unwrap();
+        let strong_id = t
+            .players
+            .iter()
+            .find(|p| p.last_name == "Strong")
+            .unwrap()
+            .tournament_id
+            .unwrap();
+        let weak_id = t
+            .players
+            .iter()
+            .find(|p| p.last_name == "Weak")
+            .unwrap()
+            .tournament_id
+            .unwrap();
 
         let mut rng = ChaCha8Rng::seed_from_u64(7);
         let (mut ss, mut sw) = (Vec::new(), Vec::new());
@@ -841,8 +870,23 @@ mod tests {
         established.fesa_games = Some(crate::PROVISIONAL_GAMES_THRESHOLD);
         let provisional = rated("Prov", 1500); // fesa_games None → provisional
         let mut t = Tournament::new("Sim").unwrap();
-        let est_id = t.add_player(established).unwrap().id;
-        let prov_id = t.add_player(provisional).unwrap().id;
+        t.add_player(established).unwrap();
+        t.add_player(provisional).unwrap();
+        t.finalize_registration().unwrap();
+        let est_id = t
+            .players
+            .iter()
+            .find(|p| p.last_name == "Est")
+            .unwrap()
+            .tournament_id
+            .unwrap();
+        let prov_id = t
+            .players
+            .iter()
+            .find(|p| p.last_name == "Prov")
+            .unwrap()
+            .tournament_id
+            .unwrap();
 
         let std = |v: &[f64]| {
             let m = v.iter().sum::<f64>() / v.len() as f64;
@@ -882,14 +926,14 @@ mod tests {
     fn oracle_unrated_center_and_k_control_the_unrated_true_strength() {
         use crate::player::NewPlayer;
         let mut t = Tournament::new("Sim").unwrap();
-        let uid = t
-            .add_player(NewPlayer {
-                last_name: "New".into(),
-                rating: None, // unrated
-                ..Default::default()
-            })
-            .unwrap()
-            .id;
+        t.add_player(NewPlayer {
+            last_name: "New".into(),
+            rating: None, // unrated
+            ..Default::default()
+        })
+        .unwrap();
+        t.finalize_registration().unwrap();
+        let uid = t.players[0].tournament_id.unwrap();
 
         // Jitter 0 pins the unrated player to the oracle's unrated center, not 600.
         let mut rng = ChaCha8Rng::seed_from_u64(1);
@@ -1029,12 +1073,19 @@ Nr Name    Nat Elo  1   Pts
 4  [D] [d] FR  1500 [3-] 0
 ";
         let t = crate::import_american_grid(grid).unwrap();
-        let id = |last| t.players.iter().find(|p| p.last_name == last).unwrap().id;
+        let id = |last| {
+            t.players
+                .iter()
+                .find(|p| p.last_name == last)
+                .unwrap()
+                .tournament_id
+                .unwrap()
+        };
 
         // Equal strengths → every game a coin flip → perfect interest (1).
         let mut equal = StrengthMap::new();
         for p in &t.players {
-            equal.insert(p.id, 1500.0);
+            equal.insert(p.tournament_id.unwrap(), 1500.0);
         }
         assert!((interest_welfare(&t, &equal) - 1.0).abs() < 1e-9);
 
@@ -1112,7 +1163,7 @@ Nr Name    Nat Elo  1   Pts
         // One far-stronger player among peers should win most of the time with no
         // rating noise — a sanity check on the whole pipeline.
         let base = tournament_with(&[("Star", 2400), ("B", 1500), ("C", 1450), ("D", 1400)]);
-        let star = base.players[0].id;
+        let star = base.players[0].tournament_id.unwrap();
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         let mut wins = 0;
         let runs = 200;
@@ -1247,7 +1298,10 @@ Nr Name    Nat Elo  1   Pts
         // With every match decided, the bracket names a champion, and it is one of
         // the eligible players.
         let champion = out.cup_champion.expect("a decided cup has a champion");
-        assert!(base.players.iter().any(|p| p.id == champion));
+        assert!(base
+            .players
+            .iter()
+            .any(|p| p.tournament_id == Some(champion)));
     }
 
     #[test]
@@ -1267,13 +1321,21 @@ Nr Name    Nat Elo  1   Pts
         let fr_present = mk(&mut t, "A", "fr"); // lower-case → stored FR
         let fr_absent = mk(&mut t, "B", "FR");
         let jp = mk(&mut t, "C", "JP");
+        t.finalize_registration().unwrap();
+        let fr_absent_tid = t
+            .players
+            .iter()
+            .find(|p| p.id == fr_absent)
+            .unwrap()
+            .tournament_id
+            .unwrap();
         // Round 1 with fr_absent sitting out.
         t.rounds.push(crate::round::Round {
             number: 1,
             boards: Vec::new(),
             bye: None,
             cup_byes: Vec::new(),
-            absent: vec![fr_absent],
+            absent: vec![fr_absent_tid],
             completed: true,
         });
 

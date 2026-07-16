@@ -66,7 +66,7 @@
   let tournament = $state<Tournament | null>(null);
   let standings = $state<Standing[]>([]);
   let cupPodium = $state<CupPodium | null>(null);
-  let draftCupPlayers = $state<string[]>([]);
+  let draftCupPlayers = $state<number[]>([]);
   let suggestedHandicaps = $state<(Handicap | null)[][]>([]);
   /** Winner that counts for standings/pairing per board, server-computed (see
    *  `TournamentResponse.effective_winners`), indexed like `tournament.rounds`. */
@@ -169,7 +169,7 @@
   // carrying them into the next round as absentees.
   const busyLongPlayers = $derived.by(() => {
     if (!tournament) return [];
-    const out: string[] = [];
+    const out: number[] = [];
     for (const r of tournament.rounds) {
       for (const b of r.boards) {
         if (b.long && b.result == null && b.no_show == null) out.push(b.player1, b.player2);

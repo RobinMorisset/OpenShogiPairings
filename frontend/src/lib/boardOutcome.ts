@@ -21,9 +21,9 @@ export function boardOutcome(board: Board, side: Winner): BoardOutcome {
   return { actualWon, gave };
 }
 
-/** The id of the player who conceded the odds, or `null` if the board has no
- *  handicap. */
-export function handicapGiverId(board: Board): string | null {
+/** The tournament number of the player who conceded the odds, or `null` if the
+ *  board has no handicap. */
+export function handicapGiverId(board: Board): number | null {
   if (!board.handicap) return null;
   return board.handicap.giver === "player1" ? board.player1 : board.player2;
 }
