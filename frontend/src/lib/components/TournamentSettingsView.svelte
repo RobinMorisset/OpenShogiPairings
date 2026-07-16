@@ -3,6 +3,7 @@
   import { _ } from "svelte-i18n";
   import { TIEBREAKS } from "../types";
   import type {
+    ClubProtection,
     EloPriorShape,
     GradeKind,
     HandicapPolicy,
@@ -136,9 +137,10 @@
   $effect(() => {
     const sThresholds = settings.macmahon_thresholds;
     const sAirtight = settings.airtight_groups_rounds ?? null;
-    const sEnabled = settings.club_protection_enabled;
-    const sRounds = settings.club_protection_rounds ?? null;
-    const sExempt = settings.club_protection_exempt_clubs;
+    const cp = settings.club_protection;
+    const sEnabled = cp?.kind === "on";
+    const sRounds = cp?.kind === "on" ? (cp.rounds ?? null) : null;
+    const sExempt = cp?.kind === "on" ? (cp.exempt_clubs ?? []) : [];
     const sFloater = settings.floater_style;
     const sCup = settings.cup_enabled;
     const sLong = settings.long_boards_enabled ?? false;
@@ -219,11 +221,13 @@
     onUpdate({
       macmahon_thresholds: cleanThresholds(thresholds),
       airtight_groups_rounds: airtightRounds,
-      club_protection_enabled: clubEnabled,
-      club_protection_rounds: clubRounds,
-      club_protection_exempt_clubs: exemptClubs
-        .map((c) => c.trim())
-        .filter((c) => c.length > 0),
+      club_protection: clubEnabled
+        ? ({
+            kind: "on",
+            rounds: clubRounds,
+            exempt_clubs: exemptClubs.map((c) => c.trim()).filter((c) => c.length > 0),
+          } satisfies ClubProtection)
+        : ({ kind: "off" } satisfies ClubProtection),
       floater_style: floaterStyle,
       cup_enabled: cupEnabled,
       long_boards_enabled: longBoardsEnabled,

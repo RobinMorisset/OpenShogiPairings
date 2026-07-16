@@ -1470,7 +1470,7 @@ pub fn pair_round_weighted(
 mod tests {
     use super::*;
     use crate::round::Winner;
-    use crate::settings::{MacMahonThreshold, RatioAtLeastOne};
+    use crate::settings::{ClubProtection, MacMahonThreshold, RatioAtLeastOne};
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
@@ -1894,7 +1894,10 @@ mod tests {
         let p = two_clubs_where_fold_pairs_mates();
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let settings = TournamentSettings {
-            club_protection_enabled: true,
+            club_protection: ClubProtection::On {
+                rounds: None,
+                exempt_clubs: Vec::new(),
+            },
             ..Default::default()
         };
 
@@ -1966,8 +1969,10 @@ mod tests {
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
         let exempt = TournamentSettings {
-            club_protection_enabled: true,
-            club_protection_exempt_clubs: vec!["  HOME ".into()],
+            club_protection: ClubProtection::On {
+                rounds: None,
+                exempt_clubs: vec!["  HOME ".into()],
+            },
             ..Default::default()
         };
         let round = pair_round_weighted(1, &p, &exempt, &[], &present, &[], None);
@@ -1980,7 +1985,10 @@ mod tests {
         );
 
         let protected = TournamentSettings {
-            club_protection_enabled: true,
+            club_protection: ClubProtection::On {
+                rounds: None,
+                exempt_clubs: Vec::new(),
+            },
             ..Default::default()
         };
         let round = pair_round_weighted(1, &p, &protected, &[], &present, &[], None);
@@ -2000,8 +2008,10 @@ mod tests {
         let p = two_clubs_where_fold_pairs_mates();
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let settings = TournamentSettings {
-            club_protection_enabled: true,
-            club_protection_rounds: Some(1),
+            club_protection: ClubProtection::On {
+                rounds: NonZeroU32::new(1),
+                exempt_clubs: Vec::new(),
+            },
             ..Default::default()
         };
 

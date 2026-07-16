@@ -12,6 +12,7 @@ export type { AffectedCycle } from "./generated/AffectedCycle";
 export type { BackupInfo } from "./generated/BackupInfo";
 export type { Board } from "./generated/Board";
 export type { BoardLedger } from "./generated/BoardLedger";
+export type { ClubProtection } from "./generated/ClubProtection";
 export type { Counterfactual } from "./generated/Counterfactual";
 export type { CounterfactualMode } from "./generated/CounterfactualMode";
 export type { Cup } from "./generated/Cup";
