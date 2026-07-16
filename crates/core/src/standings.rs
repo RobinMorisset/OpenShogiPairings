@@ -202,7 +202,7 @@ pub fn compute_standings(
     let mut standings: Vec<Standing> = players
         .iter()
         .map(|p| {
-            let t = TournamentId(p.tournament_id.expect("player has a number"));
+            let t = p.tournament_id.expect("player has a number");
             let s = scores.get_tid(t);
             let opp_m: Vec<HalfPoints> = s.opponents.iter().map(&score_m).collect();
             let opp_w: Vec<Wins> = s.opponents.iter().map(&score_w).collect();
@@ -247,9 +247,9 @@ pub fn compute_standings(
     // depends on which other players they're still tied with once every earlier
     // criterion has run out, so ranking proceeds by repeatedly splitting the
     // still-tied groups, criterion by criterion, rather than a single sort.
-    let tnum: HashMap<Uuid, u32> = players
+    let tnum: HashMap<Uuid, TournamentId> = players
         .iter()
-        .map(|p| (p.id, p.tournament_id.unwrap_or(u32::MAX)))
+        .map(|p| (p.id, p.tournament_id.unwrap_or(TournamentId(u32::MAX))))
         .collect();
 
     let mut start: Vec<usize> = (0..standings.len()).collect();
@@ -349,7 +349,7 @@ mod tests {
     fn player(tid: u32, rating: Option<u32>) -> Player {
         Player {
             id: Uuid::new_v4(),
-            tournament_id: Some(tid),
+            tournament_id: Some(TournamentId(tid)),
             last_name: format!("P{tid}"),
             first_name: String::new(),
             rating,
@@ -362,7 +362,7 @@ mod tests {
         }
     }
 
-    fn board(a: u32, b: u32, winner: Winner) -> Board {
+    fn board(a: TournamentId, b: TournamentId, winner: Winner) -> Board {
         Board {
             result: Some(winner),
             ..Board::pending(a, b, 0, PairingSource::Swiss)

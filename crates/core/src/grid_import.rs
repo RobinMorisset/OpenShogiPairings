@@ -45,6 +45,7 @@ use std::collections::HashMap;
 use crate::player::NewPlayer;
 use crate::round::{Board, Handicap, PairingSource, Winner};
 use crate::tournament::{Tournament, TournamentError};
+use crate::units::TournamentId;
 
 /// Why an American Grid could not be imported.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -93,7 +94,7 @@ pub fn import_american_grid(text: &str) -> Result<Tournament, GridImportError> {
 pub(crate) fn build_tournament(
     name: Option<&str>,
     rows: Vec<RawRow>,
-) -> Result<(Tournament, HashMap<u32, u32>), GridImportError> {
+) -> Result<(Tournament, HashMap<u32, TournamentId>), GridImportError> {
     if rows.is_empty() {
         return Err(GridImportError::NoPlayers);
     }
@@ -144,12 +145,12 @@ pub(crate) fn build_tournament(
 
     // Rounds are tid-native, so map each grid "Nr" to the tournament number
     // finalization assigned (by rating, so generally *not* the grid Nr).
-    let tid_by_uuid: HashMap<uuid::Uuid, u32> = tournament
+    let tid_by_uuid: HashMap<uuid::Uuid, TournamentId> = tournament
         .players
         .iter()
         .filter_map(|p| p.tournament_id.map(|t| (p.id, t)))
         .collect();
-    let id_of: HashMap<u32, u32> = uuid_of
+    let id_of: HashMap<u32, TournamentId> = uuid_of
         .iter()
         .map(|(&nr, uid)| (nr, tid_by_uuid[uid]))
         .collect();
@@ -168,11 +169,11 @@ fn rebuild_round(
     r: usize,
     rows: &[RawRow],
     by_number: &HashMap<u32, &RawRow>,
-    id_of: &HashMap<u32, u32>,
+    id_of: &HashMap<u32, TournamentId>,
 ) -> Result<(), GridImportError> {
     let round_number = r as u32 + 1;
-    let mut absent: Vec<u32> = Vec::new();
-    let mut byes: Vec<u32> = Vec::new();
+    let mut absent: Vec<TournamentId> = Vec::new();
+    let mut byes: Vec<TournamentId> = Vec::new();
     let mut forced_boards: Vec<Board> = Vec::new();
     // (a, b, outcome-from-a's-view, handicap) for each game, collected once.
     let mut results: Vec<(u32, u32, Outcome, Option<Handicap>)> = Vec::new();
@@ -244,7 +245,7 @@ fn rebuild_round(
     // round's real bye and demote the rest to absences, warning about it.
     let mut byes = byes.into_iter();
     let forced_bye = byes.next();
-    let demoted: Vec<u32> = byes.collect();
+    let demoted: Vec<TournamentId> = byes.collect();
     if !demoted.is_empty() {
         tracing::warn!(
             round = round_number,

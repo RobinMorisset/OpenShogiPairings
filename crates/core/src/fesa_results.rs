@@ -26,6 +26,7 @@ use std::collections::HashMap;
 use crate::grid_import::{build_tournament, parse_cell, Cell, GridImportError, RawRow};
 use crate::player::Grade;
 use crate::tournament::Tournament;
+use crate::units::TournamentId;
 
 /// Fallback last-name column width if detection finds nothing (e.g. an empty
 /// table); the real width is [`detect_last_name_width`].
@@ -34,7 +35,9 @@ const DEFAULT_LAST_NAME_WIDTH: usize = 18;
 /// Parse a FESA result table, returning the replayed tournament and each player's
 /// post-tournament strength (`ELO + (+/-)`, or the `*` rating for a pre-unrated
 /// player) keyed by player id.
-pub fn import_fesa_results(text: &str) -> Result<(Tournament, HashMap<u32, f64>), GridImportError> {
+pub fn import_fesa_results(
+    text: &str,
+) -> Result<(Tournament, HashMap<TournamentId, f64>), GridImportError> {
     let mut title: Option<String> = None;
     let mut data: Vec<(usize, &str)> = Vec::new();
 
@@ -349,13 +352,13 @@ mod tests {
     use super::*;
     use crate::decode_latin1;
 
-    fn load(fixture: &str) -> (Tournament, HashMap<u32, f64>) {
+    fn load(fixture: &str) -> (Tournament, HashMap<TournamentId, f64>) {
         let path = format!("{}/tests/fixtures/{fixture}", env!("CARGO_MANIFEST_DIR"));
         let bytes = std::fs::read(&path).expect("fixture present");
         import_fesa_results(&decode_latin1(&bytes)).expect("parses")
     }
 
-    fn wosc() -> (Tournament, HashMap<u32, f64>) {
+    fn wosc() -> (Tournament, HashMap<TournamentId, f64>) {
         load("results_WOSC_2024.txt")
     }
 

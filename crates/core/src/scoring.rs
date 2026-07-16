@@ -151,9 +151,9 @@ pub(crate) fn compute_scores(
     // number, so the only reverse (number → id) map kept is `ids`, below.
     let max_tid = players
         .iter()
-        .map(|p| p.tournament_id.unwrap())
+        .map(|p| usize::from(p.tournament_id.unwrap()))
         .max()
-        .unwrap_or(0) as usize;
+        .unwrap_or(0);
 
     // Gaps (number 0, and numbers freed by a pre-play removal) keep a default
     // all-zero score and a nil id — never read, since only present players' numbers
@@ -188,7 +188,7 @@ pub(crate) fn compute_scores(
         let adjustment: i32 = p.adjustments.iter().map(|a| a.delta).sum();
         let points =
             HalfPoints::from_halves((macmahon.halves() as i32 + adjustment * 2).max(0) as u32);
-        let t = TournamentId(p.tournament_id.unwrap());
+        let t = p.tournament_id.unwrap();
         ids[t] = p.id;
         real_tids.push(t);
         by_tid[t] = PlayerScore {
@@ -217,7 +217,7 @@ pub(crate) fn compute_scores(
             // Boards carry tournament numbers, so the score table is indexed
             // directly — no Uuid→number lookup, and every board player is a current
             // player (a played player can't be removed), so its slot is real.
-            let (ta, tb) = (TournamentId(board.player1), TournamentId(board.player2));
+            let (ta, tb) = (board.player1, board.player2);
             // A long board (two rounds, two points) counts as *two* games against
             // the same opponent for the opponent-based tie-breaks (SOS, SODOS,
             // SOSOS, Buchholz), so it is recorded twice. It still feeds ELO as a
@@ -247,7 +247,7 @@ pub(crate) fn compute_scores(
             }
         }
         if let Some(bye) = round.bye {
-            let s = &mut by_tid[TournamentId(bye)];
+            let s = &mut by_tid[bye];
             s.had_bye = true;
             s.last_descended = Some(round.number); // a bye is a downfloat
         }
@@ -255,14 +255,14 @@ pub(crate) fn compute_scores(
         // downfloat they can't be given twice.
         for board in &round.boards {
             if let Some(present) = board.no_show_opponent() {
-                let s = &mut by_tid[TournamentId(present)];
+                let s = &mut by_tid[present];
                 s.had_bye = true;
                 s.last_descended = Some(round.number);
             }
         }
         // A cup bye (an unopposed bracket advance) is a bye all the same.
         for &player in &round.cup_byes {
-            let s = &mut by_tid[TournamentId(player)];
+            let s = &mut by_tid[player];
             s.had_bye = true;
             s.last_descended = Some(round.number);
         }
@@ -278,15 +278,15 @@ pub(crate) fn compute_scores(
             // as two games against the same opponent for the point/victory totals
             // and the opponent-based tie-breaks; it stays a single game for ELO.
             let reps = if board.long { 2 } else { 1 };
-            let s = &mut by_tid[TournamentId(winner)];
+            let s = &mut by_tid[winner];
             s.points += HalfPoints::from_whole(reps); // one point per game (two for a long board)
             s.victories += Wins(reps);
             for _ in 0..reps {
-                s.defeated.push(TournamentId(loser));
+                s.defeated.push(loser);
             }
         }
         if let Some(bye) = round.bye {
-            let s = &mut by_tid[TournamentId(bye)];
+            let s = &mut by_tid[bye];
             s.points += HalfPoints::from_whole(1); // a bye scores one point
             s.victories += Wins(1);
         }
@@ -297,14 +297,14 @@ pub(crate) fn compute_scores(
                 // A long board resolved by forfeit still scores its long weight
                 // (two points), unless the referee demoted it.
                 let reps = if board.long { 2 } else { 1 };
-                let s = &mut by_tid[TournamentId(present)];
+                let s = &mut by_tid[present];
                 s.points += HalfPoints::from_whole(reps); // one point (two for a long board)
                 s.victories += Wins(reps);
             }
         }
         // A cup bye scores the free point too — the player advanced unopposed.
         for &player in &round.cup_byes {
-            let s = &mut by_tid[TournamentId(player)];
+            let s = &mut by_tid[player];
             s.points += HalfPoints::from_whole(1); // an unopposed advance scores one point
             s.victories += Wins(1);
         }
@@ -314,7 +314,7 @@ pub(crate) fn compute_scores(
         // board and stays at 0.
         if settings.half_point_absences {
             for &id in &round.absent {
-                by_tid[TournamentId(id)].points += HalfPoints::from_halves(1); // half a point
+                by_tid[id].points += HalfPoints::from_halves(1); // half a point
             }
         }
 
@@ -344,7 +344,7 @@ mod tests {
     fn player(tid: u32, rating: Option<u32>) -> Player {
         Player {
             id: Uuid::new_v4(),
-            tournament_id: Some(tid),
+            tournament_id: Some(TournamentId(tid)),
             last_name: format!("P{tid}"),
             first_name: String::new(),
             rating,

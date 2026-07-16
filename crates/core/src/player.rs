@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+use crate::units::TournamentId;
+
 /// The two families of playing grade: dan (stronger, unbounded above) and kyu
 /// (weaker, unbounded below).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -107,7 +109,7 @@ pub struct Player {
     /// reference opponents in the results table.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub tournament_id: Option<u32>,
+    pub tournament_id: Option<TournamentId>,
     /// Family name. Guaranteed non-empty (trimmed) once registered.
     pub last_name: String,
     /// Given name. May be empty.

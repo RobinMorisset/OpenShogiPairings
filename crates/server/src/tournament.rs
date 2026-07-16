@@ -9,7 +9,7 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{
     Board, Counterfactual, CounterfactualMode, CupPodium, Handicap, NewPlayer, NoShow,
-    RoundExplanation, Standing, Tournament, TournamentSettings, Winner,
+    RoundExplanation, Standing, Tournament, TournamentId, TournamentSettings, Winner,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -176,7 +176,7 @@ struct TournamentView {
     /// Players the cup will pair in the round being drafted, so the draft UI can
     /// keep them out of the Swiss customization. Empty otherwise.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    draft_cup_players: Vec<u32>,
+    draft_cup_players: Vec<TournamentId>,
     /// Suggested handicap per board, indexed like `tournament.rounds[i].boards[j]`.
     /// Computed from current ratings regardless of `handicap_policy` — the
     /// frontend decides how to surface it. `None` = no suggestion (near-equal
@@ -442,12 +442,12 @@ fn backup_after(store: &TournamentStore, label: &str) {
 #[derive(Debug, Deserialize)]
 struct DraftUpdate {
     #[serde(default)]
-    absent: Vec<u32>,
+    absent: Vec<TournamentId>,
     /// Forced pairings; only `player1`/`player2` are read (result is ignored).
     #[serde(default)]
     forced_boards: Vec<Board>,
     #[serde(default)]
-    forced_bye: Option<u32>,
+    forced_bye: Option<TournamentId>,
 }
 
 /// Edit the current draft (absent set, forced pairings, forced bye).
@@ -502,8 +502,8 @@ async fn round_explanation(
 struct CounterfactualRequest {
     #[serde(default = "default_counterfactual_mode")]
     mode: CounterfactualMode,
-    a: u32,
-    b: u32,
+    a: TournamentId,
+    b: TournamentId,
 }
 
 fn default_counterfactual_mode() -> CounterfactualMode {
@@ -531,8 +531,8 @@ async fn round_counterfactual(
 /// Body of the force-pairing endpoint: the two players to pair.
 #[derive(Debug, Deserialize)]
 struct ForcePairingRequest {
-    a: u32,
-    b: u32,
+    a: TournamentId,
+    b: TournamentId,
 }
 
 /// Force the pairing `a`–`b` onto the current round (re-pairs it with that board

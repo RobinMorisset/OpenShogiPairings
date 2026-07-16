@@ -2,6 +2,7 @@
 import type { HandicapGame } from "./HandicapGame";
 import type { NoShow } from "./NoShow";
 import type { PairingSource } from "./PairingSource";
+import type { TournamentId } from "./TournamentId";
 import type { Winner } from "./Winner";
 
 /**
@@ -15,7 +16,7 @@ export type Board = {
  * created after finalization, when every player has a number, so scoring and
  * pairing index players directly without a `Uuid → number` lookup.
  */
-player1: number, player2: number, 
+player1: TournamentId, player2: TournamentId, 
 /**
  * The *actual* winner of the game, used for end-of-tournament ELO and for
  * the sign shown in the results cell. `None` until the game is decided.

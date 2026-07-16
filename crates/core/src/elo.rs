@@ -26,6 +26,7 @@ use uuid::Uuid;
 use crate::player::Player;
 use crate::round::{Handicap, Round, Winner};
 use crate::settings::{EloPriorShape, TournamentSettings};
+use crate::units::TournamentId;
 
 /// ELO scale factor `s = 400 / ln 10`: a 400-point gap is 10:1 odds. Also the
 /// factor in the prior-width law `σ₀ = √(K · s)`, so it's `pub(crate)` for
@@ -420,7 +421,7 @@ pub fn estimate_elos(
     let n = players.len();
 
     // Boards reference players by tournament number, so index by number here.
-    let index: HashMap<u32, usize> = players
+    let index: HashMap<TournamentId, usize> = players
         .iter()
         .enumerate()
         .filter_map(|(i, p)| p.tournament_id.map(|t| (t, i)))
@@ -599,7 +600,7 @@ mod tests {
         let tid = NEXT_TID.fetch_add(1, Ordering::Relaxed);
         Player {
             id: Uuid::new_v4(),
-            tournament_id: Some(tid),
+            tournament_id: Some(TournamentId(tid)),
             last_name: "P".into(),
             first_name: String::new(),
             rating,
@@ -623,14 +624,20 @@ mod tests {
         }
     }
 
-    fn win(a: u32, b: u32) -> Board {
+    fn win(a: TournamentId, b: TournamentId) -> Board {
         Board {
             result: Some(Winner::Player1),
             ..Board::pending(a, b, 0, PairingSource::Swiss)
         }
     }
 
-    fn handicap_board(a: u32, b: u32, result: Winner, handicap: Handicap, giver: Winner) -> Board {
+    fn handicap_board(
+        a: TournamentId,
+        b: TournamentId,
+        result: Winner,
+        handicap: Handicap,
+        giver: Winner,
+    ) -> Board {
         Board {
             result: Some(result),
             handicap: Some(HandicapGame { handicap, giver }),

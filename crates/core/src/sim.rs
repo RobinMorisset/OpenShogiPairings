@@ -31,10 +31,11 @@ use crate::player::Player;
 use crate::round::Winner;
 use crate::settings::TournamentSettings;
 use crate::tournament::{Tournament, TournamentError, MIN_PLAYERS_PER_ROUND};
+use crate::units::TournamentId;
 
 /// Ground-truth strengths (ELO scale) keyed by tournament number — the "true" playing
 /// strength outcomes are drawn from, distinct from a registration rating.
-pub type StrengthMap = HashMap<u32, f64>;
+pub type StrengthMap = HashMap<TournamentId, f64>;
 
 /// The settings-independent "truth model" the simulator draws each player's
 /// ground-truth strength from — the oracle-prior knobs, shared by every settings
@@ -103,7 +104,7 @@ pub fn cup_eligibility(
     attendance_rounds: usize,
 ) -> HashSet<Uuid> {
     // Absence is recorded by tournament number (rounds are tid-native).
-    let absent_early: HashSet<u32> = base
+    let absent_early: HashSet<TournamentId> = base
         .rounds
         .iter()
         .take(attendance_rounds)
@@ -305,9 +306,9 @@ pub fn welfare_shortfall(values: &[f64], weights: &[f64]) -> Vec<f64> {
 pub fn player_game_interest(
     tournament: &Tournament,
     strengths: &StrengthMap,
-) -> Vec<(u32, f64, u32)> {
-    let mut sum: HashMap<u32, f64> = HashMap::new();
-    let mut count: HashMap<u32, u32> = HashMap::new();
+) -> Vec<(TournamentId, f64, u32)> {
+    let mut sum: HashMap<TournamentId, f64> = HashMap::new();
+    let mut count: HashMap<TournamentId, u32> = HashMap::new();
     for round in &tournament.rounds {
         for board in &round.boards {
             if board.result.is_none() {
@@ -344,10 +345,10 @@ pub fn interest_welfare(tournament: &Tournament, strengths: &StrengthMap) -> f64
 #[derive(Debug, Clone)]
 pub struct RunOutcome {
     /// Final standings order (rank 1 first) by the configured score/tie-breaks.
-    pub final_order: Vec<u32>,
+    pub final_order: Vec<TournamentId>,
     /// Final order (rank 1 first) by the Bayesian ELO estimate instead — the
     /// second lens on ranking fidelity (see the design's §4.3).
-    pub estimated_order: Vec<u32>,
+    pub estimated_order: Vec<TournamentId>,
     /// Absolute ground-truth strength gap of every played game.
     pub game_diffs: Vec<f64>,
     /// The ground-truth strengths used this run, so aggregation can score the
@@ -356,20 +357,20 @@ pub struct RunOutcome {
     /// The direct-elimination cup champion this run, when a cup was configured and
     /// its final was decided. `None` for a pure-Swiss run, or if a double no-show
     /// left the final undetermined.
-    pub cup_champion: Option<u32>,
+    pub cup_champion: Option<TournamentId>,
     /// The game-interest metric for this run: the game-weighted Sen welfare of the
     /// players' mean game interest (see [`interest_welfare`]). Higher = better.
     pub interest: f64,
     /// Per-player game interest this run — `(player, Σ entropy, #games)` — retained
     /// so aggregation can pool it across runs and name the players whose dull games
     /// most lowered `interest` (see [`player_game_interest`]).
-    pub player_interest: Vec<(u32, f64, u32)>,
+    pub player_interest: Vec<(TournamentId, f64, u32)>,
 }
 
 impl RunOutcome {
     /// The tournament winner (rank-1 finisher), or `None` if there were no
     /// players. Uses the existing tie-break chain — no special ties handling.
-    pub fn winner(&self) -> Option<u32> {
+    pub fn winner(&self) -> Option<TournamentId> {
         self.final_order.first().copied()
     }
 }
@@ -452,7 +453,7 @@ fn game_uniform(run_seed: u64, lo: u32, hi: u32, rematch: u32) -> f64 {
 }
 
 /// How many times `a` and `b` have already met in `prior` rounds (unordered).
-fn prior_meetings(prior: &[crate::round::Round], a: u32, b: u32) -> u32 {
+fn prior_meetings(prior: &[crate::round::Round], a: TournamentId, b: TournamentId) -> u32 {
     prior
         .iter()
         .flat_map(|r| &r.boards)
@@ -510,10 +511,13 @@ fn autofill_last_round(
                 // Boards already carry the players' tournament numbers — the
                 // deterministic game-outcome key (see [`game_uniform`]).
                 let rematch = prior_meetings(prior, b.player1, b.player2);
+                // `decide_board` / `game_uniform` are the low-level deterministic
+                // outcome helpers, keyed on the bare numbers (like the matching
+                // solver), so unwrap the `TournamentId` at this seam.
                 let winner = decide_board(
                     run_seed,
-                    b.player1,
-                    b.player2,
+                    b.player1.0,
+                    b.player2.0,
                     strengths[&b.player1],
                     strengths[&b.player2],
                     rematch,
@@ -531,7 +535,7 @@ fn autofill_last_round(
 
 /// Players ordered by descending ELO estimate, ties broken by tournament number
 /// (deterministic), so the estimate gives a total finishing order too.
-fn order_by_estimate(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<u32> {
+fn order_by_estimate(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<TournamentId> {
     let mut ids: Vec<&Player> = players.iter().collect();
     ids.sort_by(|a, b| {
         let ea = estimate.get(&a.id).copied().unwrap_or(f64::MIN);
@@ -593,7 +597,7 @@ pub fn simulate_run(
     }
 
     // Finishing order as tournament numbers (standings face callers by id).
-    let tid_of: HashMap<Uuid, u32> = tournament
+    let tid_of: HashMap<Uuid, TournamentId> = tournament
         .players
         .iter()
         .filter_map(|p| p.tournament_id.map(|t| (p.id, t)))

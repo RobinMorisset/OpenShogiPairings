@@ -3,6 +3,7 @@ import type { CupPodium } from "./CupPodium";
 import type { Handicap } from "./Handicap";
 import type { Standing } from "./Standing";
 import type { Tournament } from "./Tournament";
+import type { TournamentId } from "./TournamentId";
 import type { Winner } from "./Winner";
 
 /**
@@ -30,7 +31,7 @@ cup_podium: CupPodium | null,
  * Players the cup will pair in the round being drafted, so the draft UI can
  * keep them out of the Swiss customization. Empty otherwise.
  */
-draft_cup_players: Array<number>, 
+draft_cup_players: Array<TournamentId>, 
 /**
  * Suggested handicap per board, indexed like `tournament.rounds[i].boards[j]`.
  * Computed from current ratings regardless of `handicap_policy` — the

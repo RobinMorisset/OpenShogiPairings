@@ -251,7 +251,7 @@ pub fn overrides_from_list(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use osp_core::NewPlayer;
+    use osp_core::{NewPlayer, TournamentId};
 
     #[test]
     fn next_permanent_list_picks_the_first_jan_or_jul_after() {
@@ -410,7 +410,7 @@ mod tests {
     }
 
     /// The tournament number assigned to a registered player (post-finalization).
-    fn tid(base: &Tournament, id: uuid::Uuid) -> u32 {
+    fn tid(base: &Tournament, id: uuid::Uuid) -> TournamentId {
         base.players
             .iter()
             .find(|p| p.id == id)

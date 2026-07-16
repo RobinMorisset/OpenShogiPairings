@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::round::{CupStage, NoShow, PairingSource, Round};
+use crate::units::TournamentId;
 
 /// The valid cup sizes (top-N), each a power of two.
 pub const CUP_SIZES: [u32; 4] = [8, 16, 32, 64];
@@ -32,14 +33,14 @@ pub struct Cup {
     /// Bracket size (8/16/32/64).
     pub size: u32,
     /// The seeded players, seed 1..size (index 0 = top seed). Frozen at finalize.
-    pub seed_order: Vec<u32>,
+    pub seed_order: Vec<TournamentId>,
 }
 
 /// One bracket pairing for a round, with the stage it belongs to.
 #[derive(Debug, Clone)]
 pub struct CupMatch {
-    pub player1: u32,
-    pub player2: u32,
+    pub player1: TournamentId,
+    pub player2: TournamentId,
     pub stage: CupStage,
 }
 
@@ -48,7 +49,7 @@ pub struct CupMatch {
 #[derive(Debug, Clone, Default)]
 pub struct CupPairings {
     pub matches: Vec<CupMatch>,
-    pub byes: Vec<u32>,
+    pub byes: Vec<TournamentId>,
 }
 
 /// The cup podium, once the final round is decided. Each place is `None` when it
@@ -57,17 +58,20 @@ pub struct CupPairings {
 #[derive(Debug, Clone, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct CupPodium {
-    pub champion: Option<u32>,
-    pub runner_up: Option<u32>,
-    pub third: Option<u32>,
-    pub fourth: Option<u32>,
+    pub champion: Option<TournamentId>,
+    pub runner_up: Option<TournamentId>,
+    pub third: Option<TournamentId>,
+    pub fourth: Option<TournamentId>,
 }
 
 /// The outcome of one decided cup match: a winner (a played result, or a single
 /// no-show forfeit), or both players absent (a double no-show), which advances
 /// nobody.
 enum CupResult {
-    Winner { winner: u32, loser: u32 },
+    Winner {
+        winner: TournamentId,
+        loser: TournamentId,
+    },
     BothAbsent,
 }
 
@@ -183,10 +187,11 @@ impl Cup {
         rounds: &[Round],
         sched: &[u32],
         bracket: u32,
-    ) -> Option<(Vec<Option<u32>>, Option<[Option<u32>; 2]>)> {
+    ) -> Option<(Vec<Option<TournamentId>>, Option<[Option<TournamentId>; 2]>)> {
         let cup_rounds = self.cup_rounds();
-        let mut frontier: Vec<Option<u32>> = self.seed_order.iter().copied().map(Some).collect();
-        let mut semifinal_losers: Option<[Option<u32>; 2]> = None;
+        let mut frontier: Vec<Option<TournamentId>> =
+            self.seed_order.iter().copied().map(Some).collect();
+        let mut semifinal_losers: Option<[Option<TournamentId>; 2]> = None;
         for k in 1..bracket {
             let tround = sched[k as usize - 1];
             let (winners, losers) = self.play_round(rounds, tround, &frontier)?;
@@ -203,10 +208,10 @@ impl Cup {
     /// (the outer option) when a real two-player match hasn't been decided yet.
     fn decide_slot(
         &self,
-        pair: (Option<u32>, Option<u32>),
+        pair: (Option<TournamentId>, Option<TournamentId>),
         rounds: &[Round],
         k: u32,
-    ) -> Option<(Option<u32>, Option<u32>)> {
+    ) -> Option<(Option<TournamentId>, Option<TournamentId>)> {
         match pair {
             (Some(a), Some(b)) => match decide(rounds, k, a, b)? {
                 CupResult::Winner { winner, loser } => Some((Some(winner), Some(loser))),
@@ -225,8 +230,8 @@ impl Cup {
         &self,
         rounds: &[Round],
         k: u32,
-        frontier: &[Option<u32>],
-    ) -> Option<(Vec<Option<u32>>, Vec<Option<u32>>)> {
+        frontier: &[Option<TournamentId>],
+    ) -> Option<(Vec<Option<TournamentId>>, Vec<Option<TournamentId>>)> {
         let mut winners = Vec::new();
         let mut losers = Vec::new();
         for pair in fold(frontier) {
@@ -239,7 +244,11 @@ impl Cup {
 }
 
 /// Record a folded bracket pair as a match, a bye, or nothing (both slots dead).
-fn push_pairing(pair: (Option<u32>, Option<u32>), stage: CupStage, out: &mut CupPairings) {
+fn push_pairing(
+    pair: (Option<TournamentId>, Option<TournamentId>),
+    stage: CupStage,
+    out: &mut CupPairings,
+) {
     match pair {
         (Some(player1), Some(player2)) => out.matches.push(CupMatch {
             player1,
@@ -270,7 +279,7 @@ fn stage_before_final(alive: u32) -> CupStage {
 /// `None` when the board is missing or not yet decided (neither a result nor a
 /// no-show). A single no-show is a forfeit — the player who showed up wins —
 /// while a double no-show advances nobody ([`CupResult::BothAbsent`]).
-fn decide(rounds: &[Round], k: u32, a: u32, b: u32) -> Option<CupResult> {
+fn decide(rounds: &[Round], k: u32, a: TournamentId, b: TournamentId) -> Option<CupResult> {
     let round = rounds.iter().find(|r| r.number == k)?;
     let board = round
         .boards
@@ -304,12 +313,12 @@ fn decide(rounds: &[Round], k: u32, a: u32, b: u32) -> Option<CupResult> {
 /// fold and so is thrown off by the near-tie seeding perturbations real events pick
 /// up from slightly stale rating lists (a WOSC seeded off last month's list still
 /// plays a standard bracket, just with a few close seeds a position or two out).
-pub fn knockout_champion(rounds: &[Round], seeds: &[u32]) -> Option<u32> {
+pub fn knockout_champion(rounds: &[Round], seeds: &[TournamentId]) -> Option<TournamentId> {
     let n = seeds.len();
     if n < 2 || !n.is_power_of_two() {
         return None;
     }
-    let mut frontier: HashSet<u32> = seeds.iter().copied().collect();
+    let mut frontier: HashSet<TournamentId> = seeds.iter().copied().collect();
     if frontier.len() != n {
         return None; // duplicate seeds
     }
@@ -346,16 +355,16 @@ pub fn knockout_champion(rounds: &[Round], seeds: &[u32]) -> Option<u32> {
 /// alive players are mid-game and record no new pairing) are skipped automatically.
 pub fn reconstruct_cup_from_final(
     rounds: &[Round],
-    gold: u32,
-    silver: u32,
-) -> Option<(u32, Vec<u32>)> {
+    gold: TournamentId,
+    silver: TournamentId,
+) -> Option<(u32, Vec<TournamentId>)> {
     let max_round = rounds.iter().map(|r| r.number).max()?;
     // The final is the latest round in which the two finalists actually met.
     let final_round = (1..=max_round)
         .rev()
         .find(|&r| played(rounds, r, gold, silver))?;
 
-    let mut frontier: HashSet<u32> = [gold, silver].into_iter().collect();
+    let mut frontier: HashSet<TournamentId> = [gold, silver].into_iter().collect();
     let mut r = final_round;
     loop {
         // The previous bracket round: the latest earlier round where *every* still-
@@ -382,7 +391,7 @@ pub fn reconstruct_cup_from_final(
 }
 
 /// Whether a board between `a` and `b` exists in round `r`.
-fn played(rounds: &[Round], r: u32, a: u32, b: u32) -> bool {
+fn played(rounds: &[Round], r: u32, a: TournamentId, b: TournamentId) -> bool {
     rounds.iter().find(|rd| rd.number == r).is_some_and(|rd| {
         rd.boards
             .iter()
@@ -393,7 +402,11 @@ fn played(rounds: &[Round], r: u32, a: u32, b: u32) -> bool {
 /// The beaten predecessors if, in round `r`, every `frontier` player has a board
 /// against a distinct opponent *outside* the frontier; else `None` (a gap round, or
 /// a round where the field played itself or someone twice).
-fn frontier_predecessors(rounds: &[Round], r: u32, frontier: &HashSet<u32>) -> Option<Vec<u32>> {
+fn frontier_predecessors(
+    rounds: &[Round],
+    r: u32,
+    frontier: &HashSet<TournamentId>,
+) -> Option<Vec<TournamentId>> {
     let round = rounds.iter().find(|rd| rd.number == r)?;
     let mut opps = Vec::with_capacity(frontier.len());
     let mut seen = HashSet::with_capacity(frontier.len());
@@ -420,11 +433,11 @@ fn frontier_predecessors(rounds: &[Round], r: u32, frontier: &HashSet<u32>) -> O
 fn frontier_round_winners(
     rounds: &[Round],
     r: u32,
-    frontier: &HashSet<u32>,
-) -> Option<HashSet<u32>> {
+    frontier: &HashSet<TournamentId>,
+) -> Option<HashSet<TournamentId>> {
     let round = rounds.iter().find(|rd| rd.number == r)?;
     let mut winners = HashSet::with_capacity(frontier.len() / 2);
-    let mut matched: HashSet<u32> = HashSet::with_capacity(frontier.len());
+    let mut matched: HashSet<TournamentId> = HashSet::with_capacity(frontier.len());
     for &p in frontier {
         if matched.contains(&p) {
             continue;
@@ -456,12 +469,12 @@ mod tests {
     use super::*;
     use crate::round::{Board, PairingSource, Winner};
 
-    fn ids(n: usize) -> Vec<u32> {
-        (1..=n as u32).collect()
+    fn ids(n: usize) -> Vec<TournamentId> {
+        (1..=n as u32).map(TournamentId).collect()
     }
 
     /// Build a completed round whose cup boards are the given (winner, loser) pairs.
-    fn cup_round(number: u32, results: &[(u32, u32, CupStage)]) -> Round {
+    fn cup_round(number: u32, results: &[(TournamentId, TournamentId, CupStage)]) -> Round {
         Round {
             number,
             boards: results
