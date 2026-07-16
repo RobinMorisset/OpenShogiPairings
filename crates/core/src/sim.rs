@@ -589,7 +589,9 @@ pub fn simulate_run(
                 tournament.update_draft(real.absent.clone(), Vec::new(), None)?;
             }
         }
-        tournament.confirm_round()?;
+        // The simulator auto-fills every board and never displays them, so skip
+        // the display-only sort that would recompute the standings each round.
+        tournament.confirm_round_unordered()?;
         // Filling in every board result completes the round automatically.
         autofill_last_round(&mut tournament, &strengths, run_seed)?;
     }

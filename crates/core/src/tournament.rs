@@ -614,6 +614,23 @@ impl Tournament {
     /// Validates that there are enough present players and that the forced
     /// constraints are consistent.
     pub fn confirm_round(&mut self) -> Result<&Round, TournamentError> {
+        self.confirm_round_inner(true)
+    }
+
+    /// Like [`Self::confirm_round`], but skips ordering the round's boards by
+    /// standings rank — a display-only nicety (the "Board N" numbering) that costs
+    /// a full standings computation, over again, every round. The simulator
+    /// auto-fills every board by index and never shows them, so it uses this to
+    /// avoid recomputing the tie-breaks mid-tournament; the paired boards, results,
+    /// and final standings are identical either way.
+    pub fn confirm_round_unordered(&mut self) -> Result<&Round, TournamentError> {
+        self.confirm_round_inner(false)
+    }
+
+    fn confirm_round_inner(
+        &mut self,
+        order_boards_for_display: bool,
+    ) -> Result<&Round, TournamentError> {
         let draft = self.draft.clone().ok_or(TournamentError::NoDraft)?;
 
         let absent: HashSet<Uuid> = draft.absent.iter().copied().collect();
@@ -757,21 +774,25 @@ impl Tournament {
         // entering this round) of the board's best-placed player — the same
         // criteria the pairings view sorts by, so the "Board" numbers it shows
         // match this stored order instead of drifting from a client-only sort.
-        let rank_of: HashMap<Uuid, usize> = self
-            .standings()
-            .into_iter()
-            .enumerate()
-            .map(|(rank, s)| (s.player_id, rank))
-            .collect();
-        boards.sort_by_key(|b| {
-            let is_cup = matches!(b.source, PairingSource::Cup { .. });
-            let best_rank = rank_of
-                .get(&b.player1)
-                .copied()
-                .unwrap_or(usize::MAX)
-                .min(rank_of.get(&b.player2).copied().unwrap_or(usize::MAX));
-            (if is_cup { 0 } else { 1 }, best_rank)
-        });
+        // Skipped by the simulator (see `confirm_round_unordered`): it never shows
+        // the boards, and a full standings computation per round is the cost.
+        if order_boards_for_display {
+            let rank_of: HashMap<Uuid, usize> = self
+                .standings()
+                .into_iter()
+                .enumerate()
+                .map(|(rank, s)| (s.player_id, rank))
+                .collect();
+            boards.sort_by_key(|b| {
+                let is_cup = matches!(b.source, PairingSource::Cup { .. });
+                let best_rank = rank_of
+                    .get(&b.player1)
+                    .copied()
+                    .unwrap_or(usize::MAX)
+                    .min(rank_of.get(&b.player2).copied().unwrap_or(usize::MAX));
+                (if is_cup { 0 } else { 1 }, best_rank)
+            });
+        }
 
         let round = Round {
             number: draft.number,
