@@ -591,6 +591,7 @@ pub fn estimate_elos(
 mod tests {
     use super::*;
     use crate::round::{Board, HandicapGame, PairingSource};
+    use crate::settings::{Ratio, RatioAtLeastOne, UnratedK};
     use std::sync::atomic::{AtomicU32, Ordering};
 
     static NEXT_TID: AtomicU32 = AtomicU32::new(1);
@@ -708,7 +709,7 @@ mod tests {
         );
         let base = TournamentSettings::default();
         let hot = TournamentSettings {
-            elo_k_multiplier_percent: 400,
+            elo_k_multiplier_percent: Ratio::from_percent(400),
             ..Default::default()
         };
         let shift_base =
@@ -778,7 +779,7 @@ mod tests {
         );
         let shift = |k: u32| {
             let settings = TournamentSettings {
-                elo_unrated_k: k,
+                elo_unrated_k: UnratedK::new(k),
                 ..Default::default()
             };
             estimate_elos(
@@ -1015,9 +1016,13 @@ mod tests {
             elo_prior_shape_established: EloPriorShape::Laplace,
             elo_prior_shape_provisional: EloPriorShape::Laplace,
             elo_prior_shape_unrated: EloPriorShape::Laplace,
-            elo_upward_looseness_established_percent: looseness_percent,
-            elo_upward_looseness_provisional_percent: looseness_percent,
-            elo_upward_looseness_unrated_percent: looseness_percent,
+            elo_upward_looseness_established_percent: RatioAtLeastOne::from_percent(
+                looseness_percent,
+            ),
+            elo_upward_looseness_provisional_percent: RatioAtLeastOne::from_percent(
+                looseness_percent,
+            ),
+            elo_upward_looseness_unrated_percent: RatioAtLeastOne::from_percent(looseness_percent),
             ..Default::default()
         }
     }
@@ -1368,7 +1373,7 @@ mod tests {
             ),
         ];
         let settings = TournamentSettings {
-            elo_k_multiplier_percent: 0,
+            elo_k_multiplier_percent: Ratio::from_percent(0),
             ..Default::default()
         };
         let est = estimate_elos(&all, &settings, &rounds);
@@ -1426,7 +1431,7 @@ mod tests {
         // Shape stays Gaussian (default); only the unrated upward looseness moves.
         let climb = |unrated_pct: u32| {
             let settings = TournamentSettings {
-                elo_upward_looseness_unrated_percent: unrated_pct,
+                elo_upward_looseness_unrated_percent: RatioAtLeastOne::from_percent(unrated_pct),
                 ..Default::default()
             };
             estimate_elos(
@@ -1445,7 +1450,7 @@ mod tests {
         // No games → still exactly at the unrated center, asymmetry or not (the
         // two-piece normal's mode is unchanged).
         let settings = TournamentSettings {
-            elo_upward_looseness_unrated_percent: 300,
+            elo_upward_looseness_unrated_percent: RatioAtLeastOne::from_percent(300),
             ..Default::default()
         };
         let at_rest = estimate_elos(std::slice::from_ref(&newcomer), &settings, &[])[&newcomer.id];
@@ -1462,9 +1467,9 @@ mod tests {
             elo_prior_shape_established: EloPriorShape::Laplace,
             elo_prior_shape_provisional: EloPriorShape::Laplace,
             elo_prior_shape_unrated: EloPriorShape::Laplace,
-            elo_upward_looseness_established_percent: established,
-            elo_upward_looseness_provisional_percent: provisional,
-            elo_upward_looseness_unrated_percent: unrated,
+            elo_upward_looseness_established_percent: RatioAtLeastOne::from_percent(established),
+            elo_upward_looseness_provisional_percent: RatioAtLeastOne::from_percent(provisional),
+            elo_upward_looseness_unrated_percent: RatioAtLeastOne::from_percent(unrated),
             ..Default::default()
         }
     }

@@ -1,11 +1,114 @@
 //! Tournament-wide settings.
 
 use std::collections::HashSet;
+use std::num::NonZeroU32;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use ts_rs::TS;
 
 use crate::player::Grade;
+
+/// An integer-percent multiplier (`100` = ×1.0), read as a float via
+/// [`Ratio::as_f64`]. The wire form stays a bare number; wrapping it means the
+/// percent → float interpretation lives in one place instead of at every read.
+///
+/// `Deserialize` is hand-written (rather than `#[serde(from = …)]` or a field
+/// `deserialize_with`) purely so ts-rs' serde-compat pass has no attribute to
+/// choke on — it emits a spurious warning for anything beyond `rename`/`default`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct Ratio(u32);
+
+impl Ratio {
+    pub fn from_percent(percent: u32) -> Self {
+        Ratio(percent)
+    }
+
+    pub fn as_f64(self) -> f64 {
+        self.0 as f64 / 100.0
+    }
+}
+
+impl<'de> Deserialize<'de> for Ratio {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        u32::deserialize(d).map(Ratio::from_percent)
+    }
+}
+
+/// A [`Ratio`] that can never fall below ×1.0 (percent ≥ 100). Used where a value
+/// below parity is nonsensical — an upward ELO revision is never *harder* than a
+/// downward one, and a provisional prior is never *more* reliable than an
+/// established one. The floor is clamped in the one constructor (used by
+/// construction *and* deserialization), so the `.max(100)` that used to live in
+/// the getters *and* in [`TournamentSettings::normalized`] is gone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct RatioAtLeastOne(u32);
+
+impl RatioAtLeastOne {
+    pub fn from_percent(percent: u32) -> Self {
+        RatioAtLeastOne(percent.max(100))
+    }
+
+    pub fn as_f64(self) -> f64 {
+        self.0 as f64 / 100.0
+    }
+}
+
+impl<'de> Deserialize<'de> for RatioAtLeastOne {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        u32::deserialize(d).map(RatioAtLeastOne::from_percent)
+    }
+}
+
+/// The K (prior width) of an unrated player, `≥ 1` — a zero-width prior would
+/// divide by zero in the estimator. The floor is clamped in the constructor
+/// (construction and deserialization both), retiring the `.max(1)` that lived in
+/// the getter and in [`TournamentSettings::normalized`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct UnratedK(u32);
+
+impl UnratedK {
+    pub fn new(k: u32) -> Self {
+        UnratedK(k.max(1))
+    }
+
+    pub fn get(self) -> u32 {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for UnratedK {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        u32::deserialize(d).map(UnratedK::new)
+    }
+}
+
+/// Test-only convenience: compare a value newtype against a bare integer in its
+/// stored unit (a [`Ratio`]/[`RatioAtLeastOne`] against its percent, a
+/// [`UnratedK`] against its K), so the settings tests read `looseness == 100`
+/// rather than unwrapping. Gated on `test`, so production stays strict.
+#[cfg(test)]
+impl PartialEq<u32> for Ratio {
+    fn eq(&self, other: &u32) -> bool {
+        self.0 == *other
+    }
+}
+
+#[cfg(test)]
+impl PartialEq<u32> for RatioAtLeastOne {
+    fn eq(&self, other: &u32) -> bool {
+        self.0 == *other
+    }
+}
+
+#[cfg(test)]
+impl PartialEq<u32> for UnratedK {
+    fn eq(&self, other: &u32) -> bool {
+        self.0 == *other
+    }
+}
 
 /// Which player a score group sends *up* as its ascending floater when it has to
 /// pair across groups. The descending floater is always the last (weakest) of the
@@ -226,18 +329,17 @@ fn default_tiebreaks() -> Vec<Tiebreak> {
     Tiebreak::default_order()
 }
 
-/// The default ELO-estimate K multiplier, as an integer percent (100 = ×1.0).
-/// Named so `#[serde(default = …)]` can fill it in for tournaments saved before
-/// the field existed.
-fn default_elo_k_multiplier_percent() -> u32 {
-    100
+/// The default ELO-estimate K multiplier (×1.0). Named so `#[serde(default = …)]`
+/// can fill it in for tournaments saved before the field existed.
+fn default_elo_k_multiplier_percent() -> Ratio {
+    Ratio::from_percent(100)
 }
 
-/// The default extra K multiplier for a provisionally-rated player, as an integer
-/// percent (200 = ×2.0). Named so `#[serde(default = …)]` can fill it in for
-/// tournaments saved before the field existed.
-fn default_elo_provisional_multiplier_percent() -> u32 {
-    200
+/// The default extra K multiplier for a provisionally-rated player (×2.0). Named
+/// so `#[serde(default = …)]` can fill it in for tournaments saved before the
+/// field existed.
+fn default_elo_provisional_multiplier_percent() -> RatioAtLeastOne {
+    RatioAtLeastOne::from_percent(200)
 }
 
 /// The default center of the unrated-player prior (ELO). Named so
@@ -250,15 +352,15 @@ fn default_elo_unrated_prior_center() -> u32 {
 /// The default K for the unrated-player prior. Named so `#[serde(default = …)]`
 /// can fill it in for tournaments saved before the field existed. Matches
 /// [`crate::elo::UNRATED_PRIOR_DEFAULT_K`] (≈ the historical `σ 350`).
-fn default_elo_unrated_k() -> u32 {
-    crate::elo::UNRATED_PRIOR_DEFAULT_K as u32
+fn default_elo_unrated_k() -> UnratedK {
+    UnratedK::new(crate::elo::UNRATED_PRIOR_DEFAULT_K as u32)
 }
 
-/// The default upward-looseness ratio `r` for the Laplace prior, as an integer
-/// percent (100 = ×1.0 = symmetric). Named so `#[serde(default = …)]` can fill
-/// it in for tournaments saved before the field existed.
-fn default_elo_upward_looseness_percent() -> u32 {
-    100
+/// The default upward-looseness ratio `r` for the Laplace prior (×1.0 =
+/// symmetric). Named so `#[serde(default = …)]` can fill it in for tournaments
+/// saved before the field existed.
+fn default_elo_upward_looseness_percent() -> RatioAtLeastOne {
+    RatioAtLeastOne::from_percent(100)
 }
 
 /// Configuration that isn't tied to a single player or round.
@@ -289,7 +391,8 @@ pub struct TournamentSettings {
     /// default) disables it. Meaningless without MacMahon thresholds, since
     /// every player has 0 MacMahon points otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub airtight_groups_rounds: Option<u32>,
+    #[ts(as = "Option::<u32>")]
+    pub airtight_groups_rounds: Option<NonZeroU32>,
     /// Whether the pairing engine avoids pairing players from the same club
     /// ("club protection"). Off by default — enable it per tournament.
     #[serde(default)]
@@ -365,7 +468,7 @@ pub struct TournamentSettings {
     /// the settings stay `Eq`; read as a float via [`Self::elo_k_multiplier`].
     /// Only meaningful when [`Self::elo_estimate_needed`]; expected range ~100–400.
     #[serde(default = "default_elo_k_multiplier_percent")]
-    pub elo_k_multiplier_percent: u32,
+    pub elo_k_multiplier_percent: Ratio,
     /// Extra K multiplier applied to a **provisionally-rated** player — one who is
     /// not in the FESA list (rating typed by hand) or whose FESA `#games` is below
     /// [`crate::PROVISIONAL_GAMES_THRESHOLD`] — as an integer percent (200 = ×2.0).
@@ -374,7 +477,7 @@ pub struct TournamentSettings {
     /// ≥ 100 so a provisional rating is never treated as *more* reliable than an
     /// established one. Only meaningful when [`Self::elo_estimate_needed`].
     #[serde(default = "default_elo_provisional_multiplier_percent")]
-    pub elo_provisional_multiplier_percent: u32,
+    pub elo_provisional_multiplier_percent: RatioAtLeastOne,
     /// The center (mean) of the Bayesian prior for an **unrated** player, on the
     /// ELO scale. Where their estimate sits before any game pulls it. Default
     /// `600` (the midpoint of the assumed `[1, 1200]` unrated range). Only
@@ -391,7 +494,7 @@ pub struct TournamentSettings {
     /// clamps it ≥ 1 (a zero-width prior would be degenerate). Only meaningful
     /// when [`Self::elo_estimate_needed`] or [`Self::macmahon_from_estimate_active`].
     #[serde(default = "default_elo_unrated_k")]
-    pub elo_unrated_k: u32,
+    pub elo_unrated_k: UnratedK,
     /// The prior shape for an **established** (reliably-rated) player — thin-tailed
     /// Gaussian (default, behaviour-neutral) or the fatter-tailed, optionally
     /// asymmetric Laplace. The shape is chosen *per category* because a fat tail is
@@ -432,7 +535,7 @@ pub struct TournamentSettings {
     /// revision is never *harder* than a downward one). Only meaningful when a live
     /// estimate is maintained.
     #[serde(default = "default_elo_upward_looseness_percent")]
-    pub elo_upward_looseness_established_percent: u32,
+    pub elo_upward_looseness_established_percent: RatioAtLeastOne,
     /// The upward-looseness ratio `r` for a **provisionally-rated** player (not in
     /// the FESA list, or with fewer than [`crate::PROVISIONAL_GAMES_THRESHOLD`]
     /// games), as an integer percent (100 = ×1.0 = symmetric). Same meaning as
@@ -440,7 +543,7 @@ pub struct TournamentSettings {
     /// provisional prior, where a modest upward tilt is often warranted. Read via
     /// [`Self::elo_upward_looseness_provisional`] (clamps ≥ 1.0).
     #[serde(default = "default_elo_upward_looseness_percent")]
-    pub elo_upward_looseness_provisional_percent: u32,
+    pub elo_upward_looseness_provisional_percent: RatioAtLeastOne,
     /// The upward-looseness ratio `r` for an **unrated** player, as an integer
     /// percent (100 = ×1.0 = symmetric). Same meaning as
     /// [`Self::elo_upward_looseness_established_percent`] but for the wide unrated
@@ -448,7 +551,7 @@ pub struct TournamentSettings {
     /// the field is far more likely genuinely strong than a fluke. Read via
     /// [`Self::elo_upward_looseness_unrated`] (clamps ≥ 1.0).
     #[serde(default = "default_elo_upward_looseness_percent")]
-    pub elo_upward_looseness_unrated_percent: u32,
+    pub elo_upward_looseness_unrated_percent: RatioAtLeastOne,
 }
 
 impl Default for TournamentSettings {
@@ -536,7 +639,8 @@ impl TournamentSettings {
     /// Whether "airtight groups" applies to the given (1-based) round: within
     /// the configured window, if any.
     pub fn airtight_groups_active(&self, round: u32) -> bool {
-        self.airtight_groups_rounds.is_some_and(|n| round <= n)
+        self.airtight_groups_rounds
+            .is_some_and(|n| round <= n.get())
     }
 
     /// The exempt clubs in canonical (normalized) form, for membership tests.
@@ -556,10 +660,6 @@ impl TournamentSettings {
     /// stored settings.
     pub fn normalized(mut self) -> Self {
         self.macmahon_thresholds = Self::normalize_thresholds(self.macmahon_thresholds);
-        // A round count of 0 can't apply to any round, so it's the same as off.
-        if self.airtight_groups_rounds == Some(0) {
-            self.airtight_groups_rounds = None;
-        }
 
         // Exempt clubs: keep the first spelling of each, trimmed and non-empty.
         let mut seen = HashSet::new();
@@ -582,24 +682,11 @@ impl TournamentSettings {
             self.tiebreaks.retain(|&tb| tb != Tiebreak::EstElo);
         }
 
-        // `elo_k_multiplier_percent` is left as-is: 0 is a meaningful setting —
-        // it pins every *rated* player to their registration rating so only unrated
-        // players are estimated (the estimator handles the zero-width prior by
-        // skipping those players, see [`crate::elo::estimate_elos`]). Any positive
-        // percent widens the rated prior normally.
-        // A provisional rating should never be treated as more reliable than an
-        // established one, so the extra multiplier is at least ×1.
-        self.elo_provisional_multiplier_percent = self.elo_provisional_multiplier_percent.max(100);
-        // A zero-width unrated prior would divide by zero in the solver — clamp K ≥ 1.
-        self.elo_unrated_k = self.elo_unrated_k.max(1);
-        // An upward revision is never *harder* than a downward one, so r ≥ 1, for
-        // each player category.
-        self.elo_upward_looseness_established_percent =
-            self.elo_upward_looseness_established_percent.max(100);
-        self.elo_upward_looseness_provisional_percent =
-            self.elo_upward_looseness_provisional_percent.max(100);
-        self.elo_upward_looseness_unrated_percent =
-            self.elo_upward_looseness_unrated_percent.max(100);
+        // The ELO value invariants (`elo_k_multiplier` may be 0 to pin rated
+        // players; the provisional/looseness ratios stay ≥ ×1.0; the unrated K
+        // stays ≥ 1; an airtight window of 0 means off) are now enforced by the
+        // field types themselves — see [`Ratio`], [`RatioAtLeastOne`] and the
+        // `NonZeroU32` fields — so there is nothing left to clamp here.
 
         self
     }
@@ -626,15 +713,14 @@ impl TournamentSettings {
                 .any(|t| matches!(t.criterion, ThresholdCriterion::Elo { .. }))
     }
 
-    /// The ELO-estimate K multiplier `m` as a float (percent / 100).
+    /// The ELO-estimate K multiplier `m` as a float.
     pub fn elo_k_multiplier(&self) -> f64 {
-        self.elo_k_multiplier_percent as f64 / 100.0
+        self.elo_k_multiplier_percent.as_f64()
     }
 
-    /// The extra K multiplier for a provisionally-rated player, as a float
-    /// (percent / 100).
+    /// The extra K multiplier for a provisionally-rated player, as a float.
     pub fn elo_provisional_multiplier(&self) -> f64 {
-        self.elo_provisional_multiplier_percent as f64 / 100.0
+        self.elo_provisional_multiplier_percent.as_f64()
     }
 
     /// The center (mean) of the unrated-player prior, as a float.
@@ -642,29 +728,29 @@ impl TournamentSettings {
         self.elo_unrated_prior_center as f64
     }
 
-    /// The K for the unrated-player prior, as a float, clamped ≥ 1 (a zero-width
-    /// prior would divide by zero in the solver and freeze the estimate).
+    /// The K for the unrated-player prior, as a float (`≥ 1` by construction — a
+    /// zero-width prior would divide by zero in the solver and freeze the estimate).
     pub fn elo_unrated_k(&self) -> f64 {
-        self.elo_unrated_k.max(1) as f64
+        self.elo_unrated_k.get() as f64
     }
 
     /// The [`EloPriorShape::Laplace`] upward-looseness ratio `r` for an
-    /// **established** player, as a float, clamped ≥ 1.0 (an upward revision is
-    /// never harder than a downward one). `1.0` is symmetric.
+    /// **established** player, as a float (`≥ 1.0` by construction — an upward
+    /// revision is never harder than a downward one). `1.0` is symmetric.
     pub fn elo_upward_looseness_established(&self) -> f64 {
-        self.elo_upward_looseness_established_percent.max(100) as f64 / 100.0
+        self.elo_upward_looseness_established_percent.as_f64()
     }
 
     /// The Laplace upward-looseness ratio `r` for a **provisionally-rated** player,
-    /// as a float, clamped ≥ 1.0.
+    /// as a float (`≥ 1.0` by construction).
     pub fn elo_upward_looseness_provisional(&self) -> f64 {
-        self.elo_upward_looseness_provisional_percent.max(100) as f64 / 100.0
+        self.elo_upward_looseness_provisional_percent.as_f64()
     }
 
     /// The Laplace upward-looseness ratio `r` for an **unrated** player, as a
-    /// float, clamped ≥ 1.0.
+    /// float (`≥ 1.0` by construction).
     pub fn elo_upward_looseness_unrated(&self) -> f64 {
-        self.elo_upward_looseness_unrated_percent.max(100) as f64 / 100.0
+        self.elo_upward_looseness_unrated_percent.as_f64()
     }
 
     /// Sort thresholds (ELO ones by value, then grade ones by strength) and
@@ -850,7 +936,7 @@ mod tests {
         assert!(!off.airtight_groups_active(1)); // disabled by default (no window)
 
         let s = TournamentSettings {
-            airtight_groups_rounds: Some(2),
+            airtight_groups_rounds: NonZeroU32::new(2),
             ..Default::default()
         };
         assert!(s.airtight_groups_active(1));
@@ -859,13 +945,15 @@ mod tests {
     }
 
     #[test]
-    fn normalized_zeroes_a_zero_airtight_groups_window() {
-        let s = TournamentSettings {
-            airtight_groups_rounds: Some(0),
-            ..Default::default()
-        }
-        .normalized();
-        assert_eq!(s.airtight_groups_rounds, None);
+    fn a_zero_airtight_groups_window_is_off_and_unrepresentable() {
+        // `0 rounds` can't apply to any round, so it means "off" — now enforced by
+        // the type: `NonZeroU32::new(0)` is `None`, i.e. the window is absent.
+        assert_eq!(NonZeroU32::new(0), None);
+        // A JSON `0` is rejected outright rather than silently kept (the frontend
+        // sends `null`, never `0`, for an off window).
+        assert!(
+            serde_json::from_str::<TournamentSettings>(r#"{"airtight_groups_rounds":0}"#).is_err()
+        );
     }
 
     #[test]
@@ -1061,19 +1149,19 @@ mod tests {
     }
 
     #[test]
-    fn normalized_clamps_unrated_k_to_at_least_one() {
+    fn unrated_k_is_clamped_to_at_least_one_by_its_type() {
+        // A zero-width prior would divide by zero in the estimator; the type floors
+        // it at construction and on deserialize, so `normalized` no longer needs to.
+        assert_eq!(UnratedK::new(0), 1);
         let s = TournamentSettings {
-            elo_unrated_k: 0,
-            ..Default::default()
-        }
-        .normalized();
-        assert_eq!(s.elo_unrated_k, 1);
-        // And the accessor never yields a zero-width prior either.
-        let raw = TournamentSettings {
-            elo_unrated_k: 0,
+            elo_unrated_k: UnratedK::new(0),
             ..Default::default()
         };
-        assert!(raw.elo_unrated_k() >= 1.0);
+        assert_eq!(s.elo_unrated_k, 1);
+        assert!(s.elo_unrated_k() >= 1.0);
+        // A JSON `0` clamps up to `1` rather than sticking as a degenerate prior.
+        let loaded: TournamentSettings = serde_json::from_str(r#"{"elo_unrated_k":0}"#).unwrap();
+        assert_eq!(loaded.elo_unrated_k, 1);
     }
 
     #[test]
@@ -1104,24 +1192,26 @@ mod tests {
     }
 
     #[test]
-    fn normalized_clamps_upward_looseness_to_at_least_symmetric() {
+    fn upward_looseness_is_clamped_to_at_least_symmetric_by_its_type() {
         // An upward revision is never harder than a downward one, so each
-        // category's r ≥ 1.
+        // category's r ≥ 1 — floored by [`RatioAtLeastOne`] at construction and on
+        // deserialize, so `normalized` no longer clamps.
+        assert_eq!(RatioAtLeastOne::from_percent(50), 100);
+        assert_eq!(RatioAtLeastOne::from_percent(0), 100);
         let s = TournamentSettings {
-            elo_upward_looseness_established_percent: 50,
-            elo_upward_looseness_provisional_percent: 80,
-            elo_upward_looseness_unrated_percent: 0,
+            elo_upward_looseness_established_percent: RatioAtLeastOne::from_percent(50),
+            elo_upward_looseness_provisional_percent: RatioAtLeastOne::from_percent(80),
+            elo_upward_looseness_unrated_percent: RatioAtLeastOne::from_percent(0),
             ..Default::default()
-        }
-        .normalized();
+        };
         assert_eq!(s.elo_upward_looseness_established_percent, 100);
         assert_eq!(s.elo_upward_looseness_provisional_percent, 100);
         assert_eq!(s.elo_upward_looseness_unrated_percent, 100);
-        let raw = TournamentSettings {
-            elo_upward_looseness_unrated_percent: 0,
-            ..Default::default()
-        };
-        assert!(raw.elo_upward_looseness_unrated() >= 1.0);
+        assert!(s.elo_upward_looseness_unrated() >= 1.0);
+        // A JSON sub-parity value clamps up rather than sticking.
+        let loaded: TournamentSettings =
+            serde_json::from_str(r#"{"elo_upward_looseness_unrated_percent":50}"#).unwrap();
+        assert_eq!(loaded.elo_upward_looseness_unrated_percent, 100);
     }
 
     #[test]

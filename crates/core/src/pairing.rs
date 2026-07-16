@@ -1470,7 +1470,8 @@ pub fn pair_round_weighted(
 mod tests {
     use super::*;
     use crate::round::Winner;
-    use crate::settings::MacMahonThreshold;
+    use crate::settings::{MacMahonThreshold, RatioAtLeastOne};
+    use std::num::NonZeroU32;
     use uuid::Uuid;
 
     // --- solve_matching's width dispatch -----------------------------------
@@ -2102,7 +2103,7 @@ mod tests {
         // With airtight groups active for round 2, every board stays within its
         // MacMahon group.
         let settings_on = TournamentSettings {
-            airtight_groups_rounds: Some(2),
+            airtight_groups_rounds: NonZeroU32::new(2),
             ..settings_base
         };
         let round_on = pair_round_weighted(2, &p, &settings_on, &[r1], &present, &[], None);
@@ -2131,7 +2132,7 @@ mod tests {
         ];
         let settings = TournamentSettings {
             macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
-            airtight_groups_rounds: Some(1),
+            airtight_groups_rounds: NonZeroU32::new(1),
             ..Default::default()
         };
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
@@ -2186,7 +2187,7 @@ mod tests {
             elo_pairing_enabled: true,
             // Neutralize the provisional-rating widening so these pairing tests
             // exercise the base drift; reliability is covered in elo.rs tests.
-            elo_provisional_multiplier_percent: 100,
+            elo_provisional_multiplier_percent: RatioAtLeastOne::from_percent(100),
             ..Default::default()
         }
     }

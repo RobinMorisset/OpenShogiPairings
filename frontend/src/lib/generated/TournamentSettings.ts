@@ -3,7 +3,10 @@ import type { EloPriorShape } from "./EloPriorShape";
 import type { FloaterStyle } from "./FloaterStyle";
 import type { HandicapPolicy } from "./HandicapPolicy";
 import type { MacMahonThreshold } from "./MacMahonThreshold";
+import type { Ratio } from "./Ratio";
+import type { RatioAtLeastOne } from "./RatioAtLeastOne";
 import type { Tiebreak } from "./Tiebreak";
+import type { UnratedK } from "./UnratedK";
 
 /**
  * Configuration that isn't tied to a single player or round.
@@ -124,7 +127,7 @@ macmahon_from_estimated_elo: boolean,
  * the settings stay `Eq`; read as a float via [`Self::elo_k_multiplier`].
  * Only meaningful when [`Self::elo_estimate_needed`]; expected range ~100–400.
  */
-elo_k_multiplier_percent: number, 
+elo_k_multiplier_percent: Ratio, 
 /**
  * Extra K multiplier applied to a **provisionally-rated** player — one who is
  * not in the FESA list (rating typed by hand) or whose FESA `#games` is below
@@ -134,7 +137,7 @@ elo_k_multiplier_percent: number,
  * ≥ 100 so a provisional rating is never treated as *more* reliable than an
  * established one. Only meaningful when [`Self::elo_estimate_needed`].
  */
-elo_provisional_multiplier_percent: number, 
+elo_provisional_multiplier_percent: RatioAtLeastOne, 
 /**
  * The center (mean) of the Bayesian prior for an **unrated** player, on the
  * ELO scale. Where their estimate sits before any game pulls it. Default
@@ -153,7 +156,7 @@ elo_unrated_prior_center: number,
  * clamps it ≥ 1 (a zero-width prior would be degenerate). Only meaningful
  * when [`Self::elo_estimate_needed`] or [`Self::macmahon_from_estimate_active`].
  */
-elo_unrated_k: number, 
+elo_unrated_k: UnratedK, 
 /**
  * The prior shape for an **established** (reliably-rated) player — thin-tailed
  * Gaussian (default, behaviour-neutral) or the fatter-tailed, optionally
@@ -198,7 +201,7 @@ elo_prior_shape_unrated: EloPriorShape,
  * revision is never *harder* than a downward one). Only meaningful when a live
  * estimate is maintained.
  */
-elo_upward_looseness_established_percent: number, 
+elo_upward_looseness_established_percent: RatioAtLeastOne, 
 /**
  * The upward-looseness ratio `r` for a **provisionally-rated** player (not in
  * the FESA list, or with fewer than [`crate::PROVISIONAL_GAMES_THRESHOLD`]
@@ -207,7 +210,7 @@ elo_upward_looseness_established_percent: number,
  * provisional prior, where a modest upward tilt is often warranted. Read via
  * [`Self::elo_upward_looseness_provisional`] (clamps ≥ 1.0).
  */
-elo_upward_looseness_provisional_percent: number, 
+elo_upward_looseness_provisional_percent: RatioAtLeastOne, 
 /**
  * The upward-looseness ratio `r` for an **unrated** player, as an integer
  * percent (100 = ×1.0 = symmetric). Same meaning as
@@ -216,4 +219,4 @@ elo_upward_looseness_provisional_percent: number,
  * the field is far more likely genuinely strong than a fluke. Read via
  * [`Self::elo_upward_looseness_unrated`] (clamps ≥ 1.0).
  */
-elo_upward_looseness_unrated_percent: number, };
+elo_upward_looseness_unrated_percent: RatioAtLeastOne, };
