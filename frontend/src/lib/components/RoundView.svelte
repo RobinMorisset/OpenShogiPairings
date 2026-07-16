@@ -7,7 +7,6 @@
     type Counterfactual,
     type CounterfactualMode,
     type Handicap,
-    type HandicapPolicy,
     type NoShow,
     type Player,
     type Round,
@@ -19,12 +18,13 @@
   import { handicapGiverId } from "../boardOutcome";
   import { absent, toggledNoShow } from "../noShow";
   import { printPage } from "../platform";
+  import type { HandicapChoice } from "../handicap";
 
   interface Props {
     round: Round;
     players: Player[];
     /** Whether/how handicap games are shown: none, allowed, or suggested. */
-    handicapPolicy: HandicapPolicy;
+    handicapPolicy: HandicapChoice;
     /** Suggested handicap per board, indexed like `round.boards`. */
     suggestedHandicaps: (Handicap | null)[];
     /** Why the engine chose these pairings (per-board rule ledger + report).

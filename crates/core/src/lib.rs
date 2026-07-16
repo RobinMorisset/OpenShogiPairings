@@ -28,7 +28,10 @@ mod units;
 
 pub use american_grid::to_grid as american_grid;
 pub use csv_import::{parse_players_csv, CsvImportError};
-pub use cup::{knockout_champion, reconstruct_cup_from_final, Cup, CupPodium, CUP_SIZES};
+pub use cup::{
+    knockout_champion, reconstruct_cup_from_final, BracketMatch, Cup, CupBracketView, CupPodium,
+    CUP_SIZES,
+};
 pub use elo::{estimate_elos, PROVISIONAL_GAMES_THRESHOLD};
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
 pub use fesa_results::import_fesa_results;
@@ -43,7 +46,11 @@ pub use player::{Grade, GradeKind, NewPlayer, Player, PointAdjustment};
 pub use round::{
     Board, CupStage, Handicap, HandicapGame, NoShow, PairingSource, Round, RoundDraft, Winner,
 };
-pub use settings::{EloPriorShape, FloaterStyle, HandicapPolicy, Tiebreak, TournamentSettings};
+pub use settings::{
+    ClubProtection, EloEstimator, EloPriorShape, FloaterStyle, HandicapDisplay, HandicapPolicy,
+    MacMahon, MacMahonSource, PairingMode, Ratio, RatioAtLeastOne, Tiebreak, TournamentSettings,
+    UnratedK,
+};
 pub use standings::{compute_standings, Standing};
 pub use tournament::{
     Tournament, TournamentError, MIN_PLAYERS_PER_ROUND, TOURNAMENT_FORMAT_VERSION,

@@ -15,6 +15,7 @@
     "tabSettings": "Settings",
     "tabPlayers": "Players ({count})",
     "tabResults": "Standings",
+    "tabCup": "Cup",
     "tabRound": "Round {number}",
     "tabRoundCompleted": "Round {number} ✓",
     "tabRoundDraft": "Round {number} (draft)",
@@ -217,6 +218,10 @@
     "semifinal": "Semifinal",
     "final": "Final",
     "thirdPlace": "3rd place"
+  },
+  "cupBracket": {
+    "title": "Cup bracket (top {size})",
+    "tbd": "—"
   },
   "roundDraftView": {
     "summary": "Preparing round {number} — {present} in the Swiss pool, {absent} absent. Players you don't pair by hand are matched automatically.",

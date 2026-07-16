@@ -412,9 +412,9 @@ pub fn estimate_elos(
     let provisional = settings.elo_provisional_multiplier();
     let unrated_center = settings.elo_unrated_prior_center();
     let unrated_k = settings.elo_unrated_k();
-    let shape_established = settings.elo_prior_shape_established;
-    let shape_provisional = settings.elo_prior_shape_provisional;
-    let shape_unrated = settings.elo_prior_shape_unrated;
+    let shape_established = settings.elo_prior_shape_established();
+    let shape_provisional = settings.elo_prior_shape_provisional();
+    let shape_unrated = settings.elo_prior_shape_unrated();
     let looseness_established = settings.elo_upward_looseness_established();
     let looseness_provisional = settings.elo_upward_looseness_provisional();
     let looseness_unrated = settings.elo_upward_looseness_unrated();
@@ -592,6 +592,7 @@ pub fn estimate_elos(
 mod tests {
     use super::*;
     use crate::round::{Board, HandicapGame, PairingSource};
+    use crate::settings::{Ratio, RatioAtLeastOne, UnratedK};
     use std::sync::atomic::{AtomicU32, Ordering};
 
     static NEXT_TID: AtomicU32 = AtomicU32::new(1);
@@ -714,10 +715,8 @@ mod tests {
             vec![win(a.tournament_id.unwrap(), b.tournament_id.unwrap())],
         );
         let base = TournamentSettings::default();
-        let hot = TournamentSettings {
-            elo_k_multiplier_percent: 400,
-            ..Default::default()
-        };
+        let hot = TournamentSettings::elo_pairing()
+            .map_estimator(|e| e.k_multiplier = Ratio::from_percent(400));
         let shift_base =
             estimate_elos(&[a.clone(), b.clone()], &base, std::slice::from_ref(&r))[&a.id] - 1500.0;
         let shift_hot =
@@ -758,10 +757,8 @@ mod tests {
         // A no-games unrated player sits exactly at the configured center, not the
         // default 600.
         let unrated = player(None);
-        let settings = TournamentSettings {
-            elo_unrated_prior_center: 900,
-            ..Default::default()
-        };
+        let settings =
+            TournamentSettings::elo_pairing().map_estimator(|e| e.unrated_prior_center = 900);
         let elos = estimate_elos(std::slice::from_ref(&unrated), &settings, &[]);
         assert!(
             (elos[&unrated.id] - 900.0).abs() < 1e-6,
@@ -784,10 +781,8 @@ mod tests {
             )],
         );
         let shift = |k: u32| {
-            let settings = TournamentSettings {
-                elo_unrated_k: k,
-                ..Default::default()
-            };
+            let settings =
+                TournamentSettings::elo_pairing().map_estimator(|e| e.unrated_k = UnratedK::new(k));
             estimate_elos(
                 &[newcomer.clone(), strong.clone()],
                 &settings,
@@ -1018,15 +1013,14 @@ mod tests {
     /// `r` (so tests that don't care about the split can pass one number and still
     /// exercise the Laplace mechanics on whatever category their fixture uses).
     fn laplace(looseness_percent: u32) -> TournamentSettings {
-        TournamentSettings {
-            elo_prior_shape_established: EloPriorShape::Laplace,
-            elo_prior_shape_provisional: EloPriorShape::Laplace,
-            elo_prior_shape_unrated: EloPriorShape::Laplace,
-            elo_upward_looseness_established_percent: looseness_percent,
-            elo_upward_looseness_provisional_percent: looseness_percent,
-            elo_upward_looseness_unrated_percent: looseness_percent,
-            ..Default::default()
-        }
+        TournamentSettings::elo_pairing().map_estimator(|e| {
+            e.prior_shape_established = EloPriorShape::Laplace;
+            e.prior_shape_provisional = EloPriorShape::Laplace;
+            e.prior_shape_unrated = EloPriorShape::Laplace;
+            e.upward_looseness_established = RatioAtLeastOne::from_percent(looseness_percent);
+            e.upward_looseness_provisional = RatioAtLeastOne::from_percent(looseness_percent);
+            e.upward_looseness_unrated = RatioAtLeastOne::from_percent(looseness_percent);
+        })
     }
 
     /// `n` fresh equal-rated (1500) opponents.
@@ -1152,10 +1146,8 @@ mod tests {
         // *unrated* prior lets a newcomer climb further on a sustained upset, while a
         // rated player — whose shape stays Gaussian — is bit-for-bit unaffected. That
         // invariance is what makes "fat tail for unrated only" safe for the field.
-        let unrated_only_laplace = TournamentSettings {
-            elo_prior_shape_unrated: EloPriorShape::Laplace,
-            ..Default::default()
-        };
+        let unrated_only_laplace = TournamentSettings::elo_pairing()
+            .map_estimator(|e| e.prior_shape_unrated = EloPriorShape::Laplace);
 
         // (a) An unrated newcomer beating five 1800s climbs further under the
         //     unrated-Laplace prior than under the all-Gaussian default — proof the
@@ -1217,10 +1209,8 @@ mod tests {
     /// A flat (improper) prior on the unrated slot — the `turnering.py` performance
     /// rating — leaving the rated categories on their default Gaussian.
     fn flat_unrated() -> TournamentSettings {
-        TournamentSettings {
-            elo_prior_shape_unrated: EloPriorShape::Flat,
-            ..Default::default()
-        }
+        TournamentSettings::elo_pairing()
+            .map_estimator(|e| e.prior_shape_unrated = EloPriorShape::Flat)
     }
 
     #[test]
@@ -1252,11 +1242,10 @@ mod tests {
             ), // B beats newcomer
         ];
         let est = |shape, center: u32| {
-            let settings = TournamentSettings {
-                elo_prior_shape_unrated: shape,
-                elo_unrated_prior_center: center,
-                ..Default::default()
-            };
+            let settings = TournamentSettings::elo_pairing().map_estimator(|e| {
+                e.prior_shape_unrated = shape;
+                e.unrated_prior_center = center;
+            });
             estimate_elos(&all, &settings, &rounds)[&newcomer.id]
         };
         // Flat: identical regardless of the centre.
@@ -1374,10 +1363,8 @@ mod tests {
                 )],
             ),
         ];
-        let settings = TournamentSettings {
-            elo_k_multiplier_percent: 0,
-            ..Default::default()
-        };
+        let settings = TournamentSettings::elo_pairing()
+            .map_estimator(|e| e.k_multiplier = Ratio::from_percent(0));
         let est = estimate_elos(&all, &settings, &rounds);
         assert!(
             (est[&rated.id] - 1600.0).abs() < 1e-9,
@@ -1402,11 +1389,10 @@ mod tests {
         // Zero curvature and no games: the sweep skips them and they sit at the seed
         // (the unrated centre), never a NaN from 0/0.
         let newcomer = player(None);
-        let settings = TournamentSettings {
-            elo_prior_shape_unrated: EloPriorShape::Flat,
-            elo_unrated_prior_center: 900,
-            ..Default::default()
-        };
+        let settings = TournamentSettings::elo_pairing().map_estimator(|e| {
+            e.prior_shape_unrated = EloPriorShape::Flat;
+            e.unrated_prior_center = 900;
+        });
         let est = estimate_elos(std::slice::from_ref(&newcomer), &settings, &[])[&newcomer.id];
         assert!(
             (est - 900.0).abs() < 1e-6,
@@ -1432,10 +1418,9 @@ mod tests {
 
         // Shape stays Gaussian (default); only the unrated upward looseness moves.
         let climb = |unrated_pct: u32| {
-            let settings = TournamentSettings {
-                elo_upward_looseness_unrated_percent: unrated_pct,
-                ..Default::default()
-            };
+            let settings = TournamentSettings::elo_pairing().map_estimator(|e| {
+                e.upward_looseness_unrated = RatioAtLeastOne::from_percent(unrated_pct)
+            });
             estimate_elos(
                 &[newcomer.clone(), strong.clone()],
                 &settings,
@@ -1451,10 +1436,8 @@ mod tests {
 
         // No games → still exactly at the unrated center, asymmetry or not (the
         // two-piece normal's mode is unchanged).
-        let settings = TournamentSettings {
-            elo_upward_looseness_unrated_percent: 300,
-            ..Default::default()
-        };
+        let settings = TournamentSettings::elo_pairing()
+            .map_estimator(|e| e.upward_looseness_unrated = RatioAtLeastOne::from_percent(300));
         let at_rest = estimate_elos(std::slice::from_ref(&newcomer), &settings, &[])[&newcomer.id];
         assert!(
             (at_rest - UNRATED_PRIOR_MEAN).abs() < 1e-6,
@@ -1465,15 +1448,14 @@ mod tests {
     /// A Laplace prior (all categories) with a distinct upward-looseness per player
     /// category.
     fn laplace3(established: u32, provisional: u32, unrated: u32) -> TournamentSettings {
-        TournamentSettings {
-            elo_prior_shape_established: EloPriorShape::Laplace,
-            elo_prior_shape_provisional: EloPriorShape::Laplace,
-            elo_prior_shape_unrated: EloPriorShape::Laplace,
-            elo_upward_looseness_established_percent: established,
-            elo_upward_looseness_provisional_percent: provisional,
-            elo_upward_looseness_unrated_percent: unrated,
-            ..Default::default()
-        }
+        TournamentSettings::elo_pairing().map_estimator(|e| {
+            e.prior_shape_established = EloPriorShape::Laplace;
+            e.prior_shape_provisional = EloPriorShape::Laplace;
+            e.prior_shape_unrated = EloPriorShape::Laplace;
+            e.upward_looseness_established = RatioAtLeastOne::from_percent(established);
+            e.upward_looseness_provisional = RatioAtLeastOne::from_percent(provisional);
+            e.upward_looseness_unrated = RatioAtLeastOne::from_percent(unrated);
+        })
     }
 
     #[test]

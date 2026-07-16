@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-use crate::cup::{Cup, CupPairings, CupPodium, CUP_SIZES};
+use crate::cup::{Cup, CupBracketView, CupPairings, CupPodium, CUP_SIZES};
 use crate::pairing::{
     counterfactual_forbid, counterfactual_force, explain_pairing, pair_round_weighted,
     Counterfactual, CounterfactualMode, RoundExplanation, ScopeReason, PHANTOM,
@@ -461,6 +461,13 @@ impl Tournament {
     /// decided; `None` when there is no cup or the final isn't finished.
     pub fn cup_podium(&self) -> Option<CupPodium> {
         self.cup.as_ref()?.podium(&self.rounds)
+    }
+
+    /// The full cup bracket, derived for the client (structure + results); `None`
+    /// when there is no cup. Drawn from the frozen seeding, so it exists as soon
+    /// as registration is finalized and fills in as results land.
+    pub fn cup_bracket(&self) -> Option<CupBracketView> {
+        Some(self.cup.as_ref()?.bracket_view(&self.rounds))
     }
 
     /// The players the cup bracket will pair in the round currently being drafted

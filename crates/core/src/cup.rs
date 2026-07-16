@@ -64,6 +64,39 @@ pub struct CupPodium {
     pub fourth: Option<TournamentId>,
 }
 
+/// One match (a node of the bracket tree) in the derived view sent to clients.
+/// Either player is `None` while still to be determined (a feeding match not yet
+/// decided); `winner` is `None` until this match itself is decided. A player
+/// facing a `None` opponent advanced unopposed (a cup bye), so `winner` is set
+/// while the other slot stays empty.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct BracketMatch {
+    pub player1: Option<TournamentId>,
+    pub player2: Option<TournamentId>,
+    pub winner: Option<TournamentId>,
+    pub stage: CupStage,
+}
+
+/// The whole cup bracket, derived for the client from the frozen seeding and the
+/// recorded results — the authoritative shape the UI renders, so it never re-runs
+/// the fold. The full tree is drawn the instant the bracket is frozen (every
+/// later-round slot `None`), then fills in as results land. Mirrors the replay in
+/// [`Cup::matches_for_round`] / [`Cup::podium`], but tolerant of undecided and
+/// future rounds so the empty bracket still renders.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct CupBracketView {
+    /// Bracket size (top-N), for labelling / sizing.
+    pub size: u32,
+    /// Columns of matches, index 0 = the first bracket round, last = the final.
+    pub rounds: Vec<Vec<BracketMatch>>,
+    /// The third-place match — the two semifinal losers — present once the
+    /// bracket reaches a semifinal (its players fill in with the results).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub small_final: Option<BracketMatch>,
+}
+
 /// The outcome of one decided cup match: a winner (a played result, or a single
 /// no-show forfeit), or both players absent (a double no-show), which advances
 /// nobody.
@@ -175,6 +208,68 @@ impl Cup {
         })
     }
 
+    /// The full bracket as a tree of matches for the client: round 1 folded from
+    /// the seeds, each later round pairing the previous round's winners in match
+    /// order, plus a third-place match off the semifinal losers. Unlike the
+    /// replay helpers this never fails — an unknown player or an undecided board
+    /// is simply `None` — so the whole tree (including rounds not yet reached)
+    /// always renders. Long cup rounds are honoured via [`Self::cup_schedule`].
+    pub fn bracket_view(&self, rounds: &[Round]) -> CupBracketView {
+        let sched = self.cup_schedule(rounds);
+        let cup_rounds = self.cup_rounds();
+        let mut columns: Vec<Vec<BracketMatch>> = Vec::with_capacity(cup_rounds as usize);
+        // Players entering the current bracket round (every seed known at round 1).
+        let mut frontier: Vec<Slot> = self.seed_order.iter().copied().map(Slot::Player).collect();
+        let mut semifinal_losers: Option<[Slot; 2]> = None;
+
+        for bracket in 1..=cup_rounds {
+            let tround = sched[bracket as usize - 1];
+            let stage = if bracket < cup_rounds {
+                stage_before_final(frontier.len() as u32)
+            } else {
+                CupStage::Final
+            };
+            let mut col = Vec::with_capacity(frontier.len() / 2);
+            let mut winners = Vec::with_capacity(frontier.len() / 2);
+            let mut losers = Vec::with_capacity(frontier.len() / 2);
+            for (p1, p2) in fold(&frontier) {
+                let (winner, loser) = resolve_slot(rounds, tround, p1, p2);
+                col.push(BracketMatch {
+                    player1: p1.tid(),
+                    player2: p2.tid(),
+                    winner: winner.tid(),
+                    stage,
+                });
+                winners.push(winner);
+                losers.push(loser);
+            }
+            // The semifinal is the round before the final; its two losers meet in
+            // the small final (played in the same tournament round as the final).
+            if bracket == cup_rounds - 1 {
+                semifinal_losers = Some([losers[0], losers[1]]);
+            }
+            columns.push(col);
+            frontier = winners;
+        }
+
+        let small_final = semifinal_losers.map(|[l0, l1]| {
+            let final_tround = sched[cup_rounds as usize - 1];
+            let (winner, _) = resolve_slot(rounds, final_tround, l0, l1);
+            BracketMatch {
+                player1: l0.tid(),
+                player2: l1.tid(),
+                winner: winner.tid(),
+                stage: CupStage::SmallFinal,
+            }
+        });
+
+        CupBracketView {
+            size: self.size,
+            rounds: columns,
+            small_final,
+        }
+    }
+
     /// Replay the cup up to (but not including) bracket round `bracket`, returning
     /// the frontier entering it (a slot is `None` where both feeding players were
     /// no-shows) and the two semifinal losers (each `None` under the same). Each
@@ -272,6 +367,55 @@ fn stage_before_final(alive: u32) -> CupStage {
         8 => CupStage::Quarterfinal,
         4 => CupStage::Semifinal,
         n => CupStage::RoundOf(n),
+    }
+}
+
+/// A bracket slot for the [`CupBracketView`]. Three states, because the empty
+/// bracket must distinguish a player whose opponent is merely *not yet known*
+/// (nobody advances) from one whose opponent slot is genuinely dead (a real bye).
+/// Both flatten to `None` in the emitted view — the distinction only governs
+/// advancement.
+#[derive(Clone, Copy)]
+enum Slot {
+    /// A known player.
+    Player(TournamentId),
+    /// Permanently empty — both feeding players were no-shows, so the opposing
+    /// slot's player advances unopposed (a cup bye).
+    Empty,
+    /// Not yet determined — the feeding match hasn't been decided; the winner
+    /// stays pending until it is.
+    Pending,
+}
+
+impl Slot {
+    /// The tournament number, or `None` for an empty or pending slot.
+    fn tid(self) -> Option<TournamentId> {
+        match self {
+            Slot::Player(p) => Some(p),
+            Slot::Empty | Slot::Pending => None,
+        }
+    }
+}
+
+/// Resolve one bracket slot for the [`CupBracketView`]: `(winner, loser)`. A real
+/// player advances only against a genuinely `Empty` opponent (a bye); against a
+/// still-`Pending` opponent the outcome stays `Pending`, so a lone finalist is
+/// never crowned before their opponent is even known. Unlike [`Cup::decide_slot`]
+/// this never fails — an undecided board is just a `Pending` result.
+fn resolve_slot(rounds: &[Round], k: u32, a: Slot, b: Slot) -> (Slot, Slot) {
+    match (a, b) {
+        (Slot::Player(x), Slot::Player(y)) => match decide(rounds, k, x, y) {
+            Some(CupResult::Winner { winner, loser }) => {
+                (Slot::Player(winner), Slot::Player(loser))
+            }
+            Some(CupResult::BothAbsent) => (Slot::Empty, Slot::Empty),
+            None => (Slot::Pending, Slot::Pending),
+        },
+        (Slot::Player(x), Slot::Empty) | (Slot::Empty, Slot::Player(x)) => {
+            (Slot::Player(x), Slot::Empty)
+        }
+        (Slot::Pending, _) | (_, Slot::Pending) => (Slot::Pending, Slot::Pending),
+        (Slot::Empty, Slot::Empty) => (Slot::Empty, Slot::Empty),
     }
 }
 
@@ -506,6 +650,168 @@ mod tests {
         assert_eq!((m[1].player1, m[1].player2), (seeds[1], seeds[6]));
         assert_eq!((m[3].player1, m[3].player2), (seeds[3], seeds[4]));
         assert!(matches!(m[0].stage, CupStage::Quarterfinal));
+    }
+
+    #[test]
+    fn bracket_view_builds_the_full_tree_with_results() {
+        let s = ids(8);
+        let cup = Cup {
+            size: 8,
+            seed_order: s.clone(),
+        };
+        let rounds = [
+            cup_round(
+                1,
+                &[
+                    (s[0], s[7], CupStage::Quarterfinal),
+                    (s[1], s[6], CupStage::Quarterfinal),
+                    (s[2], s[5], CupStage::Quarterfinal),
+                    (s[3], s[4], CupStage::Quarterfinal),
+                ],
+            ),
+            cup_round(
+                2,
+                &[
+                    (s[0], s[3], CupStage::Semifinal),
+                    (s[1], s[2], CupStage::Semifinal),
+                ],
+            ),
+            cup_round(
+                3,
+                &[
+                    (s[0], s[1], CupStage::Final),
+                    (s[2], s[3], CupStage::SmallFinal),
+                ],
+            ),
+        ];
+        let v = cup.bracket_view(&rounds);
+        assert_eq!(v.size, 8);
+        assert_eq!(v.rounds.len(), 3);
+
+        // Quarterfinals: the seed fold, player1 wins each.
+        let qf = &v.rounds[0];
+        assert_eq!(qf.len(), 4);
+        assert_eq!((qf[0].player1, qf[0].player2), (Some(s[0]), Some(s[7])));
+        assert_eq!((qf[3].player1, qf[3].player2), (Some(s[3]), Some(s[4])));
+        assert!(matches!(qf[0].stage, CupStage::Quarterfinal));
+        assert_eq!(qf[0].winner, Some(s[0]));
+
+        // Semifinals: winners folded in match order — (s0,s3),(s1,s2).
+        let sf = &v.rounds[1];
+        assert_eq!(sf.len(), 2);
+        assert_eq!((sf[0].player1, sf[0].player2), (Some(s[0]), Some(s[3])));
+        assert!(matches!(sf[0].stage, CupStage::Semifinal));
+        assert_eq!((sf[0].winner, sf[1].winner), (Some(s[0]), Some(s[1])));
+
+        // Final + champion (the last column's single match).
+        let fin = &v.rounds[2];
+        assert_eq!(fin.len(), 1);
+        assert_eq!((fin[0].player1, fin[0].player2), (Some(s[0]), Some(s[1])));
+        assert!(matches!(fin[0].stage, CupStage::Final));
+        assert_eq!(fin[0].winner, Some(s[0]));
+
+        // Small final: the two semifinal losers (s3, s2); s2 takes third, s3 fourth.
+        let small = v.small_final.expect("small final present");
+        assert_eq!((small.player1, small.player2), (Some(s[3]), Some(s[2])));
+        assert!(matches!(small.stage, CupStage::SmallFinal));
+        assert_eq!(small.winner, Some(s[2]));
+    }
+
+    #[test]
+    fn bracket_view_keeps_a_lone_finalist_pending_until_the_other_semifinal_is_decided() {
+        // Regression: a `None` opposing slot from an *undecided* feeding match must
+        // not advance the lone player — only a genuinely empty (double no-show) slot
+        // does. Otherwise a finalist is crowned before their opponent is even known.
+        let s = ids(8);
+        let cup = Cup {
+            size: 8,
+            seed_order: s.clone(),
+        };
+        let rounds = [
+            cup_round(
+                1,
+                &[
+                    (s[0], s[7], CupStage::Quarterfinal),
+                    (s[1], s[6], CupStage::Quarterfinal),
+                    (s[2], s[5], CupStage::Quarterfinal),
+                    (s[3], s[4], CupStage::Quarterfinal),
+                ],
+            ),
+            // Only one semifinal decided; the other is still pending.
+            cup_round(2, &[(s[0], s[3], CupStage::Semifinal)]),
+        ];
+        let v = cup.bracket_view(&rounds);
+        let fin = &v.rounds[2][0];
+        // One finalist known (s0), the other still to be determined, nobody crowned.
+        assert_eq!((fin.player1, fin.player2), (Some(s[0]), None));
+        assert_eq!(fin.winner, None);
+        // Likewise the third-place match: one semifinal loser known, the rest pending.
+        let small = v.small_final.expect("small final slot present");
+        assert_eq!((small.player1, small.player2), (Some(s[3]), None));
+        assert_eq!(small.winner, None);
+    }
+
+    #[test]
+    fn bracket_view_advances_a_lone_player_past_a_double_no_show() {
+        // A genuinely empty slot (both feeding players no-showed) is a real bye: the
+        // opponent advances unopposed even though the next round isn't played yet.
+        let s = ids(8);
+        let cup = Cup {
+            size: 8,
+            seed_order: s.clone(),
+        };
+        let mut r1 = cup_round(
+            1,
+            &[
+                (s[1], s[6], CupStage::Quarterfinal),
+                (s[2], s[5], CupStage::Quarterfinal),
+                (s[3], s[4], CupStage::Quarterfinal),
+            ],
+        );
+        // The top quarterfinal (seeds 1 & 8) is a double no-show — it advances nobody.
+        r1.boards.push(Board {
+            no_show: Some(NoShow::Both),
+            source: PairingSource::Cup {
+                stage: CupStage::Quarterfinal,
+            },
+            ..Board::pending(s[0], s[7], 0, PairingSource::Swiss)
+        });
+        let v = cup.bracket_view(&[r1]);
+
+        // That quarterfinal resolves to nobody.
+        assert_eq!(v.rounds[0][0].winner, None);
+        // Its winner's semifinal slot is empty, so the seed drawn to face it (s3,
+        // the winner of 4v5 folded opposite) advances as a bye — winner set, one
+        // slot empty — despite the semifinal round not having been played.
+        let sf0 = &v.rounds[1][0];
+        assert_eq!((sf0.player1, sf0.player2), (None, Some(s[3])));
+        assert_eq!(sf0.winner, Some(s[3]));
+    }
+
+    #[test]
+    fn bracket_view_draws_the_empty_tree_before_any_result() {
+        let cup = Cup {
+            size: 16,
+            seed_order: ids(16),
+        };
+        let v = cup.bracket_view(&[]);
+        // 16 → round of 16, quarterfinal, semifinal, final: four columns.
+        assert_eq!(v.rounds.len(), 4);
+        assert_eq!(v.rounds[0].len(), 8);
+        assert!(matches!(v.rounds[0][0].stage, CupStage::RoundOf(16)));
+        // Round 1's players are the known seeds; every winner and later-round slot
+        // is still undetermined.
+        assert!(v.rounds[0]
+            .iter()
+            .all(|m| m.player1.is_some() && m.player2.is_some() && m.winner.is_none()));
+        assert!(v.rounds[1]
+            .iter()
+            .all(|m| m.player1.is_none() && m.player2.is_none()));
+        // The third-place slot exists from the start, both players undetermined.
+        let small = v
+            .small_final
+            .expect("small final slot present even when empty");
+        assert_eq!((small.player1, small.player2), (None, None));
     }
 
     #[test]

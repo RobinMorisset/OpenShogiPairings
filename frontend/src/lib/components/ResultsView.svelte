@@ -31,7 +31,7 @@
   // the settings to their label/field/tooltip. Unknown codes (from a newer save)
   // are skipped.
   const eloEstimateNeeded = $derived(
-    tournament.settings.elo_pairing_enabled ?? false,
+    tournament.settings.pairing.kind === "elo",
   );
 
   const tiebreakColumns = $derived(
