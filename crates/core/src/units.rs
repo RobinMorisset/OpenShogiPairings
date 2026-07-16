@@ -143,9 +143,19 @@ impl From<Wins> for HalfPoints {
 /// `usize` bridge below is what lets those tables be
 /// [`TiVec`](typed_index_collections::TiVec)s indexed directly by a
 /// `TournamentId` — so `table[tid]` needs no `as usize` at the call site; the one
-/// cast lives here. Purely internal (the wire/`Player` identifier stays a plain
-/// `u32`), so it carries no serde/`TS` derives.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// cast lives here.
+///
+/// It is also the player reference carried across the wire — on [`crate::Board`],
+/// [`crate::Round`], [`crate::Player::tournament_id`], … — so it derives serde and
+/// [`TS`]. Like [`Wins`] / [`HalfPoints`], it serializes as a **bare number** (a
+/// one-field tuple struct forwards to its inner value, so **no**
+/// `#[serde(transparent)]` — that only trips a ts-rs warning) and exports to
+/// TypeScript as a transparent `number` alias; the `serializes_as_a_bare_number`
+/// test pins this. [`Display`] prints the plain number for the cross-table.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, Serialize, Deserialize, TS,
+)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct TournamentId(pub u32);
 
 /// `usize` → `TournamentId`, for `TiVec` key generation (e.g. `push`).
@@ -210,11 +220,16 @@ mod tests {
             serde_json::to_string(&HalfPoints::from_whole(2)).unwrap(),
             "4"
         );
+        assert_eq!(serde_json::to_string(&TournamentId(7)).unwrap(), "7");
         // ...and round-trips back.
         assert_eq!(serde_json::from_str::<Wins>("5").unwrap(), Wins(5));
         assert_eq!(
             serde_json::from_str::<HalfPoints>("4").unwrap(),
             HalfPoints::from_halves(4)
+        );
+        assert_eq!(
+            serde_json::from_str::<TournamentId>("7").unwrap(),
+            TournamentId(7)
         );
     }
 }
