@@ -8,8 +8,8 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{
-    Board, Counterfactual, CounterfactualMode, CupPodium, Handicap, NewPlayer, NoShow,
-    RoundExplanation, Standing, Tournament, TournamentSettings, Winner,
+    Board, Counterfactual, CounterfactualMode, CupBracketView, CupPodium, Handicap, NewPlayer,
+    NoShow, RoundExplanation, Standing, Tournament, TournamentSettings, Winner,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -173,6 +173,10 @@ struct TournamentView {
     /// Results-tab medals. `None` when there is no cup or the final isn't finished.
     #[serde(skip_serializing_if = "Option::is_none")]
     cup_podium: Option<CupPodium>,
+    /// The full cup bracket (structure + results), derived server-side so the Cup
+    /// tab renders it directly. `None` when there is no cup.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cup_bracket: Option<CupBracketView>,
     /// Players the cup will pair in the round being drafted, so the draft UI can
     /// keep them out of the Swiss customization. Empty otherwise.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -195,6 +199,7 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
     let tournament = store.current().cloned().ok_or(ApiError::NoTournament)?;
     let standings = tournament.standings();
     let cup_podium = tournament.cup_podium();
+    let cup_bracket = tournament.cup_bracket();
     let draft_cup_players = tournament.draft_cup_players();
     let suggested_handicaps = tournament
         .rounds
@@ -224,6 +229,7 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
         version: store.version(),
         standings,
         cup_podium,
+        cup_bracket,
         draft_cup_players,
         suggested_handicaps,
         effective_winners,

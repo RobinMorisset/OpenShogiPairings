@@ -15,6 +15,7 @@
     "tabSettings": "Paramètres",
     "tabPlayers": "Joueurs ({count})",
     "tabResults": "Classement",
+    "tabCup": "Coupe",
     "tabRound": "Ronde {number}",
     "tabRoundCompleted": "Ronde {number} ✓",
     "tabRoundDraft": "Ronde {number} (brouillon)",
@@ -217,6 +218,10 @@
     "semifinal": "Demi-finale",
     "final": "Finale",
     "thirdPlace": "3e place"
+  },
+  "cupBracket": {
+    "title": "Tableau de la coupe (top {size})",
+    "tbd": "—"
   },
   "roundDraftView": {
     "summary": "Préparation de la ronde {number} — {present} dans la poule suisse, {absent} absent(s). Les joueurs que vous n'appariez pas à la main sont appariés automatiquement.",

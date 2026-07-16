@@ -28,7 +28,10 @@ mod units;
 
 pub use american_grid::to_grid as american_grid;
 pub use csv_import::{parse_players_csv, CsvImportError};
-pub use cup::{knockout_champion, reconstruct_cup_from_final, Cup, CupPodium, CUP_SIZES};
+pub use cup::{
+    knockout_champion, reconstruct_cup_from_final, BracketMatch, Cup, CupBracketView, CupPodium,
+    CUP_SIZES,
+};
 pub use elo::{estimate_elos, PROVISIONAL_GAMES_THRESHOLD};
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
 pub use fesa_results::import_fesa_results;

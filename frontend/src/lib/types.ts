@@ -11,6 +11,8 @@
 export type { AffectedCycle } from "./generated/AffectedCycle";
 export type { BackupInfo } from "./generated/BackupInfo";
 export type { Board } from "./generated/Board";
+export type { BracketMatch } from "./generated/BracketMatch";
+export type { CupBracketView } from "./generated/CupBracketView";
 export type { BoardLedger } from "./generated/BoardLedger";
 export type { ClubProtection } from "./generated/ClubProtection";
 export type { HandicapDisplay } from "./generated/HandicapDisplay";

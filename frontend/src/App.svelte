@@ -35,6 +35,7 @@
   } from "./lib/api";
   import type {
     BackupInfo,
+    CupBracketView,
     CupPodium,
     Handicap,
     NewPlayer,
@@ -59,6 +60,7 @@
   import RoundView from "./lib/components/RoundView.svelte";
   import RoundDraftView from "./lib/components/RoundDraftView.svelte";
   import ResultsView from "./lib/components/ResultsView.svelte";
+  import CupBracket from "./lib/components/CupBracket.svelte";
   import TournamentSettingsView from "./lib/components/TournamentSettingsView.svelte";
   import LocaleSwitcher from "./lib/components/LocaleSwitcher.svelte";
   import ThemeSwitcher from "./lib/components/ThemeSwitcher.svelte";
@@ -67,6 +69,7 @@
   let tournament = $state<Tournament | null>(null);
   let standings = $state<Standing[]>([]);
   let cupPodium = $state<CupPodium | null>(null);
+  let cupBracket = $state<CupBracketView | null>(null);
   let draftCupPlayers = $state<number[]>([]);
   let suggestedHandicaps = $state<(Handicap | null)[][]>([]);
   /** Winner that counts for standings/pairing per board, server-computed (see
@@ -98,6 +101,7 @@
     tournament = res.tournament;
     standings = res.standings;
     cupPodium = res.cup_podium ?? null;
+    cupBracket = res.cup_bracket ?? null;
     draftCupPlayers = res.draft_cup_players ?? [];
     suggestedHandicaps = res.suggested_handicaps ?? [];
     effectiveWinners = res.effective_winners ?? [];
@@ -128,6 +132,11 @@
   // finalized anyway).
   const showResults = $derived((tournament?.rounds.length ?? 0) > 0);
 
+  // The Cup tab appears once the bracket is frozen — i.e. registration has been
+  // finalized with a cup enabled, at which point `tournament.cup` is set and the
+  // seed order can't change. Sits next to Standings.
+  const showCup = $derived(tournament?.cup != null);
+
   // The tabs in the order they're rendered below, so the arrow-key shortcuts can
   // step through them. Kept in sync by construction with the markup order.
   const tabOrder = $derived(
@@ -136,6 +145,7 @@
           "settings",
           "players",
           ...(showResults ? ["results"] : []),
+          ...(showCup ? ["cup"] : []),
           ...tournament.rounds.map((r) => `round-${r.number}`),
           ...(tournament.draft ? ["draft"] : []),
         ]
@@ -305,6 +315,7 @@
       "settings",
       "players",
       ...(showResults ? ["results"] : []),
+      ...(showCup ? ["cup"] : []),
       ...tournament.rounds.map((r) => `round-${r.number}`),
       ...(tournament.draft ? ["draft"] : []),
     ]);
@@ -386,6 +397,7 @@
     tournament = null;
     standings = [];
     cupPodium = null;
+    cupBracket = null;
     draftCupPlayers = [];
     suggestedHandicaps = [];
     effectiveWinners = [];
@@ -817,6 +829,17 @@
             {$_("app.tabResults")}
           </button>
         {/if}
+        {#if showCup}
+          <button
+            type="button"
+            class="tab"
+            class:active={activeTab === "cup"}
+            data-testid="tab-cup"
+            onclick={() => (activeTab = "cup")}
+          >
+            {$_("app.tabCup")}
+          </button>
+        {/if}
         {#each tournament.rounds as round (round.number)}
           <button
             type="button"
@@ -943,6 +966,8 @@
           </div>
         {:else if activeTab === "results"}
           <ResultsView {tournament} {standings} {cupPodium} {effectiveWinners} />
+        {:else if activeTab === "cup" && tournament.cup && cupBracket}
+          <CupBracket bracket={cupBracket} cup={tournament.cup} players={tournament.players} />
         {:else if activeTab === "draft" && tournament.draft}
           <RoundDraftView
             draft={tournament.draft}
