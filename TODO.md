@@ -29,6 +29,12 @@ Known limitations and future work, roughly ordered by area.
 
 - **Keep one backup on tournament deletion for a while** 1 month before losing a tournament backup sounds good
 
+## ELO estimator
+
+- **Glicko / Glicko v2**, they're advanced variants of ELO, look at using them once we have the full games data.
+
+- **Add logistic prior**, should be quite similar to Laplace one, but not exactly
+
 ## Other
 
 - **Webhook for pushing results and pulling players** See https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification
