@@ -6,7 +6,6 @@
 //! history — so that computation lives here once rather than in each consumer.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
 
 use uuid::Uuid;
 
@@ -62,13 +61,11 @@ pub(crate) struct PlayerScore {
 
 /// Per-player scores, stored in a dense vector indexed by tournament number (the
 /// number assigned at finalization, so scoring only runs once every player has
-/// one). `index` maps a player id to their number for the [`Uuid`]-facing
-/// boundary; `ids` is the reverse, for turning a stored number back into the id a
+/// one). `ids` is the reverse map, turning a stored number back into the id a
 /// caller expects. Numbers no current player holds (0, and any freed by a
-/// pre-play removal) are gaps, holding a [`PlayerScore::default`].
+/// pre-play removal) are gaps, holding a [`PlayerScore::default`] and a nil id.
 pub(crate) struct Scores {
     by_tid: Vec<PlayerScore>,
-    index: HashMap<Uuid, u32>,
     ids: Vec<Uuid>,
 }
 
@@ -76,7 +73,7 @@ impl Scores {
     /// The accumulated state for a known player.
     #[cfg(test)]
     pub fn get(&self, id: &Uuid) -> &PlayerScore {
-        &self.by_tid[self.index[id] as usize]
+        &self.by_tid[self.tid_of(id).expect("unknown player") as usize]
     }
 
     /// The accumulated state at a tournament number — an [`PlayerScore::opponents`]
@@ -87,8 +84,11 @@ impl Scores {
     }
 
     /// A player's tournament number, or `None` if they aren't in the tournament.
+    /// A linear scan of `ids`: the number is already known everywhere on the hot
+    /// path (boards and players carry it), so this id-facing lookup is only for
+    /// the [`Uuid`] boundary and tests, and isn't worth a parallel hash table.
     pub fn tid_of(&self, id: &Uuid) -> Option<u32> {
-        self.index.get(id).copied()
+        self.ids.iter().position(|x| x == id).map(|t| t as u32)
     }
 
     /// The player id at a tournament number (the inverse of [`Self::tid_of`]).
@@ -100,9 +100,8 @@ impl Scores {
     /// opponent that was later removed).
     #[cfg(test)]
     pub fn points(&self, id: &Uuid) -> u32 {
-        self.index
-            .get(id)
-            .map_or(0, |&t| self.by_tid[t as usize].points)
+        self.tid_of(id)
+            .map_or(0, |t| self.by_tid[t as usize].points)
     }
 
     /// The number of tournament-number slots, so a caller can size a parallel
@@ -145,18 +144,9 @@ pub(crate) fn compute_scores(
     // Tournament number of each player — the dense key everything is stored by,
     // and what opponent/defeated lists hold. Assigned at finalization, so present
     // for every player whenever scoring runs (only once at least one round
-    // exists). This is the one per-player hash table left: the score records
-    // accumulate straight into a number-indexed vector, no id-keyed intermediate.
-    let index: HashMap<Uuid, u32> = players
-        .iter()
-        .map(|p| {
-            (
-                p.id,
-                p.tournament_id
-                    .expect("scoring runs only after registration is finalized"),
-            )
-        })
-        .collect();
+    // exists). The score records accumulate straight into this number-indexed
+    // vector, with no id-keyed intermediate: boards and players already carry the
+    // number, so the only reverse (number → id) map kept is `ids`, below.
     let max_tid = players
         .iter()
         .map(|p| p.tournament_id.unwrap())
@@ -201,6 +191,11 @@ pub(crate) fn compute_scores(
         by_tid[t] = PlayerScore {
             points,
             macmahon,
+            // A player faces one opponent per completed round (twice on a long
+            // board), and can't defeat more than they face. Reserving up front
+            // avoids the 1→2→4→8 regrowth as these fill in round by round.
+            opponents: Vec::with_capacity(rounds_played as usize),
+            defeated: Vec::with_capacity(rounds_played as usize),
             ..PlayerScore::default()
         };
     }
@@ -340,7 +335,7 @@ pub(crate) fn compute_scores(
         }
     }
 
-    Scores { by_tid, index, ids }
+    Scores { by_tid, ids }
 }
 
 #[cfg(test)]

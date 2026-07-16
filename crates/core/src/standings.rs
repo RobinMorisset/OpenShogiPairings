@@ -200,7 +200,7 @@ pub fn compute_standings(
     let mut standings: Vec<Standing> = players
         .iter()
         .map(|p| {
-            let t = scores.tid_of(&p.id).expect("player has a number") as usize;
+            let t = p.tournament_id.expect("player has a number") as usize;
             let s = scores.get_tid(t as u32);
             let opp_m: Vec<HalfPoints> = s.opponents.iter().map(&score_m).collect();
             let opp_w: Vec<Wins> = s.opponents.iter().map(&score_w).collect();
