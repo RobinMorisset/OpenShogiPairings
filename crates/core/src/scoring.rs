@@ -12,22 +12,22 @@ use uuid::Uuid;
 use crate::player::Player;
 use crate::round::{PairingSource, Round, Winner};
 use crate::settings::TournamentSettings;
+use crate::units::{HalfPoints, Wins};
 
 /// One player's accumulated state going into the next round. Defaultable so a
 /// [`Scores`] table can leave a gap for any tournament number no current player
 /// holds (number 0, and numbers freed by a pre-play removal).
 #[derive(Default)]
 pub(crate) struct PlayerScore {
-    /// Total score in **half-point units** (×2): MacMahon starting points plus
-    /// victories (the effective winner of a board, and a bye, each a win worth
-    /// `2`), plus `1` for each half-point absence (a `0=`). Kept in halves so a
-    /// half-point stays an exact integer; divide by 2 for display.
-    pub points: u32,
-    /// Games won (effective winner; a bye counts as a win). A whole game count,
-    /// **not** in half-point units — a half-point absence is not a victory.
-    pub victories: u32,
-    /// MacMahon starting points, in **half-point units** (×2).
-    pub macmahon: u32,
+    /// Total score: MacMahon starting points plus victories (the effective winner
+    /// of a board, and a bye, each a win worth one point), plus half a point for
+    /// each half-point absence (a `0=`).
+    pub points: HalfPoints,
+    /// Games won (effective winner; a bye counts as a win). A half-point absence
+    /// is not a victory.
+    pub victories: Wins,
+    /// MacMahon starting points.
+    pub macmahon: HalfPoints,
     /// Opponents faced, one entry per game (so a rematch would count twice, e.g.
     /// in SOS), stored by tournament number — the dense key this table is indexed
     /// by, so the opponent-based tie-breaks walk them without hashing. Only ever
@@ -38,19 +38,17 @@ pub(crate) struct PlayerScore {
     /// number (see [`Self::opponents`]).
     pub defeated: Vec<u32>,
     /// Cumulative sum of the player's running points total, added up after each
-    /// completed round (the "cumulative" tie-break, MacMahon-inclusive). In
-    /// **half-point units**, since it sums [`points`](Self::points).
-    pub cuss_m: u32,
+    /// completed round (the "cumulative" tie-break, MacMahon-inclusive).
+    pub cuss_m: HalfPoints,
     /// Cumulative sum of the player's running win total, added up after each
-    /// completed round (the "cumulative" tie-break, wins only). A whole count.
-    pub cuss_w: u32,
+    /// completed round (the "cumulative" tie-break, wins only).
+    pub cuss_w: Wins,
     /// The player's running points total as it stood after each completed round
     /// (one entry per round) — the sequence CUSSM sums, kept for the breakdown.
-    /// In **half-point units**.
-    pub running_points: Vec<u32>,
+    pub running_points: Vec<HalfPoints>,
     /// The player's running win total after each completed round — the sequence
     /// CUSSW sums.
-    pub running_wins: Vec<u32>,
+    pub running_wins: Vec<Wins>,
     /// Whether the player has taken a bye.
     pub had_bye: bool,
     /// Round number of the most recent round the player floated up / down (a bye
@@ -96,12 +94,12 @@ impl Scores {
         self.ids[tid as usize]
     }
 
-    /// A player's total points, or 0 if they aren't in the tournament (e.g. an
+    /// A player's total points, or zero if they aren't in the tournament (e.g. an
     /// opponent that was later removed).
     #[cfg(test)]
-    pub fn points(&self, id: &Uuid) -> u32 {
+    pub fn points(&self, id: &Uuid) -> HalfPoints {
         self.tid_of(id)
-            .map_or(0, |t| self.by_tid[t as usize].points)
+            .map_or(HalfPoints::ZERO, |t| self.by_tid[t as usize].points)
     }
 
     /// The number of tournament-number slots, so a caller can size a parallel
@@ -176,15 +174,16 @@ pub(crate) fn compute_scores(
             ),
             None => p.rating,
         };
-        // All point-like quantities are kept in half-point units (×2) so a later
-        // half-point absence adds an exact `1`.
-        let macmahon = settings.macmahon_points_at(mm_rating, p.grade, rounds_played) * 2;
+        let macmahon =
+            HalfPoints::from_whole(settings.macmahon_points_at(mm_rating, p.grade, rounds_played));
         // Manual bonuses/maluses are folded in alongside MacMahon starting points,
         // before any round is replayed, so they shape both the standings and the
-        // score-gap pairing weight from here on. They are whole-point deltas, so
-        // doubled into half-point units. The effective score can't go below zero.
+        // score-gap pairing weight from here on. They are whole-point deltas. The
+        // signed floor at zero needs raw units, so drop into halves for this one
+        // computation. The effective score can't go below zero.
         let adjustment: i32 = p.adjustments.iter().map(|a| a.delta).sum();
-        let points = (macmahon as i32 + adjustment * 2).max(0) as u32;
+        let points =
+            HalfPoints::from_halves((macmahon.halves() as i32 + adjustment * 2).max(0) as u32);
         let t = p.tournament_id.unwrap() as usize;
         ids[t] = p.id;
         real_tids.push(t as u32);
@@ -233,9 +232,9 @@ pub(crate) fn compute_scores(
             }
 
             // Direction from the frozen float, else from the live difference.
-            let diff = board
-                .points_diff
-                .unwrap_or_else(|| by_tid[ta].points as i32 - by_tid[tb].points as i32);
+            let diff = board.points_diff.unwrap_or_else(|| {
+                by_tid[ta].points.halves() as i32 - by_tid[tb].points.halves() as i32
+            });
             match diff.cmp(&0) {
                 Ordering::Greater => {
                     // a had more points → a downfloats, b upfloats.
@@ -282,16 +281,16 @@ pub(crate) fn compute_scores(
             // and the opponent-based tie-breaks; it stays a single game for ELO.
             let reps = if board.long { 2 } else { 1 };
             let s = &mut by_tid[winner as usize];
-            s.points += 2 * reps; // a win is 2 half-points (×2 for a long game)
-            s.victories += reps;
+            s.points += HalfPoints::from_whole(reps); // one point per game (two for a long board)
+            s.victories += Wins(reps);
             for _ in 0..reps {
                 s.defeated.push(loser);
             }
         }
         if let Some(bye) = round.bye {
             let s = &mut by_tid[bye as usize];
-            s.points += 2; // a win is 2 half-points
-            s.victories += 1;
+            s.points += HalfPoints::from_whole(1); // a bye scores one point
+            s.victories += Wins(1);
         }
         // The player who showed up on a no-show board scores the free point, as
         // for a bye. The absentee scores nothing (like an absence).
@@ -301,15 +300,15 @@ pub(crate) fn compute_scores(
                 // (two points), unless the referee demoted it.
                 let reps = if board.long { 2 } else { 1 };
                 let s = &mut by_tid[present as usize];
-                s.points += 2 * reps; // a win is 2 half-points (×2 for a long game)
-                s.victories += reps;
+                s.points += HalfPoints::from_whole(reps); // one point (two for a long board)
+                s.victories += Wins(reps);
             }
         }
         // A cup bye scores the free point too — the player advanced unopposed.
         for &player in &round.cup_byes {
             let s = &mut by_tid[player as usize];
-            s.points += 2; // a win is 2 half-points
-            s.victories += 1;
+            s.points += HalfPoints::from_whole(1); // an unopposed advance scores one point
+            s.victories += Wins(1);
         }
         // A deliberate absence scores half a point when the referee enabled it
         // (a `0=` in the cross-table): +1 half-point, but not a win. `round.absent`
@@ -317,7 +316,7 @@ pub(crate) fn compute_scores(
         // board and stays at 0.
         if settings.half_point_absences {
             for &id in &round.absent {
-                by_tid[id as usize].points += 1;
+                by_tid[id as usize].points += HalfPoints::from_halves(1); // half a point
             }
         }
 

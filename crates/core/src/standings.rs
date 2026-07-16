@@ -173,8 +173,8 @@ pub fn compute_standings(
     let scores = compute_scores(players, settings, rounds);
     // Opponent/defeated lists hold tournament numbers, so scoring an opponent is a
     // direct table lookup — `…M` by their points, `…W` by their wins.
-    let score_m = |o: &u32| HalfPoints::from_halves(scores.get_tid(*o).points);
-    let score_w = |o: &u32| Wins(scores.get_tid(*o).victories);
+    let score_m = |o: &u32| scores.get_tid(*o).points;
+    let score_w = |o: &u32| scores.get_tid(*o).victories;
 
     // The live Bayesian ELO estimate — only shown, and only ranks, in ELO mode,
     // so skip the whole (quadrature-heavy) computation in Swiss mode.
@@ -206,9 +206,9 @@ pub fn compute_standings(
             let opp_w: Vec<Wins> = s.opponents.iter().map(&score_w).collect();
             Standing {
                 player_id: p.id,
-                victories: Wins(s.victories),
-                macmahon: HalfPoints::from_halves(s.macmahon),
-                points: HalfPoints::from_halves(s.points),
+                victories: s.victories,
+                macmahon: s.macmahon,
+                points: s.points,
                 sosm: sosm[t],
                 sosw: sosw[t],
                 sodosm: s.defeated.iter().map(&score_m).sum(),
@@ -219,20 +219,16 @@ pub fn compute_standings(
                 sosm2: sum_dropping_lowest(opp_m, 2),
                 sosw1: sum_dropping_lowest(opp_w.clone(), 1),
                 sosw2: sum_dropping_lowest(opp_w, 2),
-                cussm: HalfPoints::from_halves(s.cuss_m),
-                cussw: Wins(s.cuss_w),
+                cussm: s.cuss_m,
+                cussw: s.cuss_w,
                 // Filled in below, while the ranking order is computed, since it
                 // depends on which players end up tied on the earlier criteria.
                 dc: Wins::ZERO,
                 // The output faces callers by id, so translate the numbers back.
                 opponents: s.opponents.iter().map(|&o| scores.id_of(o)).collect(),
                 defeated: s.defeated.iter().map(|&o| scores.id_of(o)).collect(),
-                running_points: s
-                    .running_points
-                    .iter()
-                    .map(|&h| HalfPoints::from_halves(h))
-                    .collect(),
-                running_wins: s.running_wins.iter().map(|&w| Wins(w)).collect(),
+                running_points: s.running_points.clone(),
+                running_wins: s.running_wins.clone(),
                 estimated_elo: elos
                     .as_ref()
                     .map(|e| e.get(&p.id).copied().unwrap_or(0.0).round() as i32),

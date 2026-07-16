@@ -32,6 +32,7 @@ use crate::player::Player;
 use crate::round::{Board, Round, Winner};
 use crate::standings::Standing;
 use crate::tournament::Tournament;
+use crate::units::HalfPoints;
 
 /// Columns are separated by a single space (widths carry the rest of the layout).
 const COLUMN_SEP: &str = " ";
@@ -152,14 +153,15 @@ fn row_for(
         player.rating.map(|r| r.to_string()).unwrap_or_default(),
     ];
     row.extend(round_cells);
-    row.push(format_half_points(standing.points.halves()));
+    row.push(format_half_points(standing.points));
     row
 }
 
 /// Render a score held in **half-point units** for the `Pts` column: a whole
 /// number when even (`6` for 6 points), or the FESA `n/2` form when odd (`5/2`
 /// for 2½). Matches how FESA itself writes fractional point totals.
-fn format_half_points(half: u32) -> String {
+fn format_half_points(points: HalfPoints) -> String {
+    let half = points.halves();
     if half.is_multiple_of(2) {
         (half / 2).to_string()
     } else {
@@ -591,9 +593,9 @@ mod tests {
 
     #[test]
     fn half_point_totals_render_whole_or_n_over_2() {
-        assert_eq!(format_half_points(0), "0");
-        assert_eq!(format_half_points(6), "3"); // 6 halves = 3 points
-        assert_eq!(format_half_points(1), "1/2"); // ½
-        assert_eq!(format_half_points(5), "5/2"); // 2½
+        assert_eq!(format_half_points(HalfPoints::from_halves(0)), "0");
+        assert_eq!(format_half_points(HalfPoints::from_halves(6)), "3"); // 6 halves = 3 points
+        assert_eq!(format_half_points(HalfPoints::from_halves(1)), "1/2"); // ½
+        assert_eq!(format_half_points(HalfPoints::from_halves(5)), "5/2"); // 2½
     }
 }

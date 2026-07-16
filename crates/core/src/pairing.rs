@@ -80,6 +80,7 @@ use crate::player::Player;
 use crate::round::{Board, PairingSource, Round};
 use crate::scoring::{compute_scores, Scores};
 use crate::settings::{FloaterStyle, TournamentSettings};
+use crate::units::HalfPoints;
 
 // --- Weighted matching ----------------------------------------------------
 
@@ -312,13 +313,13 @@ impl Rule {
             // so no `airtight_active` check; and the gap is squared, so its sign —
             // and an `abs` — are irrelevant.
             Rule::AirtightGroups => {
-                let gap = sa.macmahon as i128 - sb.macmahon as i128;
+                let gap = sa.macmahon.halves() as i128 - sb.macmahon.halves() as i128;
                 gap * gap
             }
             // Rule 3: prefer equal scores; penalty is the square of the gap (so the
             // gap's sign, and an `abs`, don't matter).
             Rule::ScoreGap => {
-                let gap = sa.points as i128 - sb.points as i128;
+                let gap = sa.points.halves() as i128 - sb.points.halves() as i128;
                 gap * gap
             }
             // Rule 4: the lower-scored player floats up, the higher-scored down.
@@ -396,7 +397,7 @@ impl Rule {
             // The bye should go to the lowest score group; penalty is the square
             // of the gap to the lowest score among free players.
             Rule::ByeGroup => {
-                let gap = s.points as i128 - ctx.min_points;
+                let gap = s.points.halves() as i128 - ctx.min_points;
                 gap * gap
             }
             Rule::FloatRepeat => float_units(s.last_descended, ctx.round),
@@ -537,7 +538,7 @@ fn fold_ranks(
     cap: usize,
 ) -> Vec<Option<FoldInfo>> {
     // Group the free players (by tournament number) by their points.
-    let mut groups: HashMap<u32, Vec<u32>> = HashMap::new();
+    let mut groups: HashMap<HalfPoints, Vec<u32>> = HashMap::new();
     for &t in free {
         groups.entry(scores.get_tid(t).points).or_default().push(t);
     }
@@ -630,10 +631,10 @@ impl PairingModel {
         let (mut mm_lo, mut mm_hi) = (u32::MAX, 0u32);
         for &t in free {
             let s = scores.get_tid(t);
-            lo = lo.min(s.points);
-            hi = hi.max(s.points);
-            mm_lo = mm_lo.min(s.macmahon);
-            mm_hi = mm_hi.max(s.macmahon);
+            lo = lo.min(s.points.halves());
+            hi = hi.max(s.points.halves());
+            mm_lo = mm_lo.min(s.macmahon.halves());
+            mm_hi = mm_hi.max(s.macmahon.halves());
         }
         let exempt_clubs = settings.exempt_clubs_normalized();
 
@@ -1328,8 +1329,9 @@ pub fn pair_round_weighted(
 ) -> Round {
     let scores = compute_scores(players, settings, completed_rounds);
     // The float frozen onto each board: points(player1) − points(player2) now.
-    let diff =
-        |p1: u32, p2: u32| scores.get_tid(p1).points as i32 - scores.get_tid(p2).points as i32;
+    let diff = |p1: u32, p2: u32| {
+        scores.get_tid(p1).points.halves() as i32 - scores.get_tid(p2).points.halves() as i32
+    };
 
     let mut placed: HashSet<u32> = HashSet::new();
     for board in forced_boards {
@@ -2504,10 +2506,10 @@ mod tests {
         let (mut mm_lo, mut mm_hi) = (u32::MAX, 0u32);
         for &pid in &free {
             let s = scores.get_tid(pid);
-            lo = lo.min(s.points);
-            hi = hi.max(s.points);
-            mm_lo = mm_lo.min(s.macmahon);
-            mm_hi = mm_hi.max(s.macmahon);
+            lo = lo.min(s.points.halves());
+            hi = hi.max(s.points.halves());
+            mm_lo = mm_lo.min(s.macmahon.halves());
+            mm_hi = mm_hi.max(s.macmahon.halves());
         }
         let edges = 3i128; // 5 free + phantom bye = 6 vertices → 3 edges
         let exempt_clubs = HashSet::new();
