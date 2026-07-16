@@ -626,7 +626,7 @@ mod tests {
     fn win(a: u32, b: u32) -> Board {
         Board {
             result: Some(Winner::Player1),
-            ..Board::pending(a, b, None, PairingSource::Swiss)
+            ..Board::pending(a, b, 0, PairingSource::Swiss)
         }
     }
 
@@ -634,7 +634,7 @@ mod tests {
         Board {
             result: Some(result),
             handicap: Some(HandicapGame { handicap, giver }),
-            ..Board::pending(a, b, None, PairingSource::Swiss)
+            ..Board::pending(a, b, 0, PairingSource::Swiss)
         }
     }
 
@@ -874,7 +874,7 @@ mod tests {
             ..Board::pending(
                 a.tournament_id.unwrap(),
                 b.tournament_id.unwrap(),
-                None,
+                0,
                 PairingSource::Swiss,
             )
         };

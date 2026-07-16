@@ -36,10 +36,12 @@ handicap?: HandicapGame | null,
  * the round was paired. Frozen here so the float history stays correct even
  * if MacMahon thresholds change later or an earlier result is edited — the
  * score standings are recomputed live, but *who floated* is a fact of the
- * pairing. `None` for boards from the naive pairer or from saves predating
- * this field (the scorer then falls back to the live points difference).
+ * pairing. Set for every scored board — Swiss, forced and cup alike — so a
+ * bracket or referee pairing that crosses score groups still shapes float
+ * history. `0` only on referee draft placeholders, which are re-created with
+ * the real value when the round is paired.
  */
-points_diff?: number | null, 
+points_diff?: number, 
 /**
  * How this pairing was decided (Swiss / referee-forced / cup). Defaults to
  * Swiss for saves predating this field.

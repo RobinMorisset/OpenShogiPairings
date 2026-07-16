@@ -348,7 +348,7 @@ mod tests {
 
         let mut board = Board {
             result: Some(Winner::Player1),
-            ..Board::pending(p1, p2, None, PairingSource::Swiss)
+            ..Board::pending(p1, p2, 0, PairingSource::Swiss)
         };
         configure(&mut board);
         t.rounds.push(Round {
@@ -439,7 +439,7 @@ mod tests {
             boards: vec![Board {
                 result: Some(Winner::Player1),
                 long: true,
-                ..Board::pending(a, b, None, PairingSource::Swiss)
+                ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
             bye: None,
             cup_byes: Vec::new(),
@@ -475,7 +475,7 @@ mod tests {
             number: 1,
             boards: vec![Board {
                 result: Some(Winner::Player1),
-                ..Board::pending(a, b, None, PairingSource::Swiss)
+                ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
             bye: Some(c),
             cup_byes: Vec::new(),
@@ -491,7 +491,7 @@ mod tests {
             number: 2,
             boards: vec![Board {
                 result: Some(Winner::Player2),
-                ..Board::pending(a, b, None, PairingSource::Swiss)
+                ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
             bye: None,
             cup_byes: Vec::new(),
@@ -513,7 +513,7 @@ mod tests {
             number: 2,
             boards: vec![Board {
                 no_show: Some(NoShow::Player2), // P2 absent
-                ..Board::pending(p1, p2, None, PairingSource::Swiss)
+                ..Board::pending(p1, p2, 0, PairingSource::Swiss)
             }],
             bye: None,
             cup_byes: Vec::new(),
@@ -537,7 +537,7 @@ mod tests {
             number: 2,
             boards: vec![Board {
                 no_show: Some(NoShow::Both),
-                ..Board::pending(p1, p2, None, PairingSource::Swiss)
+                ..Board::pending(p1, p2, 0, PairingSource::Swiss)
             }],
             bye: None,
             cup_byes: Vec::new(),

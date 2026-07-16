@@ -109,6 +109,12 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
+/// `skip_serializing_if` helper — a `0` float (the not-applicable default) is
+/// omitted.
+fn is_zero(n: &i32) -> bool {
+    *n == 0
+}
+
 /// Which stage of the direct-elimination cup a board belongs to. `RoundOf(n)`
 /// covers the early bracket rounds (round of 64/32/16); the last three rounds are
 /// named explicitly. Used to label cup games in the pairings view.
@@ -188,10 +194,12 @@ pub struct Board {
     /// the round was paired. Frozen here so the float history stays correct even
     /// if MacMahon thresholds change later or an earlier result is edited — the
     /// score standings are recomputed live, but *who floated* is a fact of the
-    /// pairing. `None` for boards from the naive pairer or from saves predating
-    /// this field (the scorer then falls back to the live points difference).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub points_diff: Option<i32>,
+    /// pairing. Set for every scored board — Swiss, forced and cup alike — so a
+    /// bracket or referee pairing that crosses score groups still shapes float
+    /// history. `0` only on referee draft placeholders, which are re-created with
+    /// the real value when the round is paired.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub points_diff: i32,
     /// How this pairing was decided (Swiss / referee-forced / cup). Defaults to
     /// Swiss for saves predating this field.
     #[serde(default, skip_serializing_if = "PairingSource::is_swiss")]
@@ -216,12 +224,7 @@ pub struct Board {
 impl Board {
     /// A not-yet-played board between two players, tagged with how it was paired
     /// and (for engine pairings) its frozen float.
-    pub fn pending(
-        player1: u32,
-        player2: u32,
-        points_diff: Option<i32>,
-        source: PairingSource,
-    ) -> Self {
+    pub fn pending(player1: u32, player2: u32, points_diff: i32, source: PairingSource) -> Self {
         Board {
             player1,
             player2,

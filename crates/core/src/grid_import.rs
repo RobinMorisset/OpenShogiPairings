@@ -228,7 +228,7 @@ fn rebuild_round(
                     forced_boards.push(Board::pending(
                         id_of[&row.number],
                         id_of[opponent],
-                        None,
+                        0,
                         PairingSource::Forced,
                     ));
                     results.push((row.number, *opponent, *outcome, *handicap));

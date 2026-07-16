@@ -1359,7 +1359,7 @@ pub fn pair_round_weighted(
             Board::pending(
                 b.player1,
                 b.player2,
-                Some(diff(b.player1, b.player2)),
+                diff(b.player1, b.player2),
                 PairingSource::Forced,
             )
         })
@@ -1445,7 +1445,7 @@ pub fn pair_round_weighted(
                 boards.push(Board::pending(
                     free[i],
                     free[j],
-                    Some(diff(free[i], free[j])),
+                    diff(free[i], free[j]),
                     PairingSource::Swiss,
                 ));
             }
@@ -1536,7 +1536,7 @@ mod tests {
                 .iter()
                 .map(|&(a, b, w)| Board {
                     result: Some(w),
-                    ..Board::pending(a, b, None, PairingSource::Swiss)
+                    ..Board::pending(a, b, 0, PairingSource::Swiss)
                 })
                 .collect(),
             bye,
@@ -1750,7 +1750,7 @@ mod tests {
         let forced = vec![Board::pending(
             p[0].tournament_id.unwrap(),
             p[3].tournament_id.unwrap(),
-            None,
+            0,
             PairingSource::Swiss,
         )];
 
@@ -1764,10 +1764,9 @@ mod tests {
             None,
         );
 
-        // Every board carries a frozen float, and the forced A-vs-D board's is
-        // +2 half-points (A on 1 point = 2 halves, D on 0). Only its sign matters
-        // to the float history.
-        assert!(round.boards.iter().all(|b| b.points_diff.is_some()));
+        // The forced A-vs-D board freezes the float A had going in: +2 half-points
+        // (A on 1 point = 2 halves, D on 0). Only its sign matters to the float
+        // history.
         let ad = round
             .boards
             .iter()
@@ -1775,7 +1774,7 @@ mod tests {
                 b.player1 == p[0].tournament_id.unwrap() && b.player2 == p[3].tournament_id.unwrap()
             })
             .expect("forced board present");
-        assert_eq!(ad.points_diff, Some(2));
+        assert_eq!(ad.points_diff, 2);
     }
 
     #[test]
@@ -1802,7 +1801,7 @@ mod tests {
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
-                    Some(0),
+                    0,
                     PairingSource::Swiss,
                 )
             }],
@@ -1837,7 +1836,7 @@ mod tests {
                         && bd.player2 == a.tournament_id.unwrap())
             })
             .expect("A vs C paired");
-        assert_eq!(ac.points_diff.unwrap().abs(), 1); // A(2) vs C(1) — an odd float
+        assert_eq!(ac.points_diff.abs(), 1); // A(2) vs C(1) — an odd float
     }
 
     #[test]

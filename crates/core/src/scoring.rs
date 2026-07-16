@@ -10,7 +10,7 @@ use std::cmp::Ordering;
 use uuid::Uuid;
 
 use crate::player::Player;
-use crate::round::{PairingSource, Round, Winner};
+use crate::round::{Round, Winner};
 use crate::settings::TournamentSettings;
 use crate::units::{HalfPoints, Wins};
 
@@ -114,11 +114,10 @@ impl Scores {
 /// bye status and float history.
 ///
 /// A float's direction is read from each board's frozen [`points_diff`] (the
-/// float as it was at pairing time), falling back to the live points-going-into-
-/// the-round only for boards that predate that field. Freezing is what keeps the
-/// float history correct once MacMahon thresholds can change mid-tournament, or
-/// when an earlier result is edited: the score table is recomputed live, but who
-/// floated in a past round is a fact of how that round was actually paired.
+/// float as it was at pairing time). Freezing is what keeps the float history
+/// correct once MacMahon thresholds can change mid-tournament, or when an earlier
+/// result is edited: the score table is recomputed live, but who floated in a
+/// past round is a fact of how that round was actually paired.
 ///
 /// [`points_diff`]: crate::round::Board::points_diff
 pub(crate) fn compute_scores(
@@ -224,18 +223,12 @@ pub(crate) fn compute_scores(
                 by_tid[tb].opponents.push(ta as u32);
             }
 
-            // A cup board is a forced bracket pairing, not a Swiss float, so it
-            // must not shape the players' float history (though it still counts as
-            // a game faced above, so a later Swiss round won't re-pair them).
-            if matches!(board.source, PairingSource::Cup { .. }) {
-                continue;
-            }
-
-            // Direction from the frozen float, else from the live difference.
-            let diff = board.points_diff.unwrap_or_else(|| {
-                by_tid[ta].points.halves() as i32 - by_tid[tb].points.halves() as i32
-            });
-            match diff.cmp(&0) {
+            // Direction from the frozen float, recorded at pairing time — for
+            // every source, cup included: a bracket pairing that crosses score
+            // groups floats its players just like a Swiss one, so it should curb
+            // re-floating them in later rounds. (The board is already recorded as
+            // a game faced above, so a later Swiss round won't re-pair them.)
+            match board.points_diff.cmp(&0) {
                 Ordering::Greater => {
                     // a had more points → a downfloats, b upfloats.
                     by_tid[ta].last_descended = Some(round.number);
@@ -340,7 +333,7 @@ pub(crate) fn compute_scores(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::{Board, CupStage, NoShow};
+    use crate::round::{Board, CupStage, NoShow, PairingSource};
     use crate::settings::MacMahonThreshold;
 
     fn player(tid: u32, rating: Option<u32>) -> Player {
@@ -373,7 +366,7 @@ mod tests {
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
-                    Some(2),
+                    2,
                     PairingSource::Swiss,
                 )
             }],
@@ -394,36 +387,6 @@ mod tests {
     }
 
     #[test]
-    fn missing_diff_falls_back_to_live_points() {
-        // No stored diff: A (1 MacMahon point) vs B (0) → A downfloats live.
-        let a = player(1, Some(2000));
-        let b = player(2, Some(1000));
-        let round = Round {
-            number: 1,
-            boards: vec![Board {
-                result: Some(Winner::Player1),
-                ..Board::pending(
-                    a.tournament_id.unwrap(),
-                    b.tournament_id.unwrap(),
-                    None,
-                    PairingSource::Swiss,
-                )
-            }],
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
-            completed: true,
-        };
-        let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
-            ..Default::default()
-        };
-        let scores = compute_scores(&[a.clone(), b.clone()], &settings, &[round]);
-        assert_eq!(scores.get(&a.id).last_descended, Some(1));
-        assert_eq!(scores.get(&b.id).last_ascended, Some(1));
-    }
-
-    #[test]
     fn no_show_scores_like_a_bye_for_the_present_player_and_an_absence_for_the_absentee() {
         // A and B are paired but B doesn't show up. A is credited the point (as
         // for a bye: +1 point/win, marked as having "had a bye", a downfloat),
@@ -437,7 +400,7 @@ mod tests {
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
-                    Some(0),
+                    0,
                     PairingSource::Swiss,
                 )
             }],
@@ -475,7 +438,7 @@ mod tests {
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
-                    Some(0),
+                    0,
                     PairingSource::Swiss,
                 )
             }],
@@ -533,7 +496,7 @@ mod tests {
                 ..Board::pending(
                     b.tournament_id.unwrap(),
                     c.tournament_id.unwrap(),
-                    Some(0),
+                    0,
                     PairingSource::Swiss,
                 )
             }],
@@ -576,7 +539,7 @@ mod tests {
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
-                    Some(0),
+                    0,
                     PairingSource::Swiss,
                 )
             }],
@@ -613,7 +576,7 @@ mod tests {
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
-                    Some(0),
+                    0,
                     PairingSource::Swiss,
                 )
             }],
@@ -650,7 +613,7 @@ mod tests {
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
-                    Some(0),
+                    0,
                     PairingSource::Swiss,
                 )
             }],
@@ -692,9 +655,10 @@ mod tests {
     }
 
     #[test]
-    fn cup_boards_count_points_and_opponents_but_not_floats() {
-        // A cup board with a big frozen points_diff would be a heavy downfloat if
-        // it were a Swiss game — but the cup bypasses the float rules.
+    fn cup_boards_count_points_opponents_and_floats() {
+        // A cup board with a big frozen points_diff (+5) is a heavy downfloat for
+        // player1: a bracket pairing across score groups shapes float history just
+        // like a Swiss one, so it should curb re-floating these players later.
         let a = player(1, None);
         let b = player(2, None);
         let round = Round {
@@ -704,7 +668,7 @@ mod tests {
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
-                    Some(5),
+                    5,
                     PairingSource::Cup {
                         stage: CupStage::Final,
                     },
@@ -725,9 +689,9 @@ mod tests {
         assert_eq!(scores.get(&a.id).points, 2); // 1 point = 2 half-points
         assert_eq!(scores.get(&a.id).opponents, vec![b.tournament_id.unwrap()]);
         assert_eq!(scores.get(&b.id).opponents, vec![a.tournament_id.unwrap()]);
-        // ...but the cup game left no float history.
-        assert_eq!(scores.get(&a.id).last_descended, None);
-        assert_eq!(scores.get(&b.id).last_ascended, None);
+        // ...and the +5 float is recorded: a downfloated, b upfloated.
+        assert_eq!(scores.get(&a.id).last_descended, Some(1));
+        assert_eq!(scores.get(&b.id).last_ascended, Some(1));
     }
 
     #[test]
@@ -750,7 +714,7 @@ mod tests {
                     ..Board::pending(
                         a.tournament_id.unwrap(),
                         o.tournament_id.unwrap(),
-                        Some(0),
+                        0,
                         PairingSource::Swiss,
                     )
                 }],

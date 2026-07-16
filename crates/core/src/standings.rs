@@ -363,7 +363,7 @@ mod tests {
     fn board(a: u32, b: u32, winner: Winner) -> Board {
         Board {
             result: Some(winner),
-            ..Board::pending(a, b, None, PairingSource::Swiss)
+            ..Board::pending(a, b, 0, PairingSource::Swiss)
         }
     }
 
@@ -394,7 +394,7 @@ mod tests {
             ..Board::pending(
                 a.tournament_id.unwrap(),
                 b.tournament_id.unwrap(),
-                None,
+                0,
                 PairingSource::Swiss,
             )
         };

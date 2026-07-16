@@ -469,7 +469,7 @@ mod tests {
                 .map(|&(w, l, stage)| Board {
                     result: Some(Winner::Player1), // player1 = winner
                     source: PairingSource::Cup { stage },
-                    ..Board::pending(w, l, None, PairingSource::Swiss)
+                    ..Board::pending(w, l, 0, PairingSource::Swiss)
                 })
                 .collect(),
             bye: None,

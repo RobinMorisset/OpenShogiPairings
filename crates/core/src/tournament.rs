@@ -21,6 +21,7 @@ use crate::player::{NewPlayer, Player, PointAdjustment};
 use crate::round::{
     Board, Handicap, HandicapGame, NoShow, PairingSource, Round, RoundDraft, Winner,
 };
+use crate::scoring::compute_scores;
 use crate::settings::TournamentSettings;
 use crate::standings::{compute_standings, Standing};
 
@@ -618,7 +619,7 @@ impl Tournament {
         draft.absent = absent;
         draft.forced_boards = forced_boards
             .into_iter()
-            .map(|b| Board::pending(b.player1, b.player2, None, PairingSource::Forced))
+            .map(|b| Board::pending(b.player1, b.player2, 0, PairingSource::Forced))
             .collect();
         draft.forced_bye = forced_bye;
         Ok(self.draft.as_ref().expect("draft present"))
@@ -676,18 +677,32 @@ impl Tournament {
                 .ok_or(TournamentError::CupBracketInconsistent)?,
             None => CupPairings::default(),
         };
-        let cup_boards: Vec<Board> = cup_pairings
-            .matches
-            .iter()
-            .map(|m| {
-                Board::pending(
-                    m.player1,
-                    m.player2,
-                    None,
-                    PairingSource::Cup { stage: m.stage },
-                )
-            })
-            .collect();
+        // Freeze each cup board's float — points going into this round, exactly
+        // like the Swiss boards get from the engine — so a bracket pairing across
+        // score groups counts toward float history and curbs re-floating those
+        // players in later rounds. Only pay for the score replay on an actual cup
+        // round; a plain Swiss round has no cup matches.
+        let cup_boards: Vec<Board> = if cup_pairings.matches.is_empty() {
+            Vec::new()
+        } else {
+            let cup_scores = compute_scores(&self.players, &self.settings, &self.rounds);
+            let cup_diff = |p1: u32, p2: u32| {
+                cup_scores.get_tid(p1).points.halves() as i32
+                    - cup_scores.get_tid(p2).points.halves() as i32
+            };
+            cup_pairings
+                .matches
+                .iter()
+                .map(|m| {
+                    Board::pending(
+                        m.player1,
+                        m.player2,
+                        cup_diff(m.player1, m.player2),
+                        PairingSource::Cup { stage: m.stage },
+                    )
+                })
+                .collect()
+        };
         let cup_byes = cup_pairings.byes;
         let cup_players: HashSet<u32> = cup_boards
             .iter()
@@ -968,13 +983,13 @@ impl Tournament {
             .boards
             .iter()
             .filter(|bd| matches!(bd.source, PairingSource::Forced))
-            .map(|bd| Board::pending(bd.player1, bd.player2, None, PairingSource::Forced))
+            .map(|bd| Board::pending(bd.player1, bd.player2, 0, PairingSource::Forced))
             .collect();
         let forced_bye = match (a == PHANTOM, b == PHANTOM) {
             (true, false) => Some(b),
             (false, true) => Some(a),
             _ => {
-                forced_boards.push(Board::pending(a, b, None, PairingSource::Forced));
+                forced_boards.push(Board::pending(a, b, 0, PairingSource::Forced));
                 None
             }
         };
@@ -1912,7 +1927,7 @@ mod tests {
             .collect();
         t.prepare_round().unwrap();
         // Force A vs C, and E as the bye (5 present → odd, ok).
-        let forced = vec![Board::pending(ids[0], ids[2], None, PairingSource::Swiss)];
+        let forced = vec![Board::pending(ids[0], ids[2], 0, PairingSource::Swiss)];
         t.update_draft(vec![], forced, Some(ids[4])).unwrap();
         let round = t.confirm_round().unwrap();
         assert_eq!(round.bye, Some(ids[4]));
