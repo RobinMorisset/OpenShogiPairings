@@ -64,37 +64,35 @@ use crate::units::{HalfPoints, Wins};
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Standing {
     pub player_id: Uuid,
-    /// Games won (effective winner; a bye counts as a win). A whole game count.
+    /// Games won (effective winner; a bye counts as a win).
     pub victories: Wins,
-    /// MacMahon starting points, in **half-point units** (×2).
+    /// MacMahon starting points.
     pub macmahon: HalfPoints,
-    /// Total score in **half-point units** (×2): `macmahon + 2·victories`, plus
-    /// `1` per half-point absence. Divide by 2 for display.
+    /// Total score: `macmahon + 2·victories`, plus `1` per half-point absence.
     pub points: HalfPoints,
-    /// Sum of opponents' points (**half-point units**, since it sums points).
+    /// Sum of opponents' points.
     pub sosm: HalfPoints,
-    /// Sum of opponents' wins (whole count).
+    /// Sum of opponents' wins.
     pub sosw: Wins,
-    /// Sum of defeated opponents' points (**half-point units**).
+    /// Sum of defeated opponents' points.
     pub sodosm: HalfPoints,
-    /// Sum of defeated opponents' wins (whole count).
+    /// Sum of defeated opponents' wins.
     pub sodosw: Wins,
-    /// Sum of opponents' SOSM (**half-point units**).
+    /// Sum of opponents' SOSM.
     pub sososm: HalfPoints,
-    /// Sum of opponents' SOSW (whole count).
+    /// Sum of opponents' SOSW.
     pub sososw: Wins,
-    /// SOSM dropping the single lowest-scoring opponent (**half-point units**).
+    /// SOSM dropping the single lowest-scoring opponent.
     pub sosm1: HalfPoints,
-    /// SOSM dropping the two lowest-scoring opponents (**half-point units**).
+    /// SOSM dropping the two lowest-scoring opponents.
     pub sosm2: HalfPoints,
-    /// SOSW dropping the single lowest-scoring opponent (whole count).
+    /// SOSW dropping the single lowest-scoring opponent.
     pub sosw1: Wins,
-    /// SOSW dropping the two lowest-scoring opponents (whole count).
+    /// SOSW dropping the two lowest-scoring opponents.
     pub sosw2: Wins,
-    /// Cumulative sum of the running points total after each round
-    /// (**half-point units**).
+    /// Cumulative sum of the running points total after each round.
     pub cussm: HalfPoints,
-    /// Cumulative sum of the running win total after each round (whole count).
+    /// Cumulative sum of the running win total after each round.
     pub cussw: Wins,
     /// Direct confrontation: this player's wins against the other players they
     /// were still tied with once every earlier configured criterion ran out
@@ -108,8 +106,7 @@ pub struct Standing {
     /// Opponents defeated (effective winner), one entry per game — the subset of
     /// `opponents` the SODOS tie-breaks sum over.
     pub defeated: Vec<Uuid>,
-    /// Running points total after each completed round (the sequence CUSSM sums),
-    /// in **half-point units**.
+    /// Running points total after each completed round (the sequence CUSSM sums).
     pub running_points: Vec<HalfPoints>,
     /// Running win total after each completed round (the sequence CUSSW sums).
     pub running_wins: Vec<Wins>,
