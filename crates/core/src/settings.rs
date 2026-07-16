@@ -177,16 +177,58 @@ impl ClubProtection {
     }
 }
 
-/// How the referee wants handicap games treated in this tournament, controlling
-/// both what the pairings view shows and whether a suggested handicap is
-/// computed for display. The suggestion never affects pairing itself and is
-/// never auto-filled — the referee always picks the handicap by hand.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+/// How the referee wants handicap games treated in this tournament. When handicaps
+/// are enabled, [`HandicapDisplay`] controls what the pairings view shows and
+/// `wiel_rule` whether the giver always counts as the winner. Folding the Wiel
+/// rule *into* the `Enabled` variant makes "Wiel on while handicaps are off"
+/// unrepresentable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HandicapPolicy {
     /// No handicap column at all.
     None,
+    /// Handicaps are played. `display` chooses whether a suggested-handicap column
+    /// is shown; `wiel_rule` whether the giver always counts as the winner.
+    Enabled {
+        display: HandicapDisplay,
+        /// The "Wiel" rule: whether a handicap game always counts as a win for the
+        /// giver in the standings and for pairing, regardless of the actual result.
+        /// Off by default: the actual result then counts, like any other game.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        wiel_rule: bool,
+    },
+}
+
+impl Default for HandicapPolicy {
+    /// Handicaps allowed (picker shown, no suggestion), Wiel off — the historical
+    /// default.
+    fn default() -> Self {
+        HandicapPolicy::Enabled {
+            display: HandicapDisplay::Allowed,
+            wiel_rule: false,
+        }
+    }
+}
+
+impl HandicapPolicy {
+    /// Whether a handicap game counts as a win for the giver regardless of result.
+    fn wiel_rule(self) -> bool {
+        matches!(
+            self,
+            HandicapPolicy::Enabled {
+                wiel_rule: true,
+                ..
+            }
+        )
+    }
+}
+
+/// What the pairings view shows once handicaps are [`enabled`](HandicapPolicy::Enabled).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(rename_all = "snake_case")]
+pub enum HandicapDisplay {
     /// The handicap picker is shown, but no suggested-handicap column.
     #[default]
     Allowed,
@@ -469,13 +511,6 @@ pub struct TournamentSettings {
     /// [`HandicapPolicy`]).
     #[serde(default)]
     pub handicap_policy: HandicapPolicy,
-    /// The "Wiel" rule: whether a handicap game always counts as a win for the
-    /// giver in the standings and for pairing, regardless of the actual result.
-    /// Off by default: handicap games then score like any other game (the
-    /// actual result counts). Enable it per tournament to have the giver always
-    /// count as the winner.
-    #[serde(default)]
-    pub handicap_wiel_rule: bool,
     /// Whether a player marked **absent** for a round is awarded half a point
     /// (rather than the default zero). Off by default. When on, an absence
     /// scores ½ — rendered `0=` in the cross-table — exactly like a half-point
@@ -609,7 +644,6 @@ impl Default for TournamentSettings {
             cup_enabled: false,
             long_boards_enabled: false,
             handicap_policy: HandicapPolicy::default(),
-            handicap_wiel_rule: false,
             half_point_absences: false,
             tiebreaks: default_tiebreaks(),
             elo_pairing_enabled: false,
@@ -677,6 +711,12 @@ impl TournamentSettings {
     /// if a round limit is set, within it.
     pub fn club_protection_active(&self, round: u32) -> bool {
         self.club_protection.active(round)
+    }
+
+    /// Whether the "Wiel" rule is in effect: a handicap game always counts as a
+    /// win for the giver. Always `false` unless handicaps are enabled.
+    pub fn handicap_wiel_rule(&self) -> bool {
+        self.handicap_policy.wiel_rule()
     }
 
     /// Whether "airtight groups" applies to the given (1-based) round: within
@@ -1026,26 +1066,52 @@ mod tests {
     }
 
     #[test]
-    fn handicap_policy_defaults_to_allowed_and_round_trips_snake_case() {
+    fn handicap_policy_defaults_to_allowed_and_round_trips_tagged() {
         assert_eq!(
             TournamentSettings::default().handicap_policy,
-            HandicapPolicy::Allowed
+            HandicapPolicy::Enabled {
+                display: HandicapDisplay::Allowed,
+                wiel_rule: false,
+            }
         );
+        // The Enabled variant is internally tagged; Wiel off is omitted.
         assert_eq!(
-            serde_json::to_string(&HandicapPolicy::Suggested).unwrap(),
-            "\"suggested\""
+            serde_json::to_string(&HandicapPolicy::Enabled {
+                display: HandicapDisplay::Suggested,
+                wiel_rule: false,
+            })
+            .unwrap(),
+            r#"{"kind":"enabled","display":"suggested"}"#
         );
-        // Omitted in the payload → the default (Allowed).
+        // Omitted in the payload → the default (Allowed, Wiel off).
         let s: TournamentSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(s.handicap_policy, HandicapPolicy::Allowed);
+        assert_eq!(
+            s.handicap_policy,
+            HandicapPolicy::Enabled {
+                display: HandicapDisplay::Allowed,
+                wiel_rule: false,
+            }
+        );
     }
 
     #[test]
-    fn handicap_wiel_rule_defaults_to_off() {
-        assert!(!TournamentSettings::default().handicap_wiel_rule);
-        // Omitted in the payload (an old save) → still off.
-        let s: TournamentSettings = serde_json::from_str("{}").unwrap();
-        assert!(!s.handicap_wiel_rule);
+    fn wiel_rule_cannot_be_on_without_handicaps_and_defaults_off() {
+        assert!(!TournamentSettings::default().handicap_wiel_rule());
+        // `None` (handicaps off) reports no Wiel — the accessor can't say otherwise.
+        let off = TournamentSettings {
+            handicap_policy: HandicapPolicy::None,
+            ..Default::default()
+        };
+        assert!(!off.handicap_wiel_rule());
+        // Wiel is only reachable via the Enabled variant.
+        let wiel = TournamentSettings {
+            handicap_policy: HandicapPolicy::Enabled {
+                display: HandicapDisplay::Allowed,
+                wiel_rule: true,
+            },
+            ..Default::default()
+        };
+        assert!(wiel.handicap_wiel_rule());
     }
 
     #[test]

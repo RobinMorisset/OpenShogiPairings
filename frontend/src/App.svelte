@@ -49,6 +49,7 @@
   } from "./lib/types";
   import { saveAmericanGrid, saveTournament } from "./lib/tournamentFile";
   import { pickCsvFile } from "./lib/csvImport";
+  import { handicapChoice } from "./lib/handicap";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
   import Login from "./lib/components/Login.svelte";
   import TournamentPicker from "./lib/components/TournamentPicker.svelte";
@@ -955,7 +956,7 @@
           <RoundView
             round={activeRound}
             players={tournament.players}
-            handicapPolicy={tournament.settings.handicap_policy}
+            handicapPolicy={handicapChoice(tournament.settings.handicap_policy)}
             suggestedHandicaps={activeRoundSuggested}
             explanation={roundExplanation}
             onProbe={(a, b, mode) => fetchCounterfactual(activeRound.number, a, b, mode)}

@@ -44,8 +44,8 @@ pub use round::{
     Board, CupStage, Handicap, HandicapGame, NoShow, PairingSource, Round, RoundDraft, Winner,
 };
 pub use settings::{
-    ClubProtection, EloPriorShape, FloaterStyle, HandicapPolicy, Ratio, RatioAtLeastOne, Tiebreak,
-    TournamentSettings, UnratedK,
+    ClubProtection, EloPriorShape, FloaterStyle, HandicapDisplay, HandicapPolicy, Ratio,
+    RatioAtLeastOne, Tiebreak, TournamentSettings, UnratedK,
 };
 pub use standings::{compute_standings, Standing};
 pub use tournament::{

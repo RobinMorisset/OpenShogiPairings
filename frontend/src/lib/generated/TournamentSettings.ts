@@ -69,14 +69,6 @@ long_boards_enabled: boolean,
  */
 handicap_policy: HandicapPolicy, 
 /**
- * The "Wiel" rule: whether a handicap game always counts as a win for the
- * giver in the standings and for pairing, regardless of the actual result.
- * Off by default: handicap games then score like any other game (the
- * actual result counts). Enable it per tournament to have the giver always
- * count as the winner.
- */
-handicap_wiel_rule: boolean, 
-/**
  * Whether a player marked **absent** for a round is awarded half a point
  * (rather than the default zero). Off by default. When on, an absence
  * scores ½ — rendered `0=` in the cross-table — exactly like a half-point

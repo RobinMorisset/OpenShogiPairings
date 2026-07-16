@@ -264,7 +264,7 @@ pub(crate) fn compute_scores(
 
         // Apply this round's results (effective winner scores).
         for board in &round.boards {
-            let (winner, loser) = match board.effective_winner(settings.handicap_wiel_rule) {
+            let (winner, loser) = match board.effective_winner(settings.handicap_wiel_rule()) {
                 Some(Winner::Player1) => (board.player1, board.player2),
                 Some(Winner::Player2) => (board.player2, board.player1),
                 None => continue,

@@ -214,7 +214,7 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
             round
                 .boards
                 .iter()
-                .map(|board| board.effective_winner(tournament.settings.handicap_wiel_rule))
+                .map(|board| board.effective_winner(tournament.settings.handicap_wiel_rule()))
                 .collect()
         })
         .collect();

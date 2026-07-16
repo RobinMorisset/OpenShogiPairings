@@ -17,6 +17,7 @@
   import { saveSettings } from "../tournamentFile";
   import { gradeRank } from "../grade";
   import { cleanThresholds, eqThresholds, normExempt, type ThresholdRow } from "../thresholds";
+  import { handicapChoice, type HandicapChoice } from "../handicap";
 
   interface Props {
     settings: TournamentSettings;
@@ -68,7 +69,7 @@
   let floaterStyle = $state<"classic" | "median">("classic");
   let cupEnabled = $state(false);
   let longBoardsEnabled = $state(false);
-  let handicapPolicy = $state<HandicapPolicy>("allowed");
+  let handicapPolicy = $state<HandicapChoice>("allowed");
   let handicapWielRule = $state(false);
   let halfPointAbsences = $state(false);
   let tiebreaks = $state<Tiebreak[]>([]);
@@ -144,8 +145,9 @@
     const sFloater = settings.floater_style;
     const sCup = settings.cup_enabled;
     const sLong = settings.long_boards_enabled ?? false;
-    const sHandicap = settings.handicap_policy;
-    const sHandicapWiel = settings.handicap_wiel_rule;
+    const sHandicap = handicapChoice(settings.handicap_policy);
+    const sHandicapWiel =
+      settings.handicap_policy.kind === "enabled" ? (settings.handicap_policy.wiel_rule ?? false) : false;
     const sHalfPointAbsences = settings.half_point_absences ?? false;
     const sTiebreaks = settings.tiebreaks ?? [];
     const sElo = settings.elo_pairing_enabled ?? false;
@@ -231,8 +233,14 @@
       floater_style: floaterStyle,
       cup_enabled: cupEnabled,
       long_boards_enabled: longBoardsEnabled,
-      handicap_policy: handicapPolicy,
-      handicap_wiel_rule: handicapWielRule,
+      handicap_policy:
+        handicapPolicy === "none"
+          ? ({ kind: "none" } satisfies HandicapPolicy)
+          : ({
+              kind: "enabled",
+              display: handicapPolicy,
+              wiel_rule: handicapWielRule,
+            } satisfies HandicapPolicy),
       half_point_absences: halfPointAbsences,
       tiebreaks: [...tiebreaks],
       elo_pairing_enabled: eloEnabled,
@@ -347,7 +355,7 @@
     persist();
   }
 
-  function setHandicapPolicy(v: HandicapPolicy) {
+  function setHandicapPolicy(v: HandicapChoice) {
     handicapPolicy = v;
     persist();
   }
