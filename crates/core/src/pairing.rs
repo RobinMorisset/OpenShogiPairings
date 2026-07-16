@@ -340,14 +340,10 @@ impl Rule {
             // each group instead. Same-group edges aren't floats, so no penalty.
             Rule::FloaterSelection => match sa.points.cmp(&sb.points) {
                 Ordering::Equal => 0,
-                _ => {
-                    let (descender, ascender) = if sa.points > sb.points {
-                        (a, b)
-                    } else {
-                        (b, a)
-                    };
-                    floater_units(ctx, descender, true) + floater_units(ctx, ascender, false)
-                }
+                // The higher-scored player is the descender, the lower the ascender;
+                // the comparison already told us which is which.
+                Ordering::Greater => floater_units(ctx, a, true) + floater_units(ctx, b, false),
+                Ordering::Less => floater_units(ctx, b, true) + floater_units(ctx, a, false),
             },
             // Rule 6: avoid pairing club-mates — but only when protection is active
             // this round, ignoring unknown clubs and clubs on the exempt list. Club

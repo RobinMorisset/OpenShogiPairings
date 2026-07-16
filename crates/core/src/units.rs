@@ -15,6 +15,30 @@
 //! **do not add `#[serde(transparent)]`**: it is redundant here and only makes
 //! ts-rs emit a "failed to parse serde attribute" warning. The
 //! `serializes_as_a_bare_number` test pins this representation.
+//!
+//! # Why `u32` and not `u16`
+//!
+//! `u16` looks tempting — a player's own score maxes at roughly `2·rounds`
+//! half-points, tiny. But these units also hold the tie-break sums, and the
+//! deepest of those, SOSOS ([`crate::standings::Standing::sososm`] /
+//! `sososw`), is a *sum of opponents' SOS*, i.e. a third-order sum that grows as
+//! ~`rounds³`:
+//!
+//! ```text
+//! points/player ≈ 2·R          (win every round; R = rounds)
+//! sos           ≈ R · 2R  = 2R²    (Σ over opponents of their points)
+//! sosos         ≈ R · 2R² = 2R³    (Σ over opponents of their SOS)
+//! ```
+//!
+//! `2R³` passes `u16::MAX` (65 535) at only **R ≈ 33 rounds**, and sooner in
+//! practice: MacMahon starting points raise everyone's base score, and a long
+//! board counts an opponent twice *and* pays double, so both the summand and the
+//! multiplier inflate. Overflow in a release build **wraps silently** (only debug
+//! panics), which would mis-rank a tournament rather than crash — the worst
+//! failure mode for a pairing tool. `u32` pushes that ceiling out past ~1300
+//! rounds, and buys nothing to shrink: on the wire these are JSON numbers
+//! regardless of width, and in memory the difference is a few KB across a whole
+//! field. So: keep `u32`.
 
 use derive_more::{Add, AddAssign, Display, Sum};
 use serde::{Deserialize, Serialize};
