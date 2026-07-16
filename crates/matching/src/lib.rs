@@ -99,7 +99,13 @@ struct Blossom<W> {
     slack: Vec<usize>,
     st: Vec<usize>,
     pa: Vec<usize>,
-    flower_from: Vec<Vec<usize>>,
+    /// The `sz × (n+1)` "which member does row `u` reach vertex `v` through"
+    /// matrix, row-major in a single allocation (entry `(u, v)` at
+    /// `u * ff_stride + v`), for the same locality reason as [`Blossom::g`].
+    flower_from: Vec<usize>,
+    /// Row stride of `flower_from` — the allocated width `n_cap + 1` for the
+    /// largest instance seen.
+    ff_stride: usize,
     s: Vec<i32>,
     vis: Vec<usize>,
     flower: Vec<Vec<usize>>,
@@ -125,7 +131,8 @@ impl<W: Weight> Blossom<W> {
             slack: vec![0; sz],
             st: vec![0; sz],
             pa: vec![0; sz],
-            flower_from: vec![vec![0; n + 1]; sz],
+            flower_from: vec![0; sz * (n + 1)],
+            ff_stride: n + 1,
             s: vec![-1; sz],
             vis: vec![0; sz],
             flower: vec![Vec::new(); sz],
@@ -159,10 +166,8 @@ impl<W: Weight> Blossom<W> {
             };
             self.stride = sz;
             self.g = vec![nil; sz * sz];
-            self.flower_from.resize(sz, Vec::new());
-            for row in &mut self.flower_from {
-                row.resize(n + 1, 0);
-            }
+            self.flower_from = vec![0; sz * (n + 1)];
+            self.ff_stride = n + 1;
             self.lab.resize(sz, W::ZERO);
             self.mate.resize(sz, 0);
             self.slack.resize(sz, 0);
@@ -185,6 +190,18 @@ impl<W: Weight> Blossom<W> {
     #[inline]
     fn g_mut(&mut self, u: usize, v: usize) -> &mut Edge<W> {
         &mut self.g[u * self.stride + v]
+    }
+
+    /// Entry `(u, v)` of the flattened `flower_from` matrix.
+    #[inline]
+    fn flower_from(&self, u: usize, v: usize) -> usize {
+        self.flower_from[u * self.ff_stride + v]
+    }
+
+    /// Mutable entry `(u, v)` of `flower_from`.
+    #[inline]
+    fn flower_from_mut(&mut self, u: usize, v: usize) -> &mut usize {
+        &mut self.flower_from[u * self.ff_stride + v]
     }
 
     fn set_edge(&mut self, u: usize, v: usize, w: W) {
@@ -258,7 +275,7 @@ impl<W: Weight> Blossom<W> {
         self.mate[u] = self.g(u, v).v;
         if u > self.n {
             let e = self.g(u, v);
-            let xr = self.flower_from[u][e.u];
+            let xr = self.flower_from(u, e.u);
             let pr = self.get_pr(u, xr);
             // The recursive `set_match` on a child touches only that child's cycle,
             // so `flower[u]` is stable until the `rotate_left` below — index it in
@@ -345,7 +362,7 @@ impl<W: Weight> Blossom<W> {
             self.g_mut(x, b).w = W::ZERO;
         }
         for x in 1..=self.n {
-            self.flower_from[b][x] = 0;
+            *self.flower_from_mut(b, x) = 0;
         }
         // `b` is a fresh index distinct from every member `xs`, so writing row/col
         // `b` never disturbs the `xs` rows we read — the cycle is stable, index it
@@ -363,8 +380,8 @@ impl<W: Weight> Blossom<W> {
                 }
             }
             for x in 1..=self.n {
-                if self.flower_from[xs][x] != 0 {
-                    self.flower_from[b][x] = xs;
+                if self.flower_from(xs, x) != 0 {
+                    *self.flower_from_mut(b, x) = xs;
                 }
             }
             mi += 1;
@@ -381,7 +398,7 @@ impl<W: Weight> Blossom<W> {
             self.set_st(m, m);
             mi += 1;
         }
-        let xr = self.flower_from[b][self.g(b, self.pa[b]).u];
+        let xr = self.flower_from(b, self.g(b, self.pa[b]).u);
         // `get_pr` may reverse `flower[b][1..]`; every index below reads it after,
         // and `set_slack`/`q_push` never mutate it, so no clone is needed.
         let pr = self.get_pr(b, xr);
@@ -542,7 +559,7 @@ impl<W: Weight> Blossom<W> {
         let mut w_max = W::ZERO;
         for u in 1..=self.n {
             for v in 1..=self.n {
-                self.flower_from[u][v] = if u == v { u } else { 0 };
+                *self.flower_from_mut(u, v) = if u == v { u } else { 0 };
                 if self.g(u, v).w > w_max {
                     w_max = self.g(u, v).w;
                 }
