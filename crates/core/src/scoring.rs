@@ -725,20 +725,15 @@ mod tests {
             })
             .collect();
 
-        let base = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::elo(1450)],
-            ..Default::default()
-        };
+        let base =
+            TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1450)]);
         // Static registration rating: A is below 1450, so no MacMahon points.
         let off = compute_scores(&all, &base, &rounds);
         assert_eq!(off.get(&a.id).macmahon, 0);
 
         // Estimate-based: A's estimate has climbed past 1450, earning the point
         // (and lifting total points to 1 MacMahon + 3 wins = 4, i.e. 8 halves).
-        let on = TournamentSettings {
-            macmahon_from_estimated_elo: true,
-            ..base
-        };
+        let on = base.clone().with_macmahon_from_estimate();
         let on = compute_scores(&all, &on, &rounds);
         assert_eq!(on.get(&a.id).macmahon, 2); // 1 MacMahon point = 2 half-points
         assert_eq!(on.get(&a.id).points, 8); // (1 + 3) points = 8 half-points
@@ -751,11 +746,9 @@ mod tests {
         use crate::player::Grade;
         let mut a = player(1, Some(1400));
         a.grade = Some(Grade::dan(1));
-        let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::grade(Grade::dan(1))],
-            macmahon_from_estimated_elo: true,
-            ..Default::default()
-        };
+        let settings = TournamentSettings::default()
+            .with_thresholds(vec![MacMahonThreshold::grade(Grade::dan(1))])
+            .with_macmahon_from_estimate();
         let scores = compute_scores(std::slice::from_ref(&a), &settings, &[]);
         // Meets the 1-dan grade threshold on grade, exactly as with the toggle off.
         assert_eq!(scores.get(&a.id).macmahon, 2); // 1 MacMahon point = 2 half-points

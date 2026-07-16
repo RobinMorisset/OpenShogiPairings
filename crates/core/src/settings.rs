@@ -458,6 +458,133 @@ fn default_elo_upward_looseness_percent() -> RatioAtLeastOne {
     RatioAtLeastOne::from_percent(100)
 }
 
+/// The configuration of the live Bayesian ELO estimate. Exists only where an
+/// estimate is actually maintained — inside [`PairingMode::Elo`] (it drives
+/// pairing) or [`MacMahonSource::FromEstimate`] (it drives MacMahon points) — so
+/// there is no way to carry estimator settings with no estimate behind them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct EloEstimator {
+    /// K multiplier `m` (see [`TournamentSettings::elo_k_multiplier`]). `0` pins
+    /// every rated player to their registration rating.
+    #[serde(default = "default_elo_k_multiplier_percent")]
+    pub k_multiplier: Ratio,
+    /// Extra K multiplier for a provisionally-rated player (≥ ×1.0).
+    #[serde(default = "default_elo_provisional_multiplier_percent")]
+    pub provisional_multiplier: RatioAtLeastOne,
+    /// Center (mean) of the unrated-player prior, on the ELO scale.
+    #[serde(default = "default_elo_unrated_prior_center")]
+    pub unrated_prior_center: u32,
+    /// K (width) of the unrated-player prior (≥ 1).
+    #[serde(default = "default_elo_unrated_k")]
+    pub unrated_k: UnratedK,
+    /// Prior shape for an established (reliably-rated) player.
+    #[serde(default)]
+    pub prior_shape_established: EloPriorShape,
+    /// Prior shape for a provisionally-rated player.
+    #[serde(default)]
+    pub prior_shape_provisional: EloPriorShape,
+    /// Prior shape for an unrated player (the one heavy-tailed category).
+    #[serde(default)]
+    pub prior_shape_unrated: EloPriorShape,
+    /// Upward-looseness ratio `r` for an established player (≥ ×1.0).
+    #[serde(default = "default_elo_upward_looseness_percent")]
+    pub upward_looseness_established: RatioAtLeastOne,
+    /// Upward-looseness ratio `r` for a provisionally-rated player (≥ ×1.0).
+    #[serde(default = "default_elo_upward_looseness_percent")]
+    pub upward_looseness_provisional: RatioAtLeastOne,
+    /// Upward-looseness ratio `r` for an unrated player (≥ ×1.0).
+    #[serde(default = "default_elo_upward_looseness_percent")]
+    pub upward_looseness_unrated: RatioAtLeastOne,
+}
+
+impl Default for EloEstimator {
+    fn default() -> Self {
+        EloEstimator {
+            k_multiplier: default_elo_k_multiplier_percent(),
+            provisional_multiplier: default_elo_provisional_multiplier_percent(),
+            unrated_prior_center: default_elo_unrated_prior_center(),
+            unrated_k: default_elo_unrated_k(),
+            prior_shape_established: EloPriorShape::default(),
+            prior_shape_provisional: EloPriorShape::default(),
+            prior_shape_unrated: EloPriorShape::default(),
+            upward_looseness_established: default_elo_upward_looseness_percent(),
+            upward_looseness_provisional: default_elo_upward_looseness_percent(),
+            upward_looseness_unrated: default_elo_upward_looseness_percent(),
+        }
+    }
+}
+
+/// Where MacMahon starting points come from: the static registration rating, or
+/// the live ELO estimate (which then carries its own [`EloEstimator`] config).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MacMahonSource {
+    /// From each player's static registration rating (or grade).
+    #[default]
+    Static,
+    /// From the live ELO estimate, recomputed each round. Inert unless there is
+    /// at least one ELO-based threshold to compare against.
+    FromEstimate { estimator: EloEstimator },
+}
+
+/// The MacMahon configuration of a Swiss tournament: the starting-point
+/// thresholds and where those points are drawn from. Lives under
+/// [`PairingMode::Swiss`] because MacMahon is a Swiss concept — ELO pairing has
+/// none.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct MacMahon {
+    /// Thresholds (sorted, de-duplicated) defining the starting groups. Empty
+    /// means everyone starts at 0.
+    #[serde(default)]
+    pub thresholds: Vec<MacMahonThreshold>,
+    #[serde(default)]
+    pub source: MacMahonSource,
+}
+
+/// How the tournament is paired: classic Swiss/MacMahon over static ratings, or
+/// the experimental ELO mode over a live estimate. Making this a sum type is what
+/// keeps the Swiss-only knobs (floater style, airtight groups, club protection,
+/// MacMahon) from coexisting with ELO pairing, and the estimator from existing
+/// without an estimate to configure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PairingMode {
+    /// Swiss / MacMahon pairing.
+    Swiss {
+        #[serde(default)]
+        floater_style: FloaterStyle,
+        /// "Airtight groups": if set, forbid pairing across MacMahon groups during
+        /// rounds `1..=n`. Meaningless without thresholds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(as = "Option::<u32>")]
+        airtight_groups: Option<NonZeroU32>,
+        #[serde(default, skip_serializing_if = "ClubProtection::is_off")]
+        club_protection: ClubProtection,
+        #[serde(default)]
+        macmahon: MacMahon,
+    },
+    /// Experimental ELO pairing over a live estimate.
+    Elo {
+        #[serde(default)]
+        estimator: EloEstimator,
+    },
+}
+
+impl Default for PairingMode {
+    fn default() -> Self {
+        PairingMode::Swiss {
+            floater_style: FloaterStyle::default(),
+            airtight_groups: None,
+            club_protection: ClubProtection::Off,
+            macmahon: MacMahon::default(),
+        }
+    }
+}
+
 /// Configuration that isn't tied to a single player or round.
 ///
 /// Kept as its own record so it can grow (time controls, tie-break choices, …)
@@ -467,197 +594,43 @@ fn default_elo_upward_looseness_percent() -> RatioAtLeastOne {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct TournamentSettings {
-    /// Thresholds (sorted, de-duplicated) defining the MacMahon starting
-    /// groups, each an ELO rating or a dan/kyu grade (see
-    /// [`ThresholdCriterion`]) — a tournament can freely mix both kinds. A
-    /// player's MacMahon points is the number of thresholds they meet or
-    /// exceed — e.g. ELO thresholds `[1200, 1700]` give 0 points below 1200, 1
-    /// in `[1200, 1700)`, and 2 at 1700 or above. Empty means no MacMahon
-    /// (everyone starts at 0). A player missing the value a threshold needs
-    /// (no rating for an ELO threshold, no grade for a grade one) never meets
-    /// it. Each threshold can carry its own degressive round (see
-    /// [`MacMahonThreshold::drops_after_round`]).
+    /// How the tournament is paired: Swiss/MacMahon over static ratings (with the
+    /// floater/airtight/club/MacMahon knobs) or ELO mode over a live estimate (see
+    /// [`PairingMode`]). Defaults to plain Swiss.
     #[serde(default)]
-    pub macmahon_thresholds: Vec<MacMahonThreshold>,
-    /// "Airtight groups": if `Some(n)`, an extra pairing rule — just below
-    /// no-rematch, above the score-gap rule — forbids pairing players with a
-    /// different number of MacMahon points during rounds `1..=n` (penalty grows
-    /// with the square of the gap, like the other gap rules). `None` (the
-    /// default) disables it. Meaningless without MacMahon thresholds, since
-    /// every player has 0 MacMahon points otherwise.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(as = "Option::<u32>")]
-    pub airtight_groups_rounds: Option<NonZeroU32>,
-    /// Club protection: whether to avoid pairing club-mates, and — when on — its
-    /// round window and exempt clubs (see [`ClubProtection`]). Off by default.
-    #[serde(default, skip_serializing_if = "ClubProtection::is_off")]
-    pub club_protection: ClubProtection,
-    /// Which player each score group sends up as its ascending floater (classic
-    /// vs median Swiss). The descending floater is always the group's weakest.
-    #[serde(default)]
-    pub floater_style: FloaterStyle,
+    pub pairing: PairingMode,
     /// Whether this is a hybrid tournament with a direct-elimination cup among the
-    /// top eligible players. Off by default. When on, registration gains an
-    /// eligibility column and finalization asks for the cup size.
+    /// top eligible players. Off by default.
     #[serde(default)]
     pub cup_enabled: bool,
     /// Whether the referee may flag individual boards as "long games" that last
-    /// two rounds and score two points for the winner (double time control on the
-    /// top boards). Off by default. When on, the round view shows a per-board
-    /// checkbox. See `docs/two-round-boards.md`.
+    /// two rounds and score two points for the winner. Off by default. See
+    /// `docs/two-round-boards.md`.
     #[serde(default)]
     pub long_boards_enabled: bool,
-    /// How handicap games are treated: hidden, allowed, or suggested (see
-    /// [`HandicapPolicy`]).
+    /// How handicap games are treated (see [`HandicapPolicy`]).
     #[serde(default)]
     pub handicap_policy: HandicapPolicy,
     /// Whether a player marked **absent** for a round is awarded half a point
-    /// (rather than the default zero). Off by default. When on, an absence
-    /// scores ½ — rendered `0=` in the cross-table — exactly like a half-point
-    /// bye; the odd-round bye still scores a full point, and a no-show forfeit
-    /// still scores nothing. This is what lets a FESA `0=` result round-trip.
+    /// (rather than the default zero). Off by default; lets a FESA `0=` round-trip.
     #[serde(default)]
     pub half_point_absences: bool,
     /// The criteria used to rank the standings, in order of priority (the
-    /// tournament number breaks anything still level). Points is one of these and
-    /// can be reordered like any other. Only these columns are shown on the
-    /// Results tab. Defaults to the classic points → SOS → SODOS → SOSOS order.
+    /// tournament number breaks anything still level). Defaults to the classic
+    /// points → SOS → SODOS → SOSOS order.
     #[serde(default = "default_tiebreaks")]
     pub tiebreaks: Vec<Tiebreak>,
-    /// Experimental ELO-based (non-Swiss) pairing mode. When on, MacMahon, the
-    /// Swiss-specific rules (score gap, float repeat, floater selection, fold) and
-    /// club protection are all disabled; pairing instead minimizes the squared
-    /// difference of a live Bayesian ELO estimate. See
-    /// `docs/elo-pairing-mode.md`. Off by default.
-    #[serde(default)]
-    pub elo_pairing_enabled: bool,
-    /// Award MacMahon starting points from the **live ELO estimate** rather than
-    /// the static registration rating: each ELO-based threshold is compared
-    /// against the same Bayesian estimate that drives ELO pairing, recomputed each
-    /// round, so a player's MacMahon points can rise or fall as their estimated
-    /// strength moves (grade-based thresholds are unaffected — they still read the
-    /// player's grade). Independent of the pairing mode: this can be combined with
-    /// plain Swiss or ELO pairing. Inert unless there is at least one ELO threshold
-    /// to compare against (see [`Self::macmahon_from_estimate_active`]); the UI
-    /// greys it out until then. Off by default.
-    #[serde(default)]
-    pub macmahon_from_estimated_elo: bool,
-    /// The multiplier `m` on each player's FESA K, as an integer percent
-    /// (100 = ×1.0), controlling how far the ELO estimate is allowed to drift from
-    /// the registration rating (bigger = faster drift). Stored as an integer so
-    /// the settings stay `Eq`; read as a float via [`Self::elo_k_multiplier`].
-    /// Only meaningful when [`Self::elo_estimate_needed`]; expected range ~100–400.
-    #[serde(default = "default_elo_k_multiplier_percent")]
-    pub elo_k_multiplier_percent: Ratio,
-    /// Extra K multiplier applied to a **provisionally-rated** player — one who is
-    /// not in the FESA list (rating typed by hand) or whose FESA `#games` is below
-    /// [`crate::PROVISIONAL_GAMES_THRESHOLD`] — as an integer percent (200 = ×2.0).
-    /// Widens their prior so their estimate drifts faster, since their seed rating
-    /// is less trustworthy. Stacks on top of `elo_k_multiplier_percent`. Clamped to
-    /// ≥ 100 so a provisional rating is never treated as *more* reliable than an
-    /// established one. Only meaningful when [`Self::elo_estimate_needed`].
-    #[serde(default = "default_elo_provisional_multiplier_percent")]
-    pub elo_provisional_multiplier_percent: RatioAtLeastOne,
-    /// The center (mean) of the Bayesian prior for an **unrated** player, on the
-    /// ELO scale. Where their estimate sits before any game pulls it. Default
-    /// `600` (the midpoint of the assumed `[1, 1200]` unrated range). Only
-    /// meaningful when [`Self::elo_estimate_needed`] or
-    /// [`Self::macmahon_from_estimate_active`].
-    #[serde(default = "default_elo_unrated_prior_center")]
-    pub elo_unrated_prior_center: u32,
-    /// The **K** setting the width of an unrated player's prior: its standard
-    /// deviation is `√(K · s)`, the same law a rated player's K obeys, so this
-    /// reads on the same familiar scale (a rated player's K is ~16–40; an unrated
-    /// one is far wider). Bigger = a looser prior that lets results move the
-    /// estimate faster. Default `705` (≈ the historical `σ 350`). Stored as an
-    /// integer so the settings stay `Eq`; read via [`Self::elo_unrated_k`], which
-    /// clamps it ≥ 1 (a zero-width prior would be degenerate). Only meaningful
-    /// when [`Self::elo_estimate_needed`] or [`Self::macmahon_from_estimate_active`].
-    #[serde(default = "default_elo_unrated_k")]
-    pub elo_unrated_k: UnratedK,
-    /// The prior shape for an **established** (reliably-rated) player — thin-tailed
-    /// Gaussian (default, behaviour-neutral) or the fatter-tailed, optionally
-    /// asymmetric Laplace. The shape is chosen *per category* because a fat tail is
-    /// only warranted where the true-strength population is actually heavy-tailed:
-    /// an established player's strength is well-anchored by their history, so a fat
-    /// tail there merely loosens the anchor and adds noise — hence the default
-    /// Gaussian. Contrast [`Self::elo_prior_shape_unrated`]. See [`EloPriorShape`].
-    /// Only meaningful when [`Self::elo_estimate_needed`] or
-    /// [`Self::macmahon_from_estimate_active`].
-    #[serde(default)]
-    pub elo_prior_shape_established: EloPriorShape,
-    /// The prior shape for a **provisionally-rated** player (not in the FESA list,
-    /// or with fewer than [`crate::PROVISIONAL_GAMES_THRESHOLD`] games). Defaults to
-    /// Gaussian like the established case; the provisional *width* is already
-    /// widened by [`Self::elo_provisional_multiplier`], so the extra fat tail is
-    /// usually unnecessary here. See [`Self::elo_prior_shape_established`].
-    #[serde(default)]
-    pub elo_prior_shape_provisional: EloPriorShape,
-    /// The prior shape for an **unrated** player — the one category whose true
-    /// strength is genuinely heavy-tailed: most newcomers are weak, but a small
-    /// fraction are strong veterans arriving from a country with no ELO system, so
-    /// the population has a fat upper tail no Gaussian can represent. Setting this to
-    /// [`EloPriorShape::Laplace`] (ideally with a raised
-    /// [`Self::elo_upward_looseness_unrated_percent`]) lets a newcomer who beats the
-    /// field climb toward their true strength instead of being dragged back to the
-    /// prior centre. See [`Self::elo_prior_shape_established`].
-    #[serde(default)]
-    pub elo_prior_shape_unrated: EloPriorShape,
-    /// How much *looser* an upward revision is than a downward one for an
-    /// **established** (reliably-rated) player, as an integer percent
-    /// (100 = ×1.0 = symmetric). Widens that player's upward arm in **either**
-    /// prior shape (the Gaussian's `σ_up = r·σ₀`, or the Laplace's
-    /// `b_up = r·b_down`): `r > 1` lets a win revise the estimate up on less
-    /// evidence than a loss revises it down. A reliable rating is the one we trust
-    /// most, so this usually stays at `100` (symmetric) — asymmetry is most useful
-    /// for the less certain players below. Read via
-    /// [`Self::elo_upward_looseness_established`], which clamps it ≥ 1.0 (an upward
-    /// revision is never *harder* than a downward one). Only meaningful when a live
-    /// estimate is maintained.
-    #[serde(default = "default_elo_upward_looseness_percent")]
-    pub elo_upward_looseness_established_percent: RatioAtLeastOne,
-    /// The upward-looseness ratio `r` for a **provisionally-rated** player (not in
-    /// the FESA list, or with fewer than [`crate::PROVISIONAL_GAMES_THRESHOLD`]
-    /// games), as an integer percent (100 = ×1.0 = symmetric). Same meaning as
-    /// [`Self::elo_upward_looseness_established_percent`] but for the less-trusted
-    /// provisional prior, where a modest upward tilt is often warranted. Read via
-    /// [`Self::elo_upward_looseness_provisional`] (clamps ≥ 1.0).
-    #[serde(default = "default_elo_upward_looseness_percent")]
-    pub elo_upward_looseness_provisional_percent: RatioAtLeastOne,
-    /// The upward-looseness ratio `r` for an **unrated** player, as an integer
-    /// percent (100 = ×1.0 = symmetric). Same meaning as
-    /// [`Self::elo_upward_looseness_established_percent`] but for the wide unrated
-    /// prior — the case where an upward tilt helps most, since a newcomer beating
-    /// the field is far more likely genuinely strong than a fluke. Read via
-    /// [`Self::elo_upward_looseness_unrated`] (clamps ≥ 1.0).
-    #[serde(default = "default_elo_upward_looseness_percent")]
-    pub elo_upward_looseness_unrated_percent: RatioAtLeastOne,
 }
 
 impl Default for TournamentSettings {
     fn default() -> Self {
         TournamentSettings {
-            macmahon_thresholds: Vec::new(),
-            airtight_groups_rounds: None,
-            club_protection: ClubProtection::Off,
-            floater_style: FloaterStyle::default(),
+            pairing: PairingMode::default(),
             cup_enabled: false,
             long_boards_enabled: false,
             handicap_policy: HandicapPolicy::default(),
             half_point_absences: false,
             tiebreaks: default_tiebreaks(),
-            elo_pairing_enabled: false,
-            macmahon_from_estimated_elo: false,
-            elo_k_multiplier_percent: default_elo_k_multiplier_percent(),
-            elo_provisional_multiplier_percent: default_elo_provisional_multiplier_percent(),
-            elo_unrated_prior_center: default_elo_unrated_prior_center(),
-            elo_unrated_k: default_elo_unrated_k(),
-            elo_prior_shape_established: EloPriorShape::default(),
-            elo_prior_shape_provisional: EloPriorShape::default(),
-            elo_prior_shape_unrated: EloPriorShape::default(),
-            elo_upward_looseness_established_percent: default_elo_upward_looseness_percent(),
-            elo_upward_looseness_provisional_percent: default_elo_upward_looseness_percent(),
-            elo_upward_looseness_unrated_percent: default_elo_upward_looseness_percent(),
         }
     }
 }
@@ -678,11 +651,42 @@ impl TournamentSettings {
     /// applies as soon as round N is complete, i.e. for pairing round N+1 and
     /// standings after N).
     pub fn effective_macmahon_thresholds(&self, rounds_played: u32) -> Vec<ThresholdCriterion> {
-        self.macmahon_thresholds
+        self.macmahon_thresholds()
             .iter()
             .filter(|t| t.drops_after_round.is_none_or(|r| rounds_played < r))
             .map(|t| t.criterion)
             .collect()
+    }
+
+    /// The configured MacMahon thresholds (empty under ELO pairing, which has no
+    /// MacMahon).
+    pub fn macmahon_thresholds(&self) -> &[MacMahonThreshold] {
+        match &self.pairing {
+            PairingMode::Swiss { macmahon, .. } => &macmahon.thresholds,
+            PairingMode::Elo { .. } => &[],
+        }
+    }
+
+    /// Which player each score group sends up as its ascending floater (Swiss
+    /// only; a default under ELO pairing, which doesn't float).
+    pub fn floater_style(&self) -> FloaterStyle {
+        match &self.pairing {
+            PairingMode::Swiss { floater_style, .. } => *floater_style,
+            PairingMode::Elo { .. } => FloaterStyle::default(),
+        }
+    }
+
+    /// The live-estimate config, if an estimate is maintained — ELO pairing, or
+    /// estimate-based MacMahon. `None` in plain Swiss, where the estimator can't
+    /// exist.
+    fn estimator(&self) -> Option<&EloEstimator> {
+        match &self.pairing {
+            PairingMode::Elo { estimator } => Some(estimator),
+            PairingMode::Swiss { macmahon, .. } => match &macmahon.source {
+                MacMahonSource::FromEstimate { estimator } => Some(estimator),
+                MacMahonSource::Static => None,
+            },
+        }
     }
 
     /// The MacMahon starting points for a player once `rounds_played` rounds
@@ -710,7 +714,12 @@ impl TournamentSettings {
     /// Whether club protection applies to the given (1-based) round: enabled and,
     /// if a round limit is set, within it.
     pub fn club_protection_active(&self, round: u32) -> bool {
-        self.club_protection.active(round)
+        match &self.pairing {
+            PairingMode::Swiss {
+                club_protection, ..
+            } => club_protection.active(round),
+            PairingMode::Elo { .. } => false,
+        }
     }
 
     /// Whether the "Wiel" rule is in effect: a handicap game always counts as a
@@ -722,13 +731,22 @@ impl TournamentSettings {
     /// Whether "airtight groups" applies to the given (1-based) round: within
     /// the configured window, if any.
     pub fn airtight_groups_active(&self, round: u32) -> bool {
-        self.airtight_groups_rounds
-            .is_some_and(|n| round <= n.get())
+        match &self.pairing {
+            PairingMode::Swiss {
+                airtight_groups, ..
+            } => airtight_groups.is_some_and(|n| round <= n.get()),
+            PairingMode::Elo { .. } => false,
+        }
     }
 
     /// The exempt clubs in canonical (normalized) form, for membership tests.
     pub fn exempt_clubs_normalized(&self) -> HashSet<String> {
-        self.club_protection.exempt_normalized()
+        match &self.pairing {
+            PairingMode::Swiss {
+                club_protection, ..
+            } => club_protection.exempt_normalized(),
+            PairingMode::Elo { .. } => HashSet::new(),
+        }
     }
 
     /// Return these settings in canonical form: thresholds sorted ascending by
@@ -739,16 +757,26 @@ impl TournamentSettings {
     /// order fields were entered, so pairing/standings are reproducible from the
     /// stored settings.
     pub fn normalized(mut self) -> Self {
-        self.macmahon_thresholds = Self::normalize_thresholds(self.macmahon_thresholds);
+        // The Swiss-only knobs live under `pairing`; ELO pairing has nothing to
+        // canonicalize here.
+        if let PairingMode::Swiss {
+            club_protection,
+            macmahon,
+            ..
+        } = &mut self.pairing
+        {
+            macmahon.thresholds =
+                Self::normalize_thresholds(std::mem::take(&mut macmahon.thresholds));
 
-        // Exempt clubs: keep the first spelling of each, trimmed and non-empty.
-        if let ClubProtection::On { exempt_clubs, .. } = &mut self.club_protection {
-            let mut seen = HashSet::new();
-            *exempt_clubs = std::mem::take(exempt_clubs)
-                .into_iter()
-                .map(|c| c.trim().to_string())
-                .filter(|c| !c.is_empty() && seen.insert(c.to_lowercase()))
-                .collect();
+            // Exempt clubs: keep the first spelling of each, trimmed and non-empty.
+            if let ClubProtection::On { exempt_clubs, .. } = club_protection {
+                let mut seen = HashSet::new();
+                *exempt_clubs = std::mem::take(exempt_clubs)
+                    .into_iter()
+                    .map(|c| c.trim().to_string())
+                    .filter(|c| !c.is_empty() && seen.insert(c.to_lowercase()))
+                    .collect();
+            }
         }
 
         // Tie-breaks: drop duplicates keeping the first occurrence (so the order
@@ -778,60 +806,90 @@ impl TournamentSettings {
     /// estimate is maintained: [`Self::macmahon_from_estimate_active`] maintains
     /// one for scoring even in plain Swiss.
     pub fn elo_estimate_needed(&self) -> bool {
-        self.elo_pairing_enabled
+        matches!(self.pairing, PairingMode::Elo { .. })
     }
 
     /// Whether MacMahon starting points are actually drawn from the live ELO
-    /// estimate: the [`Self::macmahon_from_estimated_elo`] toggle is on *and*
-    /// there is at least one ELO-based threshold for the estimate to be compared
-    /// against (with only grade thresholds, or none, the estimate would change
-    /// nothing, so the (non-trivial) estimate computation is skipped).
+    /// estimate: the source is [`MacMahonSource::FromEstimate`] *and* there is at
+    /// least one ELO-based threshold for the estimate to be compared against (with
+    /// only grade thresholds, or none, the estimate would change nothing, so the
+    /// (non-trivial) estimate computation is skipped).
     pub fn macmahon_from_estimate_active(&self) -> bool {
-        self.macmahon_from_estimated_elo
-            && self
-                .macmahon_thresholds
-                .iter()
-                .any(|t| matches!(t.criterion, ThresholdCriterion::Elo { .. }))
+        match &self.pairing {
+            PairingMode::Swiss { macmahon, .. } => {
+                matches!(macmahon.source, MacMahonSource::FromEstimate { .. })
+                    && macmahon
+                        .thresholds
+                        .iter()
+                        .any(|t| matches!(t.criterion, ThresholdCriterion::Elo { .. }))
+            }
+            PairingMode::Elo { .. } => false,
+        }
     }
 
-    /// The ELO-estimate K multiplier `m` as a float.
+    /// The ELO-estimate K multiplier `m` as a float. (The `map_or` default is
+    /// unreachable — these getters are only read while an estimate is maintained,
+    /// so [`Self::estimator`] is `Some`.)
     pub fn elo_k_multiplier(&self) -> f64 {
-        self.elo_k_multiplier_percent.as_f64()
+        self.estimator().map_or(1.0, |e| e.k_multiplier.as_f64())
     }
 
     /// The extra K multiplier for a provisionally-rated player, as a float.
     pub fn elo_provisional_multiplier(&self) -> f64 {
-        self.elo_provisional_multiplier_percent.as_f64()
+        self.estimator()
+            .map_or(2.0, |e| e.provisional_multiplier.as_f64())
     }
 
     /// The center (mean) of the unrated-player prior, as a float.
     pub fn elo_unrated_prior_center(&self) -> f64 {
-        self.elo_unrated_prior_center as f64
+        self.estimator()
+            .map_or(600.0, |e| e.unrated_prior_center as f64)
     }
 
     /// The K for the unrated-player prior, as a float (`≥ 1` by construction — a
     /// zero-width prior would divide by zero in the solver and freeze the estimate).
     pub fn elo_unrated_k(&self) -> f64 {
-        self.elo_unrated_k.get() as f64
+        self.estimator().map_or(705.0, |e| e.unrated_k.get() as f64)
+    }
+
+    /// The prior shape for an established player.
+    pub fn elo_prior_shape_established(&self) -> EloPriorShape {
+        self.estimator()
+            .map_or_else(EloPriorShape::default, |e| e.prior_shape_established)
+    }
+
+    /// The prior shape for a provisionally-rated player.
+    pub fn elo_prior_shape_provisional(&self) -> EloPriorShape {
+        self.estimator()
+            .map_or_else(EloPriorShape::default, |e| e.prior_shape_provisional)
+    }
+
+    /// The prior shape for an unrated player.
+    pub fn elo_prior_shape_unrated(&self) -> EloPriorShape {
+        self.estimator()
+            .map_or_else(EloPriorShape::default, |e| e.prior_shape_unrated)
     }
 
     /// The [`EloPriorShape::Laplace`] upward-looseness ratio `r` for an
     /// **established** player, as a float (`≥ 1.0` by construction — an upward
     /// revision is never harder than a downward one). `1.0` is symmetric.
     pub fn elo_upward_looseness_established(&self) -> f64 {
-        self.elo_upward_looseness_established_percent.as_f64()
+        self.estimator()
+            .map_or(1.0, |e| e.upward_looseness_established.as_f64())
     }
 
     /// The Laplace upward-looseness ratio `r` for a **provisionally-rated** player,
     /// as a float (`≥ 1.0` by construction).
     pub fn elo_upward_looseness_provisional(&self) -> f64 {
-        self.elo_upward_looseness_provisional_percent.as_f64()
+        self.estimator()
+            .map_or(1.0, |e| e.upward_looseness_provisional.as_f64())
     }
 
     /// The Laplace upward-looseness ratio `r` for an **unrated** player, as a
     /// float (`≥ 1.0` by construction).
     pub fn elo_upward_looseness_unrated(&self) -> f64 {
-        self.elo_upward_looseness_unrated_percent.as_f64()
+        self.estimator()
+            .map_or(1.0, |e| e.upward_looseness_unrated.as_f64())
     }
 
     /// Sort thresholds (ELO ones by value, then grade ones by strength) and
@@ -848,6 +906,89 @@ impl TournamentSettings {
         thresholds.sort_by_key(|t| t.criterion.sort_key());
         thresholds.dedup_by_key(|t| t.criterion);
         thresholds
+    }
+}
+
+/// Test-only builders that keep settings construction readable now that the
+/// pairing knobs live inside [`PairingMode`]. Each is a no-op in the mode it
+/// doesn't apply to (e.g. `with_thresholds` on ELO settings), matching how the
+/// real code ignores them.
+#[cfg(test)]
+impl TournamentSettings {
+    /// Swiss settings with the given static MacMahon thresholds.
+    pub(crate) fn with_thresholds(mut self, thresholds: Vec<MacMahonThreshold>) -> Self {
+        if let PairingMode::Swiss { macmahon, .. } = &mut self.pairing {
+            macmahon.thresholds = thresholds;
+        }
+        self
+    }
+
+    /// Draw MacMahon points from the live estimate (Swiss only).
+    pub(crate) fn with_macmahon_from_estimate(mut self) -> Self {
+        if let PairingMode::Swiss { macmahon, .. } = &mut self.pairing {
+            macmahon.source = MacMahonSource::FromEstimate {
+                estimator: EloEstimator::default(),
+            };
+        }
+        self
+    }
+
+    /// ELO pairing mode with the default estimator.
+    pub(crate) fn elo_pairing() -> Self {
+        TournamentSettings {
+            pairing: PairingMode::Elo {
+                estimator: EloEstimator::default(),
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Tweak the estimator config in whichever mode carries one (ELO pairing or
+    /// estimate-based MacMahon); a no-op in plain Swiss.
+    pub(crate) fn map_estimator(mut self, f: impl FnOnce(&mut EloEstimator)) -> Self {
+        match &mut self.pairing {
+            PairingMode::Elo { estimator } => f(estimator),
+            PairingMode::Swiss {
+                macmahon:
+                    MacMahon {
+                        source: MacMahonSource::FromEstimate { estimator },
+                        ..
+                    },
+                ..
+            } => f(estimator),
+            PairingMode::Swiss { .. } => {}
+        }
+        self
+    }
+
+    /// Set the Swiss floater style.
+    pub(crate) fn with_floater(mut self, style: FloaterStyle) -> Self {
+        if let PairingMode::Swiss { floater_style, .. } = &mut self.pairing {
+            *floater_style = style;
+        }
+        self
+    }
+
+    /// Set the airtight-groups window (Swiss).
+    pub(crate) fn with_airtight(mut self, rounds: Option<NonZeroU32>) -> Self {
+        if let PairingMode::Swiss {
+            airtight_groups, ..
+        } = &mut self.pairing
+        {
+            *airtight_groups = rounds;
+        }
+        self
+    }
+
+    /// Set club protection (Swiss).
+    pub(crate) fn with_club(mut self, protection: ClubProtection) -> Self {
+        if let PairingMode::Swiss {
+            club_protection, ..
+        } = &mut self.pairing
+        {
+            *club_protection = protection;
+        }
+        self
     }
 }
 
@@ -875,10 +1016,7 @@ mod tests {
 
     #[test]
     fn macmahon_points_count_thresholds_met() {
-        let s = TournamentSettings {
-            macmahon_thresholds: vec![mmt(1200), mmt(1700)],
-            ..Default::default()
-        };
+        let s = TournamentSettings::default().with_thresholds(vec![mmt(1200), mmt(1700)]);
         assert_eq!(s.macmahon_points(Some(1000), None), 0);
         assert_eq!(s.macmahon_points(Some(1200), None), 1); // inclusive lower bound
         assert_eq!(s.macmahon_points(Some(1699), None), 1);
@@ -892,13 +1030,10 @@ mod tests {
         // Mixed thresholds: an ELO band and a grade band, each counted on its
         // own axis — a strong-graded but low-rated player (or vice versa) can
         // meet one without the other.
-        let s = TournamentSettings {
-            macmahon_thresholds: vec![
-                MacMahonThreshold::elo(1500),
-                MacMahonThreshold::grade(Grade::dan(1)),
-            ],
-            ..Default::default()
-        };
+        let s = TournamentSettings::default().with_thresholds(vec![
+            MacMahonThreshold::elo(1500),
+            MacMahonThreshold::grade(Grade::dan(1)),
+        ]);
         // Meets neither.
         assert_eq!(s.macmahon_points(Some(1000), Some(Grade::kyu(5))), 0);
         // Meets only the grade threshold.
@@ -947,10 +1082,11 @@ mod tests {
     #[test]
     fn degressive_drops_thresholds_at_their_own_scheduled_round() {
         // Two bottom groups drop at the end of round 2, the top never drops.
-        let s = TournamentSettings {
-            macmahon_thresholds: vec![mmt_drops(1200, 2), mmt_drops(1500, 2), mmt(1800)],
-            ..Default::default()
-        };
+        let s = TournamentSettings::default().with_thresholds(vec![
+            mmt_drops(1200, 2),
+            mmt_drops(1500, 2),
+            mmt(1800),
+        ]);
         // Rounds 1–2: full thresholds.
         assert_eq!(
             s.effective_macmahon_thresholds(0),
@@ -973,19 +1109,17 @@ mod tests {
 
     #[test]
     fn normalized_sorts_by_value_and_zeroes_a_zero_drop_round() {
-        let s = TournamentSettings {
-            macmahon_thresholds: vec![
+        let s = TournamentSettings::default()
+            .with_thresholds(vec![
                 mmt_drops(1500, 3),
                 mmt(1200),
                 mmt_drops(1200, 0), // duplicate value dropped, first kept
                 mmt_drops(1800, 0), // a drop round of 0 can't fire, normalized away
-            ],
-            ..Default::default()
-        }
-        .normalized();
+            ])
+            .normalized();
         assert_eq!(
-            s.macmahon_thresholds,
-            vec![mmt(1200), mmt_drops(1500, 3), mmt(1800)]
+            s.macmahon_thresholds(),
+            &[mmt(1200), mmt_drops(1500, 3), mmt(1800)]
         );
     }
 
@@ -994,23 +1128,17 @@ mod tests {
         let off = TournamentSettings::default();
         assert!(!off.club_protection_active(1)); // disabled by default
 
-        let all = TournamentSettings {
-            club_protection: ClubProtection::On {
-                rounds: None,
-                exempt_clubs: Vec::new(),
-            },
-            ..Default::default()
-        };
+        let all = TournamentSettings::default().with_club(ClubProtection::On {
+            rounds: None,
+            exempt_clubs: Vec::new(),
+        });
         assert!(all.club_protection_active(1));
         assert!(all.club_protection_active(99)); // None = every round
 
-        let limited = TournamentSettings {
-            club_protection: ClubProtection::On {
-                rounds: NonZeroU32::new(2),
-                exempt_clubs: Vec::new(),
-            },
-            ..Default::default()
-        };
+        let limited = TournamentSettings::default().with_club(ClubProtection::On {
+            rounds: NonZeroU32::new(2),
+            exempt_clubs: Vec::new(),
+        });
         assert!(limited.club_protection_active(1));
         assert!(limited.club_protection_active(2));
         assert!(!limited.club_protection_active(3)); // past the window
@@ -1021,10 +1149,7 @@ mod tests {
         let off = TournamentSettings::default();
         assert!(!off.airtight_groups_active(1)); // disabled by default (no window)
 
-        let s = TournamentSettings {
-            airtight_groups_rounds: NonZeroU32::new(2),
-            ..Default::default()
-        };
+        let s = TournamentSettings::default().with_airtight(NonZeroU32::new(2));
         assert!(s.airtight_groups_active(1));
         assert!(s.airtight_groups_active(2));
         assert!(!s.airtight_groups_active(3)); // past the window
@@ -1037,15 +1162,16 @@ mod tests {
         assert_eq!(NonZeroU32::new(0), None);
         // A JSON `0` is rejected outright rather than silently kept (the frontend
         // sends `null`, never `0`, for an off window).
-        assert!(
-            serde_json::from_str::<TournamentSettings>(r#"{"airtight_groups_rounds":0}"#).is_err()
-        );
+        assert!(serde_json::from_str::<TournamentSettings>(
+            r#"{"pairing":{"kind":"swiss","airtight_groups":0}}"#
+        )
+        .is_err());
     }
 
     #[test]
     fn normalized_trims_and_dedups_exempt_clubs_case_insensitively() {
-        let s = TournamentSettings {
-            club_protection: ClubProtection::On {
+        let s = TournamentSettings::default()
+            .with_club(ClubProtection::On {
                 rounds: None,
                 exempt_clubs: vec![
                     "  Paris  ".into(),
@@ -1053,12 +1179,14 @@ mod tests {
                     "   ".into(),   // empty after trim
                     "Lyon".into(),
                 ],
-            },
-            ..Default::default()
-        }
-        .normalized();
+            })
+            .normalized();
         // First spelling kept, trimmed; the case-variant dup and the blank dropped.
-        let ClubProtection::On { exempt_clubs, .. } = &s.club_protection else {
+        let PairingMode::Swiss {
+            club_protection: ClubProtection::On { exempt_clubs, .. },
+            ..
+        } = &s.pairing
+        else {
             panic!("still on");
         };
         assert_eq!(exempt_clubs, &["Paris", "Lyon"]);
@@ -1172,7 +1300,6 @@ mod tests {
         // Off (the default): the estimated-ELO tie-break is dropped.
         let off = TournamentSettings {
             tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM],
-            elo_pairing_enabled: false,
             ..Default::default()
         }
         .normalized();
@@ -1181,8 +1308,7 @@ mod tests {
         // On: it is kept, in place.
         let on = TournamentSettings {
             tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM],
-            elo_pairing_enabled: true,
-            ..Default::default()
+            ..TournamentSettings::elo_pairing()
         }
         .normalized();
         assert_eq!(
@@ -1196,33 +1322,23 @@ mod tests {
     #[test]
     fn macmahon_from_estimate_active_needs_the_toggle_and_an_elo_threshold() {
         // Toggle off: never active, regardless of thresholds.
-        let off = TournamentSettings {
-            macmahon_thresholds: vec![mmt(1500)],
-            ..Default::default()
-        };
+        let off = TournamentSettings::default().with_thresholds(vec![mmt(1500)]);
         assert!(!off.macmahon_from_estimate_active());
 
         // Toggle on but no ELO threshold (grade only): inert, so not active.
-        let grade_only = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::grade(Grade::dan(1))],
-            macmahon_from_estimated_elo: true,
-            ..Default::default()
-        };
+        let grade_only = TournamentSettings::default()
+            .with_thresholds(vec![MacMahonThreshold::grade(Grade::dan(1))])
+            .with_macmahon_from_estimate();
         assert!(!grade_only.macmahon_from_estimate_active());
 
         // Toggle on with no thresholds at all: also inert.
-        let none = TournamentSettings {
-            macmahon_from_estimated_elo: true,
-            ..Default::default()
-        };
+        let none = TournamentSettings::default().with_macmahon_from_estimate();
         assert!(!none.macmahon_from_estimate_active());
 
         // Toggle on with an ELO threshold (even alongside a grade one): active.
-        let on = TournamentSettings {
-            macmahon_thresholds: vec![mmt(1500), MacMahonThreshold::grade(Grade::dan(1))],
-            macmahon_from_estimated_elo: true,
-            ..Default::default()
-        };
+        let on = TournamentSettings::default()
+            .with_thresholds(vec![mmt(1500), MacMahonThreshold::grade(Grade::dan(1))])
+            .with_macmahon_from_estimate();
         assert!(on.macmahon_from_estimate_active());
     }
 
@@ -1231,20 +1347,20 @@ mod tests {
         // Plain Swiss pairing, but MacMahon is drawn from the estimate: a live
         // estimate is maintained, so the estimated-ELO tie-break survives.
         let s = TournamentSettings {
-            macmahon_thresholds: vec![mmt(1500)],
-            macmahon_from_estimated_elo: true,
             tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo],
-            ..Default::default()
+            ..TournamentSettings::default()
+                .with_thresholds(vec![mmt(1500)])
+                .with_macmahon_from_estimate()
         }
         .normalized();
         assert_eq!(s.tiebreaks, vec![Tiebreak::Points, Tiebreak::EstElo]);
 
         // But with only a grade threshold the estimate isn't used, so it's dropped.
         let grade_only = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::grade(Grade::dan(1))],
-            macmahon_from_estimated_elo: true,
             tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo],
-            ..Default::default()
+            ..TournamentSettings::default()
+                .with_thresholds(vec![MacMahonThreshold::grade(Grade::dan(1))])
+                .with_macmahon_from_estimate()
         }
         .normalized();
         assert_eq!(grade_only.tiebreaks, vec![Tiebreak::Points]);
@@ -1252,17 +1368,16 @@ mod tests {
 
     #[test]
     fn unrated_prior_defaults_reproduce_the_historical_prior() {
+        // Default settings maintain no estimate; the getters fall back to the
+        // historical prior, and the estimator's own defaults match.
         let s = TournamentSettings::default();
-        assert_eq!(s.elo_unrated_prior_center, 600);
-        assert_eq!(s.elo_unrated_k, 705);
         assert!((s.elo_unrated_prior_center() - 600.0).abs() < 1e-9);
         // √(705·s) ≈ 350, the historical unrated std.
         let std = (s.elo_unrated_k() * crate::elo::S).sqrt();
         assert!((std - 350.0).abs() < 1.0, "unrated std ~350, got {std}");
-        // Omitted from an old save → the defaults.
-        let loaded: TournamentSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(loaded.elo_unrated_prior_center, 600);
-        assert_eq!(loaded.elo_unrated_k, 705);
+        let est = EloEstimator::default();
+        assert_eq!(est.unrated_prior_center, 600);
+        assert_eq!(est.unrated_k, 705);
     }
 
     #[test]
@@ -1270,42 +1385,34 @@ mod tests {
         // A zero-width prior would divide by zero in the estimator; the type floors
         // it at construction and on deserialize, so `normalized` no longer needs to.
         assert_eq!(UnratedK::new(0), 1);
-        let s = TournamentSettings {
-            elo_unrated_k: UnratedK::new(0),
-            ..Default::default()
-        };
-        assert_eq!(s.elo_unrated_k, 1);
+        // Deserialization clamps too (the floor lives in the type, not the nesting).
+        assert_eq!(serde_json::from_str::<UnratedK>("0").unwrap(), 1);
+        // And the settings getter never yields a zero-width prior.
+        let s = TournamentSettings::elo_pairing().map_estimator(|e| e.unrated_k = UnratedK::new(0));
         assert!(s.elo_unrated_k() >= 1.0);
-        // A JSON `0` clamps up to `1` rather than sticking as a degenerate prior.
-        let loaded: TournamentSettings = serde_json::from_str(r#"{"elo_unrated_k":0}"#).unwrap();
-        assert_eq!(loaded.elo_unrated_k, 1);
     }
 
     #[test]
     fn prior_shape_defaults_to_gaussian_and_is_behaviour_neutral() {
+        // Default settings: the shape getters report Gaussian, looseness symmetric.
         let s = TournamentSettings::default();
-        assert_eq!(s.elo_prior_shape_established, EloPriorShape::Gaussian);
-        assert_eq!(s.elo_prior_shape_provisional, EloPriorShape::Gaussian);
-        assert_eq!(s.elo_prior_shape_unrated, EloPriorShape::Gaussian);
-        assert_eq!(s.elo_upward_looseness_established_percent, 100);
-        assert_eq!(s.elo_upward_looseness_provisional_percent, 100);
-        assert_eq!(s.elo_upward_looseness_unrated_percent, 100);
+        assert_eq!(s.elo_prior_shape_established(), EloPriorShape::Gaussian);
+        assert_eq!(s.elo_prior_shape_provisional(), EloPriorShape::Gaussian);
+        assert_eq!(s.elo_prior_shape_unrated(), EloPriorShape::Gaussian);
         assert!((s.elo_upward_looseness_established() - 1.0).abs() < 1e-9);
         assert!((s.elo_upward_looseness_provisional() - 1.0).abs() < 1e-9);
         assert!((s.elo_upward_looseness_unrated() - 1.0).abs() < 1e-9);
-        // Omitted from an old save → the (Gaussian, symmetric) defaults.
-        let loaded: TournamentSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(loaded.elo_prior_shape_unrated, EloPriorShape::Gaussian);
-        assert_eq!(loaded.elo_upward_looseness_unrated_percent, 100);
-        // A per-category Laplace shape round-trips through JSON.
-        let laplace = TournamentSettings {
-            elo_prior_shape_unrated: EloPriorShape::Laplace,
-            ..Default::default()
-        };
+        // The estimator's own defaults match.
+        let est = EloEstimator::default();
+        assert_eq!(est.prior_shape_unrated, EloPriorShape::Gaussian);
+        assert_eq!(est.upward_looseness_unrated, 100);
+        // A per-category Laplace shape round-trips through JSON (in ELO mode).
+        let laplace = TournamentSettings::elo_pairing()
+            .map_estimator(|e| e.prior_shape_unrated = EloPriorShape::Laplace);
         let json = serde_json::to_string(&laplace).unwrap();
         let back: TournamentSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.elo_prior_shape_unrated, EloPriorShape::Laplace);
-        assert_eq!(back.elo_prior_shape_established, EloPriorShape::Gaussian);
+        assert_eq!(back.elo_prior_shape_unrated(), EloPriorShape::Laplace);
+        assert_eq!(back.elo_prior_shape_established(), EloPriorShape::Gaussian);
     }
 
     #[test]
@@ -1315,36 +1422,27 @@ mod tests {
         // deserialize, so `normalized` no longer clamps.
         assert_eq!(RatioAtLeastOne::from_percent(50), 100);
         assert_eq!(RatioAtLeastOne::from_percent(0), 100);
-        let s = TournamentSettings {
-            elo_upward_looseness_established_percent: RatioAtLeastOne::from_percent(50),
-            elo_upward_looseness_provisional_percent: RatioAtLeastOne::from_percent(80),
-            elo_upward_looseness_unrated_percent: RatioAtLeastOne::from_percent(0),
-            ..Default::default()
-        };
-        assert_eq!(s.elo_upward_looseness_established_percent, 100);
-        assert_eq!(s.elo_upward_looseness_provisional_percent, 100);
-        assert_eq!(s.elo_upward_looseness_unrated_percent, 100);
+        // Deserialization clamps too.
+        assert_eq!(serde_json::from_str::<RatioAtLeastOne>("50").unwrap(), 100);
+        // And through the settings getter (in a mode that carries an estimator).
+        let s = TournamentSettings::elo_pairing().map_estimator(|e| {
+            e.upward_looseness_established = RatioAtLeastOne::from_percent(50);
+            e.upward_looseness_unrated = RatioAtLeastOne::from_percent(0);
+        });
+        assert!(s.elo_upward_looseness_established() >= 1.0);
         assert!(s.elo_upward_looseness_unrated() >= 1.0);
-        // A JSON sub-parity value clamps up rather than sticking.
-        let loaded: TournamentSettings =
-            serde_json::from_str(r#"{"elo_upward_looseness_unrated_percent":50}"#).unwrap();
-        assert_eq!(loaded.elo_upward_looseness_unrated_percent, 100);
     }
 
     #[test]
     fn elo_estimate_needed_is_true_for_elo_pairing() {
         assert!(!TournamentSettings::default().elo_estimate_needed());
-        assert!(TournamentSettings {
-            elo_pairing_enabled: true,
-            ..Default::default()
-        }
-        .elo_estimate_needed());
+        assert!(TournamentSettings::elo_pairing().elo_estimate_needed());
     }
 
     #[test]
     fn floater_style_defaults_to_classic_and_round_trips_snake_case() {
         assert_eq!(
-            TournamentSettings::default().floater_style,
+            TournamentSettings::default().floater_style(),
             FloaterStyle::Classic
         );
         assert_eq!(
@@ -1353,6 +1451,6 @@ mod tests {
         );
         // Omitted in the payload → the default (Classic).
         let s: TournamentSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(s.floater_style, FloaterStyle::Classic);
+        assert_eq!(s.floater_style(), FloaterStyle::Classic);
     }
 }

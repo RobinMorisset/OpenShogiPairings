@@ -502,10 +502,8 @@ mod tests {
                 Winner::Player1,
             )],
         )];
-        let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
-            ..Default::default()
-        };
+        let settings =
+            TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
         let standings = compute_standings(&[a.clone(), b.clone()], &settings, &rounds);
 
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
@@ -547,13 +545,10 @@ mod tests {
                 Winner::Player1,
             )],
         )];
-        let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold {
-                criterion: ThresholdCriterion::Elo { value: 1500 },
-                drops_after_round: Some(1),
-            }],
-            ..Default::default()
-        };
+        let settings = TournamentSettings::default().with_thresholds(vec![MacMahonThreshold {
+            criterion: ThresholdCriterion::Elo { value: 1500 },
+            drops_after_round: Some(1),
+        }]);
         let standings = compute_standings(&[a.clone(), b.clone()], &settings, &rounds);
 
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
@@ -605,10 +600,8 @@ mod tests {
                 )],
             ),
         ];
-        let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
-            ..Default::default()
-        };
+        let settings =
+            TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
         let standings = compute_standings(&[a.clone(), b.clone(), c.clone()], &settings, &rounds);
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
         // SOSM/SODOSM are in half-point units (opponents' MacMahon = 2 halves);
@@ -761,10 +754,7 @@ mod tests {
         let b = player(2, Some(1800));
 
         // The estimate is only computed in ELO mode, so enable it here.
-        let elo_mode = TournamentSettings {
-            elo_pairing_enabled: true,
-            ..Default::default()
-        };
+        let elo_mode = TournamentSettings::elo_pairing();
         let none = compute_standings(&[a.clone(), b.clone()], &elo_mode, &[]);
         let of = |st: &[Standing], id| {
             st.iter()
@@ -803,7 +793,6 @@ mod tests {
             &players,
             &TournamentSettings {
                 tiebreaks: vec![Tiebreak::EstElo],
-                elo_pairing_enabled: false,
                 ..Default::default()
             },
             &[],
@@ -815,8 +804,7 @@ mod tests {
             &players,
             &TournamentSettings {
                 tiebreaks: vec![Tiebreak::EstElo],
-                elo_pairing_enabled: true,
-                ..Default::default()
+                ..TournamentSettings::elo_pairing()
             },
             &[],
         );
@@ -885,10 +873,8 @@ mod tests {
             e.clone(),
             f.clone(),
         ];
-        let base = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
-            ..Default::default()
-        };
+        let base =
+            TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
         let pos = |st: &[Standing], id| st.iter().position(|s| s.player_id == id).unwrap();
 
         let by_m = compute_standings(

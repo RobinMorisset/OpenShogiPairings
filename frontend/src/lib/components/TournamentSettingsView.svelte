@@ -4,9 +4,11 @@
   import { TIEBREAKS } from "../types";
   import type {
     ClubProtection,
+    EloEstimator,
     EloPriorShape,
     GradeKind,
     HandicapPolicy,
+    PairingMode,
     MacMahonThreshold,
     Player,
     Tiebreak,
@@ -136,13 +138,24 @@
   // reshuffling under the cursor. `untrack` makes this fire on `settings` changes
   // only, not our own writes.
   $effect(() => {
-    const sThresholds = settings.macmahon_thresholds;
-    const sAirtight = settings.airtight_groups_rounds ?? null;
-    const cp = settings.club_protection;
+    // The Swiss knobs live under pairing.swiss; the ELO estimator lives under
+    // pairing.elo.estimator OR pairing.swiss.macmahon.source (estimate-MacMahon).
+    const pairing = settings.pairing;
+    const swiss = pairing.kind === "swiss" ? pairing : null;
+    const macmahonSource = swiss?.macmahon.source;
+    const est =
+      pairing.kind === "elo"
+        ? pairing.estimator
+        : macmahonSource?.kind === "from_estimate"
+          ? macmahonSource.estimator
+          : null;
+    const sThresholds = swiss?.macmahon.thresholds ?? [];
+    const sAirtight = swiss?.airtight_groups ?? null;
+    const cp = swiss?.club_protection;
     const sEnabled = cp?.kind === "on";
     const sRounds = cp?.kind === "on" ? (cp.rounds ?? null) : null;
     const sExempt = cp?.kind === "on" ? (cp.exempt_clubs ?? []) : [];
-    const sFloater = settings.floater_style;
+    const sFloater = swiss?.floater_style ?? "classic";
     const sCup = settings.cup_enabled;
     const sLong = settings.long_boards_enabled ?? false;
     const sHandicap = handicapChoice(settings.handicap_policy);
@@ -150,16 +163,16 @@
       settings.handicap_policy.kind === "enabled" ? (settings.handicap_policy.wiel_rule ?? false) : false;
     const sHalfPointAbsences = settings.half_point_absences ?? false;
     const sTiebreaks = settings.tiebreaks ?? [];
-    const sElo = settings.elo_pairing_enabled ?? false;
-    const sMacmahonFromElo = settings.macmahon_from_estimated_elo ?? false;
-    const sEloK = settings.elo_k_multiplier_percent ?? 100;
-    const sEloProv = settings.elo_provisional_multiplier_percent ?? 200;
-    const sEloUnratedCenter = settings.elo_unrated_prior_center ?? 600;
-    const sEloUnratedK = settings.elo_unrated_k ?? 705;
-    const sEloPriorShape = settings.elo_prior_shape_unrated ?? "gaussian";
-    const sEloLooseEst = settings.elo_upward_looseness_established_percent ?? 100;
-    const sEloLooseProv = settings.elo_upward_looseness_provisional_percent ?? 100;
-    const sEloLooseUnr = settings.elo_upward_looseness_unrated_percent ?? 100;
+    const sElo = pairing.kind === "elo";
+    const sMacmahonFromElo = macmahonSource?.kind === "from_estimate";
+    const sEloK = est?.k_multiplier ?? 100;
+    const sEloProv = est?.provisional_multiplier ?? 200;
+    const sEloUnratedCenter = est?.unrated_prior_center ?? 600;
+    const sEloUnratedK = est?.unrated_k ?? 705;
+    const sEloPriorShape = est?.prior_shape_unrated ?? "gaussian";
+    const sEloLooseEst = est?.upward_looseness_established ?? 100;
+    const sEloLooseProv = est?.upward_looseness_provisional ?? 100;
+    const sEloLooseUnr = est?.upward_looseness_unrated ?? 100;
     untrack(() => {
       const matches =
         eqThresholds(cleanThresholds(thresholds), sThresholds) &&
@@ -220,17 +233,40 @@
   function persist() {
     // Send the current values; the server normalizes them (sorts/de-dups the
     // MacMahon thresholds, trims/de-dups the exempt clubs).
+    // The estimator config the current controls describe — attached to whichever
+    // mode carries a live estimate (ELO pairing, or estimate-based MacMahon).
+    const estimator: EloEstimator = {
+      k_multiplier: eloKPercent,
+      provisional_multiplier: eloProvisionalPercent,
+      unrated_prior_center: eloUnratedCenter,
+      unrated_k: eloUnratedK,
+      prior_shape_established: "gaussian",
+      prior_shape_provisional: "gaussian",
+      prior_shape_unrated: eloPriorShape,
+      upward_looseness_established: eloLoosenessEstablishedPercent,
+      upward_looseness_provisional: eloLoosenessProvisionalPercent,
+      upward_looseness_unrated: eloLoosenessUnratedPercent,
+    };
+    const pairing: PairingMode = eloEnabled
+      ? { kind: "elo", estimator }
+      : {
+          kind: "swiss",
+          floater_style: floaterStyle,
+          airtight_groups: airtightRounds,
+          club_protection: clubEnabled
+            ? ({
+                kind: "on",
+                rounds: clubRounds,
+                exempt_clubs: exemptClubs.map((c) => c.trim()).filter((c) => c.length > 0),
+              } satisfies ClubProtection)
+            : ({ kind: "off" } satisfies ClubProtection),
+          macmahon: {
+            thresholds: cleanThresholds(thresholds),
+            source: macmahonFromElo ? { kind: "from_estimate", estimator } : { kind: "static" },
+          },
+        };
     onUpdate({
-      macmahon_thresholds: cleanThresholds(thresholds),
-      airtight_groups_rounds: airtightRounds,
-      club_protection: clubEnabled
-        ? ({
-            kind: "on",
-            rounds: clubRounds,
-            exempt_clubs: exemptClubs.map((c) => c.trim()).filter((c) => c.length > 0),
-          } satisfies ClubProtection)
-        : ({ kind: "off" } satisfies ClubProtection),
-      floater_style: floaterStyle,
+      pairing,
       cup_enabled: cupEnabled,
       long_boards_enabled: longBoardsEnabled,
       handicap_policy:
@@ -243,18 +279,6 @@
             } satisfies HandicapPolicy),
       half_point_absences: halfPointAbsences,
       tiebreaks: [...tiebreaks],
-      elo_pairing_enabled: eloEnabled,
-      macmahon_from_estimated_elo: macmahonFromElo,
-      elo_k_multiplier_percent: eloKPercent,
-      elo_provisional_multiplier_percent: eloProvisionalPercent,
-      elo_unrated_prior_center: eloUnratedCenter,
-      elo_unrated_k: eloUnratedK,
-      elo_prior_shape_established: "gaussian",
-      elo_prior_shape_provisional: "gaussian",
-      elo_prior_shape_unrated: eloPriorShape,
-      elo_upward_looseness_established_percent: eloLoosenessEstablishedPercent,
-      elo_upward_looseness_provisional_percent: eloLoosenessProvisionalPercent,
-      elo_upward_looseness_unrated_percent: eloLoosenessUnratedPercent,
     });
   }
 

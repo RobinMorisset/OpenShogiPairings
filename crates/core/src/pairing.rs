@@ -193,7 +193,7 @@ fn active_rules(settings: &TournamentSettings) -> &'static [Rule] {
         Rule::Fold,
     ];
     const ELO: [Rule; 3] = [Rule::Rematch, Rule::ByeSelection, Rule::EloGap];
-    if settings.elo_pairing_enabled {
+    if settings.elo_estimate_needed() {
         &ELO
     } else {
         &SWISS
@@ -699,7 +699,7 @@ impl PairingModel {
             elo,
             elo_rank,
             round: number,
-            floater_style: settings.floater_style,
+            floater_style: settings.floater_style(),
             club_active,
             airtight_active,
             edges: (vcount / 2) as i128,
@@ -1853,10 +1853,8 @@ mod tests {
             player(4, Some(900), None),
         ];
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
-        let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
-            ..Default::default()
-        };
+        let settings =
+            TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
 
         let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);
 
@@ -1893,13 +1891,10 @@ mod tests {
     fn weighted_avoids_pairing_club_mates_when_protection_on() {
         let p = two_clubs_where_fold_pairs_mates();
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
-        let settings = TournamentSettings {
-            club_protection: ClubProtection::On {
-                rounds: None,
-                exempt_clubs: Vec::new(),
-            },
-            ..Default::default()
-        };
+        let settings = TournamentSettings::default().with_club(ClubProtection::On {
+            rounds: None,
+            exempt_clubs: Vec::new(),
+        });
 
         let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);
 
@@ -1968,13 +1963,10 @@ mod tests {
         ];
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
-        let exempt = TournamentSettings {
-            club_protection: ClubProtection::On {
-                rounds: None,
-                exempt_clubs: vec!["  HOME ".into()],
-            },
-            ..Default::default()
-        };
+        let exempt = TournamentSettings::default().with_club(ClubProtection::On {
+            rounds: None,
+            exempt_clubs: vec!["  HOME ".into()],
+        });
         let round = pair_round_weighted(1, &p, &exempt, &[], &present, &[], None);
         assert!(
             board_pairs(&round).contains(&unord(
@@ -1984,13 +1976,10 @@ mod tests {
             "exempt club-mates should be paired by the fold"
         );
 
-        let protected = TournamentSettings {
-            club_protection: ClubProtection::On {
-                rounds: None,
-                exempt_clubs: Vec::new(),
-            },
-            ..Default::default()
-        };
+        let protected = TournamentSettings::default().with_club(ClubProtection::On {
+            rounds: None,
+            exempt_clubs: Vec::new(),
+        });
         let round = pair_round_weighted(1, &p, &protected, &[], &present, &[], None);
         assert!(
             !board_pairs(&round).contains(&unord(
@@ -2007,13 +1996,10 @@ mod tests {
         // ideal (club-mate pairs) wins again.
         let p = two_clubs_where_fold_pairs_mates();
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
-        let settings = TournamentSettings {
-            club_protection: ClubProtection::On {
-                rounds: NonZeroU32::new(1),
-                exempt_clubs: Vec::new(),
-            },
-            ..Default::default()
-        };
+        let settings = TournamentSettings::default().with_club(ClubProtection::On {
+            rounds: NonZeroU32::new(1),
+            exempt_clubs: Vec::new(),
+        });
 
         // Pair round 2 directly (no completed rounds needed to exercise the window).
         let round = pair_round_weighted(2, &p, &settings, &[], &present, &[], None);
@@ -2052,10 +2038,8 @@ mod tests {
             player(7, Some(900), None),
             player(8, Some(850), None),
         ];
-        let settings_base = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
-            ..Default::default()
-        };
+        let settings_base =
+            TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let r1 = completed_round(
             1,
@@ -2112,10 +2096,7 @@ mod tests {
 
         // With airtight groups active for round 2, every board stays within its
         // MacMahon group.
-        let settings_on = TournamentSettings {
-            airtight_groups_rounds: NonZeroU32::new(2),
-            ..settings_base
-        };
+        let settings_on = settings_base.with_airtight(NonZeroU32::new(2));
         let round_on = pair_round_weighted(2, &p, &settings_on, &[r1], &present, &[], None);
         for b in &round_on.boards {
             assert_eq!(
@@ -2140,11 +2121,9 @@ mod tests {
             player(7, Some(900), None),
             player(8, Some(850), None),
         ];
-        let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
-            airtight_groups_rounds: NonZeroU32::new(1),
-            ..Default::default()
-        };
+        let settings = TournamentSettings::default()
+            .with_thresholds(vec![MacMahonThreshold::elo(1500)])
+            .with_airtight(NonZeroU32::new(1));
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let r1 = completed_round(
             1,
@@ -2193,13 +2172,10 @@ mod tests {
     // --- ELO (non-Swiss) mode ---------------------------------------------
 
     fn elo_settings() -> TournamentSettings {
-        TournamentSettings {
-            elo_pairing_enabled: true,
-            // Neutralize the provisional-rating widening so these pairing tests
-            // exercise the base drift; reliability is covered in elo.rs tests.
-            elo_provisional_multiplier_percent: RatioAtLeastOne::from_percent(100),
-            ..Default::default()
-        }
+        // Neutralize the provisional-rating widening so these pairing tests
+        // exercise the base drift; reliability is covered in elo.rs tests.
+        TournamentSettings::elo_pairing()
+            .map_estimator(|e| e.provisional_multiplier = RatioAtLeastOne::from_percent(100))
     }
 
     #[test]
@@ -2325,10 +2301,9 @@ mod tests {
             player(4, Some(1000), None), // Y (lower group)
         ];
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
-        let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)], // X0..X2 on 1 point, Y on 0
-            ..Default::default()
-        };
+        // X0..X2 on 1 point, Y on 0
+        let settings =
+            TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
 
         let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);
         assert!(
@@ -2353,15 +2328,10 @@ mod tests {
             player(4, Some(1200), None), // L2
         ];
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
-        let base = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
-            ..Default::default()
-        };
+        let base =
+            TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
 
-        let classic = TournamentSettings {
-            floater_style: FloaterStyle::Classic,
-            ..base.clone()
-        };
+        let classic = base.clone().with_floater(FloaterStyle::Classic);
         let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], None);
         assert!(
             board_pairs(&round).contains(&unord(
@@ -2371,10 +2341,7 @@ mod tests {
             "classic Swiss floats up the strongest of the group (L0)"
         );
 
-        let median = TournamentSettings {
-            floater_style: FloaterStyle::Median,
-            ..base
-        };
+        let median = base.with_floater(FloaterStyle::Median);
         let round = pair_round_weighted(1, &p, &median, &[], &present, &[], None);
         assert!(
             board_pairs(&round).contains(&unord(
@@ -2397,15 +2364,10 @@ mod tests {
             player(4, Some(1000), None), // Y (lower group)
         ];
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
-        let base = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
-            ..Default::default()
-        };
+        let base =
+            TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
 
-        let classic = TournamentSettings {
-            floater_style: FloaterStyle::Classic,
-            ..base.clone()
-        };
+        let classic = base.clone().with_floater(FloaterStyle::Classic);
         let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], None);
         assert!(
             board_pairs(&round).contains(&unord(
@@ -2415,10 +2377,7 @@ mod tests {
             "classic Swiss floats down the weakest of the group (X2)"
         );
 
-        let median = TournamentSettings {
-            floater_style: FloaterStyle::Median,
-            ..base
-        };
+        let median = base.with_floater(FloaterStyle::Median);
         let round = pair_round_weighted(1, &p, &median, &[], &present, &[], None);
         assert!(
             board_pairs(&round).contains(&unord(
@@ -2443,10 +2402,7 @@ mod tests {
         ];
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
-        let classic = TournamentSettings {
-            floater_style: FloaterStyle::Classic,
-            ..Default::default()
-        };
+        let classic = TournamentSettings::default().with_floater(FloaterStyle::Classic);
         let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], None);
         assert_eq!(
             round.bye,
@@ -2454,10 +2410,7 @@ mod tests {
             "classic Swiss gives the bye to the weakest of the group (P4)"
         );
 
-        let median = TournamentSettings {
-            floater_style: FloaterStyle::Median,
-            ..Default::default()
-        };
+        let median = TournamentSettings::default().with_floater(FloaterStyle::Median);
         let round = pair_round_weighted(1, &p, &median, &[], &present, &[], None);
         assert_eq!(
             round.bye,
@@ -2505,10 +2458,8 @@ mod tests {
             ],
             Some(id(4)), // p5 took a bye
         );
-        let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
-            ..Default::default()
-        };
+        let settings =
+            TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
         let scores = compute_scores(&p, &settings, &[r1]);
         let free: Vec<u32> = p.iter().map(|q| q.tournament_id.unwrap()).collect();
         let free_tid = &free;
@@ -2661,10 +2612,8 @@ mod tests {
             player(3, Some(1000), None),
             player(4, Some(900), None),
         ];
-        let settings = TournamentSettings {
-            macmahon_thresholds: vec![MacMahonThreshold::elo(1500)],
-            ..Default::default()
-        };
+        let settings =
+            TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
         let present: Vec<u32> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], None);
 
