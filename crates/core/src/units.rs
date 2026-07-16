@@ -133,6 +133,48 @@ impl From<Wins> for HalfPoints {
     }
 }
 
+/// A player's dense tournament number — the 1-based key the scoring tables are
+/// indexed by (assigned at finalization). Distinct from a [`Uuid`] (the stable
+/// identity) and from any score quantity, so a raw number can't be mistaken for
+/// one of those.
+///
+/// This is the type the per-number score tables ([`crate::scoring::Scores`], and
+/// the opponent/defeated lists) are keyed by. The [`From<usize>`] / [`Into`]
+/// `usize` bridge below is what lets those tables be
+/// [`TiVec`](typed_index_collections::TiVec)s indexed directly by a
+/// `TournamentId` — so `table[tid]` needs no `as usize` at the call site; the one
+/// cast lives here. Purely internal (the wire/`Player` identifier stays a plain
+/// `u32`), so it carries no serde/`TS` derives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TournamentId(pub u32);
+
+/// `usize` → `TournamentId`, for `TiVec` key generation (e.g. `push`).
+impl From<usize> for TournamentId {
+    fn from(i: usize) -> Self {
+        TournamentId(i as u32)
+    }
+}
+
+/// `TournamentId` → `usize`, the single place the index cast is written — this is
+/// what makes a `TiVec<TournamentId, _>` indexable by a bare `TournamentId`.
+impl From<TournamentId> for usize {
+    fn from(t: TournamentId) -> Self {
+        t.0 as usize
+    }
+}
+
+/// Test-only convenience: compare a [`TournamentId`] against a bare `u32` literal,
+/// so the scoring tests keep reading `opponents == vec![btid, btid]` (with `btid`
+/// a plain `u32` tournament number) after the lists became `Vec<TournamentId>`.
+/// `Vec<A>: PartialEq<Vec<B>>` holds whenever `A: PartialEq<B>`, so this covers
+/// the list assertions too. Gated on `test`; production code stays strict.
+#[cfg(test)]
+impl PartialEq<u32> for TournamentId {
+    fn eq(&self, other: &u32) -> bool {
+        self.0 == *other
+    }
+}
+
 /// Test-only convenience: compare a score against a bare integer literal in its
 /// natural unit ([`Wins`] a whole count, [`HalfPoints`] raw half-units), so the
 /// assertions in the scoring/standings tests read `standing.points == 4` rather

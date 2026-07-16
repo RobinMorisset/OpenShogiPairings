@@ -56,7 +56,9 @@ use crate::player::Player;
 use crate::round::Round;
 use crate::scoring::compute_scores;
 use crate::settings::{Tiebreak, TournamentSettings};
-use crate::units::{HalfPoints, Wins};
+use crate::units::{HalfPoints, TournamentId, Wins};
+
+use typed_index_collections::TiVec;
 
 /// One player's standing: score and every tie-break metric. The position in the
 /// returned [`compute_standings`] vector is the player's rank.
@@ -173,8 +175,8 @@ pub fn compute_standings(
     let scores = compute_scores(players, settings, rounds);
     // Opponent/defeated lists hold tournament numbers, so scoring an opponent is a
     // direct table lookup — `…M` by their points, `…W` by their wins.
-    let score_m = |o: &u32| scores.get_tid(*o).points;
-    let score_w = |o: &u32| scores.get_tid(*o).victories;
+    let score_m = |o: &TournamentId| scores.get_tid(*o).points;
+    let score_w = |o: &TournamentId| scores.get_tid(*o).victories;
 
     // The live Bayesian ELO estimate — only shown, and only ranks, in ELO mode,
     // so skip the whole (quadrature-heavy) computation in Swiss mode.
@@ -186,13 +188,13 @@ pub fn compute_standings(
     // by tournament number so the SOSOS pass (a sum over opponents, which are
     // numbers) is a plain array walk.
     let cap = scores.tid_capacity();
-    let mut sosm = vec![HalfPoints::ZERO; cap];
-    let mut sosw = vec![Wins::ZERO; cap];
+    let mut sosm: TiVec<TournamentId, HalfPoints> = vec![HalfPoints::ZERO; cap].into();
+    let mut sosw: TiVec<TournamentId, Wins> = vec![Wins::ZERO; cap].into();
     for p in players {
         let t = scores
             .tid_of(&p.id)
-            .expect("player has a number when scoring runs") as usize;
-        let s = scores.get_tid(t as u32);
+            .expect("player has a number when scoring runs");
+        let s = scores.get_tid(t);
         sosm[t] = s.opponents.iter().map(score_m).sum();
         sosw[t] = s.opponents.iter().map(score_w).sum();
     }
@@ -200,8 +202,8 @@ pub fn compute_standings(
     let mut standings: Vec<Standing> = players
         .iter()
         .map(|p| {
-            let t = p.tournament_id.expect("player has a number") as usize;
-            let s = scores.get_tid(t as u32);
+            let t = TournamentId(p.tournament_id.expect("player has a number"));
+            let s = scores.get_tid(t);
             let opp_m: Vec<HalfPoints> = s.opponents.iter().map(&score_m).collect();
             let opp_w: Vec<Wins> = s.opponents.iter().map(&score_w).collect();
             Standing {
@@ -213,8 +215,8 @@ pub fn compute_standings(
                 sosw: sosw[t],
                 sodosm: s.defeated.iter().map(&score_m).sum(),
                 sodosw: s.defeated.iter().map(&score_w).sum(),
-                sososm: s.opponents.iter().map(|&o| sosm[o as usize]).sum(),
-                sososw: s.opponents.iter().map(|&o| sosw[o as usize]).sum(),
+                sososm: s.opponents.iter().map(|&o| sosm[o]).sum(),
+                sososw: s.opponents.iter().map(|&o| sosw[o]).sum(),
                 sosm1: sum_dropping_lowest(opp_m.clone(), 1),
                 sosm2: sum_dropping_lowest(opp_m, 2),
                 sosw1: sum_dropping_lowest(opp_w.clone(), 1),

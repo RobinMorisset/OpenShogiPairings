@@ -48,7 +48,7 @@ pub use standings::{compute_standings, Standing};
 pub use tournament::{
     Tournament, TournamentError, MIN_PLAYERS_PER_ROUND, TOURNAMENT_FORMAT_VERSION,
 };
-pub use units::{HalfPoints, Wins};
+pub use units::{HalfPoints, TournamentId, Wins};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

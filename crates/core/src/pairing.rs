@@ -80,7 +80,7 @@ use crate::player::Player;
 use crate::round::{Board, PairingSource, Round};
 use crate::scoring::{compute_scores, Scores};
 use crate::settings::{FloaterStyle, TournamentSettings};
-use crate::units::HalfPoints;
+use crate::units::{HalfPoints, TournamentId};
 
 // --- Weighted matching ----------------------------------------------------
 
@@ -300,11 +300,11 @@ impl Rule {
     /// one arm and the body inlines into the O(k²) fill loop.
     #[inline]
     fn edge_units(self, ctx: &Ctx, a: u32, b: u32) -> i128 {
-        let sa = ctx.scores.get_tid(a);
-        let sb = ctx.scores.get_tid(b);
+        let sa = ctx.scores.get_tid(TournamentId(a));
+        let sb = ctx.scores.get_tid(TournamentId(b));
         match self {
             // Rule 1: never play the same opponent twice.
-            Rule::Rematch => i128::from(sa.opponents.contains(&b)),
+            Rule::Rematch => i128::from(sa.opponents.contains(&TournamentId(b))),
             // Rule 2: bye-only rule, real boards are neutral.
             Rule::ByeGroup => 0,
             // Rule 3 (optional, first N rounds): forbid crossing MacMahon groups;
@@ -391,7 +391,7 @@ impl Rule {
     /// Penalty units for giving `player` the bye (before the priority multiplier).
     /// A bye repeats the rematch rule (never bye twice) and counts as a downfloat.
     fn bye_units(self, ctx: &Ctx, player: u32) -> i128 {
-        let s = ctx.scores.get_tid(player);
+        let s = ctx.scores.get_tid(TournamentId(player));
         match self {
             Rule::Rematch => i128::from(s.had_bye),
             // The bye should go to the lowest score group; penalty is the square
@@ -540,7 +540,10 @@ fn fold_ranks(
     // Group the free players (by tournament number) by their points.
     let mut groups: HashMap<HalfPoints, Vec<u32>> = HashMap::new();
     for &t in free {
-        groups.entry(scores.get_tid(t).points).or_default().push(t);
+        groups
+            .entry(scores.get_tid(TournamentId(t)).points)
+            .or_default()
+            .push(t);
     }
     // Result indexed by tournament number (`None` for a non-free player).
     let mut info = vec![None; cap];
@@ -630,7 +633,7 @@ impl PairingModel {
         let (mut lo, mut hi) = (u32::MAX, 0u32);
         let (mut mm_lo, mut mm_hi) = (u32::MAX, 0u32);
         for &t in free {
-            let s = scores.get_tid(t);
+            let s = scores.get_tid(TournamentId(t));
             lo = lo.min(s.points.halves());
             hi = hi.max(s.points.halves());
             mm_lo = mm_lo.min(s.macmahon.halves());
@@ -1330,7 +1333,8 @@ pub fn pair_round_weighted(
     let scores = compute_scores(players, settings, completed_rounds);
     // The float frozen onto each board: points(player1) − points(player2) now.
     let diff = |p1: u32, p2: u32| {
-        scores.get_tid(p1).points.halves() as i32 - scores.get_tid(p2).points.halves() as i32
+        scores.get_tid(TournamentId(p1)).points.halves() as i32
+            - scores.get_tid(TournamentId(p2)).points.halves() as i32
     };
 
     let mut placed: HashSet<u32> = HashSet::new();
@@ -2504,7 +2508,7 @@ mod tests {
         let (mut lo, mut hi) = (u32::MAX, 0u32);
         let (mut mm_lo, mut mm_hi) = (u32::MAX, 0u32);
         for &pid in &free {
-            let s = scores.get_tid(pid);
+            let s = scores.get_tid(TournamentId(pid));
             lo = lo.min(s.points.halves());
             hi = hi.max(s.points.halves());
             mm_lo = mm_lo.min(s.macmahon.halves());

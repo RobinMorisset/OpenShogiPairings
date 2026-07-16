@@ -7,12 +7,13 @@
 
 use std::cmp::Ordering;
 
+use typed_index_collections::TiVec;
 use uuid::Uuid;
 
 use crate::player::Player;
 use crate::round::{Round, Winner};
 use crate::settings::TournamentSettings;
-use crate::units::{HalfPoints, Wins};
+use crate::units::{HalfPoints, TournamentId, Wins};
 
 /// One player's accumulated state going into the next round. Defaultable so a
 /// [`Scores`] table can leave a gap for any tournament number no current player
@@ -33,10 +34,10 @@ pub(crate) struct PlayerScore {
     /// by, so the opponent-based tie-breaks walk them without hashing. Only ever
     /// holds numbers of players still in the tournament (a player who has played
     /// can't be removed), so every entry resolves to a real slot.
-    pub opponents: Vec<u32>,
+    pub opponents: Vec<TournamentId>,
     /// Opponents defeated (effective winner), one entry per game, by tournament
     /// number (see [`Self::opponents`]).
-    pub defeated: Vec<u32>,
+    pub defeated: Vec<TournamentId>,
     /// Cumulative sum of the player's running points total, added up after each
     /// completed round (the "cumulative" tie-break, MacMahon-inclusive).
     pub cuss_m: HalfPoints,
@@ -63,35 +64,39 @@ pub(crate) struct PlayerScore {
 /// caller expects. Numbers no current player holds (0, and any freed by a
 /// pre-play removal) are gaps, holding a [`PlayerScore::default`] and a nil id.
 pub(crate) struct Scores {
-    by_tid: Vec<PlayerScore>,
-    ids: Vec<Uuid>,
+    by_tid: TiVec<TournamentId, PlayerScore>,
+    ids: TiVec<TournamentId, Uuid>,
 }
 
 impl Scores {
     /// The accumulated state for a known player.
     #[cfg(test)]
     pub fn get(&self, id: &Uuid) -> &PlayerScore {
-        &self.by_tid[self.tid_of(id).expect("unknown player") as usize]
+        &self.by_tid[self.tid_of(id).expect("unknown player")]
     }
 
     /// The accumulated state at a tournament number — an [`PlayerScore::opponents`]
     /// / [`PlayerScore::defeated`] entry, or a [`Self::tid_of`] result. A gap
-    /// number resolves to a default (all-zero) score.
-    pub fn get_tid(&self, tid: u32) -> &PlayerScore {
-        &self.by_tid[tid as usize]
+    /// number resolves to a default (all-zero) score. The [`TiVec`] is indexed by
+    /// the [`TournamentId`] directly — no `as usize`.
+    pub fn get_tid(&self, tid: TournamentId) -> &PlayerScore {
+        &self.by_tid[tid]
     }
 
     /// A player's tournament number, or `None` if they aren't in the tournament.
     /// A linear scan of `ids`: the number is already known everywhere on the hot
     /// path (boards and players carry it), so this id-facing lookup is only for
     /// the [`Uuid`] boundary and tests, and isn't worth a parallel hash table.
-    pub fn tid_of(&self, id: &Uuid) -> Option<u32> {
-        self.ids.iter().position(|x| x == id).map(|t| t as u32)
+    pub fn tid_of(&self, id: &Uuid) -> Option<TournamentId> {
+        self.ids
+            .iter()
+            .position(|x| x == id)
+            .map(TournamentId::from)
     }
 
     /// The player id at a tournament number (the inverse of [`Self::tid_of`]).
-    pub fn id_of(&self, tid: u32) -> Uuid {
-        self.ids[tid as usize]
+    pub fn id_of(&self, tid: TournamentId) -> Uuid {
+        self.ids[tid]
     }
 
     /// A player's total points, or zero if they aren't in the tournament (e.g. an
@@ -99,12 +104,12 @@ impl Scores {
     #[cfg(test)]
     pub fn points(&self, id: &Uuid) -> HalfPoints {
         self.tid_of(id)
-            .map_or(HalfPoints::ZERO, |t| self.by_tid[t as usize].points)
+            .map_or(HalfPoints::ZERO, |t| self.by_tid[t].points)
     }
 
     /// The number of tournament-number slots, so a caller can size a parallel
-    /// per-number table. Slot `t` is a valid [`Self::get_tid`] argument for any
-    /// `t < tid_capacity()`.
+    /// per-number table. Every [`TournamentId`] `t` with `usize::from(t) <
+    /// tid_capacity()` is a valid [`Self::get_tid`] argument.
     pub fn tid_capacity(&self) -> usize {
         self.by_tid.len()
     }
@@ -154,11 +159,11 @@ pub(crate) fn compute_scores(
     // all-zero score and a nil id — never read, since only present players' numbers
     // appear as opponents. `real_tids` lists the present players' numbers for the
     // per-round cumulative pass, which must visit every real player but not a gap.
-    let mut by_tid: Vec<PlayerScore> = std::iter::repeat_with(PlayerScore::default)
+    let mut by_tid: TiVec<TournamentId, PlayerScore> = std::iter::repeat_with(PlayerScore::default)
         .take(max_tid + 1)
         .collect();
-    let mut ids = vec![Uuid::nil(); max_tid + 1];
-    let mut real_tids: Vec<u32> = Vec::with_capacity(players.len());
+    let mut ids: TiVec<TournamentId, Uuid> = vec![Uuid::nil(); max_tid + 1].into();
+    let mut real_tids: Vec<TournamentId> = Vec::with_capacity(players.len());
     for p in players {
         // The rating the ELO thresholds see: the rounded live estimate when
         // estimate-based MacMahon is active, else the static registration rating.
@@ -183,9 +188,9 @@ pub(crate) fn compute_scores(
         let adjustment: i32 = p.adjustments.iter().map(|a| a.delta).sum();
         let points =
             HalfPoints::from_halves((macmahon.halves() as i32 + adjustment * 2).max(0) as u32);
-        let t = p.tournament_id.unwrap() as usize;
+        let t = TournamentId(p.tournament_id.unwrap());
         ids[t] = p.id;
-        real_tids.push(t as u32);
+        real_tids.push(t);
         by_tid[t] = PlayerScore {
             points,
             macmahon,
@@ -212,15 +217,15 @@ pub(crate) fn compute_scores(
             // Boards carry tournament numbers, so the score table is indexed
             // directly — no Uuid→number lookup, and every board player is a current
             // player (a played player can't be removed), so its slot is real.
-            let (ta, tb) = (board.player1 as usize, board.player2 as usize);
+            let (ta, tb) = (TournamentId(board.player1), TournamentId(board.player2));
             // A long board (two rounds, two points) counts as *two* games against
             // the same opponent for the opponent-based tie-breaks (SOS, SODOS,
             // SOSOS, Buchholz), so it is recorded twice. It still feeds ELO as a
             // single game (that reads the boards directly, not these lists).
             let reps = if board.long { 2 } else { 1 };
             for _ in 0..reps {
-                by_tid[ta].opponents.push(tb as u32);
-                by_tid[tb].opponents.push(ta as u32);
+                by_tid[ta].opponents.push(tb);
+                by_tid[tb].opponents.push(ta);
             }
 
             // Direction from the frozen float, recorded at pairing time — for
@@ -242,7 +247,7 @@ pub(crate) fn compute_scores(
             }
         }
         if let Some(bye) = round.bye {
-            let s = &mut by_tid[bye as usize];
+            let s = &mut by_tid[TournamentId(bye)];
             s.had_bye = true;
             s.last_descended = Some(round.number); // a bye is a downfloat
         }
@@ -250,14 +255,14 @@ pub(crate) fn compute_scores(
         // downfloat they can't be given twice.
         for board in &round.boards {
             if let Some(present) = board.no_show_opponent() {
-                let s = &mut by_tid[present as usize];
+                let s = &mut by_tid[TournamentId(present)];
                 s.had_bye = true;
                 s.last_descended = Some(round.number);
             }
         }
         // A cup bye (an unopposed bracket advance) is a bye all the same.
         for &player in &round.cup_byes {
-            let s = &mut by_tid[player as usize];
+            let s = &mut by_tid[TournamentId(player)];
             s.had_bye = true;
             s.last_descended = Some(round.number);
         }
@@ -273,15 +278,15 @@ pub(crate) fn compute_scores(
             // as two games against the same opponent for the point/victory totals
             // and the opponent-based tie-breaks; it stays a single game for ELO.
             let reps = if board.long { 2 } else { 1 };
-            let s = &mut by_tid[winner as usize];
+            let s = &mut by_tid[TournamentId(winner)];
             s.points += HalfPoints::from_whole(reps); // one point per game (two for a long board)
             s.victories += Wins(reps);
             for _ in 0..reps {
-                s.defeated.push(loser);
+                s.defeated.push(TournamentId(loser));
             }
         }
         if let Some(bye) = round.bye {
-            let s = &mut by_tid[bye as usize];
+            let s = &mut by_tid[TournamentId(bye)];
             s.points += HalfPoints::from_whole(1); // a bye scores one point
             s.victories += Wins(1);
         }
@@ -292,14 +297,14 @@ pub(crate) fn compute_scores(
                 // A long board resolved by forfeit still scores its long weight
                 // (two points), unless the referee demoted it.
                 let reps = if board.long { 2 } else { 1 };
-                let s = &mut by_tid[present as usize];
+                let s = &mut by_tid[TournamentId(present)];
                 s.points += HalfPoints::from_whole(reps); // one point (two for a long board)
                 s.victories += Wins(reps);
             }
         }
         // A cup bye scores the free point too — the player advanced unopposed.
         for &player in &round.cup_byes {
-            let s = &mut by_tid[player as usize];
+            let s = &mut by_tid[TournamentId(player)];
             s.points += HalfPoints::from_whole(1); // an unopposed advance scores one point
             s.victories += Wins(1);
         }
@@ -309,7 +314,7 @@ pub(crate) fn compute_scores(
         // board and stays at 0.
         if settings.half_point_absences {
             for &id in &round.absent {
-                by_tid[id as usize].points += HalfPoints::from_halves(1); // half a point
+                by_tid[TournamentId(id)].points += HalfPoints::from_halves(1); // half a point
             }
         }
 
@@ -319,7 +324,7 @@ pub(crate) fn compute_scores(
         // definition of a sum over the sequence of rounds. Visits the present
         // players (by their numbers), never the gap slots.
         for &t in &real_tids {
-            let s = &mut by_tid[t as usize];
+            let s = &mut by_tid[t];
             s.cuss_m += s.points;
             s.cuss_w += s.victories;
             s.running_points.push(s.points);

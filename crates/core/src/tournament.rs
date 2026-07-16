@@ -24,6 +24,7 @@ use crate::round::{
 use crate::scoring::compute_scores;
 use crate::settings::TournamentSettings;
 use crate::standings::{compute_standings, Standing};
+use crate::units::TournamentId;
 
 /// On-disk / on-the-wire format version for a serialized [`Tournament`].
 ///
@@ -687,8 +688,8 @@ impl Tournament {
         } else {
             let cup_scores = compute_scores(&self.players, &self.settings, &self.rounds);
             let cup_diff = |p1: u32, p2: u32| {
-                cup_scores.get_tid(p1).points.halves() as i32
-                    - cup_scores.get_tid(p2).points.halves() as i32
+                cup_scores.get_tid(TournamentId(p1)).points.halves() as i32
+                    - cup_scores.get_tid(TournamentId(p2)).points.halves() as i32
             };
             cup_pairings
                 .matches
