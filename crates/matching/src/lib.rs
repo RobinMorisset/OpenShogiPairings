@@ -561,9 +561,11 @@ impl<W: Weight> Blossom<W> {
 /// vertex `i`.
 ///
 /// `n` must be even (a perfect matching is otherwise impossible) and `cost` must
-/// have exactly `n * n` entries; the diagonal is ignored. Costs must be
-/// non-negative and symmetric. On the complete graph every vertex is pairable, so
-/// a perfect matching always exists.
+/// have exactly `n * n` entries. Only the strict **upper triangle** (`i < j`) is
+/// read — the cost is taken as symmetric, so the diagonal and the lower triangle
+/// are ignored and a caller may leave them unset. Costs must be non-negative. On
+/// the complete graph every vertex is pairable, so a perfect matching always
+/// exists.
 ///
 /// The matrix is a flat slice, not `&[Vec<_>]`, so a caller building it (and the
 /// solver reading it) touches one contiguous allocation rather than `n` rows.
@@ -581,9 +583,9 @@ pub fn min_weight_perfect_matching<W: Weight>(cost: &[W], n: usize) -> Vec<usize
     // above every cost so all weights are ≥ 1 (keeping the matching perfect).
     let mut max_cost = W::ZERO;
     for i in 0..n {
-        for j in 0..n {
+        for j in (i + 1)..n {
             let c = cost[i * n + j];
-            if i != j && c > max_cost {
+            if c > max_cost {
                 max_cost = c;
             }
         }
@@ -596,11 +598,6 @@ pub fn min_weight_perfect_matching<W: Weight>(cost: &[W], n: usize) -> Vec<usize
         bl.reset(n);
         for i in 0..n {
             for j in (i + 1)..n {
-                debug_assert_eq!(
-                    cost[i * n + j],
-                    cost[j * n + i],
-                    "cost matrix must be symmetric"
-                );
                 bl.set_edge(i + 1, j + 1, offset - cost[i * n + j]);
             }
         }

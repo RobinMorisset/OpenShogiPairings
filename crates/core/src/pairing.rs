@@ -308,17 +308,18 @@ impl Rule {
             // Rule 2: bye-only rule, real boards are neutral.
             Rule::ByeGroup => 0,
             // Rule 3 (optional, first N rounds): forbid crossing MacMahon groups;
-            // penalty is the square of the gap in MacMahon starting points.
+            // penalty is the square of the gap in MacMahon starting points. Only in
+            // the rule set when active (inactive rules are filtered out upstream),
+            // so no `airtight_active` check; and the gap is squared, so its sign —
+            // and an `abs` — are irrelevant.
             Rule::AirtightGroups => {
-                if !ctx.airtight_active {
-                    return 0;
-                }
-                let gap = (sa.macmahon as i128 - sb.macmahon as i128).abs();
+                let gap = sa.macmahon as i128 - sb.macmahon as i128;
                 gap * gap
             }
-            // Rule 3: prefer equal scores; penalty is the square of the gap.
+            // Rule 3: prefer equal scores; penalty is the square of the gap (so the
+            // gap's sign, and an `abs`, don't matter).
             Rule::ScoreGap => {
-                let gap = (sa.points as i128 - sb.points as i128).abs();
+                let gap = sa.points as i128 - sb.points as i128;
                 gap * gap
             }
             // Rule 4: the lower-scored player floats up, the higher-scored down.
@@ -352,9 +353,8 @@ impl Rule {
             // this round, ignoring unknown clubs and clubs on the exempt list. Club
             // names are matched case-insensitively.
             Rule::Club => {
-                if !ctx.club_active {
-                    return 0;
-                }
+                // Only in the rule set when protection is active (inactive rules
+                // are filtered out upstream), so no `club_active` check.
                 match (&ctx.club_norm[a as usize], &ctx.club_norm[b as usize]) {
                     (Some(na), Some(nb)) => i128::from(na == nb && !ctx.exempt_clubs.contains(na)),
                     _ => 0,
@@ -475,14 +475,16 @@ fn edge_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], a: u32, b: u32) -> i128 {
         .sum()
 }
 
-/// Add one rule's contribution to every real edge of the cost matrix: for each
-/// pair `(i, j)`, `+= m · units(ctx, tid_i, tid_j)` on both `(i, j)` and `(j, i)`.
+/// Add one rule's contribution to the (upper-triangle) real edges of the cost
+/// matrix: `cost[i*vcount + j] += m · units(ctx, tid_i, tid_j)` for every `i < j`.
 ///
-/// This is the fissioned, per-rule form of the cost fill. `units` is generic and
-/// each call site passes a closure over a *constant* rule, so it monomorphizes to
-/// that rule's arm of [`Rule::edge_units`] with the enum `match` folded away — the
-/// O(k²) inner loop carries no per-edge branch or call. The dispatch on which rule
-/// happens once per rule (see the fill in [`pair_round_weighted`]), not per edge.
+/// `units` is generic and each call site passes a closure over a *constant* rule,
+/// so it monomorphizes to that rule's arm of [`Rule::edge_units`] with the enum
+/// `match` folded away — the O(k²) inner loop carries no per-edge branch or call.
+/// The dispatch on which rule happens once per rule (see the fill in
+/// [`pair_round_weighted`]), not per edge. Only the upper triangle is written:
+/// [`min_weight_perfect_matching`] reads the matrix as symmetric, taking just
+/// `cost[i*n + j]` for `i < j`.
 #[inline]
 fn accumulate_edge_rule<F: Fn(&Ctx, u32, u32) -> i128>(
     cost: &mut [i128],
@@ -497,9 +499,7 @@ fn accumulate_edge_rule<F: Fn(&Ctx, u32, u32) -> i128>(
         let base_i = i * vcount;
         let ti = free_tid[i];
         for j in (i + 1)..k {
-            let c = m * units(ctx, ti, free_tid[j]);
-            cost[base_i + j] += c;
-            cost[j * vcount + i] += c;
+            cost[base_i + j] += m * units(ctx, ti, free_tid[j]);
         }
     }
 }
@@ -1452,8 +1452,9 @@ pub fn pair_round_weighted(
         // Fill by rule, not by edge: each rule adds its contribution to every edge
         // in its own monomorphized O(k²) loop, so the per-edge `match self` in
         // `edge_units` folds away (the rule is a constant here). The dispatch on
-        // which rule runs once per rule. Bye-only rules are 0 on every real edge,
-        // so they are skipped entirely rather than adding 0 k² times.
+        // which rule runs once per rule. Bye-only rules are 0 on every real edge, so
+        // they are skipped. Only the upper triangle is written — the solver reads
+        // the matrix as symmetric — so there is no symmetric store or mirror pass.
         macro_rules! fill {
             ($rule:expr, $m:expr) => {
                 accumulate_edge_rule(&mut cost, vcount, k, &free_tid, &ctx, $m, |ctx, a, b| {
