@@ -938,7 +938,6 @@
     table,
     th,
     td,
-    button.sitout,
     .win,
     .loss,
     .absent,
@@ -957,6 +956,12 @@
     }
     tbody tr:nth-child(even) {
       background: transparent !important;
+    }
+    /* The sit-out token is a <button> carrying its tone class (.win/.absent),
+       both of which force border-color: #000 above. Keep its border invisible
+       in print so no square is drawn around the 0+ / 0= / 0− tokens. */
+    button.sitout {
+      border-color: transparent !important;
     }
   }
 </style>
