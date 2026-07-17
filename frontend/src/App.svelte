@@ -937,8 +937,10 @@
             {busy}
           />
         {:else if activeTab === "players"}
-          <PlayerRegistration onAdd={handleAddPlayer} {ratings} {busy} />
-          <div class="ratings-status">
+          <div class="print-hide">
+            <PlayerRegistration onAdd={handleAddPlayer} {ratings} {busy} />
+          </div>
+          <div class="ratings-status print-hide">
             <span>
               {#if ratings.length > 0}
                 {$_("app.ratingsLoaded", { values: { count: ratings.length } })}
@@ -1269,6 +1271,7 @@
     .toolbar,
     .tabs,
     .round-controls,
+    .print-hide,
     footer {
       display: none;
     }

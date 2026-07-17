@@ -414,11 +414,15 @@
             <td class="category">
               <input
                 type="checkbox"
+                class="cat-box"
                 checked={(player.categories ?? []).includes(cat.id)}
                 disabled={busy}
                 title={cat.name}
                 onchange={(e) => onToggleCategory?.(player.id, cat.id, e.currentTarget.checked)}
               />
+              <span class="cat-print" aria-hidden="true"
+                >{(player.categories ?? []).includes(cat.id) ? "✓" : ""}</span
+              >
             </td>
           {/each}
           {#if showEligible}
@@ -798,9 +802,31 @@
     border-color: var(--border-accent);
   }
 
+  /* On screen the category cell is an editable checkbox; the ✓ is print-only. */
+  .cat-print {
+    display: none;
+  }
   @media print {
     .print-hide {
       display: none;
+    }
+    /* The sort direction arrows (▲ ▼ ⇅) are interactive-only chrome. */
+    .sort-arrow {
+      display: none;
+    }
+    /* Render category membership as a single checkmark (like a finalized
+       cup-eligibility cell) rather than an ugly print of the checkbox. */
+    .cat-box {
+      display: none;
+    }
+    .cat-print {
+      display: inline;
+    }
+    /* Print is black & white: the cup-eligibility checkmark is green and bold on
+       screen; match the plain category checkmarks — black and normal weight. */
+    .elig-frozen {
+      color: #000;
+      font-weight: normal;
     }
   }
 </style>
