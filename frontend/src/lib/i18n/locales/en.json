@@ -113,6 +113,10 @@
   "roundView": {
     "unknownPlayer": "(unknown)",
     "print": "Print",
+    "alphabetical": "By name",
+    "alphabeticalTitle": "List every player alphabetically, each with their board and opponent — a lookup sheet to print. Results are recorded in the default view.",
+    "playerColumn": "Player",
+    "opponentColumn": "Opponent",
     "noBoards": "No boards in this round.",
     "board": "Board",
     "player1": "Player 1",

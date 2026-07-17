@@ -83,6 +83,22 @@
     busy = false,
   }: Props = $props();
 
+  // The other side of a board.
+  function other(side: Winner): Winner {
+    return side === "player1" ? "player2" : "player1";
+  }
+
+  // A side's outcome, from the recorded result or a no-show. An opponent who
+  // failed to appear hands `side` the point, but under `"both"` nobody won —
+  // so winning compares `no_show` strictly, while losing goes through
+  // `absent()`, which counts `"both"` as covering each side.
+  function isWinner(board: Board, side: Winner): boolean {
+    return board.result === side || board.no_show === other(side);
+  }
+  function isLoser(board: Board, side: Winner): boolean {
+    return board.result === other(side) || absent(board.no_show, side);
+  }
+
   // The long checkbox is editable only on the current round; turning it *on* also
   // needs the board still undecided (turning it off after a result is the demote
   // path). Mirrors the server's `set_board_long` guards.
@@ -201,6 +217,82 @@
   const swissBye = $derived(
     (round.sitouts ?? []).find((s) => s.kind === "bye")?.player ?? null,
   );
+
+  // --- Alphabetical (lookup) mode -------------------------------------------
+
+  // A pairing sheet to print at the start of a round: every board appears twice,
+  // once from each player's side, so a player finds their own name in a single
+  // alphabetical scan of the left column and reads their board and opponent
+  // across. It is a lookup sheet, not an entry sheet — nothing here is
+  // clickable, and the referee flips back to the default view to record results.
+  let alphabetical = $state(false);
+
+  /** One printed line: a player, their board, and who they face. */
+  interface AlphaRow {
+    key: string;
+    /** The board number, as numbered in the default (engine-order) view. */
+    number: number;
+    /** The player this line is filed under, by tournament number. */
+    left: number;
+    /** Their opponent, or null on a sit-out (a bye has no one to swap with). */
+    right: number | null;
+    /** The board, or null on a sit-out row. */
+    board: Board | null;
+    /** Which side `left` plays on `board` — the flipped copy reads its result
+     *  from `player2`, so a recorded win stays on the right player. */
+    leftSide: Winner;
+    /** A sit-out row from the cup bracket rather than the Swiss bye. */
+    cupBye: boolean;
+    /** Index into `round.boards` / `suggestedHandicaps`; -1 on a sit-out row. */
+    index: number;
+  }
+
+  // Last name, then first name — the order players expect to look themselves up
+  // in, and not the order `name()` would give (it appends the rating).
+  function byLastName(x: number, y: number): number {
+    const a = byId.get(x);
+    const b = byId.get(y);
+    return (
+      (a?.last_name ?? "").localeCompare(b?.last_name ?? "") ||
+      (a?.first_name ?? "").localeCompare(b?.first_name ?? "")
+    );
+  }
+
+  const alphaRows = $derived.by(() => {
+    const rows: AlphaRow[] = [];
+    round.boards.forEach((board, index) => {
+      const common = { number: index + 1, board, cupBye: false, index };
+      rows.push({
+        ...common,
+        key: `${index}-1`,
+        left: board.player1,
+        right: board.player2,
+        leftSide: "player1",
+      });
+      rows.push({
+        ...common,
+        key: `${index}-2`,
+        left: board.player2,
+        right: board.player1,
+        leftSide: "player2",
+      });
+    });
+    // Sit-outs keep the numbers the default view gives them (after the boards),
+    // but sort in with everyone else so a bye-taker's single scan finds them.
+    byeSitouts.forEach((sitout, i) => {
+      rows.push({
+        key: `bye-${sitout.player}`,
+        number: round.boards.length + i + 1,
+        left: sitout.player,
+        right: null,
+        board: null,
+        leftSide: "player1",
+        cupBye: typeof sitout.kind !== "string",
+        index: -1,
+      });
+    });
+    return rows.sort((a, b) => byLastName(a.left, b.left));
+  });
 
   // --- Counterfactual probe ("why not pair A and B?") ----------------------
 
@@ -400,6 +492,16 @@
 
 <div class="round">
   <div class="round-toolbar print-hide">
+    <button
+      type="button"
+      class="ghost"
+      class:active={alphabetical}
+      aria-pressed={alphabetical}
+      title={$_("roundView.alphabeticalTitle")}
+      onclick={() => (alphabetical = !alphabetical)}
+    >
+      🔤 {$_("roundView.alphabetical")}
+    </button>
     <button type="button" class="ghost" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
   </div>
   {#if hasReport}
@@ -459,8 +561,8 @@
                 <button
                   type="button"
                   class="player"
-                  class:winner={board.result === "player1" || board.no_show === "player2"}
-                  class:loser={board.result === "player2" || absent(board.no_show, "player1")}
+                  class:winner={isWinner(board, "player1")}
+                  class:loser={isLoser(board, "player1")}
                   disabled={busy || !onCarriedWinner}
                   title={$_("roundView.clickToSetWinner")}
                   onclick={() => onCarriedWinner?.(index, "player1")}
@@ -472,8 +574,8 @@
                 <button
                   type="button"
                   class="player"
-                  class:winner={board.result === "player2" || board.no_show === "player1"}
-                  class:loser={board.result === "player1" || absent(board.no_show, "player2")}
+                  class:winner={isWinner(board, "player2")}
+                  class:loser={isLoser(board, "player2")}
                   disabled={busy || !onCarriedWinner}
                   title={$_("roundView.clickToSetWinner")}
                   onclick={() => onCarriedWinner?.(index, "player2")}
@@ -490,6 +592,60 @@
   {/if}
   {#if round.boards.length === 0 && byeSitouts.length === 0}
     <p class="empty">{$_("roundView.noBoards")}</p>
+  {:else if alphabetical}
+    <table>
+      <thead>
+        <tr>
+          <th class="num">{$_("roundView.board")}</th>
+          <th>{$_("roundView.playerColumn")}</th>
+          <th>{$_("roundView.opponentColumn")}</th>
+          {#if handicapPolicy === "suggested"}
+            <th class="suggested-col">{$_("roundView.suggested")}</th>
+          {/if}
+        </tr>
+      </thead>
+      <tbody>
+        {#each alphaRows as row (row.key)}
+          <tr class:bye-row={!row.board}>
+            <td class="num"
+              >{row.number}{#if row.board?.long}<span
+                  class="long-badge"
+                  title={$_("roundView.longTitle")}>★2R</span
+                >{/if}</td
+            >
+            <td>
+              <span
+                class="player"
+                class:winner={!row.board || isWinner(row.board, row.leftSide)}
+                class:loser={row.board && isLoser(row.board, row.leftSide)}>{name(row.left)}</span
+              >
+            </td>
+            <td>
+              {#if row.right == null}
+                <span class="player bye-opponent"
+                  >{$_(row.cupBye ? "roundView.cupByeOpponent" : "roundView.byeOpponent")}</span
+                >
+              {:else}
+                <span
+                  class="player"
+                  class:winner={isWinner(row.board!, other(row.leftSide))}
+                  class:loser={isLoser(row.board!, other(row.leftSide))}>{name(row.right)}</span
+                >
+              {/if}
+            </td>
+            {#if handicapPolicy === "suggested"}
+              <td class="suggested suggested-col">
+                {#if row.board && !isCup(row.board) && suggestedHandicaps[row.index]}
+                  <span title={HANDICAPS.find((h) => h.value === suggestedHandicaps[row.index])?.label}
+                    >{suggestedHandicaps[row.index]}</span
+                  >
+                {/if}
+              </td>
+            {/if}
+          </tr>
+        {/each}
+      </tbody>
+    </table>
   {:else}
     <table>
       <thead>
@@ -530,8 +686,8 @@
               <button
                 type="button"
                 class="player"
-                class:winner={board.result === "player1" || board.no_show === "player2"}
-                class:loser={board.result === "player2" || absent(board.no_show, "player1")}
+                class:winner={isWinner(board, "player1")}
+                class:loser={isLoser(board, "player1")}
                 disabled={busy}
                 title={$_("roundView.clickToSetWinner")}
                 onclick={() => onClickWinner(index, "player1")}
@@ -543,8 +699,8 @@
               <button
                 type="button"
                 class="player"
-                class:winner={board.result === "player2" || board.no_show === "player1"}
-                class:loser={board.result === "player1" || absent(board.no_show, "player2")}
+                class:winner={isWinner(board, "player2")}
+                class:loser={isLoser(board, "player2")}
                 disabled={busy}
                 title={$_("roundView.clickToSetWinner")}
                 onclick={() => onClickWinner(index, "player2")}
@@ -811,7 +967,16 @@
   .round-toolbar {
     display: flex;
     justify-content: flex-end;
+    gap: 0.5rem;
     margin-bottom: 0.5rem;
+  }
+  /* Matches `.probe-mode.active`: an accent border on the ghost button's
+     transparent background. (`--text-on-accent` is for text *on* an accent
+     fill, so it would be invisible here.) */
+  .round-toolbar .ghost.active {
+    border-color: var(--color-accent, var(--border-strong));
+    color: var(--text-primary);
+    font-weight: 600;
   }
   table {
     width: 100%;

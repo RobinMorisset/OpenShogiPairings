@@ -113,6 +113,10 @@
   "roundView": {
     "unknownPlayer": "(inconnu)",
     "print": "Imprimer",
+    "alphabetical": "Par nom",
+    "alphabeticalTitle": "Liste tous les joueurs par ordre alphabétique, chacun avec sa table et son adversaire — une feuille à imprimer pour la consultation. Les résultats se saisissent dans la vue par défaut.",
+    "playerColumn": "Joueur",
+    "opponentColumn": "Adversaire",
     "noBoards": "Aucune table dans cette ronde.",
     "board": "Table",
     "player1": "Joueur 1",

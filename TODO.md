@@ -49,7 +49,3 @@ Known limitations and future work, roughly ordered by area.
 
 - **More complete american grid exporter** There should be fields in the settings with the dates
   and time control of the tournament, so they can be reported in the header of the american grid;
-
-## Frontend
-
-- **Pairings in alphabetical order**
