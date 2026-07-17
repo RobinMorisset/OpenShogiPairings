@@ -13,6 +13,33 @@ fi
 echo "== cargo clippy =="
 cargo clippy --workspace --all-targets -- -D warnings
 
+echo "== Cargo.lock freshness =="
+# Both lockfiles have a habit of landing a few commits late, for two reasons:
+#   - frontend/src-tauri is excluded from the workspace (see the top-level
+#     Cargo.toml), so nothing in the usual loop resolves it. A dependency added
+#     to a path crate like osp-core leaves its lock stale until someone happens
+#     to build the desktop app, long after the commit that caused it.
+#   - the root lock is the opposite problem: the clippy above refreshes it as a
+#     side effect, so it sits modified-but-unstaged and misses the commit.
+# Re-resolve each (a no-op when fresh) and stage whatever moved, so the lock
+# travels with the manifest change instead of trailing it.
+#   `update -w` only re-locks the workspace's own members: it adds and drops
+#     entries to match the manifests but leaves registry deps on their pinned
+#     versions, so this never smuggles a dependency bump into an unrelated
+#     commit. (Plain `update` would bump everything; `metadata` is no good
+#     either — it insists on downloading every package in the graph, including
+#     ones this host never builds, so it fails even on a correct lock.)
+#   --offline keeps it fast and network-free: re-locking only reads the registry
+#     index, which is already on disk.
+for manifest in Cargo.toml frontend/src-tauri/Cargo.toml; do
+  lock="${manifest%Cargo.toml}Cargo.lock"
+  cargo update --workspace --offline --manifest-path "$manifest" --quiet
+  if ! git diff --quiet -- "$lock"; then
+    git add "$lock"
+    echo "   $lock was out of date — refreshed and added to this commit"
+  fi
+done
+
 echo "== svelte-check =="
 # On Windows (Git Bash / MSYS), node isn't on the shell PATH by default.
 case "$(uname -s)" in
