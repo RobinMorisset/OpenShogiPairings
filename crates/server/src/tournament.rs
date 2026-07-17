@@ -379,7 +379,7 @@ async fn update_settings(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
     store.mutate(expected, move |t| {
-        t.update_settings(settings);
+        t.update_settings(settings)?;
         Ok(())
     })?;
     view(&store)

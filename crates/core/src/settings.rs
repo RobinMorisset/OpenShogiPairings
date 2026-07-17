@@ -792,10 +792,9 @@ impl TournamentSettings {
         let mut seen_tb = HashSet::new();
         self.tiebreaks.retain(|&tb| seen_tb.insert(tb));
         // The estimated-ELO tie-break is meaningless unless a live estimate is
-        // actually maintained — outside both ELO pairing modes *and* estimate-
-        // based MacMahon it just sits at each player's registration rating — so
-        // it is not a valid ranking criterion there.
-        if !self.elo_estimate_needed() && !self.macmahon_from_estimate_active() {
+        // actually maintained — without one it just sits at each player's
+        // registration rating — so it is not a valid ranking criterion there.
+        if !self.elo_estimate_live() {
             self.tiebreaks.retain(|&tb| tb != Tiebreak::EstElo);
         }
 
@@ -809,8 +808,8 @@ impl TournamentSettings {
     }
 
     /// Whether a live ELO estimate needs to be maintained for **pairing**
-    /// purposes — either ELO mode. Used to gate the pairing model's ELO context
-    /// (edge weights, bye ranks). Note this is *not* the only place a live
+    /// purposes — i.e. the ELO pairing mode. Used to gate the pairing model's ELO
+    /// context (edge weights, bye ranks). Note this is *not* the only place a live
     /// estimate is maintained: [`Self::macmahon_from_estimate_active`] maintains
     /// one for scoring even in plain Swiss.
     pub fn elo_estimate_needed(&self) -> bool {
@@ -833,6 +832,16 @@ impl TournamentSettings {
             }
             PairingMode::Elo { .. } => false,
         }
+    }
+
+    /// Whether a live ELO estimate is maintained *at all* — for pairing (ELO mode)
+    /// or for scoring (estimate-based MacMahon). This is the single gate for
+    /// whether the estimated-ELO value is computed, shown as a standings column,
+    /// and usable as a ranking tie-break; the frontend mirrors it as
+    /// `eloEstimateLive`. Keep those in sync — splitting this rule is what let the
+    /// estimate column diverge between the two modes.
+    pub fn elo_estimate_live(&self) -> bool {
+        self.elo_estimate_needed() || self.macmahon_from_estimate_active()
     }
 
     /// The ELO-estimate K multiplier `m` as a float. (The `map_or` default is

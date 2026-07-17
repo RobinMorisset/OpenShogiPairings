@@ -101,6 +101,7 @@ impl From<TournamentError> for ApiError {
             | TournamentError::HandicapNotAllowedForCup
             | TournamentError::UnsupportedFormatVersion { .. }
             | TournamentError::MalformedSave(_)
+            | TournamentError::EloEstimateUnanchored
             | TournamentError::CupSizeRequired
             | TournamentError::InvalidCupSize { .. }
             | TournamentError::NotEnoughEligiblePlayers { .. }

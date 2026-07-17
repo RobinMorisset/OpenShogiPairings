@@ -179,6 +179,40 @@ fn is_reliably_rated(player: &Player) -> bool {
     matches!(player.fesa_games, Some(games) if games >= PROVISIONAL_GAMES_THRESHOLD)
 }
 
+/// Whether the ELO estimate has a **scale anchor**: at least one player who is
+/// either pinned to a fixed rating (K multiplier 0, see [`estimate_elos`]) or held
+/// by a *proper* (non-flat) prior centered on a fixed value — a rated player's
+/// registration rating, or an unrated player's `unrated_center`.
+///
+/// It matters because a flat prior contributes nothing to the objective, so if
+/// *every* player is on a flat prior and nothing is pinned, the log-likelihood is
+/// invariant under adding the same constant to every `θ`: the scale has a free
+/// additive degree of freedom. The estimates are then meaningful only *relative*
+/// to each other — their absolute ELO values (and the all-loss floor an all-loss
+/// player pins near, [`FLAT_ALL_LOSS_FLOOR`]) are arbitrary. Pairing and
+/// estimate-based MacMahon read them as absolute numbers, so an unanchored field
+/// yields scale-nonsensical results. Callers validate against this before letting
+/// the estimator drive anything (see `Tournament::finalize_registration_with` /
+/// `update_settings`).
+pub(crate) fn has_scale_anchor(players: &[Player], settings: &TournamentSettings) -> bool {
+    let m = settings.elo_k_multiplier();
+    players.iter().any(|p| {
+        // K multiplier 0 pins a rated player to their registration rating — an
+        // absolute anchor, regardless of prior shape.
+        if m == 0.0 && p.rating.is_some() {
+            return true;
+        }
+        let shape = match p.rating {
+            None => settings.elo_prior_shape_unrated(),
+            Some(_) if is_reliably_rated(p) => settings.elo_prior_shape_established(),
+            Some(_) => settings.elo_prior_shape_provisional(),
+        };
+        // A proper prior (Gaussian/Laplace) is centered on a fixed value, so it
+        // anchors the scale; a flat prior does not.
+        !matches!(shape, EloPriorShape::Flat)
+    })
+}
+
 /// A player's Gaussian prior `(mean, standard deviation)` on the ELO scale.
 ///
 /// A rated player is centered on their registration rating with a width derived
@@ -394,10 +428,11 @@ enum FlatDegenerate {
 /// Estimate every player's current ELO (posterior mode) from the completed
 /// rounds, using the FESA-K × multiplier prior from `settings`.
 ///
-/// Byes contribute nothing (they are not games), draws score ½ for each side, and
-/// handicap games are excluded for now (V1 — a handicap→ELO mapping is future
-/// work). The returned map has one entry per player in `players`; a player with no
-/// counted games sits exactly at their prior mean.
+/// Byes contribute nothing (they are not games) and draws score ½ for each side.
+/// Handicap games *are* counted: they use the actual result plus a handicap offset
+/// on each side's effective strength (the giver plays as if weaker — see the games
+/// loop below), not the effective winner. The returned map has one entry per player
+/// in `players`; a player with no counted games sits exactly at their prior mean.
 ///
 /// A K multiplier of 0 (`settings.elo_k_multiplier() == 0`) **pins** every rated
 /// player to their registration rating — only unrated players are estimated. This

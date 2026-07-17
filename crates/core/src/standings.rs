@@ -113,11 +113,11 @@ pub struct Standing {
     /// Running win total after each completed round (the sequence CUSSW sums).
     pub running_wins: Vec<Wins>,
     /// The player's current estimated ELO (rounded), from the Bayesian estimate
-    /// that drives the experimental ELO pairing mode (see [`crate::estimate_elos`]).
-    /// `None` outside ELO mode: the estimate is only shown (and only ranks) when
-    /// [`TournamentSettings::elo_estimate_needed`], so in Swiss mode it isn't
-    /// computed at all. When present, a player with no counted games sits at their
-    /// prior mean (their registration rating, or 600 if unrated).
+    /// (see [`crate::estimate_elos`]). `None` unless a live estimate is maintained
+    /// — [`TournamentSettings::elo_estimate_live`], i.e. ELO pairing *or*
+    /// estimate-based MacMahon — since otherwise it isn't computed at all. When
+    /// present, a player with no counted games sits at their prior mean (their
+    /// registration rating, or 600 if unrated).
     pub estimated_elo: Option<i32>,
 }
 
@@ -178,10 +178,12 @@ pub fn compute_standings(
     let score_m = |o: &TournamentId| scores.get_tid(*o).points;
     let score_w = |o: &TournamentId| scores.get_tid(*o).victories;
 
-    // The live Bayesian ELO estimate — only shown, and only ranks, in ELO mode,
-    // so skip the whole (quadrature-heavy) computation in Swiss mode.
+    // The live Bayesian ELO estimate — computed whenever a live estimate is
+    // maintained (ELO pairing *or* estimate-based MacMahon), which is exactly when
+    // it is shown and ranks; skip the whole (quadrature-heavy) computation
+    // otherwise.
     let elos = settings
-        .elo_estimate_needed()
+        .elo_estimate_live()
         .then(|| estimate_elos(players, settings, rounds));
 
     // SOSM and SOSW first — each needed on its own for the SOSOS metrics. Indexed
@@ -268,11 +270,11 @@ pub fn compute_standings(
     let mut groups: Vec<Vec<usize>> = vec![start];
 
     for &tb in &settings.tiebreaks {
-        // Estimated ELO only ranks when a live estimate is maintained (either ELO
-        // mode); otherwise the estimate is just the registration rating, so skip
-        // it (defends against a loaded save that predates normalization dropping
-        // it).
-        if tb == Tiebreak::EstElo && !settings.elo_estimate_needed() {
+        // Estimated ELO only ranks when a live estimate is maintained (ELO pairing
+        // or estimate-based MacMahon); otherwise the estimate is just the
+        // registration rating, so skip it (defends against a loaded save that
+        // predates normalization dropping it).
+        if tb == Tiebreak::EstElo && !settings.elo_estimate_live() {
             continue;
         }
         let mut next_groups: Vec<Vec<usize>> = Vec::new();
@@ -788,6 +790,25 @@ mod tests {
         let after = compute_standings(&[a.clone(), b.clone()], &elo_mode, &rounds);
         assert!(of(&after, a.id) > 1400, "the winner's estimate rises");
         assert!(of(&after, b.id) < 1800, "the loser's estimate falls");
+    }
+
+    #[test]
+    fn estimated_elo_is_populated_in_macmahon_from_estimate_mode() {
+        // Estimate-based MacMahon maintains a live estimate for scoring, so the
+        // standings must expose it too — not only in ELO pairing mode. (It used to
+        // be `None` here, which left the Results-tab column blank.)
+        let a = player(1, Some(1400));
+        let b = player(2, Some(1800));
+        let settings = TournamentSettings::default()
+            .with_thresholds(vec![MacMahonThreshold::elo(1500)])
+            .with_macmahon_from_estimate();
+        assert!(settings.macmahon_from_estimate_active());
+
+        let st = compute_standings(&[a.clone(), b.clone()], &settings, &[]);
+        let est = |id| st.iter().find(|s| s.player_id == id).unwrap().estimated_elo;
+        // No games → the estimate seeds at the registration rating, and it is present.
+        assert_eq!(est(a.id), Some(1400));
+        assert_eq!(est(b.id), Some(1800));
     }
 
     #[test]

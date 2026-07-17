@@ -155,6 +155,14 @@ pub enum TournamentError {
     /// enough to read its format version).
     #[error("malformed tournament save: {0}")]
     MalformedSave(String),
+    /// The ELO estimate is enabled but nothing anchors its scale: every player is
+    /// on a flat prior and none is pinned, so the estimate has no absolute
+    /// reference (see [`crate::elo::has_scale_anchor`]).
+    #[error(
+        "the ELO estimate has no scale anchor: add a rated player, pin ratings \
+         (K multiplier 0), or use a non-flat unrated prior"
+    )]
+    EloEstimateUnanchored,
     /// The cup is enabled but no size was chosen at finalization.
     #[error("choose a cup size to finalize (the cup is enabled)")]
     CupSizeRequired,
@@ -309,9 +317,35 @@ impl Tournament {
     /// Allowed at any point; the caller (UI) warns when registration is already
     /// finalized, since changing the groups shifts everyone's points and future
     /// pairings.
-    pub fn update_settings(&mut self, settings: TournamentSettings) -> &TournamentSettings {
-        self.settings = settings.normalized();
-        &self.settings
+    pub fn update_settings(
+        &mut self,
+        settings: TournamentSettings,
+    ) -> Result<&TournamentSettings, TournamentError> {
+        let settings = settings.normalized();
+        // Once the tournament has started, a settings change is the last gate
+        // before the new config takes effect (there is no re-finalization), so the
+        // ELO scale anchor is validated here too. Before finalization the field may
+        // still be incomplete, so that case is left to
+        // [`finalize_registration_with`], which validates against the final field.
+        if self.registration_finalized {
+            Self::validate_elo_scale_anchor(&settings, &self.players)?;
+        }
+        self.settings = settings;
+        Ok(&self.settings)
+    }
+
+    /// If the ELO estimate would be live under `settings`, require the field to
+    /// anchor its scale — otherwise the estimate (and anything it drives: pairing,
+    /// estimate-based MacMahon) has no absolute reference. See
+    /// [`crate::elo::has_scale_anchor`].
+    fn validate_elo_scale_anchor(
+        settings: &TournamentSettings,
+        players: &[Player],
+    ) -> Result<(), TournamentError> {
+        if settings.elo_estimate_live() && !crate::elo::has_scale_anchor(players, settings) {
+            return Err(TournamentError::EloEstimateUnanchored);
+        }
+        Ok(())
     }
 
     /// The ranked standings (points and tie-breaks) from the completed rounds.
@@ -353,6 +387,11 @@ impl Tournament {
         if self.registration_finalized {
             return Err(TournamentError::RegistrationAlreadyFinalized);
         }
+
+        // Pre-validate (before any mutation) that an enabled ELO estimate has a
+        // scale anchor in the final field, so we don't finalize into an estimate
+        // whose absolute scale is undefined.
+        Self::validate_elo_scale_anchor(&self.settings, &self.players)?;
 
         // Pre-validate the cup so a bad request doesn't half-finalize.
         let cup_size = if self.settings.cup_enabled {
@@ -2486,7 +2525,8 @@ mod tests {
         t.update_settings(TournamentSettings {
             cup_enabled: true,
             ..Default::default()
-        });
+        })
+        .unwrap();
     }
 
     fn add_rated(t: &mut Tournament, name: &str, rating: u32, eligible: bool) -> Uuid {
@@ -2517,6 +2557,59 @@ mod tests {
             .boards
             .iter()
             .find(|bd| (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a))
+    }
+
+    #[test]
+    fn finalize_rejects_an_elo_estimate_with_no_scale_anchor() {
+        use crate::settings::EloPriorShape;
+
+        // ELO pairing with a flat unrated prior and an all-unrated field: nothing
+        // pins the scale, so the estimate would have no absolute reference.
+        let flat_unrated = TournamentSettings::elo_pairing()
+            .map_estimator(|e| e.prior_shape_unrated = EloPriorShape::Flat);
+
+        let mut t = Tournament::new("Open").unwrap();
+        // During registration the field may still grow, so setting it is allowed.
+        t.update_settings(flat_unrated).unwrap();
+        t.add_player(named("A")).unwrap();
+        t.add_player(named("B")).unwrap();
+
+        // Finalizing into the unanchored estimate is refused, leaving registration
+        // open (nothing was mutated).
+        assert!(matches!(
+            t.finalize_registration(),
+            Err(TournamentError::EloEstimateUnanchored)
+        ));
+        assert!(!t.registration_finalized);
+
+        // A single rated player anchors the scale (its Gaussian prior is centered on
+        // a fixed rating), so finalization then succeeds.
+        add_rated(&mut t, "R", 1500, false);
+        assert!(t.finalize_registration().is_ok());
+    }
+
+    #[test]
+    fn changing_settings_after_start_rejects_an_unanchored_elo_estimate() {
+        use crate::settings::EloPriorShape;
+
+        // A started Swiss tournament of unrated players.
+        let mut t = Tournament::new("Open").unwrap();
+        t.add_player(named("A")).unwrap();
+        t.add_player(named("B")).unwrap();
+        t.finalize_registration().unwrap();
+
+        // Switching to ELO pairing with a flat unrated prior now — no rated player
+        // to anchor the scale — is refused at the settings change.
+        let flat_unrated = TournamentSettings::elo_pairing()
+            .map_estimator(|e| e.prior_shape_unrated = EloPriorShape::Flat);
+        assert!(matches!(
+            t.update_settings(flat_unrated),
+            Err(TournamentError::EloEstimateUnanchored)
+        ));
+
+        // The default ELO settings (a Gaussian unrated prior) DO anchor the scale,
+        // so that change is accepted.
+        assert!(t.update_settings(TournamentSettings::elo_pairing()).is_ok());
     }
 
     /// Record `winner` beating `loser` on their board in round `rnum`.
@@ -2661,7 +2754,8 @@ mod tests {
             cup_enabled: true,
             long_boards_enabled: true,
             ..Default::default()
-        });
+        })
+        .unwrap();
         let s: Vec<Uuid> = (0..8)
             .map(|i| add_rated(&mut t, &format!("E{i}"), 2000 - i * 100, true))
             .collect();

@@ -313,7 +313,8 @@ convergence to the unique global maximum, so the result is deterministic given a
 fixed tolerance and max-iteration cap.
 
 Seed: rated players at `μᵢ₀`, unrated at `600`. Games that don't inform strength
-(byes; handicap games in V1 — see §4) are simply excluded from the sums.
+(byes) are simply excluded from the sums. Handicap games *are* included, via the
+per-side handicap offset described in §4.
 
 Per-player posterior variance (`σ_current² = −1/H` at the optimum), if wanted
 later (e.g. the results-simulation TODO or the caps of §2.3/§2.4), is available
