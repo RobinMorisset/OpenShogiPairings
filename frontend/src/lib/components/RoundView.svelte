@@ -1171,7 +1171,10 @@
     padding: 0.25rem 0.4rem;
     border: 1px solid var(--border-soft);
     border-radius: 0.4rem;
-    background: transparent;
+    /* Theme-aware inset (like .tb-select), not `transparent`: a transparent
+       native <select> falls back to the OS light combobox on Windows/WebView2,
+       giving white-on-white with the inherited light text in dark mode. */
+    background: var(--bg-inset);
     color: inherit;
     font: inherit;
   }
