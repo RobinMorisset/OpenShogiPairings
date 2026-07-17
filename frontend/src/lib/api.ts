@@ -648,6 +648,18 @@ export function setPlayerEligible(
   });
 }
 
+/** Add or remove a player's membership in a referee-defined category. */
+export function setPlayerCategory(
+  id: string,
+  categoryId: string,
+  member: boolean,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath(`/players/${id}/category`), {
+    method: "POST",
+    body: JSON.stringify({ category_id: categoryId, member }),
+  });
+}
+
 /** Apply a manual point bonus (positive delta) or malus (negative) to a player. */
 export function addPointAdjustment(
   id: string,

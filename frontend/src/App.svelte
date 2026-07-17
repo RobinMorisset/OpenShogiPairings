@@ -27,6 +27,7 @@
     setBoardNoShow,
     setBoardWinner,
     setPlayerEligible,
+    setPlayerCategory,
     setSitoutValue,
     undoTournament,
     updateDraft,
@@ -528,6 +529,12 @@
     });
   }
 
+  function handleToggleCategory(id: string, categoryId: string, member: boolean) {
+    run(async () => {
+      apply(await setPlayerCategory(id, categoryId, member));
+    });
+  }
+
   function handleAddPointAdjustment(id: string, delta: number, reason: string) {
     run(async () => {
       apply(await addPointAdjustment(id, delta, reason));
@@ -962,11 +969,13 @@
             <PlayerList
               players={tournament.players}
               showEligible={cupEnabled}
+              categories={tournament.settings.categories ?? []}
               finalized={tournament.registration_finalized}
               onEdit={handleEditPlayer}
               onRemove={handleRemovePlayer}
               onToggleEligible={handleToggleEligible}
               onSetEligibleByNationality={handleSetEligibleByNationality}
+              onToggleCategory={handleToggleCategory}
               onAddAdjustment={handleAddPointAdjustment}
               onRemoveAdjustment={handleRemovePointAdjustment}
               {busy}
@@ -978,6 +987,7 @@
             {standings}
             {cupPodium}
             {effectiveWinners}
+            categories={tournament.settings.categories ?? []}
             onSetSitoutValue={handleSetSitoutValue}
           />
         {:else if activeTab === "cup" && tournament.cup && cupBracket}

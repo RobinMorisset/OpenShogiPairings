@@ -111,6 +111,7 @@ impl From<TournamentError> for ApiError {
             | TournamentError::EmptyAdjustmentReason
             | TournamentError::ZeroPointAdjustment => ApiError::BadRequest(err.to_string()),
             TournamentError::PlayerNotFound(_)
+            | TournamentError::CategoryNotFound(_)
             | TournamentError::RoundNotFound(_)
             | TournamentError::BoardNotFound { .. }
             // The sit-out addressed by the route doesn't exist: that player

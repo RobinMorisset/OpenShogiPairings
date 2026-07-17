@@ -38,6 +38,7 @@ export type { EloEstimator } from "./generated/EloEstimator";
 export type { MacMahon } from "./generated/MacMahon";
 export type { MacMahonSource } from "./generated/MacMahonSource";
 export type { Player } from "./generated/Player";
+export type { PlayerCategory } from "./generated/PlayerCategory";
 export type { PointAdjustment } from "./generated/PointAdjustment";
 export type { RatedPlayer } from "./generated/RatedPlayer";
 export type { Round } from "./generated/Round";

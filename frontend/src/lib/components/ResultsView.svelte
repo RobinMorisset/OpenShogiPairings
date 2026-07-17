@@ -5,6 +5,7 @@
     Board,
     CupPodium,
     Player,
+    PlayerCategory,
     Round,
     Sitout,
     SitoutValue,
@@ -28,6 +29,8 @@
     /** Winner that counts for standings/pairing per board, server-computed
      *  (respects the Wiel rule), indexed like `tournament.rounds[i].boards[j]`. */
     effectiveWinners: (Winner | null)[][];
+    /** Referee-defined categories, for the highlight filter and leader marks. */
+    categories?: PlayerCategory[];
     /** Re-score one player's sit-out in one round. Omitted for a read-only
      *  table, which leaves the sit-out cells as plain text. */
     onSetSitoutValue?: (roundNumber: number, player: number, value: SitoutValue) => void;
@@ -38,6 +41,7 @@
     standings,
     cupPodium = null,
     effectiveWinners,
+    categories = [],
     onSetSitoutValue,
   }: Props = $props();
 
@@ -151,6 +155,47 @@
         (r): r is { standing: Standing; player: Player } => r.player != null,
       ),
   );
+
+  // The category leaders: for each category, the highest-ranked player in it
+  // (rows are already in the server's ranked order). Keyed by player id → the
+  // names of every category that player tops, so one ⭐ carries a tooltip
+  // listing them all (a player can lead more than one).
+  const categoryLeaders = $derived.by(() => {
+    const leaders = new Map<string, string[]>();
+    for (const cat of categories) {
+      const leader = rows.find(({ player }) => (player.categories ?? []).includes(cat.id));
+      if (!leader) continue;
+      const led = leaders.get(leader.player.id) ?? [];
+      led.push(cat.name);
+      leaders.set(leader.player.id, led);
+    }
+    return leaders;
+  });
+
+  // The categories the referee has selected to highlight. Kept as an array (a
+  // reassigned-on-toggle value) so Svelte reactivity is straightforward.
+  let highlightedCategories = $state<string[]>([]);
+  const filtering = $derived(highlightedCategories.length > 0);
+
+  // Drop any selection that points at a now-deleted category, so filtering never
+  // stays "active" with nothing left to highlight.
+  $effect(() => {
+    const valid = new Set(categories.map((c) => c.id));
+    if (highlightedCategories.some((c) => !valid.has(c))) {
+      highlightedCategories = highlightedCategories.filter((c) => valid.has(c));
+    }
+  });
+
+  function toggleHighlight(id: string) {
+    highlightedCategories = highlightedCategories.includes(id)
+      ? highlightedCategories.filter((c) => c !== id)
+      : [...highlightedCategories, id];
+  }
+
+  // Whether a player belongs to any currently-highlighted category.
+  function isHighlighted(player: Player): boolean {
+    return (player.categories ?? []).some((c) => highlightedCategories.includes(c));
+  }
 
   type PlayedCell = {
     kind: "played";
@@ -493,6 +538,26 @@
       {/if}
     </div>
   {/if}
+  {#if categories.length > 0}
+    <div class="category-filter print-hide">
+      <span class="filter-label">{$_("resultsView.highlightCategory")}</span>
+      {#each categories as cat (cat.id)}
+        <button
+          type="button"
+          class="cat-chip"
+          class:active={highlightedCategories.includes(cat.id)}
+          onclick={() => toggleHighlight(cat.id)}
+        >{cat.name}</button>
+      {/each}
+      {#if filtering}
+        <button
+          type="button"
+          class="cat-chip clear"
+          onclick={() => (highlightedCategories = [])}
+        >{$_("resultsView.clearHighlight")}</button>
+      {/if}
+    </div>
+  {/if}
   <table onmousemove={trackTip} onmouseleave={clearTip}>
     <thead>
       <tr>
@@ -519,9 +584,9 @@
     </thead>
     <tbody>
       {#each rows as { standing, player } (player.id)}
-        <tr>
+        <tr class:cat-highlight={filtering && isHighlighted(player)} class:cat-dim={filtering && !isHighlighted(player)}>
           <td class="num">{player.tournament_id ?? "—"}</td>
-          <td>{#if player.tournament_id != null && medalOf.has(player.tournament_id)}<span class="medal">{medalOf.get(player.tournament_id)}</span> {/if}{player.last_name}</td>
+          <td>{#if player.tournament_id != null && medalOf.has(player.tournament_id)}<span class="medal">{medalOf.get(player.tournament_id)}</span> {/if}{#if categoryLeaders.has(player.id)}<span class="cat-star" title={$_("resultsView.categoryLeader", { values: { categories: categoryLeaders.get(player.id)?.join(", ") } })}>⭐</span> {/if}{player.last_name}</td>
           <td>{player.first_name || "—"}</td>
           <td class="num">{player.rating ?? "—"}</td>
           {#if showEstimatedElo}
@@ -789,6 +854,48 @@
   }
   .medal {
     font-size: 0.85rem;
+  }
+  .cat-star {
+    font-size: 0.85rem;
+    cursor: help;
+  }
+  .category-filter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.6rem;
+  }
+  .filter-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+  .cat-chip {
+    padding: 0.2rem 0.6rem;
+    border: 1px solid var(--border-soft);
+    border-radius: 999px;
+    background: var(--bg-inset);
+    color: inherit;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+  .cat-chip:hover {
+    background: var(--bg-hover);
+  }
+  .cat-chip.active {
+    background: var(--bg-accent);
+    border-color: var(--border-accent-strong);
+    color: var(--text-on-accent);
+  }
+  .cat-chip.clear {
+    border-style: dashed;
+  }
+  tr.cat-dim {
+    opacity: 0.35;
+  }
+  tr.cat-highlight {
+    background: var(--bg-hover-strong);
   }
   .cell-tip {
     position: fixed;

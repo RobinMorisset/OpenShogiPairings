@@ -93,6 +93,9 @@ pub enum TournamentError {
     /// No player with the given id exists in this tournament.
     #[error("no player with id {0}")]
     PlayerNotFound(Uuid),
+
+    #[error("no category with id {0}")]
+    CategoryNotFound(Uuid),
     /// Registration has already been finalized.
     #[error("registration is already finalized")]
     RegistrationAlreadyFinalized,
@@ -330,6 +333,12 @@ impl Tournament {
         if self.registration_finalized {
             Self::validate_elo_scale_anchor(&settings, &self.players)?;
         }
+        // Prune any player memberships in categories this update deleted, so a
+        // stale id can never linger (and later collide with a re-created one).
+        let valid_categories = settings.category_ids();
+        for p in &mut self.players {
+            p.categories.retain(|c| valid_categories.contains(c));
+        }
         self.settings = settings;
         Ok(&self.settings)
     }
@@ -454,6 +463,32 @@ impl Tournament {
     ) -> Result<&Player, TournamentError> {
         let player = self.player_mut(id)?;
         player.eligible = eligible;
+        Ok(player)
+    }
+
+    /// Add (`member`) or remove a player's membership in a referee-defined
+    /// category. The category must currently exist in the settings, else
+    /// [`TournamentError::CategoryNotFound`]. Allowed at any time — categories are
+    /// descriptive, so (unlike cup eligibility) they never freeze at
+    /// finalization. The stored list is kept sorted and de-duplicated.
+    pub fn set_player_category(
+        &mut self,
+        id: Uuid,
+        category_id: Uuid,
+        member: bool,
+    ) -> Result<&Player, TournamentError> {
+        if !self.settings.categories.iter().any(|c| c.id == category_id) {
+            return Err(TournamentError::CategoryNotFound(category_id));
+        }
+        let player = self.player_mut(id)?;
+        if member {
+            if !player.categories.contains(&category_id) {
+                player.categories.push(category_id);
+                player.categories.sort();
+            }
+        } else {
+            player.categories.retain(|&c| c != category_id);
+        }
         Ok(player)
     }
 
@@ -2515,6 +2550,110 @@ mod tests {
                 supported: TOURNAMENT_FORMAT_VERSION,
             })
         );
+    }
+
+    // --- Player categories ------------------------------------------------
+
+    fn category(name: &str) -> crate::settings::PlayerCategory {
+        crate::settings::PlayerCategory {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+        }
+    }
+
+    fn with_categories(cats: Vec<crate::settings::PlayerCategory>) -> TournamentSettings {
+        TournamentSettings {
+            categories: cats,
+            ..Default::default()
+        }
+    }
+
+    fn cats_of(t: &Tournament, id: Uuid) -> Vec<Uuid> {
+        t.players
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .categories
+            .clone()
+    }
+
+    #[test]
+    fn set_player_category_adds_and_removes_membership() {
+        let mut t = Tournament::new("Paris Open").unwrap();
+        let women = category("Women");
+        let u18 = category("U18");
+        t.update_settings(with_categories(vec![women.clone(), u18.clone()]))
+            .unwrap();
+        let p = t.add_player(named("Tanaka")).unwrap().id;
+
+        // Default: no memberships.
+        assert!(cats_of(&t, p).is_empty());
+
+        // Join both categories; the list stays sorted and de-duplicated.
+        t.set_player_category(p, women.id, true).unwrap();
+        t.set_player_category(p, u18.id, true).unwrap();
+        t.set_player_category(p, women.id, true).unwrap(); // idempotent
+        let mut expected = vec![women.id, u18.id];
+        expected.sort();
+        assert_eq!(cats_of(&t, p), expected);
+
+        // Leave one; the other remains.
+        t.set_player_category(p, women.id, false).unwrap();
+        assert_eq!(cats_of(&t, p), vec![u18.id]);
+    }
+
+    #[test]
+    fn set_player_category_rejects_an_unknown_category() {
+        let mut t = Tournament::new("Paris Open").unwrap();
+        let p = t.add_player(named("Tanaka")).unwrap().id;
+        let stray = Uuid::new_v4();
+        assert_eq!(
+            t.set_player_category(p, stray, true),
+            Err(TournamentError::CategoryNotFound(stray))
+        );
+    }
+
+    #[test]
+    fn deleting_a_category_prunes_it_from_every_player() {
+        let mut t = Tournament::new("Paris Open").unwrap();
+        let women = category("Women");
+        let u18 = category("U18");
+        t.update_settings(with_categories(vec![women.clone(), u18.clone()]))
+            .unwrap();
+        let p = t.add_player(named("Tanaka")).unwrap().id;
+        t.set_player_category(p, women.id, true).unwrap();
+        t.set_player_category(p, u18.id, true).unwrap();
+
+        // Drop "Women" from the settings: the membership is pruned, "U18" stays.
+        t.update_settings(with_categories(vec![u18.clone()]))
+            .unwrap();
+        assert_eq!(cats_of(&t, p), vec![u18.id]);
+    }
+
+    #[test]
+    fn normalizing_settings_trims_blank_and_duplicate_categories() {
+        let id = Uuid::new_v4();
+        let s = TournamentSettings {
+            categories: vec![
+                crate::settings::PlayerCategory {
+                    id,
+                    name: "  Women  ".to_string(),
+                },
+                crate::settings::PlayerCategory {
+                    id, // duplicate id — first kept
+                    name: "dup".to_string(),
+                },
+                crate::settings::PlayerCategory {
+                    id: Uuid::new_v4(),
+                    name: "   ".to_string(), // blank — dropped
+                },
+            ],
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(s.categories.len(), 1);
+        assert_eq!(s.categories[0].name, "Women"); // trimmed
+        assert_eq!(s.categories[0].id, id);
     }
 
     // --- Hybrid cup -------------------------------------------------------

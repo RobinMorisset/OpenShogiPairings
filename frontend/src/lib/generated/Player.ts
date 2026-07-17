@@ -63,6 +63,13 @@ club?: string,
  */
 eligible?: boolean, 
 /**
+ * The referee-defined categories this player belongs to (e.g. "Women",
+ * "U18"), each a [`crate::settings::PlayerCategory::id`]. Sorted and
+ * de-duplicated. Purely descriptive — drives the Players-tab checkbox
+ * columns and the standings filter/leader marks, never pairing or scoring.
+ */
+categories?: Array<string>, 
+/**
  * Manual point bonuses/maluses a referee has applied to this player (e.g. a
  * fair-play bonus, or a correction). Each entry's `delta` is folded into the
  * player's points alongside MacMahon starting points and victories (see

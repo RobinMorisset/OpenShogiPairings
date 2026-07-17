@@ -58,6 +58,7 @@ use crate::{auth, live};
 /// - `PUT    /players/{player_id}`  edit a player
 /// - `DELETE /players/{player_id}`  remove a player
 /// - `POST   /players/{player_id}/eligible`  set cup eligibility
+/// - `POST   /players/{player_id}/category`  set membership in a player category
 /// - `POST   /players/{player_id}/adjustments`             add a manual point bonus/malus
 /// - `DELETE /players/{player_id}/adjustments/{adjustment_id}` remove one
 /// - `GET    /backups`         list automatic backups, newest first
@@ -129,6 +130,7 @@ pub fn scope(state: AppState) -> Router<AppState> {
             axum::routing::put(edit_player).delete(remove_player),
         )
         .route("/players/{player_id}/eligible", post(set_player_eligible))
+        .route("/players/{player_id}/category", post(set_player_category))
         .route(
             "/players/{player_id}/adjustments",
             post(add_point_adjustment),
@@ -871,6 +873,29 @@ async fn set_player_eligible(
     let mut store = instance.write();
     store.mutate(expected, |t| {
         t.set_player_eligible(params.player_id, req.eligible)
+            .map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// Body of the category-membership endpoint: which category, and whether the
+/// player belongs to it.
+#[derive(Debug, Deserialize)]
+struct SetCategoryRequest {
+    category_id: Uuid,
+    member: bool,
+}
+
+/// Add or remove a player's membership in a referee-defined category.
+async fn set_player_category(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<PlayerParams>,
+    Json(req): Json<SetCategoryRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| {
+        t.set_player_category(params.player_id, req.category_id, req.member)
             .map(|_| ())
     })?;
     view(&store)

@@ -146,6 +146,12 @@ pub struct Player {
     /// registration; frozen into the bracket at finalization.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub eligible: bool,
+    /// The referee-defined categories this player belongs to (e.g. "Women",
+    /// "U18"), each a [`crate::settings::PlayerCategory::id`]. Sorted and
+    /// de-duplicated. Purely descriptive — drives the Players-tab checkbox
+    /// columns and the standings filter/leader marks, never pairing or scoring.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<Uuid>,
     /// Manual point bonuses/maluses a referee has applied to this player (e.g. a
     /// fair-play bonus, or a correction). Each entry's `delta` is folded into the
     /// player's points alongside MacMahon starting points and victories (see
@@ -227,6 +233,7 @@ impl Player {
             nationality: non_empty(new.nationality.unwrap_or_default()).map(|c| c.to_uppercase()),
             club: non_empty(new.club.unwrap_or_default()),
             eligible: false,
+            categories: Vec::new(),
             adjustments: Vec::new(),
         }
     }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
-  import type { NewPlayer, Player } from "../types";
+  import type { NewPlayer, Player, PlayerCategory } from "../types";
   import { formatGrade, gradeRank, parseGrade } from "../grade";
   import { printPage } from "../platform";
 
@@ -8,6 +8,8 @@
     players: Player[];
     /** Show the cup-eligibility column (when the hybrid cup is enabled). */
     showEligible?: boolean;
+    /** Referee-defined categories — one checkbox column each. */
+    categories?: PlayerCategory[];
     /** Registration already finalized — the cup bracket is frozen, so bulk
      * eligibility edits (only meaningful pre-finalization) are hidden. */
     finalized?: boolean;
@@ -18,6 +20,8 @@
     onToggleEligible?: (id: string, eligible: boolean) => void;
     /** Set cup eligibility for every player of the given nationality. */
     onSetEligibleByNationality?: (nationality: string, eligible: boolean) => void;
+    /** Toggle a player's membership in a category. */
+    onToggleCategory?: (id: string, categoryId: string, member: boolean) => void;
     /** Apply a manual point bonus (positive delta) or malus (negative) to a player. */
     onAddAdjustment?: (id: string, delta: number, reason: string) => void;
     /** Remove a previously applied point adjustment. */
@@ -28,11 +32,13 @@
   let {
     players,
     showEligible = false,
+    categories = [],
     finalized = false,
     onEdit,
     onRemove,
     onToggleEligible,
     onSetEligibleByNationality,
+    onToggleCategory,
     onAddAdjustment,
     onRemoveAdjustment,
     busy = false,
@@ -100,8 +106,8 @@
     onSetEligibleByNationality?.(bulkNationality, eligible);
   }
 
-  // #, last name, first name, rating, grade, nat., club, [cup], actions.
-  const colCount = $derived(7 + (showEligible ? 1 : 0) + 1);
+  // #, last name, first name, rating, grade, nat., club, [categories…], [cup], actions.
+  const colCount = $derived(7 + categories.length + (showEligible ? 1 : 0) + 1);
 
   type Field = "last_name" | "first_name" | "rating" | "grade" | "nationality" | "club";
 
@@ -378,6 +384,9 @@
         {@render sortHeader("grade", $_("playerList.grade"), false)}
         {@render sortHeader("nationality", $_("playerList.nationality"), false)}
         {@render sortHeader("club", $_("playerList.club"), false)}
+        {#each categories as cat (cat.id)}
+          <th class="category" title={cat.name}>{cat.name}</th>
+        {/each}
         {#if showEligible}
           <th class="elig">
             <button type="button" class="sort-btn" title={$_("playerList.eligibleForCup")} onclick={() => toggleSort("eligible")}>
@@ -401,6 +410,17 @@
           <td>{@render cell(player, "grade", false)}</td>
           <td>{@render cell(player, "nationality", false)}</td>
           <td>{@render cell(player, "club", false)}</td>
+          {#each categories as cat (cat.id)}
+            <td class="category">
+              <input
+                type="checkbox"
+                checked={(player.categories ?? []).includes(cat.id)}
+                disabled={busy}
+                title={cat.name}
+                onchange={(e) => onToggleCategory?.(player.id, cat.id, e.currentTarget.checked)}
+              />
+            </td>
+          {/each}
           {#if showEligible}
             <td class="elig">
               {#if finalized}
@@ -576,6 +596,10 @@
   .elig {
     text-align: center;
     width: 2.5rem;
+  }
+  .category {
+    text-align: center;
+    white-space: nowrap;
   }
   th.elig {
     width: auto;

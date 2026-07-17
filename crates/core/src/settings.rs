@@ -5,6 +5,7 @@ use std::num::NonZeroU32;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use ts_rs::TS;
+use uuid::Uuid;
 
 use crate::player::Grade;
 
@@ -585,6 +586,23 @@ impl Default for PairingMode {
     }
 }
 
+/// A referee-defined player category — an optional descriptive tag such as
+/// "Women", "U18" or "U14". Categories are created in the settings (none by
+/// default, no cap on how many, and freely renamed or deleted), shown as
+/// checkbox columns in the Players tab, and used to filter/highlight the
+/// standings and flag each category's leader. They are **purely descriptive**:
+/// a category never affects pairing, MacMahon points or the ranking itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct PlayerCategory {
+    /// Stable identifier, minted by the client when the category is created, so a
+    /// player's membership (which references this id) survives a later rename.
+    pub id: Uuid,
+    /// Display name. Trimmed and guaranteed non-empty in canonical form (see
+    /// [`TournamentSettings::normalized`]).
+    pub name: String,
+}
+
 /// Configuration that isn't tied to a single player or round.
 ///
 /// Kept as its own record so it can grow (time controls, tie-break choices, …)
@@ -628,6 +646,11 @@ pub struct TournamentSettings {
     /// points → SOS → SODOS → SOSOS order.
     #[serde(default = "default_tiebreaks")]
     pub tiebreaks: Vec<Tiebreak>,
+    /// Referee-defined player categories (see [`PlayerCategory`]). Empty by
+    /// default. Descriptive only — used for the Players-tab checkbox columns and
+    /// the standings filter/leader marks, never for pairing or scoring.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<PlayerCategory>,
 }
 
 impl Default for TournamentSettings {
@@ -639,6 +662,7 @@ impl Default for TournamentSettings {
             handicap_policy: HandicapPolicy::default(),
             half_point_absences: false,
             tiebreaks: default_tiebreaks(),
+            categories: Vec::new(),
         }
     }
 }
@@ -719,6 +743,13 @@ impl TournamentSettings {
         club.trim().to_lowercase()
     }
 
+    /// The ids of every currently-defined category, for pruning a player's stale
+    /// memberships once a category is deleted (see
+    /// [`Tournament::update_settings`](crate::Tournament::update_settings)).
+    pub fn category_ids(&self) -> HashSet<Uuid> {
+        self.categories.iter().map(|c| c.id).collect()
+    }
+
     /// Whether club protection applies to the given (1-based) round: enabled and,
     /// if a round limit is set, within it.
     pub fn club_protection_active(&self, round: u32) -> bool {
@@ -797,6 +828,15 @@ impl TournamentSettings {
         if !self.elo_estimate_live() {
             self.tiebreaks.retain(|&tb| tb != Tiebreak::EstElo);
         }
+
+        // Categories: trim each name, drop blank-named ones, and keep the first
+        // of any repeated id (client-minted, so a collision would be a client
+        // bug). Entry order is otherwise preserved — it drives the column order.
+        let mut seen_cat = HashSet::new();
+        self.categories.retain_mut(|c| {
+            c.name = c.name.trim().to_string();
+            !c.name.is_empty() && seen_cat.insert(c.id)
+        });
 
         // The ELO value invariants (`elo_k_multiplier` may be 0 to pin rated
         // players; the provisional/looseness ratios stay ≥ ×1.0; the unrated K

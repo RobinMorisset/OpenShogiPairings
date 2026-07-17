@@ -11,6 +11,7 @@
     PairingMode,
     MacMahonThreshold,
     Player,
+    PlayerCategory,
     Tiebreak,
     ThresholdCriterion,
     TournamentSettings,
@@ -61,6 +62,26 @@
     return a.length === b.length && a.every((v, i) => v === b[i]);
   }
 
+  // Canonical form of the category rows — trimmed names, blanks dropped, first of
+  // any repeated id kept — mirroring the server's normalization. Used both in the
+  // "did our edit round-trip?" check and when persisting, so a half-typed blank
+  // row never counts as a divergence from the stored settings.
+  function cleanCategories(rows: PlayerCategory[]): PlayerCategory[] {
+    const seen = new Set<string>();
+    const out: PlayerCategory[] = [];
+    for (const c of rows) {
+      const name = c.name.trim();
+      if (name.length === 0 || seen.has(c.id)) continue;
+      seen.add(c.id);
+      out.push({ id: c.id, name });
+    }
+    return out;
+  }
+
+  function eqCategories(a: PlayerCategory[], b: PlayerCategory[]): boolean {
+    return a.length === b.length && a.every((c, i) => c.id === b[i].id && c.name === b[i].name);
+  }
+
   // Local editable rows, kept in *entry* order (not sorted) so the row a referee
   // is editing never jumps or shows a stale value. The inputs bind to these.
   let thresholds = $state<ThresholdRow[]>([]);
@@ -75,6 +96,9 @@
   let handicapWielRule = $state(false);
   let halfPointAbsences = $state(false);
   let tiebreaks = $state<Tiebreak[]>([]);
+  // Local editable category rows (id + name), in entry order — the same
+  // entry-order-preserving pattern as the thresholds above.
+  let categories = $state<PlayerCategory[]>([]);
   let eloEnabled = $state(false);
   let macmahonFromElo = $state(false);
   let eloKPercent = $state(100);
@@ -163,6 +187,7 @@
       settings.handicap_policy.kind === "enabled" ? (settings.handicap_policy.wiel_rule ?? false) : false;
     const sHalfPointAbsences = settings.half_point_absences ?? false;
     const sTiebreaks = settings.tiebreaks ?? [];
+    const sCategories = settings.categories ?? [];
     const sElo = pairing.kind === "elo";
     const sMacmahonFromElo = macmahonSource?.kind === "from_estimate";
     const sEloK = est?.k_multiplier ?? 100;
@@ -187,6 +212,7 @@
         handicapWielRule === sHandicapWiel &&
         halfPointAbsences === sHalfPointAbsences &&
         eqStr(tiebreaks, sTiebreaks) &&
+        eqCategories(cleanCategories(categories), sCategories) &&
         eloEnabled === sElo &&
         macmahonFromElo === sMacmahonFromElo &&
         eloKPercent === sEloK &&
@@ -216,6 +242,7 @@
         handicapWielRule = sHandicapWiel;
         halfPointAbsences = sHalfPointAbsences;
         tiebreaks = [...sTiebreaks];
+        categories = sCategories.map((c) => ({ id: c.id, name: c.name }));
         eloEnabled = sElo;
         macmahonFromElo = sMacmahonFromElo;
         eloKPercent = sEloK;
@@ -279,6 +306,7 @@
             } satisfies HandicapPolicy),
       half_point_absences: halfPointAbsences,
       tiebreaks: [...tiebreaks],
+      categories: cleanCategories(categories),
     });
   }
 
@@ -471,6 +499,22 @@
   function editThresholdDropRound(i: number, raw: string) {
     const n = Math.round(Number(raw));
     thresholds[i].dropsAfterRound = Number.isFinite(n) && n >= 1 ? n : 1;
+    persist();
+  }
+
+  function addCategory() {
+    // A fresh client-minted id; the row persists once it gets a non-blank name
+    // (a blank one is dropped by `cleanCategories`, so no request is sent yet).
+    categories.push({ id: crypto.randomUUID(), name: "" });
+  }
+
+  function removeCategory(i: number) {
+    categories.splice(i, 1);
+    persist();
+  }
+
+  function editCategoryName(i: number, raw: string) {
+    categories[i].name = raw;
     persist();
   }
 
@@ -1032,6 +1076,43 @@
   </div>
 
   <div class="section">
+    <h3>{$_("settings.categoriesTitle")}</h3>
+    <p class="desc">
+      {$_("settings.categoriesDesc")}
+    </p>
+    <div class="categories">
+      {#each categories as row, i (row.id)}
+        <div class="category-row">
+          <input
+            type="text"
+            class="category-name"
+            value={row.name}
+            placeholder={$_("settings.categoryNamePlaceholder")}
+            disabled={busy}
+            onchange={(e) => editCategoryName(i, e.currentTarget.value)}
+          />
+          <button
+            type="button"
+            class="remove"
+            disabled={busy}
+            title={$_("settings.removeCategory")}
+            onclick={() => removeCategory(i)}>✕</button
+          >
+        </div>
+      {/each}
+      {#if categories.length === 0}
+        <p class="muted">{$_("settings.noCategories")}</p>
+      {/if}
+      <button
+        type="button"
+        class="ghost small"
+        disabled={busy}
+        onclick={addCategory}>{$_("settings.addCategory")}</button
+      >
+    </div>
+  </div>
+
+  <div class="section">
     <h3>{$_("settings.pairingModeTitle")}</h3>
     <p class="desc">
       {$_("settings.pairingModeDesc")}
@@ -1216,6 +1297,26 @@
     display: flex;
     gap: 0.4rem;
     align-items: center;
+  }
+  .categories {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    align-items: flex-start;
+  }
+  .category-row {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+  }
+  .category-name {
+    width: 14rem;
+    background: var(--bg-inset);
+    color: inherit;
+    border: 1px solid var(--border-soft);
+    border-radius: 0.4rem;
+    padding: 0.3rem 0.45rem;
+    font: inherit;
   }
   .threshold-row.dragging {
     opacity: 0.4;
