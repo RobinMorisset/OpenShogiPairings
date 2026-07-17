@@ -356,6 +356,8 @@
     "handicapSuggested": "Handicap games suggested — also show a suggested-handicap column",
     "handicapWielCheckbox": "\"Wiel\" rule: the giver always counts as the winner",
     "handicapWielDesc": "When on, a handicap game always credits the giver as the winner in the standings and for pairing, whatever the actual result. When off (the default), handicap games score like any other game.",
+    "absencesTitle": "Absences",
+    "absencesDesc": "How a round a player does not play is scored by default.",
     "halfPointAbsencesCheckbox": "Give a half point to absences by default",
     "halfPointAbsencesDesc": "When on, a player marked absent scores half a point (shown as 0= in the cross-table) instead of zero. This is only the starting value: click any 0+/0=/0− in the standings to re-score that round for that player. It applies to rounds started from now on, and leaves rounds already played as they are. The odd-round bye still starts at a full point, and a no-show forfeit still scores nothing. Off by default.",
     "rankingTitle": "Ranking criteria",

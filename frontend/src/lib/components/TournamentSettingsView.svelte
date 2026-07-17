@@ -867,23 +867,7 @@
     </label>
   </div>
 
-  <div class="section">
-    <h3>{$_("settings.longBoardsTitle")}</h3>
-    <p class="desc">
-      {$_("settings.longBoardsDesc")}
-    </p>
-    <label class="check">
-      <input
-        type="checkbox"
-        checked={longBoardsEnabled}
-        disabled={busy}
-        onchange={(e) => setLongBoardsEnabled(e.currentTarget.checked)}
-      />
-      {$_("settings.longBoardsCheckbox")}
-    </label>
-  </div>
-
-  <div class="section">
+  <div class="section column-start">
     <h3>{$_("settings.handicapTitle")}</h3>
     <p class="desc">
       {$_("settings.handicapDesc")}
@@ -932,6 +916,13 @@
     </label>
     <p class="desc">
       {$_("settings.handicapWielDesc")}
+    </p>
+  </div>
+
+  <div class="section">
+    <h3>{$_("settings.absencesTitle")}</h3>
+    <p class="desc">
+      {$_("settings.absencesDesc")}
     </p>
     <label class="check">
       <input
@@ -1108,6 +1099,22 @@
   </div>
 
   <div class="section">
+    <h3>{$_("settings.longBoardsTitle")}</h3>
+    <p class="desc">
+      {$_("settings.longBoardsDesc")}
+    </p>
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={longBoardsEnabled}
+        disabled={busy}
+        onchange={(e) => setLongBoardsEnabled(e.currentTarget.checked)}
+      />
+      {$_("settings.longBoardsCheckbox")}
+    </label>
+  </div>
+
+  <div class="section">
     <h3>{$_("settings.exportSettings")}</h3>
     <p class="desc">{$_("settings.exportSettingsDesc")}</p>
     <button type="button" class="ghost small" onclick={exportSettings}>
@@ -1131,6 +1138,16 @@
     fieldset.swiss-fieldset,
     fieldset.floater-fieldset {
       break-inside: avoid;
+    }
+    /* A section that starts a column has nothing above it to be separated from,
+       and CSS can't select one ("first in column" has no selector). So pin the
+       break here rather than leaving it to the balancer — which lands on this
+       same section anyway — and drop the divider like the first section above. */
+    .settings > .column-start {
+      break-before: column;
+      margin-top: 0.5rem;
+      border-top: none;
+      padding-top: 0;
     }
   }
   h3 {

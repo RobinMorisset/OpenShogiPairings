@@ -53,6 +53,3 @@ Known limitations and future work, roughly ordered by area.
 ## Frontend
 
 - **Pairings in alphabetical order**
-
-- **Settings cleanup** Give a half-point to absences should not be in the handicap games section
-  and the long games section should be nearer the end

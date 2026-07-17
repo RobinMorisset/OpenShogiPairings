@@ -356,6 +356,8 @@
     "handicapSuggested": "Parties avec handicap suggérées — afficher aussi une colonne de handicap suggéré",
     "handicapWielCheckbox": "Règle \"Wiel\" : le donneur compte toujours comme vainqueur",
     "handicapWielDesc": "Si activée, une partie avec handicap crédite toujours le donneur comme vainqueur au classement et pour l'appariement, quel que soit le résultat réel. Si désactivée (par défaut), les parties avec handicap comptent comme n'importe quelle autre partie.",
+    "absencesTitle": "Absences",
+    "absencesDesc": "Comment est comptée par défaut une ronde qu'un joueur ne joue pas.",
     "halfPointAbsencesCheckbox": "Donner un demi-point aux absences par défaut",
     "halfPointAbsencesDesc": "Si activée, un joueur marqué absent marque un demi-point (affiché 0= dans la grille) au lieu de zéro. Ce n'est que la valeur de départ : cliquer sur n'importe quel 0+/0=/0− du classement pour recompter cette ronde pour ce joueur. Elle s'applique aux rondes lancées à partir de maintenant et laisse inchangées les rondes déjà jouées. Le bye d'une ronde impaire part toujours d'un point entier, et un forfait (no-show) ne rapporte toujours rien. Désactivée par défaut.",
     "rankingTitle": "Critères de classement",
