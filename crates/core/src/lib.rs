@@ -36,11 +36,9 @@ pub use elo::{estimate_elos, PROVISIONAL_GAMES_THRESHOLD};
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
 pub use fesa_results::import_fesa_results;
 pub use grid_import::{import_american_grid, GridImportError};
-pub use handicap::suggested_handicap;
 pub use pairing::{
-    counterfactual_forbid, counterfactual_force, explain_pairing, pair_round_weighted,
-    AffectedCycle, BoardLedger, Counterfactual, CounterfactualMode, RoundExplanation,
-    RuleContribution, RuleDelta, RuleId, RuleTotal, ScopeReason,
+    pair_round_weighted, AffectedCycle, BoardLedger, Counterfactual, CounterfactualMode,
+    RoundExplanation, RuleContribution, RuleDelta, RuleId, RuleTotal, ScopeReason,
 };
 pub use player::{Grade, GradeKind, NewPlayer, Player, PointAdjustment};
 pub use round::{

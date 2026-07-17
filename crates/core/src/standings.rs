@@ -255,9 +255,12 @@ pub fn compute_standings(
     // depends on which other players they're still tied with once every earlier
     // criterion has run out, so ranking proceeds by repeatedly splitting the
     // still-tied groups, criterion by criterion, rather than a single sort.
+    // Every player has a number by the time standings run (registration is
+    // finalized) — the score pass above already `expect`s it — so this shares that
+    // invariant rather than papering over a missing number with a sentinel.
     let tnum: HashMap<Uuid, TournamentId> = players
         .iter()
-        .map(|p| (p.id, p.tournament_id.unwrap_or(TournamentId(u32::MAX))))
+        .map(|p| (p.id, p.tournament_id.expect("player has a number")))
         .collect();
 
     let mut start: Vec<usize> = (0..standings.len()).collect();

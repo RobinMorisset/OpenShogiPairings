@@ -224,11 +224,6 @@ struct Ctx<'a> {
     round: u32,
     /// Which player each lower group sends up as its ascending floater.
     floater_style: FloaterStyle,
-    /// Whether club protection applies this round (enabled and within its window).
-    club_active: bool,
-    /// Whether "airtight groups" applies this round (see
-    /// [`TournamentSettings::airtight_groups_active`]).
-    airtight_active: bool,
     /// Clubs exempt from protection, in normalized form (see
     /// [`TournamentSettings::normalize_club`]).
     exempt_clubs: &'a HashSet<String>,
@@ -437,17 +432,17 @@ impl Rule {
         if let Rule::ByeGroup = self {
             return ctx.max_gap * ctx.max_gap;
         }
+        // `AirtightGroups` and `Club` only reach here when active — `build` filters
+        // out the inactive ones (see its rule filter) — so no `active` factor is
+        // needed on their bounds.
         let per_edge = match self {
             Rule::Rematch => 1,
-            // 0 when off or out of its round window — no wasted tier.
-            Rule::AirtightGroups => {
-                i128::from(ctx.airtight_active) * ctx.max_mm_gap * ctx.max_mm_gap
-            }
+            Rule::AirtightGroups => ctx.max_mm_gap * ctx.max_mm_gap,
             Rule::ScoreGap => ctx.max_gap * ctx.max_gap,
             Rule::FloatRepeat => 2 * FLOAT_BASE, // two directions, each ≤ FLOAT_BASE
             // A descender and an ascender term, each a rank distance ≤ group_size − 1.
             Rule::FloaterSelection => 2 * (ctx.max_group - 1).max(0),
-            Rule::Club => i128::from(ctx.club_active), // 0 when off — no wasted tier
+            Rule::Club => 1,
             // Two squared terms, each a rank deviation ≤ (group_size − 1)².
             Rule::Fold => 2 * (ctx.max_group - 1).max(0).pow(2),
             // The squared gap between the widest-separated free players.
@@ -621,8 +616,6 @@ struct PairingModel {
     elo_rank: TiVec<TournamentId, i128>,
     round: u32,
     floater_style: FloaterStyle,
-    club_active: bool,
-    airtight_active: bool,
     edges: i128,
     max_gap: i128,
     min_points: i128,
@@ -718,11 +711,16 @@ impl PairingModel {
             .map(|f| f.group_size)
             .max()
             .unwrap_or(0) as i128;
-        // The active rules, minus the two whole-round no-ops: `AirtightGroups` with
-        // its window closed and `Club` with protection off both return 0 for every
-        // edge and bye, and (having max-total 0) leave every other rule's
-        // multiplier unchanged — so dropping them here is exact, and spares the
-        // O(k²) cost loop a per-edge branch and call each.
+        // The active rules, minus the whole-round no-ops that contribute 0 to every
+        // edge and bye — and (having max-total 0) leave every other rule's
+        // multiplier unchanged, so dropping them here is exact and spares the O(k²)
+        // cost loop a per-edge branch and call each:
+        //   - `AirtightGroups` with its window closed, and `Club` with protection
+        //     off;
+        //   - the bye-only rules (`ByeGroup`, `ByeSelection`) when no phantom is in
+        //     play: on an even field there is no bye vertex for them to fire on, so
+        //     they would only reserve a ladder tier (and eat overflow headroom) for
+        //     nothing.
         let club_active = settings.club_protection_active(number);
         let airtight_active = settings.airtight_groups_active(number);
         let rules: Vec<Rule> = active_rules(settings)
@@ -731,6 +729,7 @@ impl PairingModel {
             .filter(|r| match r {
                 Rule::AirtightGroups => airtight_active,
                 Rule::Club => club_active,
+                Rule::ByeGroup | Rule::ByeSelection => need_phantom,
                 _ => true,
             })
             .collect();
@@ -744,8 +743,6 @@ impl PairingModel {
             elo_rank,
             round: number,
             floater_style: settings.floater_style(),
-            club_active,
-            airtight_active,
             edges: (vcount / 2) as i128,
             max_gap: hi.saturating_sub(lo) as i128,
             min_points: lo as i128,
@@ -778,8 +775,6 @@ impl PairingModel {
             club_norm: &self.club_norm,
             round: self.round,
             floater_style: self.floater_style,
-            club_active: self.club_active,
-            airtight_active: self.airtight_active,
             exempt_clubs: &self.exempt_clubs,
             edges: self.edges,
             max_gap: self.max_gap,
@@ -925,7 +920,7 @@ fn accumulate(totals: &mut HashMap<RuleId, (u32, i64)>, rules: &[Rule], units: &
 /// `swiss_boards` must be the engine-paired boards only (forced/cup boards aren't
 /// engine decisions and carry no explanation). The bye is treated as matched to
 /// the phantom vertex, exactly as during pairing.
-pub fn explain_pairing(
+pub(crate) fn explain_pairing(
     number: u32,
     players: &[Player],
     settings: &TournamentSettings,
@@ -1299,7 +1294,7 @@ fn diff_matchings(
 /// caller checks scope). Re-solves the rest with the forced edge pre-placed and a
 /// stability tie-break toward the confirmed pairing, then diffs the two.
 #[allow(clippy::too_many_arguments)]
-pub fn counterfactual_force(
+pub(crate) fn counterfactual_force(
     number: u32,
     players: &[Player],
     settings: &TournamentSettings,
@@ -1341,7 +1336,7 @@ pub fn counterfactual_force(
 /// confirmed pairing, and diff. If `a`–`b` wasn't the engine's choice anyway, the
 /// diff is empty.
 #[allow(clippy::too_many_arguments)]
-pub fn counterfactual_forbid(
+pub(crate) fn counterfactual_forbid(
     number: u32,
     players: &[Player],
     settings: &TournamentSettings,
@@ -2534,6 +2529,27 @@ mod tests {
     }
 
     #[test]
+    fn bye_only_rules_are_dropped_from_the_ladder_on_an_even_field() {
+        let settings = TournamentSettings::default();
+        let has_bye_rule = |need_phantom: bool, n: u32| {
+            let p: Vec<Player> = (1..=n).map(|i| player(i, Some(1500), None)).collect();
+            let free: Vec<TournamentId> = (1..=n).map(TournamentId).collect();
+            let model = PairingModel::build(1, &p, &settings, &[], &free, need_phantom);
+            model
+                .rules
+                .iter()
+                .any(|r| matches!(r, Rule::ByeGroup | Rule::ByeSelection))
+        };
+        // No phantom (even field) → the bye-only rules can never fire, so they must
+        // not reserve a ladder tier. A phantom (odd field) → they stay.
+        assert!(
+            !has_bye_rule(false, 4),
+            "an even field must not reserve a bye-rule tier"
+        );
+        assert!(has_bye_rule(true, 3), "an odd field keeps the bye rules");
+    }
+
+    #[test]
     fn rule_bounds_are_valid_upper_bounds() {
         // A field with rematches, a bye, floats, club-mates and a spread of scores
         // so every rule can fire; then assert no single edge (or bye) can exceed
@@ -2590,8 +2606,6 @@ mod tests {
             club_norm: &club_norm,
             round: 2,
             floater_style: FloaterStyle::Median, // exercise the floater-selection bound
-            club_active: true,                   // exercise the club rule's bound
-            airtight_active: true,               // exercise the airtight-groups bound
             exempt_clubs: &exempt_clubs,
             edges,
             max_gap: (hi - lo) as i128,

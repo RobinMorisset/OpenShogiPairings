@@ -22,7 +22,7 @@ fn elo_prime(elo: f64) -> f64 {
 /// `None` when either player is unrated (the transform needs a numeric rating)
 /// or the adjusted gap is small enough to call it an even game (≤45). The nine
 /// non-equal bins map 1:1 onto [`Handicap::ALL`].
-pub fn suggested_handicap(rating1: Option<u32>, rating2: Option<u32>) -> Option<Handicap> {
+pub(crate) fn suggested_handicap(rating1: Option<u32>, rating2: Option<u32>) -> Option<Handicap> {
     let diff = (elo_prime(rating1? as f64) - elo_prime(rating2? as f64))
         .abs()
         .round() as u32;
