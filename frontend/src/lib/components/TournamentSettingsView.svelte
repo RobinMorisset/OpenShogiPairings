@@ -1395,6 +1395,16 @@
     padding: 0.3rem 0.45rem;
     font: inherit;
   }
+  /* The "add a tie-break" picker: its options carry the full description (DC's is
+     very long). Without a definite width the select's flex-basis is its
+     max-content, which stretches the row past its (multi-)column and overflows.
+     width:100% pins it to the column; min-width:0 lets it shrink there. The open
+     option list still shows each description in full. Scoped to .threshold-row so
+     the compact ELO-knob .tb-select controls keep their content width. */
+  .threshold-row .tb-select {
+    min-width: 0;
+    width: 100%;
+  }
   .club-input {
     width: 12rem;
     background: var(--bg-inset);
