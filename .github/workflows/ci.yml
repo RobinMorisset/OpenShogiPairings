@@ -1,0 +1,67 @@
+name: CI
+
+# Lint and test on every push and pull request — the same checks the local git
+# hooks (scripts/git-hooks/) run, but on a clean checkout so a missing hook, an
+# uncommitted file, a stale lockfile, or a "works on my machine" gap can't slip a
+# red build onto a branch unnoticed.
+#
+# Note: this *reports* status, it does not block a push — direct pushes still
+# land, and a failure just marks the commit red. To make it a hard gate, require
+# these checks under branch protection (which gates pull-request merges).
+
+on:
+  push:
+  pull_request:
+
+# A newer push to the same ref supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Rust: formatting, lint, and the full workspace test suite. `--locked` makes a
+  # stale root Cargo.lock fail here (the lockfile-drift the pre-commit hook guards
+  # against locally). The excluded desktop crate (frontend/src-tauri) is not built
+  # here — it's covered by the release workflow.
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+      - name: Format (cargo fmt)
+        run: cargo fmt --all --check
+      - name: Lint (clippy, warnings denied)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked
+
+  # Frontend: type-check, unit tests, and the i18n locale-key parity check.
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Type-check (svelte-check)
+        working-directory: frontend
+        run: npm run check
+      - name: Test (vitest)
+        working-directory: frontend
+        run: npm test
+      - name: i18n locale keys in sync
+        run: node scripts/check-i18n-keys.mjs
