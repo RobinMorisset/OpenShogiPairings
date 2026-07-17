@@ -44,11 +44,36 @@ jobs:
             exit 1
           fi
 
-  build:
+  # Create the draft release once, up front, so the two build runners upload to
+  # the *same* release instead of each racing to create one — that race is what
+  # produced duplicate per-platform releases. Only on a real tag; on manual
+  # dispatch there is no tag and nothing to publish to.
+  create-release:
     needs: check-version
-    # Run once check-version passes, and also on manual dispatch where
-    # check-version is skipped (there's no tag to verify).
-    if: ${{ !cancelled() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped') }}
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
+    steps:
+      - name: Create the draft release
+        id: create
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft \
+            --title "OpenShogiPairings $tag" \
+            --notes "See the assets below to download and install OpenShogiPairings."
+          id=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)
+          echo "release_id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [check-version, create-release]
+    # Run once the checks pass. On manual dispatch both check-version and
+    # create-release are skipped (no tag), and the build still runs — with an
+    # empty releaseId, so tauri-action builds without publishing, to exercise the
+    # pipeline.
+    if: ${{ !cancelled() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped') && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix:
@@ -92,9 +117,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: frontend
-          tagName: ${{ github.ref_name }}
-          releaseName: "OpenShogiPairings ${{ github.ref_name }}"
-          releaseBody: "See the assets below to download and install OpenShogiPairings."
-          releaseDraft: true
-          prerelease: false
+          # Upload into the single draft release created by `create-release`,
+          # rather than creating one here (which raced across the two runners).
+          # Empty on manual dispatch → tauri-action builds without publishing.
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
