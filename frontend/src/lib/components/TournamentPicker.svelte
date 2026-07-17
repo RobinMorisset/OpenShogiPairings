@@ -11,16 +11,18 @@
   import { currentTournamentId, getToken, initialTab } from "../session";
   import { loadTournament } from "../tournamentFile";
   import CreateTournament from "./CreateTournament.svelte";
-  import type { TournamentSummary } from "../types";
+  import type { Tournament, TournamentSummary } from "../types";
 
   let tournaments = $state<TournamentSummary[]>([]);
   let loading = $state(true);
   let busy = $state(false);
   let error = $state<string | null>(null);
 
-  // Set only when creating requires the admin password we don't have yet —
-  // stashes the pending create so the retry after logging in can reuse it.
+  // Set only when an action requires the admin password we don't have yet —
+  // stashes the pending create/load so the retry after logging in can reuse it.
+  // At most one is ever set at a time.
   let pendingCreate = $state<{ name: string; password?: string } | null>(null);
+  let pendingLoad = $state<Tournament | null>(null);
   let adminPassword = $state("");
 
   async function refresh() {
@@ -69,14 +71,19 @@
 
   async function submitAdminPassword(event: SubmitEvent) {
     event.preventDefault();
-    if (!pendingCreate || adminPassword.length === 0) return;
+    if ((!pendingCreate && !pendingLoad) || adminPassword.length === 0) return;
     busy = true;
     error = null;
     try {
       await loginAdmin(adminPassword);
       adminPassword = "";
-      const { name, password } = pendingCreate;
-      await handleCreate(name, password);
+      // Retry whichever action was waiting on the admin password.
+      if (pendingCreate) {
+        const { name, password } = pendingCreate;
+        await handleCreate(name, password);
+      } else if (pendingLoad) {
+        await applyLoaded(pendingLoad);
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         error = $_("login.wrongPassword");
@@ -91,17 +98,30 @@
   async function handleLoad() {
     const loaded = await loadTournament();
     if (!loaded) return; // user cancelled the file dialog
+    await applyLoaded(loaded);
+  }
+
+  // Create a blank entry then seed it with the loaded file's contents. Split out
+  // of `handleLoad` so the retry after an admin login can reuse it.
+  async function applyLoaded(loaded: Tournament) {
     busy = true;
     error = null;
     try {
       const { id } = await createTournamentEntry(loaded.name);
+      pendingLoad = null;
       select(id);
       // `select` synchronously updates api.ts's notion of the open tournament,
       // so this can run right after: it seeds the new (blank) entry with the
       // file's actual contents.
       await replaceTournament(loaded);
     } catch (err) {
-      error = describe(err);
+      if (err instanceof ApiError && err.status === 401) {
+        // The server requires the admin password to create tournaments —
+        // stash this file and ask for it inline, exactly as handleCreate does.
+        pendingLoad = loaded;
+      } else {
+        error = describe(err);
+      }
     } finally {
       busy = false;
     }
@@ -167,7 +187,7 @@
     {/if}
   </section>
 
-  {#if pendingCreate}
+  {#if pendingCreate || pendingLoad}
     <section class="card admin-card">
       <h2>{$_("picker.adminPasswordTitle")}</h2>
       <p class="muted">{$_("picker.adminPasswordPrompt")}</p>
@@ -191,7 +211,10 @@
             type="button"
             class="ghost"
             data-testid="admin-password-cancel"
-            onclick={() => (pendingCreate = null)}
+            onclick={() => {
+              pendingCreate = null;
+              pendingLoad = null;
+            }}
             disabled={busy}
           >
             {$_("createTournament.cancel")}

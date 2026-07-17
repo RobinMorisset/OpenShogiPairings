@@ -410,12 +410,26 @@ impl TournamentRegistry {
                     if store.current().is_none() {
                         continue; // already warned inside `with_persistence`
                     }
-                    let auth = Self::load_auth(dir, id).and_then(|a| a.password_hash);
+                    // Fail closed: if the sidecar is present but unreadable we
+                    // can't tell whether this tournament is password-protected, so
+                    // refuse to load it rather than serve it open.
+                    let auth = match Self::load_auth(dir, id) {
+                        Ok(hash) => hash.map(AuthConfig::from_hash),
+                        Err(e) => {
+                            tracing::error!(
+                                "refusing to load tournament {id}: its auth sidecar is \
+                                 unreadable ({e}). Failing closed rather than serving a \
+                                 password-protected tournament with no password; fix or \
+                                 remove {id}.auth.json."
+                            );
+                            continue;
+                        }
+                    };
                     instances.insert(
                         id,
                         Arc::new(TournamentInstance {
                             store: RwLock::new(store),
-                            auth: auth.map(AuthConfig::from_hash),
+                            auth,
                         }),
                     );
                 }
@@ -439,13 +453,34 @@ impl TournamentRegistry {
             .map(|dir| dir.join(format!("{id}.auth.json")))
     }
 
-    fn load_auth(dir: &Path, id: Uuid) -> Option<PersistedAuth> {
-        let bytes = fs::read(dir.join(format!("{id}.auth.json"))).ok()?;
-        serde_json::from_slice(&bytes).ok()
+    /// Load the password hash from the `{id}.auth.json` sidecar, as three
+    /// distinct outcomes so the caller can **fail closed** on damage:
+    /// - the file is absent → `Ok(None)`: the tournament was created without a
+    ///   password. A create *with* a password writes the sidecar before the
+    ///   tournament file (see [`create`](Self::create)), so a present tournament
+    ///   with no sidecar is genuinely open, not a torn create;
+    /// - the file is present and valid → `Ok(Some(hash))`: password-protected;
+    /// - the file is present but unreadable or corrupt → `Err(..)`: the caller
+    ///   must refuse to load the tournament rather than expose a protected one
+    ///   with no password. Atomic writes make this case a real anomaly, not the
+    ///   normal torn-write it used to be.
+    fn load_auth(dir: &Path, id: Uuid) -> Result<Option<String>, String> {
+        let path = dir.join(format!("{id}.auth.json"));
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(format!("read {}: {e}", path.display())),
+        };
+        let parsed: PersistedAuth =
+            serde_json::from_slice(&bytes).map_err(|e| format!("parse {}: {e}", path.display()))?;
+        Ok(parsed.password_hash)
     }
 
-    /// Write the `{id}.auth.json` sidecar. Best-effort, like every other
-    /// persistence write in this server — a failure is logged, not propagated.
+    /// Write the `{id}.auth.json` sidecar atomically (temp file + rename), the
+    /// same durability the tournament file gets in [`TournamentStore::persist`]
+    /// — a half-written sidecar would reload as an *unreadable* sidecar, which
+    /// [`load_auth`](Self::load_auth) now (correctly) refuses to serve open.
+    /// Best-effort otherwise: a failure is logged, not propagated.
     fn persist_auth(&self, id: Uuid, auth: &AuthConfig) {
         let Some(path) = self.auth_path(id) else {
             return; // in-memory only
@@ -456,13 +491,22 @@ impl TournamentRegistry {
         let file = PersistedAuth {
             password_hash: Some(auth.password_hash().to_string()),
         };
-        match serde_json::to_vec_pretty(&file) {
-            Ok(bytes) => {
-                if let Err(e) = fs::write(&path, bytes) {
-                    tracing::warn!("could not write {}: {e}", path.display());
-                }
+        let bytes = match serde_json::to_vec_pretty(&file) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::warn!("could not serialize auth for {id}: {e}");
+                return;
             }
-            Err(e) => tracing::warn!("could not serialize auth for {id}: {e}"),
+        };
+        // `{id}.auth.json` → `{id}.auth.tmp` (extension `tmp`, so the load-all
+        // scan skips it, same as the tournament file's temp).
+        let tmp = path.with_extension("tmp");
+        if let Err(e) = fs::write(&tmp, &bytes) {
+            tracing::warn!("could not write {}: {e}", tmp.display());
+            return;
+        }
+        if let Err(e) = fs::rename(&tmp, &path) {
+            tracing::warn!("could not replace {}: {e}", path.display());
         }
     }
 
@@ -512,13 +556,17 @@ impl TournamentRegistry {
         if let Some(dir) = &self.data_dir {
             let _ = fs::create_dir_all(dir);
         }
-        let mut store = TournamentStore::empty(self.tournament_path(id));
-        store.set_current(tournament);
         let auth = password.map(AuthConfig::new);
         let token = auth.as_ref().map(|a| a.token().to_string());
+        // Write the auth sidecar *before* the tournament file, so a crash between
+        // the two writes can only ever leave the sidecar orphaned (harmless: no
+        // tournament file, so nothing loads), never a tournament file with its
+        // sidecar missing (which would reload as open). See [`load_auth`].
         if let Some(auth) = &auth {
             self.persist_auth(id, auth);
         }
+        let mut store = TournamentStore::empty(self.tournament_path(id));
+        store.set_current(tournament);
         self.instances
             .write()
             .expect("registry lock poisoned")
@@ -747,6 +795,34 @@ mod tests {
         let auth = instance.auth.as_ref().expect("password was persisted");
         assert!(auth.password_matches("secret"));
         assert!(!auth.password_matches("wrong"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_corrupt_auth_sidecar_fails_closed_not_open() {
+        let dir = std::env::temp_dir().join(format!("osp-authfail-{}", uuid::Uuid::new_v4()));
+
+        let id = {
+            let registry = TournamentRegistry::new(Some(dir.clone()));
+            registry
+                .create("Locked Cup", Some("secret".into()))
+                .unwrap()
+                .0
+        };
+
+        // Corrupt the sidecar (a torn/garbled write). The tournament file itself
+        // is intact and says nothing about being locked.
+        std::fs::write(dir.join(format!("{id}.auth.json")), b"{ this is not json")
+            .expect("overwrite the sidecar");
+
+        // The tournament must NOT come back open (which would drop its password);
+        // it is dropped from the registry until an admin fixes the sidecar.
+        let reloaded = TournamentRegistry::new(Some(dir.clone()));
+        assert!(
+            reloaded.get(id).is_none(),
+            "a tournament with an unreadable auth sidecar must fail closed, not load open"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

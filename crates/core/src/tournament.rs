@@ -869,11 +869,17 @@ impl Tournament {
         // board that scores them, so they get no sit-out.
         let has_board: HashSet<TournamentId> =
             boards.iter().flat_map(|b| [b.player1, b.player2]).collect();
+        // A player already given a sit-out this round (a cup bye, or a bye/absence
+        // the engine placed) must not also get an Absent entry: scoring sums every
+        // sit-out a player has, so a second one would double-count them. This can
+        // happen when a current cup-bye player is also in the referee-set absent
+        // list.
+        let already_sitting: HashSet<TournamentId> = sitouts.iter().map(|s| s.player).collect();
         sitouts.extend(
             draft
                 .absent
                 .iter()
-                .filter(|id| !has_board.contains(id))
+                .filter(|id| !has_board.contains(id) && !already_sitting.contains(id))
                 .map(|&player| Sitout {
                     player,
                     kind: SitoutKind::Absent,
@@ -2809,6 +2815,62 @@ mod tests {
         assert_eq!(podium.runner_up, Some(s_tid[3]));
         assert_eq!(podium.third, Some(s_tid[2]));
         assert_eq!(podium.fourth, None); // the fourth-place slot never existed
+    }
+
+    #[test]
+    fn cup_bye_player_also_marked_absent_is_not_double_scored() {
+        // Same setup that produces a cup bye (a R1 double no-show leaves s3 to
+        // advance unopposed in R2), but then the referee also marks that very
+        // cup-bye player absent. A player may hold only one sit-out; without the
+        // guard s3 would carry both a CupBye and an Absent entry and be scored
+        // twice.
+        let mut t = Tournament::new("Champ").unwrap();
+        enable_cup(&mut t);
+        let s: Vec<Uuid> = (0..8)
+            .map(|i| add_rated(&mut t, &format!("E{i}"), 2000 - i * 100, true))
+            .collect();
+        add_rated(&mut t, "N9", 1250, false);
+        add_rated(&mut t, "N10", 1200, false);
+        t.finalize_registration_with(Some(8)).unwrap();
+        let s_tid: Vec<TournamentId> = s.iter().map(|&id| tid(&t, id)).collect();
+
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        no_show_both(&mut t, 1, s[0], s[7]);
+        decide(&mut t, 1, s[1], s[6]);
+        decide(&mut t, 1, s[2], s[5]);
+        decide(&mut t, 1, s[3], s[4]);
+        decide_rest(&mut t, 1);
+
+        // R2: s3 takes the cup bye. Additionally mark s3 absent (the referee's odd
+        // call — the UI hides cup-bye players, but `update_draft` accepts any known
+        // player, so it must be handled).
+        t.prepare_round().unwrap();
+        t.update_draft(vec![s_tid[3]], Vec::new(), Vec::new())
+            .unwrap();
+        t.confirm_round().unwrap();
+
+        // Exactly one sit-out for s3, and it's the cup bye — not a second Absent.
+        let s3_sitouts: Vec<_> = t.rounds[1]
+            .sitouts
+            .iter()
+            .filter(|so| so.player == s_tid[3])
+            .collect();
+        assert_eq!(
+            s3_sitouts.len(),
+            1,
+            "a cup-bye player must not also receive an Absent sit-out"
+        );
+        assert!(matches!(s3_sitouts[0].kind, SitoutKind::CupBye { .. }));
+
+        // And the cup bye scores its single point (2 half-points), not two.
+        let s3_points = t
+            .standings()
+            .into_iter()
+            .find(|st| st.player_id == s[3])
+            .unwrap()
+            .points;
+        assert_eq!(s3_points, 2);
     }
 
     #[test]
