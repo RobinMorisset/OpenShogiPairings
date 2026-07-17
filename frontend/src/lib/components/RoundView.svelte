@@ -587,7 +587,7 @@
           {/each}
         </tbody>
       </table>
-      <p class="hint">{$_("roundView.carriedHint")}</p>
+      <p class="hint print-hide">{$_("roundView.carriedHint")}</p>
     </div>
   {/if}
   {#if round.boards.length === 0 && byeSitouts.length === 0}
@@ -843,7 +843,7 @@
         ⚠ {$_("roundView.alreadyCompletedWarning")}
       </p>
     {:else}
-      <p class="hint">{$_("roundView.clickToRecordWinner")}</p>
+      <p class="hint print-hide">{$_("roundView.clickToRecordWinner")}</p>
     {/if}
   {/if}
 
