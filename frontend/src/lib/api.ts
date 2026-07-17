@@ -49,6 +49,24 @@ function resolveApiBase(): Promise<string> {
   return apiBasePromise;
 }
 
+/**
+ * Start resolving the API base without waiting for the answer.
+ *
+ * Under Tauri this costs a dynamic import plus an IPC round-trip, and nothing
+ * about it depends on the UI locale — so `main.ts` kicks it off alongside the
+ * locale catalogue rather than letting it queue behind the first render. By the
+ * time a component issues a request, `apiBasePromise` is already in flight (or
+ * settled) and `apiUrl` resolves immediately. Purely an optimisation: every
+ * caller still awaits `resolveApiBase`, so skipping this changes nothing but
+ * the timing.
+ */
+export function prewarmApiBase(): void {
+  // Errors are deliberately swallowed: the real caller awaits the same promise
+  // and reports failure in context. This must never surface as an unhandled
+  // rejection just because we asked early.
+  void resolveApiBase().catch(() => {});
+}
+
 /** Build a full API URL from a path like `/api/health`. */
 async function apiUrl(path: string): Promise<string> {
   return `${await resolveApiBase()}${path}`;
