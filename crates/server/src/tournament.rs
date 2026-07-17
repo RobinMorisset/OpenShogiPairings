@@ -246,7 +246,7 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
 async fn get_tournament(
     TournamentCtx(instance): TournamentCtx,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let store = instance.store.read().expect("store lock poisoned");
+    let store = instance.read();
     view(&store)
 }
 
@@ -267,7 +267,7 @@ async fn replace_tournament(
         .map_err(|e| ApiError::BadRequest(format!("could not parse tournament: {e}")))?;
     tournament.validate_loaded()?;
     tournament.id = id;
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     // Atomic optimistic-concurrency check, under the same lock the replace runs
     // in — the middleware pre-screen alone can't close the race for a
     // whole-tournament replace (see TournamentStore::ensure_current_version).
@@ -293,7 +293,7 @@ async fn undo(
     TournamentCtx(instance): TournamentCtx,
     ExpectedVersion(expected): ExpectedVersion,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     if store.current().is_none() {
         return Err(ApiError::NoTournament);
     }
@@ -306,7 +306,7 @@ async fn undo(
 async fn list_backups(
     TournamentCtx(instance): TournamentCtx,
 ) -> Result<Json<Vec<backup::BackupInfo>>, ApiError> {
-    let store = instance.store.read().expect("store lock poisoned");
+    let store = instance.read();
     let tournament = store.current().ok_or(ApiError::NoTournament)?;
     Ok(Json(backup::list(tournament.id)))
 }
@@ -327,7 +327,7 @@ async fn restore_backup(
     ExpectedVersion(expected): ExpectedVersion,
     Path(params): Path<BackupParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.ensure_current_version(expected)?;
     let tournament_id = store.current().ok_or(ApiError::NoTournament)?.id;
     let restored = backup::load(tournament_id, &params.backup_id)
@@ -344,7 +344,7 @@ async fn restore_backup(
 async fn american_grid(
     TournamentCtx(instance): TournamentCtx,
 ) -> Result<impl IntoResponse, ApiError> {
-    let store = instance.store.read().expect("store lock poisoned");
+    let store = instance.read();
     let tournament = store.current().ok_or(ApiError::NoTournament)?;
     let grid = osp_core::american_grid(tournament, &tournament.standings());
     Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], grid))
@@ -363,7 +363,7 @@ async fn import_american_grid(
     let mut tournament =
         osp_core::import_american_grid(&body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     tournament.id = id;
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.ensure_current_version(expected)?;
     store.set_current(tournament);
     view(&store)
@@ -377,7 +377,7 @@ async fn update_settings(
     ExpectedVersion(expected): ExpectedVersion,
     Json(settings): Json<TournamentSettings>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, move |t| {
         t.update_settings(settings);
         Ok(())
@@ -400,7 +400,7 @@ async fn finalize_registration(
     body: Option<Json<FinalizeRequest>>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let cup_size = body.and_then(|Json(b)| b.cup_size);
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| t.finalize_registration_with(cup_size))?;
     backup_after(&store, "registration finalized");
     view(&store)
@@ -412,7 +412,7 @@ async fn cancel_round(
     TournamentCtx(instance): TournamentCtx,
     ExpectedVersion(expected): ExpectedVersion,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| t.cancel_last_round())?;
     backup_after(&store, "round cancelled");
     view(&store)
@@ -430,7 +430,7 @@ async fn prepare_round(
     body: Option<Json<FinalizeRequest>>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let cup_size = body.and_then(|Json(b)| b.cup_size);
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| {
         if !t.registration_finalized {
             t.finalize_registration_with(cup_size)?;
@@ -487,7 +487,7 @@ async fn update_draft(
     ExpectedVersion(expected): ExpectedVersion,
     Json(req): Json<DraftUpdate>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| {
         t.update_draft(req.absent, req.forced_boards, req.forced_byes)
             .map(|_| ())
@@ -500,7 +500,7 @@ async fn confirm_round(
     TournamentCtx(instance): TournamentCtx,
     ExpectedVersion(expected): ExpectedVersion,
 ) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| t.confirm_round().map(|_| ()))?;
     let label = round_label(&store, "round", "started");
     backup_after(&store, &label);
@@ -520,7 +520,7 @@ async fn round_explanation(
     TournamentCtx(instance): TournamentCtx,
     Path(params): Path<RoundParams>,
 ) -> Result<Json<RoundExplanation>, ApiError> {
-    let store = instance.store.read().expect("store lock poisoned");
+    let store = instance.read();
     let tournament = store.current().ok_or(ApiError::NoTournament)?;
     let explanation = tournament.explain_round(params.round_number)?;
     Ok(Json(explanation))
@@ -553,7 +553,7 @@ async fn round_counterfactual(
             "a counterfactual needs two different players".into(),
         ));
     }
-    let store = instance.store.read().expect("store lock poisoned");
+    let store = instance.read();
     let tournament = store.current().ok_or(ApiError::NoTournament)?;
     let result = tournament.explain_counterfactual(params.round_number, req.a, req.b, req.mode)?;
     Ok(Json(result))
@@ -578,7 +578,7 @@ async fn force_pairing(
             "a forced pairing needs two different players".into(),
         ));
     }
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| t.force_pairing(req.a, req.b).map(|_| ()))?;
     let label = round_label(&store, "round", "re-paired");
     backup_after(&store, &label);
@@ -611,7 +611,7 @@ async fn set_board_result(
     Path(params): Path<BoardParams>,
     Json(req): Json<SetResultRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     let was_completed = round_completed(&store, params.round_number);
     store.mutate(expected, |t| {
         t.toggle_board_winner(params.round_number, params.board_index, req.clicked)
@@ -644,7 +644,7 @@ async fn set_board_drawn(
     Path(params): Path<BoardParams>,
     Json(req): Json<SetDrawnRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| {
         t.set_board_drawn(params.round_number, params.board_index, req.drawn)
             .map(|_| ())
@@ -670,7 +670,7 @@ async fn set_board_no_show(
     Path(params): Path<BoardParams>,
     Json(req): Json<SetNoShowRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     let was_completed = round_completed(&store, params.round_number);
     store.mutate(expected, |t| {
         t.set_board_no_show(params.round_number, params.board_index, req.absent)
@@ -706,7 +706,7 @@ async fn set_sitout_value(
     Path(params): Path<SitoutParams>,
     Json(req): Json<SetSitoutValueRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| {
         t.set_sitout_value(params.round_number, params.player, req.value)
             .map(|_| ())
@@ -732,7 +732,7 @@ async fn set_board_long(
     Path(params): Path<BoardParams>,
     Json(req): Json<SetLongRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     let was_completed = round_completed(&store, params.round_number);
     store.mutate(expected, |t| {
         t.set_board_long(params.round_number, params.board_index, req.long)
@@ -758,7 +758,7 @@ async fn set_board_handicap(
     Path(params): Path<BoardParams>,
     Json(req): Json<SetHandicapRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| {
         t.set_board_handicap(params.round_number, params.board_index, req.handicap)
             .map(|_| ())
@@ -772,7 +772,7 @@ async fn add_player(
     ExpectedVersion(expected): ExpectedVersion,
     Json(new_player): Json<NewPlayer>,
 ) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| t.add_player(new_player).map(|_| ()))?;
     Ok((StatusCode::CREATED, view(&store)?))
 }
@@ -785,7 +785,7 @@ async fn add_players_batch(
     ExpectedVersion(expected): ExpectedVersion,
     Json(new_players): Json<Vec<NewPlayer>>,
 ) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| {
         for new_player in new_players {
             t.add_player(new_player)?;
@@ -813,7 +813,7 @@ async fn import_players_csv(
     let ratings = ratings::cached_ratings(&state);
     // A parse failure carries a machine code so the client can localize it.
     let new_players = osp_core::parse_players_csv(&body, &ratings).map_err(ApiError::CsvImport)?;
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| {
         for new_player in new_players {
             t.add_player(new_player)?;
@@ -837,7 +837,7 @@ async fn edit_player(
     Path(params): Path<PlayerParams>,
     Json(new_player): Json<NewPlayer>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| {
         t.edit_player(params.player_id, new_player).map(|_| ())
     })?;
@@ -850,7 +850,7 @@ async fn remove_player(
     ExpectedVersion(expected): ExpectedVersion,
     Path(params): Path<PlayerParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| t.remove_player(params.player_id))?;
     view(&store)
 }
@@ -868,7 +868,7 @@ async fn set_player_eligible(
     Path(params): Path<PlayerParams>,
     Json(req): Json<SetEligibleRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| {
         t.set_player_eligible(params.player_id, req.eligible)
             .map(|_| ())
@@ -890,7 +890,7 @@ async fn add_point_adjustment(
     Path(params): Path<PlayerParams>,
     Json(req): Json<AddAdjustmentRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| {
         t.add_point_adjustment(params.player_id, req.delta, req.reason)
             .map(|_| ())
@@ -912,7 +912,7 @@ async fn remove_point_adjustment(
     ExpectedVersion(expected): ExpectedVersion,
     Path(params): Path<AdjustmentParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
-    let mut store = instance.store.write().expect("store lock poisoned");
+    let mut store = instance.write();
     store.mutate(expected, |t| {
         t.remove_point_adjustment(params.player_id, params.adjustment_id)
             .map(|_| ())

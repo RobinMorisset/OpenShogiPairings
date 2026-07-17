@@ -91,11 +91,7 @@ pub async fn check_version(
             Err(e) => return e.into_response(),
         };
         if let Some(expected) = expected {
-            let current = instance
-                .store
-                .read()
-                .expect("store lock poisoned")
-                .version();
+            let current = instance.read().version();
             if current != expected {
                 return ApiError::VersionConflict.into_response();
             }
@@ -114,11 +110,7 @@ pub async fn check_version(
 pub async fn events(
     TournamentCtx(instance): TournamentCtx,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let receiver = instance
-        .store
-        .read()
-        .expect("store lock poisoned")
-        .subscribe();
+    let receiver = instance.read().subscribe();
     let stream = BroadcastStream::new(receiver).map(|message| {
         let data = match message {
             Ok(version) => version.to_string(),

@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use osp_core::{Tournament, TournamentError};
 use serde::{Deserialize, Serialize};
@@ -341,6 +341,45 @@ pub struct TournamentInstance {
     pub auth: Option<AuthConfig>,
 }
 
+impl TournamentInstance {
+    /// Acquire the store for reading / writing, **recovering from a poisoned
+    /// lock** rather than propagating the panic.
+    ///
+    /// A `std::sync::RwLock` is poisoned only when a thread panics *while holding
+    /// the write guard*, and the poison flag means "the guarded value may have
+    /// been left half-updated, with its invariants broken." Recovering with
+    /// [`PoisonError::into_inner`](std::sync::PoisonError::into_inner) is sound
+    /// **here** because that half-updated state cannot arise: every write path
+    /// installs an already-complete value in a single move — [`mutate`] runs the
+    /// closure against a *clone* and only swaps it in (`current.replace(next)`)
+    /// *after* the closure returns `Ok`, and [`set_current`]/[`undo`] likewise
+    /// replace `current` wholesale. So a panic mid-mutation unwinds *before* any
+    /// partial write reaches `current`; the `TournamentStore` behind the lock is
+    /// always a complete, consistent value, poison flag or not.
+    ///
+    /// The payoff is that one panicking mutation (e.g. an unexpected `osp-core`
+    /// panic) fails only that one request, instead of poisoning the lock and
+    /// turning every later request for this tournament — reads included — into a
+    /// 500 until the process restarts. The registry's own methods ([`list`],
+    /// [`remove`]) already recover the same way, so this keeps the per-tournament
+    /// handlers consistent with them.
+    ///
+    /// [`mutate`]: TournamentStore::mutate
+    /// [`set_current`]: TournamentStore::set_current
+    /// [`undo`]: TournamentStore::undo
+    /// [`list`]: TournamentRegistry::list
+    /// [`remove`]: TournamentRegistry::remove
+    pub fn read(&self) -> RwLockReadGuard<'_, TournamentStore> {
+        self.store.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Acquire the store for writing, recovering from a poisoned lock — see
+    /// [`read`](Self::read) for why that recovery is safe here.
+    pub fn write(&self) -> RwLockWriteGuard<'_, TournamentStore> {
+        self.store.write().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
 /// Summary of a tournament for the picker list (`GET /api/tournaments`) — name
 /// and whether it's locked, never the tournament's contents.
 #[derive(Serialize, TS)]
@@ -517,10 +556,10 @@ impl TournamentRegistry {
         instances
             .iter()
             .filter_map(|(id, instance)| {
-                // Recover from a poisoned store lock rather than propagating the
-                // panic: one tournament whose mutation panicked must not take the
+                // `instance.read()` recovers from a poisoned store lock (see its
+                // doc): one tournament whose mutation panicked must not take the
                 // whole picker down for every other tournament.
-                let store = instance.store.read().unwrap_or_else(|e| e.into_inner());
+                let store = instance.read();
                 let tournament = store.current()?;
                 Some(TournamentSummary {
                     id: *id,
@@ -595,11 +634,7 @@ impl TournamentRegistry {
             // flipping `deleted` guarantees any such write either ran before this
             // point (and is now deleted) or sees the tombstone and refuses to
             // persist — so a late write can't resurrect the file on disk.
-            instance
-                .store
-                .write()
-                .unwrap_or_else(|e| e.into_inner())
-                .mark_deleted();
+            instance.write().mark_deleted();
             if let Some(path) = self.tournament_path(id) {
                 let _ = fs::remove_file(path);
             }
@@ -825,6 +860,42 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_poisoned_store_lock_still_serves_later_requests() {
+        let instance = Arc::new(TournamentInstance {
+            store: RwLock::new({
+                let mut s = TournamentStore::empty(None);
+                s.set_current(Tournament::new("Cup").unwrap());
+                s
+            }),
+            auth: None,
+        });
+
+        // Poison the store lock: panic while holding its write guard, exactly the
+        // shape of an osp-core panic inside a mutation. (The panic message on
+        // stderr during this test is expected.)
+        let poisoner = Arc::clone(&instance);
+        let joined = std::thread::spawn(move || {
+            let _guard = poisoner.store.write().unwrap();
+            panic!("boom while holding the store write lock");
+        })
+        .join();
+        assert!(joined.is_err(), "the spawned thread panicked as intended");
+        assert!(
+            instance.store.read().is_err(),
+            "the store lock is now poisoned"
+        );
+
+        // The raw `.expect(...)` the handlers used to do would panic here, 500ing
+        // every future request. The recovering accessors instead hand back the
+        // (still-consistent) state and keep serving.
+        assert_eq!(instance.read().current().unwrap().name, "Cup");
+        instance
+            .write()
+            .set_current(Tournament::new("Cup 2").unwrap());
+        assert_eq!(instance.read().current().unwrap().name, "Cup 2");
     }
 
     fn add_named(name: &str) -> impl FnOnce(&mut Tournament) -> Result<(), TournamentError> + '_ {
