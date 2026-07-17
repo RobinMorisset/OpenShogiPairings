@@ -151,6 +151,10 @@ pub enum TournamentError {
     /// The serialized record uses a format version this build cannot read.
     #[error("unsupported tournament format version {found} (this build supports {supported})")]
     UnsupportedFormatVersion { found: u32, supported: u32 },
+    /// The bytes couldn't be parsed as a tournament save at all (not even far
+    /// enough to read its format version).
+    #[error("malformed tournament save: {0}")]
+    MalformedSave(String),
     /// The cup is enabled but no size was chosen at finalization.
     #[error("choose a cup size to finalize (the cup is enabled)")]
     CupSizeRequired,

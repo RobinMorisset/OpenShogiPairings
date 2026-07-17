@@ -50,25 +50,34 @@
   // The tie-break columns to show, in the referee-chosen order — resolved from
   // the settings to their label/field/tooltip. Unknown codes (from a newer save)
   // are skipped.
-  const eloEstimateNeeded = $derived(
-    tournament.settings.pairing.kind === "elo",
-  );
+  // A live ELO estimate is maintained — so the estimate is a meaningful ranking
+  // and column — in either of the server's two cases: ELO pairing mode, or Swiss
+  // with MacMahon drawn from the estimate against at least one ELO threshold.
+  // Mirrors the server's `elo_estimate_needed() || macmahon_from_estimate_active()`
+  // (and TournamentSettingsView's `eloEstimateLive`) — keep the three in sync, or
+  // the estimate the server ranks by would be hidden here.
+  const eloEstimateNeeded = $derived.by(() => {
+    const pairing = tournament.settings.pairing;
+    if (pairing.kind === "elo") return true;
+    return (
+      pairing.macmahon.source.kind === "from_estimate" &&
+      pairing.macmahon.thresholds.some((t) => t.criterion.kind === "elo")
+    );
+  });
 
   const tiebreakColumns = $derived(
     (tournament.settings.tiebreaks ?? [])
-      // Estimated ELO only ranks when a live estimate is maintained (either ELO
-      // mode); drop it as a column otherwise (defends against a loaded save
-      // that still lists it).
+      // Estimated ELO only ranks when a live estimate is maintained; drop it as a
+      // column otherwise (defends against a loaded save that still lists it).
       .filter((code) => code !== "est_elo" || eloEstimateNeeded)
       .map((code) => TIEBREAKS.find((t) => t.code === code))
       .filter((t): t is (typeof TIEBREAKS)[number] => t != null),
   );
 
   // The estimated-ELO column is only meaningful when a live estimate is
-  // maintained (either ELO mode). Show it as a dedicated column there — unless
-  // the referee already added it to the ranking criteria, in which case it
-  // appears as a tie-break column (with its ranking position) and this one
-  // would duplicate it.
+  // maintained. Show it as a dedicated column there — unless the referee already
+  // added it to the ranking criteria, in which case it appears as a tie-break
+  // column (with its ranking position) and this one would duplicate it.
   const showEstimatedElo = $derived(
     eloEstimateNeeded && !(tournament.settings.tiebreaks ?? []).includes("est_elo"),
   );

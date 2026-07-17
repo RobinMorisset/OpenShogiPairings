@@ -1,6 +1,7 @@
 //! Per-tournament API: fetch, replace (load), delete, player CRUD, rounds, and
 //! undo — everything nested under `/api/tournaments/{id}`.
 
+use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{header, StatusCode};
 use axum::middleware;
@@ -255,11 +256,22 @@ async fn get_tournament(
 async fn replace_tournament(
     TournamentCtx(instance): TournamentCtx,
     Path(id): Path<Uuid>,
-    Json(mut tournament): Json<Tournament>,
+    ExpectedVersion(expected): ExpectedVersion,
+    body: Bytes,
 ) -> Result<Json<TournamentView>, ApiError> {
+    // Reject an incompatible save with a clear version error *before* the generic
+    // deserialize, whose failure on a reshaped field would otherwise be an opaque
+    // 422 (see [`crate::state::check_format_version`]).
+    crate::state::check_format_version(&body)?;
+    let mut tournament: Tournament = serde_json::from_slice(&body)
+        .map_err(|e| ApiError::BadRequest(format!("could not parse tournament: {e}")))?;
     tournament.validate_loaded()?;
     tournament.id = id;
     let mut store = instance.store.write().expect("store lock poisoned");
+    // Atomic optimistic-concurrency check, under the same lock the replace runs
+    // in — the middleware pre-screen alone can't close the race for a
+    // whole-tournament replace (see TournamentStore::ensure_current_version).
+    store.ensure_current_version(expected)?;
     store.set_current(tournament);
     view(&store)
 }
@@ -277,11 +289,15 @@ async fn delete_tournament(
 }
 
 /// Revert the last player change.
-async fn undo(TournamentCtx(instance): TournamentCtx) -> Result<Json<TournamentView>, ApiError> {
+async fn undo(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
     if store.current().is_none() {
         return Err(ApiError::NoTournament);
     }
+    store.ensure_current_version(expected)?;
     store.undo();
     view(&store)
 }
@@ -308,9 +324,11 @@ struct BackupParams {
 /// history.
 async fn restore_backup(
     TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
     Path(params): Path<BackupParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
+    store.ensure_current_version(expected)?;
     let tournament_id = store.current().ok_or(ApiError::NoTournament)?.id;
     let restored = backup::load(tournament_id, &params.backup_id)
         .ok_or_else(|| ApiError::NotFound(format!("no backup {}", params.backup_id)))?;
@@ -339,12 +357,14 @@ async fn american_grid(
 async fn import_american_grid(
     TournamentCtx(instance): TournamentCtx,
     Path(id): Path<Uuid>,
+    ExpectedVersion(expected): ExpectedVersion,
     body: String,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut tournament =
         osp_core::import_american_grid(&body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     tournament.id = id;
     let mut store = instance.store.write().expect("store lock poisoned");
+    store.ensure_current_version(expected)?;
     store.set_current(tournament);
     view(&store)
 }

@@ -25,6 +25,40 @@ use crate::ratings::CachedRatings;
 /// simply told to resync (see [`crate::live`]).
 const NOTIFY_CAPACITY: usize = 16;
 
+/// Peek at only the `format_version` of a serialized tournament and reject an
+/// incompatible one *before* a full deserialize is attempted.
+///
+/// A format bump can reshape a field's serde representation (v5, for instance,
+/// made `handicap_policy` an internally-tagged enum, so an old bare-string value
+/// no longer deserializes at all). A full `from_slice::<Tournament>` of such a
+/// file therefore fails deep inside a changed field with an opaque, misleading
+/// error — hiding the real cause, the format version, which the version field
+/// exists precisely to surface. Every path that loads an untrusted save (server
+/// startup, the "load file" endpoint) runs this first, so an old file is
+/// rejected loudly with a clear version message rather than mis-parsed or
+/// silently dropped. Lives in the server (not `osp-core`) because it is the
+/// server that parses JSON — core has no runtime JSON dependency.
+pub fn check_format_version(bytes: &[u8]) -> Result<(), TournamentError> {
+    #[derive(Deserialize)]
+    struct VersionProbe {
+        format_version: Option<u32>,
+    }
+    let probe: VersionProbe =
+        serde_json::from_slice(bytes).map_err(|e| TournamentError::MalformedSave(e.to_string()))?;
+    // A missing field means "current" (matches the `Tournament` field's own
+    // serde default), so only a present, mismatched version is rejected.
+    let found = probe
+        .format_version
+        .unwrap_or(osp_core::TOURNAMENT_FORMAT_VERSION);
+    if found != osp_core::TOURNAMENT_FORMAT_VERSION {
+        return Err(TournamentError::UnsupportedFormatVersion {
+            found,
+            supported: osp_core::TOURNAMENT_FORMAT_VERSION,
+        });
+    }
+    Ok(())
+}
+
 /// The current tournament plus a linear undo history.
 ///
 /// The history is a stack of full tournament snapshots taken *before* each
@@ -108,13 +142,45 @@ impl TournamentStore {
     }
 
     /// Read and parse the persisted tournament, or `None` if the file is absent
-    /// or unreadable/corrupt (in which case the server just starts empty).
+    /// or can't be loaded.
+    ///
+    /// A file that is present but unreadable — a wrong/old format version, or
+    /// corrupt bytes — is reported loudly at `error` level and the file is left
+    /// **untouched** (the caller drops the instance instead of inserting an empty
+    /// one, so nothing ever persists over it). This is deliberate: an old file
+    /// from before an incompatible format bump must be rejected, not silently
+    /// discarded — losing an in-progress event on a routine binary upgrade would
+    /// be far worse than refusing to serve it.
     fn load_from_disk(path: &Path) -> Option<Tournament> {
-        let bytes = fs::read(path).ok()?;
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                // Genuinely absent is the normal empty-start case; anything else
+                // (permissions, I/O) is worth surfacing.
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    tracing::error!("could not read {}: {e}", path.display());
+                }
+                return None;
+            }
+        };
+        // Check the format version before the full parse, so an incompatible old
+        // save fails with a clear version message rather than an opaque
+        // field-level serde error (see [`check_format_version`]).
+        if let Err(e) = check_format_version(&bytes) {
+            tracing::error!(
+                "refusing to load {}: {e}. The file is left untouched — load it \
+                 with a matching build, or remove it to start fresh.",
+                path.display()
+            );
+            return None;
+        }
         match serde_json::from_slice(&bytes) {
             Ok(tournament) => Some(tournament),
             Err(e) => {
-                tracing::warn!("could not parse {}: {e}; starting empty", path.display());
+                tracing::error!(
+                    "could not parse {}: {e}. The file is left untouched.",
+                    path.display()
+                );
                 None
             }
         }
@@ -222,6 +288,24 @@ impl TournamentStore {
     /// mutation, persistence, or backup should touch it.
     fn mark_deleted(&mut self) {
         self.deleted = true;
+    }
+
+    /// Confirm the caller's edit was based on the current version, for the
+    /// state-replacing mutations (`set_current` via load/restore/import, and
+    /// `undo`) that don't go through [`mutate`]'s built-in check.
+    ///
+    /// Call it **under the write lock**, immediately before the mutation: that is
+    /// what makes optimistic concurrency atomic here. [`crate::live::check_version`]
+    /// only pre-screens (it reads the version and releases the lock before the
+    /// handler runs), so without this in-lock re-check two edits racing from the
+    /// same base version would both pass the pre-screen and the later one would
+    /// silently clobber the earlier — a `200` where the client is owed a `409`.
+    /// `expected` is `None` when the client opts out of concurrency checking.
+    pub fn ensure_current_version(&self, expected: Option<u32>) -> Result<(), MutateError> {
+        match expected {
+            Some(expected) if self.version != expected => Err(MutateError::VersionConflict),
+            _ => Ok(()),
+        }
     }
 
     /// Revert to the previous state, if any. No-op when history is empty.
@@ -742,5 +826,57 @@ mod tests {
             Err(MutateError::NoTournament)
         ));
         assert!(instance.store.read().unwrap().is_deleted());
+    }
+
+    #[test]
+    fn check_format_version_rejects_old_and_accepts_current() {
+        // A current serialization round-trips through the version check.
+        let current = serde_json::to_vec(&Tournament::new("Cup").unwrap()).unwrap();
+        assert!(check_format_version(&current).is_ok());
+
+        // A present-but-wrong version (the v1.0.0 files were format 4) is rejected
+        // with the clear version error — this is the case a full deserialize would
+        // instead fail on with an opaque field-level error.
+        let old = br#"{"format_version":4,"handicap_policy":"allowed"}"#;
+        assert!(matches!(
+            check_format_version(old),
+            Err(TournamentError::UnsupportedFormatVersion { found: 4, .. })
+        ));
+
+        // A missing version means "current" (matches the field's serde default).
+        assert!(check_format_version(b"{}").is_ok());
+
+        // Bytes that aren't even JSON are a malformed save, not a version error.
+        assert!(matches!(
+            check_format_version(b"not json"),
+            Err(TournamentError::MalformedSave(_))
+        ));
+    }
+
+    #[test]
+    fn ensure_current_version_closes_the_replace_undo_race() {
+        // Model the race the middleware pre-screen can't: two writers both read
+        // version N, then serialize on the write lock. The first commits (→ N+1);
+        // the second's version-unchecked mutation (load/restore/undo) must now be
+        // rejected here rather than silently clobber the first.
+        let mut store = TournamentStore::empty(None);
+        store.set_current(Tournament::new("Cup").unwrap());
+        let base = store.version(); // what both writers saw
+
+        // Writer A commits first.
+        store
+            .mutate(Some(base), add_named("Alice"))
+            .expect("A is based on the current version");
+        assert_eq!(store.version(), base + 1);
+
+        // Writer B's load/restore/undo, still based on `base`, is now stale.
+        assert!(matches!(
+            store.ensure_current_version(Some(base)),
+            Err(MutateError::VersionConflict)
+        ));
+        // A client that opts out of the check (no header) still passes.
+        assert!(store.ensure_current_version(None).is_ok());
+        // And a writer based on the now-current version is accepted.
+        assert!(store.ensure_current_version(Some(store.version())).is_ok());
     }
 }

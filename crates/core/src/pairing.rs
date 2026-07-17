@@ -107,6 +107,18 @@ fn solve_matching(cost: &[i128], n: usize) -> Vec<usize> {
     } else if max <= i64::MAX as i128 / 16 {
         min_weight_perfect_matching(&narrow::<i64>(cost), n)
     } else {
+        // The narrow tiers require `max <= TYPE::MAX / 16` (headroom for the
+        // solver's internal edge-weight doubling and its `MAX / 4` "infinity"
+        // sentinel); the i128 tier needs the same guard, or a cost that reaches
+        // this range overflows *inside* the solver — silently, in release.
+        // There is no wider integer to fall back to, so this is a hard scale
+        // limit, checked here rather than left to corrupt the matching.
+        assert!(
+            max <= i128::MAX / 16,
+            "pairing cost {max} exceeds the matching solver's i128 headroom \
+             (i128::MAX / 16): field too large or score/MacMahon spread too wide \
+             (known scale limit)"
+        );
         min_weight_perfect_matching(cost, n)
     }
 }
@@ -446,6 +458,36 @@ impl Rule {
     }
 }
 
+/// The cost ladder lives in `i128`, and its lexicographic separation only holds
+/// while every multiplier and running total stays in range. Overflow would wrap
+/// *silently* in release (the workspace sets no `overflow-checks`), producing a
+/// non-lexicographic cost — a wrong pairing with no error, the exact failure the
+/// derived-ladder design exists to rule out. So the ladder arithmetic goes
+/// through these checked helpers, turning the (extreme) overflow into a loud,
+/// precise abort instead of a silently miscosted draw. It is reachable only at
+/// the edges: many hundreds of players combined with a very wide score/MacMahon
+/// spread, or the counterfactual re-solve ([`solve_stable`]) near a thousand.
+#[cold]
+#[track_caller]
+fn ladder_overflow() -> ! {
+    panic!(
+        "pairing weight ladder overflowed i128: the field is too large or the \
+         score/MacMahon spread too wide for the exact lexicographic ladder. \
+         This is a known scale limit; pairing was aborted rather than emit a \
+         silently miscosted draw."
+    );
+}
+
+#[track_caller]
+fn ladder_mul(a: i128, b: i128) -> i128 {
+    a.checked_mul(b).unwrap_or_else(|| ladder_overflow())
+}
+
+#[track_caller]
+fn ladder_add(a: i128, b: i128) -> i128 {
+    a.checked_add(b).unwrap_or_else(|| ladder_overflow())
+}
+
 /// Derive the priority multipliers from each rule's worst-case total units, given
 /// in priority order (highest first). Bottom-up, `mult[i] = 1 + Σ_{j>i}
 /// mult[j]·max_total[j]`, so one unit of rule `i` strictly exceeds the largest
@@ -455,8 +497,8 @@ fn scale_ladder(max_total: &[i128]) -> Vec<i128> {
     let mut mult = vec![0i128; max_total.len()];
     let mut lower = 0i128; // Σ over the already-assigned lower-priority rules
     for i in (0..max_total.len()).rev() {
-        mult[i] = 1 + lower;
-        lower += mult[i] * max_total[i];
+        mult[i] = ladder_add(1, lower);
+        lower = ladder_add(lower, ladder_mul(mult[i], max_total[i]));
     }
     mult
 }
@@ -1055,7 +1097,10 @@ fn solve_stable(
     for i in 0..n {
         for j in (i + 1)..n {
             let stray = i128::from(!baseline.contains(&unord_pair(verts[i], verts[j])));
-            let c = base(verts[i], verts[j]) * stab + stray;
+            // `base·stab` compounds the ladder magnitude by ~n/2, so this path
+            // overflows at smaller fields than plain pairing — checked, same as
+            // the ladder itself (see [`ladder_mul`]).
+            let c = ladder_add(ladder_mul(base(verts[i], verts[j]), stab), stray);
             cost[i * n + j] = c;
             cost[j * n + i] = c;
             max_c = max_c.max(c);
@@ -1063,7 +1108,7 @@ fn solve_stable(
     }
     if !forbidden.is_empty() {
         // Above the total of any perfect matching that avoids the edge.
-        let prohibitive = max_c * (n as i128 / 2) + 1;
+        let prohibitive = ladder_add(ladder_mul(max_c, n as i128 / 2), 1);
         for i in 0..n {
             for j in (i + 1)..n {
                 if forbidden.contains(&unord_pair(verts[i], verts[j])) {
@@ -2467,6 +2512,25 @@ mod tests {
             assert!(mult[i] > lower_max);
         }
         assert_eq!(mult[max_total.len() - 1], 1); // the lowest-priority rule is the unit
+    }
+
+    #[test]
+    #[should_panic(expected = "overflowed i128")]
+    fn scale_ladder_aborts_on_overflow_instead_of_wrapping() {
+        // Two astronomically large worst-case totals push the running product past
+        // i128. Without the checked arithmetic this would wrap silently in release
+        // and corrupt the lexicographic ordering; it must abort loudly instead.
+        let _ = scale_ladder(&[i128::MAX / 2, i128::MAX / 2]);
+    }
+
+    #[test]
+    #[should_panic(expected = "i128 headroom")]
+    fn solve_matching_rejects_costs_beyond_i128_headroom() {
+        // A 2×2 cost matrix whose off-diagonal cost is above the solver's i128
+        // headroom (MAX/16): the solver's internal doubling would overflow, so the
+        // dispatch must reject it rather than hand it over to be silently mangled.
+        let big = i128::MAX / 2;
+        let _ = solve_matching(&[0, big, big, 0], 2);
     }
 
     #[test]

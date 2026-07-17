@@ -242,6 +242,14 @@ pub fn compute_standings(
     // first); the tournament number breaks any remaining tie so the order is
     // deterministic (unnumbered players last).
     //
+    // NOTE (intentional): there is deliberately no hard-wired "sort by points
+    // first" step. Score is modeled as an ordinary, reorderable/removable
+    // tie-break rather than a mandatory primary sort, because which quantity
+    // should rank first is a tournament choice — e.g. in ELO pairing mode ranking
+    // by estimated ELO is the point, not raw points. So a settings list without
+    // `Points` (or with it below another criterion) is a valid configuration, not
+    // a bug; the default order (`Tiebreak::default_order`) simply puts it first.
+    //
     // Most criteria are a plain per-player number, so ranking by them is just a
     // lexicographic sort. Direct confrontation isn't: its value for a player
     // depends on which other players they're still tied with once every earlier
