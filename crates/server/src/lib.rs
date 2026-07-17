@@ -298,7 +298,7 @@ mod tests {
         let (status, body) = send(router(state.clone()), get(&t(id, ""))).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["tournament"]["name"], "Paris Open");
-        assert_eq!(body["tournament"]["format_version"], 4);
+        assert_eq!(body["tournament"]["format_version"], 5);
         assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
         assert_eq!(body["can_undo"], false); // nothing to undo on a fresh tournament
 
@@ -530,7 +530,13 @@ mod tests {
         assert_eq!(rounds.len(), 1);
         assert_eq!(rounds[0]["number"], 1);
         assert_eq!(rounds[0]["boards"].as_array().unwrap().len(), 1); // 3 → 1 board
-        assert!(rounds[0]["bye"].is_number()); // + a bye
+
+        // + a bye, serialized as the round's one sit-out.
+        let sitouts = rounds[0]["sitouts"].as_array().unwrap();
+        assert_eq!(sitouts.len(), 1);
+        assert!(sitouts[0]["player"].is_number());
+        assert_eq!(sitouts[0]["kind"], "bye");
+        assert_eq!(sitouts[0]["value"], "full");
     }
 
     #[tokio::test]

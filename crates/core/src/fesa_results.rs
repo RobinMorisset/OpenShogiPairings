@@ -23,7 +23,7 @@
 
 use std::collections::HashMap;
 
-use crate::grid_import::{build_tournament, parse_cell, Cell, GridImportError, RawRow};
+use crate::grid_import::{build_tournament, parse_cell, GridImportError, RawRow};
 use crate::player::Grade;
 use crate::tournament::Tournament;
 use crate::units::TournamentId;
@@ -71,36 +71,12 @@ pub fn import_fesa_results(
         rows.push(row);
     }
 
-    demote_extra_byes(&mut rows);
-
     let (tournament, id_of) = build_tournament(title.as_deref(), rows)?;
     let strengths = strength_by_number
         .into_iter()
         .filter_map(|(number, s)| id_of.get(&number).map(|&id| (id, s)))
         .collect();
     Ok((tournament, strengths))
-}
-
-/// The tournament model allows at most one bye per round, but a FESA table can
-/// show several `0+` in a round (a real bye plus forfeit wins against no-shows).
-/// Keep the first as the round's bye and demote the rest to absences. Those few
-/// players lose that `+1` in the *reconstructed* standings — a rare, tail-only
-/// rounding in the observed data; the real games (and the mismatch metric) are
-/// unaffected, and the simulation ignores these rounds entirely.
-fn demote_extra_byes(rows: &mut [RawRow]) {
-    let round_count = rows.first().map_or(0, |r| r.cells.len());
-    for r in 0..round_count {
-        let mut seen_bye = false;
-        for row in rows.iter_mut() {
-            if matches!(row.cells.get(r), Some(Cell::Bye)) {
-                if seen_bye {
-                    row.cells[r] = Cell::Absent;
-                } else {
-                    seen_bye = true;
-                }
-            }
-        }
-    }
 }
 
 /// A data row starts (after leading spaces) with a run of digits then a space —
@@ -351,6 +327,7 @@ fn is_cell_token(t: &str) -> bool {
 mod tests {
     use super::*;
     use crate::decode_latin1;
+    use crate::grid_import::Cell;
 
     fn load(fixture: &str) -> (Tournament, HashMap<TournamentId, f64>) {
         let path = format!("{}/tests/fixtures/{fixture}", env!("CARGO_MANIFEST_DIR"));
@@ -466,7 +443,9 @@ mod tests {
         assert!(t.rounds.iter().all(|r| r.completed));
         // Beta's round-2 no-show landed them in the absent set and scored nothing.
         let beta = find(&t, "Beta", "Bob");
-        assert!(t.rounds[1].absent.contains(&beta.tournament_id.unwrap()));
+        assert!(t.rounds[1]
+            .absentees()
+            .any(|id| id == beta.tournament_id.unwrap()));
         let points = |id| {
             t.standings()
                 .into_iter()
@@ -481,8 +460,8 @@ mod tests {
     #[test]
     fn imports_a_fesa_half_point_bye_and_scores_it() {
         // A FESA table with an odd field where one player sits out a round as a
-        // half-point bye (`0=`), like the all-`0=` Campionato Italiano. The
-        // importer turns on `half_point_absences` and scores the ½.
+        // half-point bye (`0=`), like the all-`0=` Campionato Italiano. The cell
+        // states the ½ itself, so it scores without touching any setting.
         let mut text = String::from("Half Open : 2026\nNr Name Nat Grade ELO R1 Pts +/-\n");
         let row = |nr: u32, last: &str, first: &str, c1: &str, pts: &str| {
             format!("{nr:>2} {last:<12}{first} IT 1 Dan 1500 {c1} {pts} +0\n")
@@ -492,7 +471,7 @@ mod tests {
         text.push_str(&row(3, "Gamma", "Cid", "0=", "1/2")); // half-point bye
 
         let (t, _) = import_fesa_results(&text).unwrap();
-        assert!(t.settings.half_point_absences);
+        assert!(!t.settings.half_point_absences, "the setting is untouched");
         let points = |last, first| {
             t.standings()
                 .into_iter()

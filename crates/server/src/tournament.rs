@@ -9,7 +9,8 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{
     Board, Counterfactual, CounterfactualMode, CupBracketView, CupPodium, Handicap, NewPlayer,
-    NoShow, RoundExplanation, Standing, Tournament, TournamentId, TournamentSettings, Winner,
+    NoShow, RoundExplanation, SitoutValue, Standing, Tournament, TournamentId, TournamentSettings,
+    Winner,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -114,6 +115,10 @@ pub fn scope(state: AppState) -> Router<AppState> {
         .route(
             "/rounds/{round_number}/boards/{board_index}/long",
             post(set_board_long),
+        )
+        .route(
+            "/rounds/{round_number}/sitouts/{player}",
+            put(set_sitout_value),
         )
         .route("/players", post(add_player))
         .route("/players/batch", post(add_players_batch))
@@ -453,10 +458,10 @@ struct DraftUpdate {
     #[serde(default)]
     forced_boards: Vec<Board>,
     #[serde(default)]
-    forced_bye: Option<TournamentId>,
+    forced_byes: Vec<TournamentId>,
 }
 
-/// Edit the current draft (absent set, forced pairings, forced bye).
+/// Edit the current draft (absent set, forced pairings, forced byes).
 async fn update_draft(
     TournamentCtx(instance): TournamentCtx,
     ExpectedVersion(expected): ExpectedVersion,
@@ -464,7 +469,7 @@ async fn update_draft(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.store.write().expect("store lock poisoned");
     store.mutate(expected, |t| {
-        t.update_draft(req.absent, req.forced_boards, req.forced_bye)
+        t.update_draft(req.absent, req.forced_boards, req.forced_byes)
             .map(|_| ())
     })?;
     view(&store)
@@ -654,6 +659,38 @@ async fn set_board_no_show(
     if !was_completed && round_completed(&store, params.round_number) {
         backup_after(&store, &format!("round {} completed", params.round_number));
     }
+    view(&store)
+}
+
+/// The round and player addressed by the sit-out endpoint (see [`BackupParams`]
+/// on why this is a named struct rather than a bare tuple `Path`).
+#[derive(Deserialize)]
+struct SitoutParams {
+    round_number: u32,
+    player: TournamentId,
+}
+
+/// Body of the sit-out endpoint: what the round is worth to that player.
+#[derive(Debug, Deserialize)]
+struct SetSitoutValueRequest {
+    value: SitoutValue,
+}
+
+/// Set what a round scored a player who sat it out (`0+` / `0=` / `0−`).
+///
+/// Allowed on completed rounds — re-scoring a past round is the point — and it
+/// never changes whether the round is complete, since sit-outs don't gate that.
+async fn set_sitout_value(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<SitoutParams>,
+    Json(req): Json<SetSitoutValueRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.store.write().expect("store lock poisoned");
+    store.mutate(expected, |t| {
+        t.set_sitout_value(params.round_number, params.player, req.value)
+            .map(|_| ())
+    })?;
     view(&store)
 }
 

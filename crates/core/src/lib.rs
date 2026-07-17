@@ -44,7 +44,8 @@ pub use pairing::{
 };
 pub use player::{Grade, GradeKind, NewPlayer, Player, PointAdjustment};
 pub use round::{
-    Board, CupStage, Handicap, HandicapGame, NoShow, PairingSource, Round, RoundDraft, Winner,
+    Board, CupStage, Handicap, HandicapGame, NoShow, PairingSource, Round, RoundDraft, Sitout,
+    SitoutKind, SitoutValue, Winner,
 };
 pub use settings::{
     ClubProtection, EloEstimator, EloPriorShape, FloaterStyle, HandicapDisplay, HandicapPolicy,

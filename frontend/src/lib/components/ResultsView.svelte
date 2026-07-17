@@ -1,7 +1,18 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
   import { TIEBREAKS } from "../types";
-  import type { Board, CupPodium, Player, Round, Standing, Tiebreak, Tournament, Winner } from "../types";
+  import type {
+    Board,
+    CupPodium,
+    Player,
+    Round,
+    Sitout,
+    SitoutValue,
+    Standing,
+    Tiebreak,
+    Tournament,
+    Winner,
+  } from "../types";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
   import { boardOutcome } from "../boardOutcome";
   import { partitionDropped } from "../tiebreak";
@@ -17,9 +28,18 @@
     /** Winner that counts for standings/pairing per board, server-computed
      *  (respects the Wiel rule), indexed like `tournament.rounds[i].boards[j]`. */
     effectiveWinners: (Winner | null)[][];
+    /** Re-score one player's sit-out in one round. Omitted for a read-only
+     *  table, which leaves the sit-out cells as plain text. */
+    onSetSitoutValue?: (roundNumber: number, player: number, value: SitoutValue) => void;
   }
 
-  let { tournament, standings, cupPodium = null, effectiveWinners }: Props = $props();
+  let {
+    tournament,
+    standings,
+    cupPodium = null,
+    effectiveWinners,
+    onSetSitoutValue,
+  }: Props = $props();
 
   // Round number → its index into `tournament.rounds` (and so into
   // `effectiveWinners`), since that array isn't filtered to completed rounds.
@@ -140,11 +160,19 @@
     pointsDiff: number;
   };
 
+  // A round the player sat out — a bye of some sort, or an absence — showing
+  // what it scored (`0+` / `0=` / `0−`). The only editable cell: clicking it
+  // re-scores that one round for that one player.
+  type SitoutCell = {
+    kind: "sitout";
+    /** Which round it belongs to, for the re-scoring call. */
+    roundNumber: number;
+    player: number;
+    sitout: Sitout;
+  };
+
   type Cell =
-    | { kind: "bye" }
-    // An absence: `half` when the tournament awards absences half a point (a
-    // scored half-bye, `0=`), otherwise a plain zero (`0−`).
-    | { kind: "absent"; half: boolean }
+    | SitoutCell
     // A no-show board: this player was the absentee (`0#`) or the one who
     // showed up and was credited the free point, bye-style (`0+`).
     | { kind: "no-show"; opponentName: string }
@@ -153,6 +181,8 @@
     // A long (two-round) game started this round: its result belongs to the next
     // round's column, so this column shows a `0−` placeholder.
     | { kind: "long-pending"; opponentName: string }
+    // The player wasn't in this round at all (e.g. registered later).
+    | { kind: "not-in-round" }
     | PlayedCell;
 
   // A long (two-round) game lives in its starting round but its result is only
@@ -179,19 +209,12 @@
 
   function cellFor(player: Player, round: Round): Cell {
     const pid = tid(player);
-    // The Swiss bye and the (rare) cup bye both read as a free point.
-    if (round.bye === pid || (round.cup_byes ?? []).includes(pid))
-      return { kind: "bye" };
+    // No board: a bye or an absence, showing whatever it was scored.
+    const sitout = (round.sitouts ?? []).find((s) => s.player === pid);
+    if (sitout)
+      return { kind: "sitout", roundNumber: round.number, player: pid, sitout };
     const boardIdx = round.boards.findIndex((b) => b.player1 === pid || b.player2 === pid);
-    if (boardIdx < 0) {
-      // No board and not the bye: absent. It scores a half point (a `0=`
-      // half-bye) when the tournament awards absences half a point *and* the
-      // player is in this round's absent list — matching the server's scoring.
-      const half =
-        (tournament.settings.half_point_absences ?? false) &&
-        (round.absent ?? []).includes(pid);
-      return { kind: "absent", half };
-    }
+    if (boardIdx < 0) return { kind: "not-in-round" };
     return cellForBoard(player, round, round.boards[boardIdx], boardIdx);
   }
 
@@ -238,6 +261,56 @@
       handicap,
       pointsDiff,
     };
+  }
+
+  /** The three values a sit-out can take, in the order the picker lists them. */
+  const SITOUT_VALUES: SitoutValue[] = ["full", "half", "zero"];
+
+  /** The cross-table token for a sit-out value: `0+`, `0=` or `0−`. */
+  function sitoutLabel(value: SitoutValue): string {
+    return { full: "0+", half: "0=", zero: "0−" }[value];
+  }
+
+  /** Whether a sit-out is a bye of some kind (as opposed to an absence) — it
+   *  colours the cell and names it in the tooltip. */
+  function isBye(sitout: Sitout): boolean {
+    return sitout.kind !== "absent";
+  }
+
+  /** The tooltip for a sit-out cell: why the player sat out, what it scored,
+   *  and (when editable) that it can be clicked. */
+  function sitoutTitle(cell: SitoutCell): string {
+    const kind = cell.sitout.kind;
+    const reason =
+      kind === "absent"
+        ? $_("resultsView.sitoutAbsent")
+        : kind === "forced_bye"
+          ? $_("resultsView.sitoutForcedBye")
+          : kind === "bye"
+            ? $_("resultsView.sitoutBye")
+            : $_("resultsView.sitoutCupBye");
+    const worth = $_(`resultsView.sitoutWorth.${cell.sitout.value}`);
+    return onSetSitoutValue ? `${reason}\n${worth}\n${$_("resultsView.sitoutEditHint")}` : `${reason}\n${worth}`;
+  }
+
+  // The sit-out cell whose picker is open, if any. Keyed by round + player,
+  // since that pair identifies a cell uniquely.
+  let picking = $state<{ roundNumber: number; player: number } | null>(null);
+
+  const isPicking = (cell: SitoutCell) =>
+    picking?.roundNumber === cell.roundNumber && picking?.player === cell.player;
+
+  function togglePicker(cell: SitoutCell) {
+    picking = isPicking(cell)
+      ? null
+      : { roundNumber: cell.roundNumber, player: cell.player };
+  }
+
+  function chooseValue(cell: SitoutCell, value: SitoutValue) {
+    picking = null;
+    if (value !== cell.sitout.value) {
+      onSetSitoutValue?.(cell.roundNumber, cell.player, value);
+    }
   }
 
   /** Ascending/descending floater markers, e.g. `^`, `vv` — one per point of gap. */
@@ -450,8 +523,39 @@
           {#each completedRounds as round, i (round.number)}
             {@const cell = longAwareCell(player, i)}
             <td class="num result">
-              {#if cell.kind === "bye"}
-                <span class="win" data-tip={$_("resultsView.byeTitle")}>0+</span>
+              {#if cell.kind === "sitout"}
+                {@const tone = isBye(cell.sitout) && cell.sitout.value === "full" ? "win" : "absent"}
+                {#if onSetSitoutValue}
+                  <span class="sitout-cell">
+                    <button
+                      type="button"
+                      class="sitout {tone}"
+                      data-testid="sitout-{cell.roundNumber}-{cell.player}"
+                      aria-haspopup="true"
+                      aria-expanded={isPicking(cell)}
+                      data-tip={sitoutTitle(cell)}
+                      onclick={() => togglePicker(cell)}>{sitoutLabel(cell.sitout.value)}</button
+                    >
+                    {#if isPicking(cell)}
+                      <span class="sitout-picker print-hide" role="menu">
+                        {#each SITOUT_VALUES as value (value)}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            class:current={value === cell.sitout.value}
+                            data-testid="sitout-option-{value}"
+                            data-tip={$_(`resultsView.sitoutWorth.${value}`)}
+                            onclick={() => chooseValue(cell, value)}>{sitoutLabel(value)}</button
+                          >
+                        {/each}
+                      </span>
+                    {/if}
+                  </span>
+                {:else}
+                  <span class={tone} data-tip={sitoutTitle(cell)}>{sitoutLabel(cell.sitout.value)}</span>
+                {/if}
+              {:else if cell.kind === "not-in-round"}
+                <span class="absent" data-tip={$_("resultsView.notInRoundTitle")}>0−</span>
               {:else if cell.kind === "long-pending"}
                 <span
                   class="pending"
@@ -459,12 +563,6 @@
                     values: { name: cell.opponentName },
                   })}>0−</span
                 >
-              {:else if cell.kind === "absent"}
-                {#if cell.half}
-                  <span class="absent" data-tip={$_("resultsView.halfByeTitle")}>0=</span>
-                {:else}
-                  <span class="absent" data-tip={$_("resultsView.absentTitle")}>0−</span>
-                {/if}
               {:else if cell.kind === "no-show"}
                 <span
                   class="absent"
@@ -582,6 +680,56 @@
   .loss {
     color: var(--color-danger);
   }
+  /* A sit-out cell is a button, but reads as the plain token until hovered. */
+  .sitout-cell {
+    position: relative;
+    display: inline-block;
+  }
+  button.sitout {
+    padding: 0 0.15rem;
+    border: 1px solid transparent;
+    border-radius: 0.25rem;
+    background: none;
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    color: inherit;
+    cursor: pointer;
+  }
+  button.sitout:hover,
+  button.sitout[aria-expanded="true"] {
+    border-color: var(--border-divider);
+    background: var(--bg-stripe);
+  }
+  .sitout-picker {
+    position: absolute;
+    z-index: 900;
+    top: calc(100% + 0.2rem);
+    right: 0;
+    display: flex;
+    gap: 0.15rem;
+    padding: 0.2rem;
+    border: 1px solid var(--border-divider);
+    border-radius: 0.35rem;
+    background: var(--bg-surface);
+    box-shadow: 0 4px 14px var(--shadow-dropdown);
+  }
+  .sitout-picker button {
+    padding: 0.1rem 0.35rem;
+    border: 1px solid transparent;
+    border-radius: 0.25rem;
+    background: none;
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .sitout-picker button:hover {
+    background: var(--bg-stripe);
+  }
+  .sitout-picker button.current {
+    border-color: var(--color-accent-strong);
+    font-weight: 700;
+  }
   .absent {
     color: var(--text-tertiary);
   }
@@ -672,6 +820,7 @@
     table,
     th,
     td,
+    button.sitout,
     .win,
     .loss,
     .absent,

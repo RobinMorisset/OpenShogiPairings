@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::units::TournamentId;
+use crate::units::{HalfPoints, TournamentId};
 
 /// Which player won a board. Colour (sente/gote) is chosen at random per game
 /// and isn't tracked, so the result is simply which of the two players won.
@@ -323,29 +323,109 @@ impl Board {
     }
 }
 
-/// One round of the tournament: the boards, plus the player sitting out (a bye)
-/// when there is an odd number of players.
+/// What a round is worth to a player who played no board — the `0+` / `0=` /
+/// `0−` shown in their cross-table cell. A bye starts at [`Full`](Self::Full)
+/// and an absence at the tournament's
+/// [`half_point_absences`](crate::settings::TournamentSettings::half_point_absences)
+/// default, but the referee can set any of the three per round and per player.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(rename_all = "snake_case")]
+pub enum SitoutValue {
+    /// `0−`: nothing.
+    Zero,
+    /// `0=`: half a point, but not a victory.
+    Half,
+    /// `0+`: a full point, counted as a victory (like a played win).
+    Full,
+}
+
+impl SitoutValue {
+    /// The score this is worth.
+    pub fn points(self) -> HalfPoints {
+        match self {
+            SitoutValue::Zero => HalfPoints::ZERO,
+            SitoutValue::Half => HalfPoints::from_halves(1),
+            SitoutValue::Full => HalfPoints::from_whole(1),
+        }
+    }
+
+    /// Whether this counts as a victory. Only a full point does — a `0=` is
+    /// score without a win, so it never lifts the Wins column or the
+    /// victory-based tie-breaks (SOSW, SODOSW, CUSSW).
+    pub fn is_victory(self) -> bool {
+        matches!(self, SitoutValue::Full)
+    }
+
+    /// The cross-table / American Grid cell for this value.
+    pub fn cell(self) -> &'static str {
+        match self {
+            SitoutValue::Zero => "0-",
+            SitoutValue::Half => "0=",
+            SitoutValue::Full => "0+",
+        }
+    }
+}
+
+/// Why a player has no board in a round. Distinct from [`SitoutValue`]: the kind
+/// records what happened, the value what it scores, and the referee can edit the
+/// latter without rewriting the former. Only the kind feeds the pairing engine
+/// (a bye is a downfloat that shouldn't repeat), so re-scoring a past cell can
+/// never reshape a later round's pairing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(rename_all = "snake_case")]
+pub enum SitoutKind {
+    /// Marked absent by the referee, so excluded from the pairing entirely.
+    Absent,
+    /// Present but left over: the engine gave them the bye (an odd field).
+    Bye,
+    /// The referee fixed the bye on this player.
+    ForcedBye,
+    /// Advanced through the cup bracket unopposed — the rare case where the
+    /// player they would have faced never materialized (both players of the
+    /// feeding match were no-shows).
+    CupBye { stage: CupStage },
+}
+
+impl SitoutKind {
+    /// Whether this is a bye of any sort (as opposed to an absence): the player
+    /// was in the tournament that round but had nobody to play. A bye is a
+    /// downfloat and shouldn't be handed out twice, whatever it ended up
+    /// scoring.
+    pub fn is_bye(self) -> bool {
+        !matches!(self, SitoutKind::Absent)
+    }
+}
+
+/// A player with no board in a round: why they sat out, and what it scores.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct Sitout {
+    pub player: TournamentId,
+    pub kind: SitoutKind,
+    pub value: SitoutValue,
+}
+
+/// One round of the tournament: the boards, plus everyone who played no board —
+/// the byes and the absentees ([`Sitout`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Round {
     /// 1-based round number.
     pub number: u32,
     pub boards: Vec<Board>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bye: Option<TournamentId>,
-    /// Cup players who advance this round without an opponent — the rare cup bye
-    /// that arises when the player they would have faced vanished (both players
-    /// in a feeding bracket match were no-shows). Credited a point exactly like
-    /// the Swiss [`bye`](Self::bye); empty in the overwhelmingly common case.
-    /// Separate from `bye` because several can occur at once and a Swiss bye may
-    /// coexist with them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub cup_byes: Vec<TournamentId>,
-    /// Players marked absent for this round (excluded from pairing). Recorded so
-    /// the next round's draft can default to the same absentees, and so a
-    /// deliberate absence is distinguishable from a late joiner.
+    /// Everyone who played no board this round: the bye (when the field is odd),
+    /// any referee-forced or cup byes, and the players marked absent. Each
+    /// carries what the round scored them, frozen when the round was confirmed
+    /// and editable afterwards from the standings.
+    ///
+    /// A player marked absent who nonetheless has a board — the cup bracket
+    /// pairs its players regardless of the absent set, so the referee can record
+    /// the forfeit — is *not* listed here: they played a board, and it is the
+    /// board that scores them.
     #[serde(default)]
-    pub absent: Vec<TournamentId>,
+    pub sitouts: Vec<Sitout>,
     /// Whether the round has been completed (all games played and locked in).
     /// A new round must not be started until the current one is completed.
     #[serde(default)]
@@ -361,13 +441,57 @@ impl Round {
     pub fn is_complete(&self) -> bool {
         self.boards.iter().all(|b| b.complete_for_round())
     }
+
+    /// This player's sit-out, if they played no board this round.
+    pub fn sitout(&self, player: TournamentId) -> Option<&Sitout> {
+        self.sitouts.iter().find(|s| s.player == player)
+    }
+
+    /// The players marked absent this round — the set the next round's draft
+    /// defaults to, and what tells a deliberate absence from a late joiner.
+    pub fn absentees(&self) -> impl Iterator<Item = TournamentId> + '_ {
+        self.sitouts
+            .iter()
+            .filter(|s| !s.kind.is_bye())
+            .map(|s| s.player)
+    }
+
+    /// Everyone who took a bye of any kind this round.
+    pub fn byes(&self) -> impl Iterator<Item = TournamentId> + '_ {
+        self.sitouts
+            .iter()
+            .filter(|s| s.kind.is_bye())
+            .map(|s| s.player)
+    }
+
+    /// The bye the *engine* chose, if any — the phantom edge of the round's
+    /// matching, and so the only bye the pairing explanations can reason about.
+    /// There is at most one by construction (a matching has one phantom).
+    pub fn swiss_bye(&self) -> Option<TournamentId> {
+        self.sitouts
+            .iter()
+            .find(|s| s.kind == SitoutKind::Bye)
+            .map(|s| s.player)
+    }
+
+    /// The byes the referee fixed by hand — the ones re-pairing the round must
+    /// carry over (an engine-chosen bye goes back up for grabs).
+    pub fn forced_byes(&self) -> impl Iterator<Item = TournamentId> + '_ {
+        self.sitouts
+            .iter()
+            .filter(|s| s.kind == SitoutKind::ForcedBye)
+            .map(|s| s.player)
+    }
 }
 
 /// A round being set up but not yet started (the `RoundDraft` state).
 ///
 /// The referee customizes it — mark players absent, force specific pairings,
-/// force the bye — and then confirms, which generates the pairings for the
+/// force byes — and then confirms, which generates the pairings for the
 /// remaining players and turns it into a real [`Round`].
+///
+/// These are the pairing *inputs* only: what each sit-out ends up scoring is
+/// decided when the round is confirmed (see [`Sitout`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct RoundDraft {
@@ -380,7 +504,9 @@ pub struct RoundDraft {
     /// here). Remaining present players are paired automatically.
     #[serde(default)]
     pub forced_boards: Vec<Board>,
-    /// A player forced to take the bye (only valid with an odd present count).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub forced_bye: Option<TournamentId>,
+    /// Players forced to take a bye. Usually empty (the engine picks the bye
+    /// when the field is odd) or a single player; several are allowed, and the
+    /// engine still adds its own bye if what's left over is odd.
+    #[serde(default)]
+    pub forced_byes: Vec<TournamentId>,
 }

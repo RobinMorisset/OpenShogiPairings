@@ -8,6 +8,7 @@ import type {
   NoShow,
   RatedPlayer,
   RoundExplanation,
+  SitoutValue,
   Tournament,
   TournamentResponse,
   TournamentSettings,
@@ -446,10 +447,12 @@ export function prepareRound(cupSize?: number): Promise<TournamentResponse> {
 export interface DraftUpdate {
   absent: number[];
   forced_boards: { player1: number; player2: number }[];
-  forced_bye?: number | null;
+  /** Players forced onto a bye. The engine still byes one more of its own if
+   *  what's left over is odd, so any number of these is consistent. */
+  forced_byes: number[];
 }
 
-/** Edit the current draft (absent set, forced pairings, forced bye). */
+/** Edit the current draft (absent set, forced pairings, forced byes). */
 export function updateDraft(update: DraftUpdate): Promise<TournamentResponse> {
   return request<TournamentResponse>(scopedPath("/draft"), {
     method: "PUT",
@@ -559,6 +562,22 @@ export function setBoardHandicap(
   return request<TournamentResponse>(
     scopedPath(`/rounds/${roundNumber}/boards/${boardIndex}/handicap`),
     { method: "PUT", body: JSON.stringify({ handicap }) },
+  );
+}
+
+/**
+ * Set what a round scored a player who sat it out — the `0+` / `0=` / `0−` in
+ * their cross-table cell. Past (completed) rounds are fair game: only the score
+ * moves, never why the player sat out.
+ */
+export function setSitoutValue(
+  roundNumber: number,
+  player: number,
+  value: SitoutValue,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    scopedPath(`/rounds/${roundNumber}/sitouts/${player}`),
+    { method: "PUT", body: JSON.stringify({ value }) },
   );
 }
 

@@ -37,7 +37,7 @@
   const forcedIds = $derived(
     new Set([
       ...draft.forced_boards.flatMap((b) => [b.player1, b.player2]),
-      ...(draft.forced_bye ? [draft.forced_bye] : []),
+      ...draft.forced_byes,
     ]),
   );
 
@@ -79,7 +79,7 @@
         player1: b.player1,
         player2: b.player2,
       })),
-      forced_bye: draft.forced_bye ?? null,
+      forced_byes: [...draft.forced_byes],
     };
   }
 
@@ -90,11 +90,11 @@
       ? [...update.absent, id]
       : update.absent.filter((x) => x !== id);
     if (willBeAbsent) {
-      // An absent player can't be in a forced pairing or the forced bye.
+      // An absent player can't be in a forced pairing or on a forced bye.
       update.forced_boards = update.forced_boards.filter(
         (b) => b.player1 !== id && b.player2 !== id,
       );
-      if (update.forced_bye === id) update.forced_bye = null;
+      update.forced_byes = update.forced_byes.filter((x) => x !== id);
     }
     onUpdate(update);
   }
@@ -129,22 +129,36 @@
     onUpdate(update);
   }
 
-  function setForcedBye(id: number | "") {
+  // An even field pairs up exactly, so it needs no bye and this section is shut:
+  // the round would have to bye *two* players to stay pairable, which is not what
+  // a referee reaching for "forced bye" means. To sit someone out of an even
+  // field, mark them absent instead and set what the round scored them from the
+  // standings. (The engine itself is happy either way — that's what lets the
+  // importers rebuild a round with several byes.)
+  const byesClosed = $derived(present.length % 2 === 0);
+
+  function addForcedBye(id: number | "") {
+    if (id === "" || draft.forced_byes.includes(id)) return;
     const update = base();
-    update.forced_bye = id === "" ? null : id;
+    update.forced_byes = [...update.forced_byes, id];
     onUpdate(update);
   }
 
-  // Client-side validation (the server validates authoritatively too).
+  // Removing stays possible even while the section is shut: marking someone
+  // absent can flip the field to even *after* a bye was forced, and the referee
+  // must be able to take it back.
+  function removeForcedBye(id: number) {
+    const update = base();
+    update.forced_byes = update.forced_byes.filter((x) => x !== id);
+    onUpdate(update);
+  }
+
+  // Client-side validation (the server validates authoritatively too). The forced
+  // byes need no parity check: whatever they leave over, the engine byes one more
+  // player if the count is odd.
   const problem = $derived.by<string | null>(() => {
     if (cupPlayers.length === 0 && present.length < 2)
       return $_("roundDraftView.needAtLeastTwoPresent");
-    if (draft.forced_bye) {
-      if (present.length % 2 === 0)
-        return $_("roundDraftView.needOddPresentForBye");
-      if ((present.length - 2 * draft.forced_boards.length - 1) % 2 !== 0)
-        return $_("roundDraftView.forcedPairingsLeaveUnpairable");
-    }
     return null;
   });
 </script>
@@ -238,19 +252,36 @@
     </div>
   </section>
 
-  <section class:disabled={present.length % 2 === 0}>
+  <section class:disabled={byesClosed && draft.forced_byes.length === 0}>
     <h3>{$_("roundDraftView.forcedBye")}</h3>
     <p class="muted small">{$_("roundDraftView.forcedByeHint")}</p>
+    {#if draft.forced_byes.length > 0}
+      <ul class="forced-list">
+        {#each draft.forced_byes as id (id)}
+          <li>
+            <span>{label(id)}</span>
+            <button
+              type="button"
+              class="remove"
+              disabled={busy}
+              onclick={() => removeForcedBye(id)}
+              title={$_("roundDraftView.removeForcedBye")}>✕</button
+            >
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    {#if byesClosed && draft.forced_byes.length > 0}
+      <p class="hint warning">⚠ {$_("roundDraftView.forcedByeEvenWarning")}</p>
+    {/if}
     <select
-      value={draft.forced_bye ?? ""}
-      disabled={busy || present.length % 2 === 0}
-      onchange={(e) => setForcedBye(parseId(e.currentTarget.value))}
+      value=""
+      disabled={busy || byesClosed || forceable.length === 0}
+      onchange={(e) => addForcedBye(parseId(e.currentTarget.value))}
     >
       <option value="">{$_("roundDraftView.automaticBye")}</option>
-      {#each present as p (p.id)}
-        {#if !forcedIds.has(tid(p)) || draft.forced_bye === tid(p)}
-          <option value={tid(p)}>{label(tid(p))}</option>
-        {/if}
+      {#each forceable as p (p.id)}
+        <option value={tid(p)}>{label(tid(p))}</option>
       {/each}
     </select>
   </section>

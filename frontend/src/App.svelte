@@ -27,6 +27,7 @@
     setBoardNoShow,
     setBoardWinner,
     setPlayerEligible,
+    setSitoutValue,
     undoTournament,
     updateDraft,
     updateSettings,
@@ -42,6 +43,7 @@
     NoShow,
     RatedPlayer,
     RoundExplanation,
+    SitoutValue,
     Standing,
     Tournament,
     TournamentResponse,
@@ -620,6 +622,12 @@
     });
   }
 
+  function handleSetSitoutValue(roundNumber: number, player: number, value: SitoutValue) {
+    run(async () => {
+      apply(await setSitoutValue(roundNumber, player, value));
+    });
+  }
+
   function handleSetNoShow(roundNumber: number, boardIndex: number, absent: NoShow | null) {
     run(async () => {
       apply(await setBoardNoShow(roundNumber, boardIndex, absent));
@@ -965,7 +973,13 @@
             />
           </div>
         {:else if activeTab === "results"}
-          <ResultsView {tournament} {standings} {cupPodium} {effectiveWinners} />
+          <ResultsView
+            {tournament}
+            {standings}
+            {cupPodium}
+            {effectiveWinners}
+            onSetSitoutValue={handleSetSitoutValue}
+          />
         {:else if activeTab === "cup" && tournament.cup && cupBracket}
           <CupBracket bracket={cupBracket} cup={tournament.cup} players={tournament.players} />
         {:else if activeTab === "draft" && tournament.draft}

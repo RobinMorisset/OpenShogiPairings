@@ -20,12 +20,12 @@ use crate::units::{HalfPoints, TournamentId, Wins};
 /// holds (number 0, and numbers freed by a pre-play removal).
 #[derive(Default)]
 pub(crate) struct PlayerScore {
-    /// Total score: MacMahon starting points plus victories (the effective winner
-    /// of a board, and a bye, each a win worth one point), plus half a point for
-    /// each half-point absence (a `0=`).
+    /// Total score: MacMahon starting points, plus a point per victory (the
+    /// effective winner of a board), plus whatever each round the player sat out
+    /// was worth to them (a bye's `0+`, a `0=`, …).
     pub points: HalfPoints,
-    /// Games won (effective winner; a bye counts as a win). A half-point absence
-    /// is not a victory.
+    /// Games won (effective winner). A sit-out counts as a win exactly when it
+    /// scored a full point (`0+`, the usual bye); a `0=` never does.
     pub victories: Wins,
     /// MacMahon starting points.
     pub macmahon: HalfPoints,
@@ -50,7 +50,8 @@ pub(crate) struct PlayerScore {
     /// The player's running win total after each completed round — the sequence
     /// CUSSW sums.
     pub running_wins: Vec<Wins>,
-    /// Whether the player has taken a bye.
+    /// Whether the player has taken a bye (of any kind, whatever it scored) or
+    /// been handed the equivalent free point by an opponent's no-show.
     pub had_bye: bool,
     /// Round number of the most recent round the player floated up / down (a bye
     /// counts as a downfloat). `None` if never.
@@ -246,10 +247,15 @@ pub(crate) fn compute_scores(
                 Ordering::Equal => {}
             }
         }
-        if let Some(bye) = round.bye {
-            let s = &mut by_tid[bye];
-            s.had_bye = true;
-            s.last_descended = Some(round.number); // a bye is a downfloat
+        // Everyone with no board this round: byes (engine, forced or cup) and
+        // absentees alike. A bye is a downfloat they can't be given twice —
+        // that follows the *kind*, never the score the referee gave the cell.
+        for sitout in &round.sitouts {
+            if sitout.kind.is_bye() {
+                let s = &mut by_tid[sitout.player];
+                s.had_bye = true;
+                s.last_descended = Some(round.number);
+            }
         }
         // A no-show has the same effect on the player who showed up as a bye: a
         // downfloat they can't be given twice.
@@ -259,12 +265,6 @@ pub(crate) fn compute_scores(
                 s.had_bye = true;
                 s.last_descended = Some(round.number);
             }
-        }
-        // A cup bye (an unopposed bracket advance) is a bye all the same.
-        for &player in &round.cup_byes {
-            let s = &mut by_tid[player];
-            s.had_bye = true;
-            s.last_descended = Some(round.number);
         }
 
         // Apply this round's results (effective winner scores).
@@ -285,10 +285,15 @@ pub(crate) fn compute_scores(
                 s.defeated.push(loser);
             }
         }
-        if let Some(bye) = round.bye {
-            let s = &mut by_tid[bye];
-            s.points += HalfPoints::from_whole(1); // a bye scores one point
-            s.victories += Wins(1);
+        // Every sit-out scores whatever its cell says — a full point for the
+        // usual bye, nothing for the usual absence, and whatever the referee
+        // chose where they overrode it. Only a full point is a victory.
+        for sitout in &round.sitouts {
+            let s = &mut by_tid[sitout.player];
+            s.points += sitout.value.points();
+            if sitout.value.is_victory() {
+                s.victories += Wins(1);
+            }
         }
         // The player who showed up on a no-show board scores the free point, as
         // for a bye. The absentee scores nothing (like an absence).
@@ -300,21 +305,6 @@ pub(crate) fn compute_scores(
                 let s = &mut by_tid[present];
                 s.points += HalfPoints::from_whole(reps); // one point (two for a long board)
                 s.victories += Wins(reps);
-            }
-        }
-        // A cup bye scores the free point too — the player advanced unopposed.
-        for &player in &round.cup_byes {
-            let s = &mut by_tid[player];
-            s.points += HalfPoints::from_whole(1); // an unopposed advance scores one point
-            s.victories += Wins(1);
-        }
-        // A deliberate absence scores half a point when the referee enabled it
-        // (a `0=` in the cross-table): +1 half-point, but not a win. `round.absent`
-        // is the sat-out set (no board this round); a no-show forfeit is on a
-        // board and stays at 0.
-        if settings.half_point_absences {
-            for &id in &round.absent {
-                by_tid[id].points += HalfPoints::from_halves(1); // half a point
             }
         }
 
@@ -338,7 +328,7 @@ pub(crate) fn compute_scores(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::{Board, CupStage, NoShow, PairingSource};
+    use crate::round::{Board, CupStage, NoShow, PairingSource, Sitout, SitoutKind, SitoutValue};
     use crate::settings::MacMahonThreshold;
 
     fn player(tid: u32, rating: Option<u32>) -> Player {
@@ -375,9 +365,7 @@ mod tests {
                     PairingSource::Swiss,
                 )
             }],
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: Vec::new(),
             completed: true,
         };
         let scores = compute_scores(
@@ -409,9 +397,7 @@ mod tests {
                     PairingSource::Swiss,
                 )
             }],
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: Vec::new(),
             completed: true,
         };
         let scores = compute_scores(
@@ -447,9 +433,7 @@ mod tests {
                     PairingSource::Swiss,
                 )
             }],
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: Vec::new(),
             completed: true,
         };
         let scores = compute_scores(
@@ -466,14 +450,18 @@ mod tests {
     }
 
     #[test]
-    fn cup_bye_scores_a_point_like_a_bye() {
+    fn a_cup_bye_scores_like_any_other_bye() {
         let a = player(1, None);
         let round = Round {
             number: 1,
             boards: Vec::new(),
-            bye: None,
-            cup_byes: vec![a.tournament_id.unwrap()],
-            absent: Vec::new(),
+            sitouts: vec![Sitout {
+                player: a.tournament_id.unwrap(),
+                kind: SitoutKind::CupBye {
+                    stage: CupStage::Final,
+                },
+                value: SitoutValue::Full,
+            }],
             completed: true,
         };
         let scores = compute_scores(
@@ -487,46 +475,67 @@ mod tests {
     }
 
     #[test]
-    fn an_absence_scores_half_a_point_only_when_the_setting_is_on() {
-        // A is marked absent for round 1 (no board), while B beats C. With the
-        // setting off A scores 0; with it on A scores half a point (1 half-unit)
-        // — and it is not a victory. The real win still scores a full point.
+    fn a_sitout_scores_exactly_what_its_cell_says() {
+        // The three values a referee can give a sit-out, and what each is worth:
+        // nothing, half a point, or a full point that also counts as a victory.
         let a = player(1, None);
-        let b = player(2, None);
-        let c = player(3, None);
-        let round = Round {
+        let round = |value| Round {
             number: 1,
-            boards: vec![Board {
-                result: Some(Winner::Player1),
-                ..Board::pending(
-                    b.tournament_id.unwrap(),
-                    c.tournament_id.unwrap(),
-                    0,
-                    PairingSource::Swiss,
-                )
+            boards: Vec::new(),
+            sitouts: vec![Sitout {
+                player: a.tournament_id.unwrap(),
+                kind: SitoutKind::Absent,
+                value,
             }],
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: vec![a.tournament_id.unwrap()],
             completed: true,
         };
-        let players = [a.clone(), b.clone(), c.clone()];
+        // (points in half-units, victories) for each value.
+        let expected = [
+            (SitoutValue::Zero, 0, 0), // `0-`: nothing
+            (SitoutValue::Half, 1, 0), // `0=`: half a point, but not a win
+            (SitoutValue::Full, 2, 1), // `0+`: a full point, and a win
+        ];
+        for (value, points, victories) in expected {
+            let rounds = [round(value)];
+            let scores = compute_scores(
+                std::slice::from_ref(&a),
+                &TournamentSettings::default(),
+                &rounds,
+            );
+            assert_eq!(scores.get(&a.id).points, points, "points for {value:?}");
+            assert_eq!(
+                scores.get(&a.id).victories,
+                victories,
+                "victories for {value:?}"
+            );
+        }
+    }
 
-        let off = compute_scores(
-            &players,
-            &TournamentSettings::default(),
-            std::slice::from_ref(&round),
-        );
-        assert_eq!(off.get(&a.id).points, 0); // no half-point without the setting
-
-        let on_settings = TournamentSettings {
-            half_point_absences: true,
-            ..Default::default()
+    #[test]
+    fn re_scoring_a_bye_leaves_its_pairing_effects_alone() {
+        // The referee decides this bye shouldn't have scored. It stops paying the
+        // point, but it was still a bye: the player has had one (so the engine
+        // won't hand them another) and it still counts as a downfloat.
+        let a = player(1, None);
+        let round = Round {
+            number: 1,
+            boards: Vec::new(),
+            sitouts: vec![Sitout {
+                player: a.tournament_id.unwrap(),
+                kind: SitoutKind::Bye,
+                value: SitoutValue::Zero,
+            }],
+            completed: true,
         };
-        let on = compute_scores(&players, &on_settings, std::slice::from_ref(&round));
-        assert_eq!(on.get(&a.id).points, 1); // half a point = 1 half-unit
-        assert_eq!(on.get(&a.id).victories, 0); // but not a win
-        assert_eq!(on.get(&b.id).points, 2); // the real win is a full point
+        let scores = compute_scores(
+            std::slice::from_ref(&a),
+            &TournamentSettings::default(),
+            &[round],
+        );
+        assert_eq!(scores.get(&a.id).points, 0);
+        assert_eq!(scores.get(&a.id).victories, 0);
+        assert!(scores.get(&a.id).had_bye);
+        assert_eq!(scores.get(&a.id).last_descended, Some(1));
     }
 
     #[test]
@@ -548,9 +557,7 @@ mod tests {
                     PairingSource::Swiss,
                 )
             }],
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: Vec::new(),
             completed: true,
         };
         let scores = compute_scores(
@@ -585,9 +592,7 @@ mod tests {
                     PairingSource::Swiss,
                 )
             }],
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: Vec::new(),
             completed: true, // completed even with the long board pending
         };
         let scores = compute_scores(
@@ -622,9 +627,7 @@ mod tests {
                     PairingSource::Swiss,
                 )
             }],
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: Vec::new(),
             completed: true,
         };
         let scores = compute_scores(
@@ -679,9 +682,7 @@ mod tests {
                     },
                 )
             }],
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: Vec::new(),
             completed: true,
         };
         let scores = compute_scores(
@@ -723,9 +724,7 @@ mod tests {
                         PairingSource::Swiss,
                     )
                 }],
-                bye: None,
-                cup_byes: Vec::new(),
-                absent: Vec::new(),
+                sitouts: Vec::new(),
                 completed: true,
             })
             .collect();

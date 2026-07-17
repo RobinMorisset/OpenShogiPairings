@@ -618,9 +618,7 @@ mod tests {
         Round {
             number,
             boards,
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: Vec::new(),
             completed: true,
         }
     }

@@ -189,6 +189,19 @@
     return out;
   }
 
+  // --- Byes -----------------------------------------------------------------
+
+  // Everyone who sits this round out with no opponent: the engine's bye, any
+  // the referee forced, and the rare cup bye. Absences aren't here — they never
+  // reach the pairing, so the round view has no row for them.
+  const byeSitouts = $derived((round.sitouts ?? []).filter((s) => s.kind !== "absent"));
+
+  // The bye the *engine* chose, if any. Only this one was the engine's decision,
+  // so it's the only one the pairing explanations can speak about.
+  const swissBye = $derived(
+    (round.sitouts ?? []).find((s) => s.kind === "bye")?.player ?? null,
+  );
+
   // --- Counterfactual probe ("why not pair A and B?") ----------------------
 
   // The bye sentinel used by the server's counterfactual/force-pairing APIs
@@ -206,7 +219,7 @@
         ids.add(b.player2);
       }
     }
-    if (round.bye) ids.add(round.bye);
+    if (swissBye != null) ids.add(swissBye);
     return [...ids].sort((x, y) => name(x).localeCompare(name(y)));
   });
 
@@ -257,7 +270,7 @@
         m.set(b.player2, b.player1);
       }
     }
-    if (round.bye) m.set(round.bye, PHANTOM);
+    if (swissBye != null) m.set(swissBye, PHANTOM);
     return m;
   });
 
@@ -475,7 +488,7 @@
       <p class="hint">{$_("roundView.carriedHint")}</p>
     </div>
   {/if}
-  {#if round.boards.length === 0 && !round.bye}
+  {#if round.boards.length === 0 && byeSitouts.length === 0}
     <p class="empty">{$_("roundView.noBoards")}</p>
   {:else}
     <table>
@@ -635,43 +648,24 @@
             {/if}
           </tr>
         {/each}
-        {#if round.bye}
+        {#each byeSitouts as sitout, i (sitout.player)}
+          {@const isCup = typeof sitout.kind !== "string"}
           <tr class="bye-row">
-            <td class="src-col"
-              >{#if isNoteworthy(byeLedger)}<span
-                  class="compromise print-hide"
-                  title={ledgerTooltip(byeLedger!)}>⚠</span
-                >{/if}</td
-            >
-            <td class="num">{round.boards.length + 1}</td>
-            <td class="p1-col">
-              <span class="player winner">{name(round.bye)}</span>
-            </td>
-            <td>
-              <span class="player bye-opponent">{$_("roundView.byeOpponent")}</span>
-            </td>
-            <td class="draw-col"></td>
-            <td class="noshow-col"></td>
-            {#if longEnabled}
-              <td class="long-col"></td>
-            {/if}
-            {#if handicapPolicy !== "none"}
-              <td class="handicap-col"></td>
-              {#if handicapPolicy === "suggested"}
-                <td class="suggested-col"></td>
+            <td class="src-col">
+              {#if isCup}
+                🏆
+              {:else if sitout.kind === "bye" && isNoteworthy(byeLedger)}
+                <span class="compromise print-hide" title={ledgerTooltip(byeLedger!)}>⚠</span>
               {/if}
-            {/if}
-          </tr>
-        {/if}
-        {#each round.cup_byes ?? [] as byePlayer, i (byePlayer)}
-          <tr class="bye-row">
-            <td class="src-col">🏆</td>
-            <td class="num">{round.boards.length + (round.bye ? 1 : 0) + i + 1}</td>
+            </td>
+            <td class="num">{round.boards.length + i + 1}</td>
             <td class="p1-col">
-              <span class="player winner">{name(byePlayer)}</span>
+              <span class="player winner">{name(sitout.player)}</span>
             </td>
             <td>
-              <span class="player bye-opponent">{$_("roundView.cupByeOpponent")}</span>
+              <span class="player bye-opponent"
+                >{$_(isCup ? "roundView.cupByeOpponent" : "roundView.byeOpponent")}</span
+              >
             </td>
             <td class="draw-col"></td>
             <td class="noshow-col"></td>
@@ -749,7 +743,7 @@
                 {#each swissPlayers as id (id)}
                   <option value={id}>{name(id)}</option>
                 {/each}
-                {#if round.bye}
+                {#if swissBye != null}
                   <option value={PHANTOM}>{$_("roundView.probe.bye")}</option>
                 {/if}
               </select>

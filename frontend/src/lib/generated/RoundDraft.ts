@@ -6,8 +6,11 @@ import type { TournamentId } from "./TournamentId";
  * A round being set up but not yet started (the `RoundDraft` state).
  *
  * The referee customizes it — mark players absent, force specific pairings,
- * force the bye — and then confirms, which generates the pairings for the
+ * force byes — and then confirms, which generates the pairings for the
  * remaining players and turns it into a real [`Round`].
+ *
+ * These are the pairing *inputs* only: what each sit-out ends up scoring is
+ * decided when the round is confirmed (see [`Sitout`]).
  */
 export type RoundDraft = { 
 /**
@@ -24,6 +27,8 @@ absent: Array<TournamentId>,
  */
 forced_boards: Array<Board>, 
 /**
- * A player forced to take the bye (only valid with an odd present count).
+ * Players forced to take a bye. Usually empty (the engine picks the bye
+ * when the field is odd) or a single player; several are allowed, and the
+ * engine still adds its own bye if what's left over is odd.
  */
-forced_bye?: TournamentId | null, };
+forced_byes: Array<TournamentId>, };

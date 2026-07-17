@@ -72,16 +72,9 @@ pub fn to_grid(tournament: &Tournament, standings: &[Standing]) -> String {
     header.push("Pts".into());
     rows.push(header);
 
-    let half_point_absences = tournament.settings.half_point_absences;
     for standing in standings {
         if let Some(player) = players_by_id.get(&standing.player_id) {
-            rows.push(row_for(
-                player,
-                standing,
-                &completed,
-                &rank_of,
-                half_point_absences,
-            ));
+            rows.push(row_for(player, standing, &completed, &rank_of));
         }
     }
 
@@ -118,7 +111,6 @@ fn row_for(
     standing: &Standing,
     rounds: &[&Round],
     rank_of: &HashMap<TournamentId, u32>,
-    half_point_absences: bool,
 ) -> Vec<String> {
     let mut round_cells: Vec<String> = (0..rounds.len())
         .map(|i| {
@@ -127,7 +119,6 @@ fn row_for(
                 i,
                 rounds,
                 rank_of,
-                half_point_absences,
             )
         })
         .collect();
@@ -179,7 +170,6 @@ fn long_aware_cell(
     i: usize,
     rounds: &[&Round],
     rank_of: &HashMap<TournamentId, u32>,
-    half_point_absences: bool,
 ) -> String {
     fn on_long(round: &Round, player_id: TournamentId) -> Option<&Board> {
         round
@@ -199,31 +189,29 @@ fn long_aware_cell(
             return game_cell(board, player_id, rank_of);
         }
     }
-    round_cell(player_id, rounds[i], rank_of, half_point_absences)
+    round_cell(player_id, rounds[i], rank_of)
 }
 
-/// The single round cell for a player: `0+` for a bye (or a no-show opponent),
-/// `0-` for an absence (`0=` when the tournament awards absences half a point),
-/// `0#` for a no-show, or `<opponent><marker><handicap?>` for a game. The
+/// The single round cell for a player: whatever their sit-out scored (`0+` for
+/// the usual bye, `0-`/`0=` for an absence) when they played no board, `0#` /
+/// `0+` for a no-show, or `<opponent><marker><handicap?>` for a game. The
 /// opponent is their final rank.
 fn round_cell(
     player_id: TournamentId,
     round: &Round,
     rank_of: &HashMap<TournamentId, u32>,
-    half_point_absences: bool,
 ) -> String {
-    // The Swiss bye and the (rare) cup bye both read as a free point.
-    if round.bye == Some(player_id) || round.cup_byes.contains(&player_id) {
-        return "0+".into();
+    // No board: a bye or an absence, rendered as whatever it was worth.
+    if let Some(sitout) = round.sitout(player_id) {
+        return sitout.value.cell().into();
     }
     let Some(board) = round
         .boards
         .iter()
         .find(|b| b.player1 == player_id || b.player2 == player_id)
     else {
-        // No board and not the bye: absent for the whole round — `0=` (a scored
-        // half point) when the tournament awards absences half a point, else `0-`.
-        return if half_point_absences { "0=" } else { "0-" }.into();
+        // Not in this round at all (e.g. registered later): nothing scored.
+        return "0-".into();
     };
     game_cell(board, player_id, rank_of)
 }
@@ -309,7 +297,9 @@ fn pad(s: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::{Handicap, HandicapGame, NoShow, PairingSource};
+    use crate::round::{
+        CupStage, Handicap, HandicapGame, NoShow, PairingSource, Sitout, SitoutKind, SitoutValue,
+    };
 
     /// The tournament number assigned to a registered player (only valid after
     /// `finalize_registration`).
@@ -358,9 +348,7 @@ mod tests {
         t.rounds.push(Round {
             number: 1,
             boards: vec![board],
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: Vec::new(),
             completed: true,
         });
         (t, p1, p2)
@@ -445,18 +433,14 @@ mod tests {
                 long: true,
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: Vec::new(),
             completed: true,
         });
         // Round 2: A and B are on the long game, so they have no board here.
         t.rounds.push(Round {
             number: 2,
             boards: Vec::new(),
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: Vec::new(),
             completed: true,
         });
         let rows = data_rows(&to_grid(&t, &t.standings()));
@@ -481,9 +465,11 @@ mod tests {
                 result: Some(Winner::Player1),
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
-            bye: Some(c),
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: vec![Sitout {
+                player: c,
+                kind: SitoutKind::Bye,
+                value: SitoutValue::Full,
+            }],
             completed: true,
         });
         let grid = to_grid(&t, &t.standings());
@@ -497,9 +483,11 @@ mod tests {
                 result: Some(Winner::Player2),
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: vec![c],
+            sitouts: vec![Sitout {
+                player: c,
+                kind: SitoutKind::Absent,
+                value: SitoutValue::Zero,
+            }],
             completed: true,
         });
         let grid = to_grid(&t, &t.standings());
@@ -519,9 +507,7 @@ mod tests {
                 no_show: Some(NoShow::Player2), // P2 absent
                 ..Board::pending(p1, p2, 0, PairingSource::Swiss)
             }],
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: Vec::new(),
             completed: true,
         });
         let grid = to_grid(&t, &t.standings());
@@ -543,9 +529,7 @@ mod tests {
                 no_show: Some(NoShow::Both),
                 ..Board::pending(p1, p2, 0, PairingSource::Swiss)
             }],
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: Vec::new(),
             completed: true,
         });
         let grid = to_grid(&t, &t.standings());
@@ -567,13 +551,39 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             boards: Vec::new(),
-            bye: None,
-            cup_byes: vec![p1],
-            absent: Vec::new(),
+            sitouts: vec![Sitout {
+                player: p1,
+                kind: SitoutKind::CupBye {
+                    stage: CupStage::Semifinal,
+                },
+                value: SitoutValue::Full,
+            }],
             completed: true,
         });
         let grid = to_grid(&t, &t.standings());
         assert!(grid.contains("0+"), "cup bye token missing: {grid}");
+    }
+
+    #[test]
+    fn a_sitout_renders_whatever_the_referee_scored_it() {
+        // The cell follows the sit-out's value, not the reason: a bye the referee
+        // knocked down to half a point reads `0=`, not `0+`.
+        let (mut t, _p1, p2) = one_board(|_| {});
+        t.rounds.push(Round {
+            number: 2,
+            boards: Vec::new(),
+            sitouts: vec![Sitout {
+                player: p2,
+                kind: SitoutKind::Bye,
+                value: SitoutValue::Half,
+            }],
+            completed: true,
+        });
+        let grid = to_grid(&t, &t.standings());
+        assert!(
+            grid.contains("0=]"),
+            "half-scored bye token missing: {grid}"
+        );
     }
 
     #[test]

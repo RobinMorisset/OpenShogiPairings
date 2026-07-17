@@ -26,24 +26,26 @@
 //! column. A `=` records only that a draw occurred (the win/loss of the replay is
 //! not encoded), so an imported draw is given an arbitrary decisive winner.
 //!
-//! # Accepted round-trip limitations
+//! Each non-playing cell is imported with the score it states — a `0+` as a bye,
+//! a `0=` as a half-scoring absence, a `0-` as an absence worth nothing — so the
+//! tournament's `half_point_absences` default never enters into it. A round may
+//! carry as many `0+` cells as it likes (a genuine bye plus any number of
+//! forfeit wins, which the grid renders identically); each becomes a bye.
 //!
-//! The importer reconstructs a *Swiss/bye/absence* history, not the no-show board
+//! # Accepted round-trip limitation
+//!
+//! The importer reconstructs a *bye/absence* history, not the no-show board
 //! machinery: a player who showed up on a no-show board exports as `0+` (a free
 //! point) and reimports as a plain **bye**, and the absentee's `0#` reimports as
-//! an **absence**. A single round can therefore legitimately carry several `0+`
-//! cells — a genuine bye plus one or more no-show forfeits, indistinguishable in
-//! the grid. Rather than reject such a grid, the importer keeps the **first**
-//! `0+` (the player highest in the file) as the round's bye and imports the rest
-//! as **absences**, emitting a `tracing::warn!`. This is a deliberate, lossy
-//! simplification: the importer exists only to seed non-trivial tournament state
-//! for tests and simulations (there is no UI for it), where an exact round-trip
-//! of no-show boards is out of scope.
+//! an **absence**. Both score the same as the original, which is what the
+//! importer is for — seeding non-trivial tournament state for tests and
+//! simulations (there is no UI for it), where reconstructing the boards
+//! themselves is out of scope.
 
 use std::collections::HashMap;
 
 use crate::player::NewPlayer;
-use crate::round::{Board, Handicap, PairingSource, Winner};
+use crate::round::{Board, Handicap, PairingSource, SitoutValue, Winner};
 use crate::tournament::{Tournament, TournamentError};
 use crate::units::TournamentId;
 
@@ -112,15 +114,6 @@ pub(crate) fn build_tournament(
 
     // Register the players (in Nr order) and remember Nr -> id.
     let mut tournament = Tournament::new(name.unwrap_or("Imported tournament"))?;
-    // A `0=` cell (half-point bye/absence) is reconstructed as an absence, so it
-    // only scores its ½ if the tournament awards half a point to absences. Turn
-    // that on whenever the source carries any `0=`.
-    if rows
-        .iter()
-        .any(|r| r.cells.iter().any(|c| matches!(c, Cell::HalfBye)))
-    {
-        tournament.settings.half_point_absences = true;
-    }
     let mut uuid_of: HashMap<u32, uuid::Uuid> = HashMap::new();
     let mut ordered = rows.clone();
     ordered.sort_by_key(|r| r.number);
@@ -173,18 +166,33 @@ fn rebuild_round(
 ) -> Result<(), GridImportError> {
     let round_number = r as u32 + 1;
     let mut absent: Vec<TournamentId> = Vec::new();
-    let mut byes: Vec<TournamentId> = Vec::new();
+    let mut forced_byes: Vec<TournamentId> = Vec::new();
     let mut forced_boards: Vec<Board> = Vec::new();
+    // What each non-playing cell scored, applied once the round exists — the
+    // grid states the score outright, so nothing is left to the tournament's
+    // `half_point_absences` default.
+    let mut sitout_values: Vec<(TournamentId, SitoutValue)> = Vec::new();
     // (a, b, outcome-from-a's-view, handicap) for each game, collected once.
     let mut results: Vec<(u32, u32, Outcome, Option<Handicap>)> = Vec::new();
 
     for row in rows {
+        let id = id_of[&row.number];
         match &row.cells[r] {
-            Cell::Bye => byes.push(id_of[&row.number]),
-            // A half-point bye reconstructs as an absence; the ½ comes from the
-            // tournament's `half_point_absences` setting, turned on in
-            // `build_tournament` whenever any `0=` is present.
-            Cell::Absent | Cell::HalfBye => absent.push(id_of[&row.number]),
+            // A `0+` is a free point without a board: import it as a forced bye,
+            // however many the round has (a real bye plus any forfeit wins).
+            Cell::Bye => {
+                forced_byes.push(id);
+                sitout_values.push((id, SitoutValue::Full));
+            }
+            // A half-point bye reconstructs as an absence scoring its ½.
+            Cell::HalfBye => {
+                absent.push(id);
+                sitout_values.push((id, SitoutValue::Half));
+            }
+            Cell::Absent => {
+                absent.push(id);
+                sitout_values.push((id, SitoutValue::Zero));
+            }
             Cell::Game {
                 opponent,
                 outcome,
@@ -227,7 +235,7 @@ fn rebuild_round(
                         });
                     }
                     forced_boards.push(Board::pending(
-                        id_of[&row.number],
+                        id,
                         id_of[opponent],
                         0,
                         PairingSource::Forced,
@@ -238,27 +246,16 @@ fn rebuild_round(
         }
     }
 
-    // A round can legitimately show several `0+` cells: a genuine bye plus one or
-    // more no-show *forfeits*, which both render `0+` and the grid can't tell
-    // apart (see the module docs). Rather than fail the whole import, keep the
-    // first `0+` (the player highest in the file — `byes` is in row order) as the
-    // round's real bye and demote the rest to absences, warning about it.
-    let mut byes = byes.into_iter();
-    let forced_bye = byes.next();
-    let demoted: Vec<TournamentId> = byes.collect();
-    if !demoted.is_empty() {
-        tracing::warn!(
-            round = round_number,
-            demoted = demoted.len(),
-            "several byes in one round; keeping the first and importing the rest as absences"
-        );
-        absent.extend(demoted);
-    }
-
     // Force every pairing, so the engine has an empty graph to solve.
     tournament.prepare_round()?;
-    tournament.update_draft(absent, forced_boards, forced_bye)?;
+    tournament.update_draft(absent, forced_boards, forced_byes)?;
     tournament.confirm_round()?;
+
+    // Score each non-playing cell exactly as the grid wrote it, rather than
+    // leaving an absence on the tournament default.
+    for (player, value) in sitout_values {
+        tournament.set_sitout_value(round_number, player, value)?;
+    }
 
     for (a_num, b_num, outcome, handicap) in results {
         let a = id_of[&a_num];
@@ -313,8 +310,7 @@ pub(crate) enum Cell {
     Bye,
     Absent,
     /// A half-point bye/absence (`0=`): the player scored ½ without playing.
-    /// Reconstructed as an absence, with the tournament's `half_point_absences`
-    /// setting turned on so the ½ is scored (see [`build_tournament`]).
+    /// Reconstructed as an absence whose sit-out is worth [`SitoutValue::Half`].
     HalfBye,
     Game {
         opponent: u32,
@@ -582,12 +578,12 @@ Nr Name          Nat Elo  1   2   Pts
 
         // Byes landed on the right players.
         assert_eq!(
-            t.rounds[0].bye,
-            Some(player(&t, "Gamma").tournament_id.unwrap())
+            t.rounds[0].byes().collect::<Vec<_>>(),
+            vec![player(&t, "Gamma").tournament_id.unwrap()]
         );
         assert_eq!(
-            t.rounds[1].bye,
-            Some(player(&t, "Beta").tournament_id.unwrap())
+            t.rounds[1].byes().collect::<Vec<_>>(),
+            vec![player(&t, "Beta").tournament_id.unwrap()]
         );
 
         // Alpha beat Beta in round 1.
@@ -723,10 +719,10 @@ Nr Name    Nat Elo  1   Pts
 ";
         let t = import_american_grid(grid).unwrap();
         assert_eq!(
-            t.rounds[0].absent,
+            t.rounds[0].absentees().collect::<Vec<_>>(),
             vec![player(&t, "C").tournament_id.unwrap()]
         );
-        assert_eq!(t.rounds[0].bye, None);
+        assert_eq!(t.rounds[0].byes().next(), None);
     }
 
     #[test]
@@ -744,11 +740,11 @@ Nr Name    Nat Elo  1   Pts
 ";
         let t = import_american_grid(grid).unwrap();
         assert!(t.rounds[0]
-            .absent
-            .contains(&player(&t, "B").tournament_id.unwrap()));
+            .absentees()
+            .any(|id| id == player(&t, "B").tournament_id.unwrap()));
         assert_eq!(
-            t.rounds[0].bye,
-            Some(player(&t, "A").tournament_id.unwrap())
+            t.rounds[0].byes().collect::<Vec<_>>(),
+            vec![player(&t, "A").tournament_id.unwrap()]
         );
         let of = |last| {
             t.standings()
@@ -763,10 +759,11 @@ Nr Name    Nat Elo  1   Pts
     }
 
     #[test]
-    fn imports_a_half_point_bye_and_turns_on_half_point_absences() {
+    fn imports_a_half_point_bye_as_a_half_scoring_absence() {
         // C sits out round 1 as a half-point bye (`0=`); A beats B. The importer
-        // reconstructs C as an absence, turns on `half_point_absences`, and scores
-        // C half a point (1 half-unit).
+        // reconstructs C as an absence scoring half a point (1 half-unit) — the
+        // cell says so outright, so the tournament's `half_point_absences`
+        // default is left alone.
         let grid = "\
 [Half]
 Nr Name    Nat Elo  1   Pts
@@ -775,11 +772,10 @@ Nr Name    Nat Elo  1   Pts
 3  [C] [c] FR  1500 [0=] 1/2
 ";
         let t = import_american_grid(grid).unwrap();
-        assert!(t.settings.half_point_absences);
-        assert_eq!(
-            t.rounds[0].absent,
-            vec![player(&t, "C").tournament_id.unwrap()]
-        );
+        assert!(!t.settings.half_point_absences, "the setting is untouched");
+        let c = player(&t, "C").tournament_id.unwrap();
+        assert_eq!(t.rounds[0].absentees().collect::<Vec<_>>(), vec![c]);
+        assert_eq!(t.rounds[0].sitout(c).unwrap().value, SitoutValue::Half);
         let of = |last| {
             t.standings()
                 .into_iter()
@@ -859,11 +855,10 @@ Nr Name    Nat Elo  1   Pts
     }
 
     #[test]
-    fn demotes_extra_byes_to_absences_instead_of_failing() {
-        // Two `0+` cells in one round (a genuine bye plus a no-show forfeit, both
-        // rendered `0+`): the importer keeps the first — the player highest in the
-        // file — as the round's bye and demotes the rest to absences, rather than
-        // rejecting the whole grid.
+    fn imports_several_byes_in_one_round() {
+        // Two `0+` cells in one round — a genuine bye plus a no-show forfeit, which
+        // the grid renders identically. Both import as byes and both keep their
+        // point; neither is demoted.
         let grid = "\
 [Two byes]
 Nr Name    Nat Elo  1    Pts
@@ -875,11 +870,19 @@ Nr Name    Nat Elo  1    Pts
         let t = import_american_grid(grid).unwrap();
         assert_eq!(t.rounds.len(), 1);
         let r = &t.rounds[0];
-        // A (first in the file) keeps the bye; B is demoted to an absence.
-        assert_eq!(r.bye, Some(player(&t, "A").tournament_id.unwrap()));
-        assert_eq!(r.absent, vec![player(&t, "B").tournament_id.unwrap()]);
+        let (a, b) = (
+            player(&t, "A").tournament_id.unwrap(),
+            player(&t, "B").tournament_id.unwrap(),
+        );
+        assert_eq!(r.byes().collect::<Vec<_>>(), vec![a, b]);
+        assert_eq!(r.absentees().next(), None);
         // The real game between C and D is still reconstructed and decided.
         assert!(board(&t, 0, "C", "D").result.is_some());
+        // Both free points scored, so the grid round-trips to a fixpoint.
+        let g = crate::american_grid(&t, &t.standings());
+        let t2 = import_american_grid(&g).unwrap();
+        assert_eq!(g, crate::american_grid(&t2, &t2.standings()));
+        assert_eq!(g.matches("0+").count(), 2, "both byes still read 0+:\n{g}");
     }
 
     #[test]

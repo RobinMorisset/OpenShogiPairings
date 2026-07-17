@@ -35,7 +35,15 @@ long_boards_enabled: boolean,
 handicap_policy: HandicapPolicy, 
 /**
  * Whether a player marked **absent** for a round is awarded half a point
- * (rather than the default zero). Off by default; lets a FESA `0=` round-trip.
+ * (rather than the default zero). Off by default.
+ *
+ * This is only the *default*, applied to each absence as the round is
+ * confirmed: what a sit-out actually scores is recorded on the round
+ * ([`Sitout::value`]), where the referee can override it per player and per
+ * round. So turning this on affects rounds confirmed from then on, not ones
+ * already played.
+ *
+ * [`Sitout::value`]: crate::round::Sitout::value
  */
 half_point_absences: boolean, 
 /**

@@ -19,7 +19,8 @@ use crate::pairing::{
 };
 use crate::player::{NewPlayer, Player, PointAdjustment};
 use crate::round::{
-    Board, Handicap, HandicapGame, NoShow, PairingSource, Round, RoundDraft, Winner,
+    Board, Handicap, HandicapGame, NoShow, PairingSource, Round, RoundDraft, Sitout, SitoutKind,
+    SitoutValue, Winner,
 };
 use crate::scoring::compute_scores;
 use crate::settings::TournamentSettings;
@@ -35,7 +36,9 @@ use crate::units::TournamentId;
 /// single `name`.
 /// v3: tournaments carry a list of `rounds`.
 /// v4: players carry a list of manual point `adjustments`.
-pub const TOURNAMENT_FORMAT_VERSION: u32 = 4;
+/// v5: rounds carry one `sitouts` list (each with what it scores) in place of
+/// the separate `bye`, `cup_byes` and `absent` fields.
+pub const TOURNAMENT_FORMAT_VERSION: u32 = 5;
 
 fn default_format_version() -> u32 {
     TOURNAMENT_FORMAT_VERSION
@@ -133,6 +136,10 @@ pub enum TournamentError {
     /// No board with the given index exists in the round.
     #[error("no board {board} in round {round}")]
     BoardNotFound { round: u32, board: usize },
+    /// A sit-out's value was set for a player who played a board that round (or
+    /// wasn't in it at all), so there is no sit-out to score.
+    #[error("player {player} did not sit out round {round}")]
+    PlayerNotSittingOut { round: u32, player: TournamentId },
     /// A handicap was requested for two players whose ratings are equal (or both
     /// unrated), so there is no unambiguous handicap giver.
     #[error("a handicap game needs two players with different ratings")]
@@ -482,7 +489,7 @@ impl Tournament {
                 p.matches
                     .iter()
                     .flat_map(|m| [m.player1, m.player2])
-                    .chain(p.byes)
+                    .chain(p.byes.iter().map(|&(player, _)| player))
                     .collect()
             })
             .unwrap_or_default()
@@ -569,7 +576,7 @@ impl Tournament {
             .rounds
             .last()
             .map(|r| {
-                let mut absent: Vec<TournamentId> = r.absent.clone();
+                let mut absent: Vec<TournamentId> = r.absentees().collect();
                 for board in &r.boards {
                     for (side, id) in [
                         (Winner::Player1, board.player1),
@@ -589,19 +596,19 @@ impl Tournament {
             number,
             absent: default_absent,
             forced_boards: Vec::new(),
-            forced_bye: None,
+            forced_byes: Vec::new(),
         });
         Ok(self.draft.as_ref().expect("just set the draft"))
     }
 
     /// Replace the current draft's customization (absent set, forced pairings,
-    /// forced bye). Structural consistency is validated when the round is
+    /// forced byes). Structural consistency is validated when the round is
     /// confirmed; here we only check that every referenced player exists.
     pub fn update_draft(
         &mut self,
         absent: Vec<TournamentId>,
         forced_boards: Vec<Board>,
-        forced_bye: Option<TournamentId>,
+        forced_byes: Vec<TournamentId>,
     ) -> Result<&RoundDraft, TournamentError> {
         if self.draft.is_none() {
             return Err(TournamentError::NoDraft);
@@ -614,7 +621,7 @@ impl Tournament {
         let referenced = absent
             .iter()
             .chain(forced_boards.iter().flat_map(|b| [&b.player1, &b.player2]))
-            .chain(forced_bye.iter());
+            .chain(forced_byes.iter());
         for id in referenced {
             if !known.contains(id) {
                 return Err(TournamentError::InvalidDraft(format!(
@@ -629,7 +636,7 @@ impl Tournament {
             .into_iter()
             .map(|b| Board::pending(b.player1, b.player2, 0, PairingSource::Forced))
             .collect();
-        draft.forced_bye = forced_bye;
+        draft.forced_byes = forced_byes;
         Ok(self.draft.as_ref().expect("draft present"))
     }
 
@@ -715,7 +722,7 @@ impl Tournament {
         let cup_players: HashSet<TournamentId> = cup_boards
             .iter()
             .flat_map(|b| [b.player1, b.player2])
-            .chain(cup_byes.iter().copied())
+            .chain(cup_byes.iter().map(|&(p, _)| p))
             .collect();
 
         // Players still busy on an unresolved long game (a two-round board started
@@ -768,35 +775,30 @@ impl Tournament {
                 }
             }
         }
-        if let Some(bye) = draft.forced_bye {
+        for &bye in &draft.forced_byes {
             if cup_players.contains(&bye) {
                 return Err(TournamentError::InvalidDraft(
-                    "the forced bye is a cup player".into(),
+                    "a forced bye is a cup player".into(),
                 ));
             }
             if busy_long.contains(&bye) {
                 return Err(TournamentError::InvalidDraft(
-                    "the forced bye is a player still in a long game".into(),
+                    "a forced bye is a player still in a long game".into(),
                 ));
             }
             if !swiss_set.contains(&bye) {
                 return Err(TournamentError::InvalidDraft(
-                    "the forced bye is an absent player".into(),
+                    "a forced bye is an absent player".into(),
                 ));
             }
             if !placed.insert(bye) {
                 return Err(TournamentError::InvalidDraft(
-                    "the forced bye is also in a forced pairing".into(),
-                ));
-            }
-            // With a forced bye, the Swiss players left to auto-pair must be even.
-            let leftover = swiss_present.len() - 2 * draft.forced_boards.len() - 1;
-            if !leftover.is_multiple_of(2) {
-                return Err(TournamentError::InvalidDraft(
-                    "a forced bye needs an odd number of Swiss players".into(),
+                    "a forced bye is also in a forced pairing, or forced twice".into(),
                 ));
             }
         }
+        // No parity check on the forced byes: whatever they leave over, the
+        // engine byes one more player if the count is odd.
 
         // Pair the Swiss pool with the engine, then prepend the cup boards.
         let swiss_round = pair_round_weighted(
@@ -806,7 +808,7 @@ impl Tournament {
             &self.rounds,
             &swiss_present,
             &draft.forced_boards,
-            draft.forced_bye,
+            &draft.forced_byes,
         );
         let mut boards = cup_boards;
         boards.extend(swiss_round.boards);
@@ -842,12 +844,43 @@ impl Tournament {
             });
         }
 
+        // Everyone with no board: the byes the engine picked or the referee forced
+        // (both already built by the engine), the cup byes, and the absentees. What
+        // each scores is frozen here — a bye is a full point, an absence follows the
+        // tournament default — and the referee can re-value any of them afterwards
+        // from the standings.
+        let mut sitouts = swiss_round.sitouts;
+        sitouts.extend(cup_byes.into_iter().map(|(player, stage)| Sitout {
+            player,
+            kind: SitoutKind::CupBye { stage },
+            value: SitoutValue::Full,
+        }));
+        let absent_value = if self.settings.half_point_absences {
+            SitoutValue::Half
+        } else {
+            SitoutValue::Zero
+        };
+        // An absent player the cup paired anyway (the bracket ignores the absent
+        // set, so the referee can record the forfeit) has a board: it is the
+        // board that scores them, so they get no sit-out.
+        let has_board: HashSet<TournamentId> =
+            boards.iter().flat_map(|b| [b.player1, b.player2]).collect();
+        sitouts.extend(
+            draft
+                .absent
+                .iter()
+                .filter(|id| !has_board.contains(id))
+                .map(|&player| Sitout {
+                    player,
+                    kind: SitoutKind::Absent,
+                    value: absent_value,
+                }),
+        );
+
         let round = Round {
             number: draft.number,
             boards,
-            bye: swiss_round.bye,
-            cup_byes,
-            absent: draft.absent,
+            sitouts,
             completed: false,
         };
         self.rounds.push(round);
@@ -883,7 +916,7 @@ impl Tournament {
             &self.settings,
             completed,
             &swiss_boards,
-            round.bye,
+            round.swiss_bye(),
         ))
     }
 
@@ -917,16 +950,18 @@ impl Tournament {
             .map(|bd| (bd.player1, bd.player2))
             .collect();
 
-        // Both probed players must be engine-paired (in a Swiss board or the bye).
-        // `PHANTOM` stands for the bye itself (the nil UUID, never a real player
-        // id) — it's in scope exactly when this round actually has a Swiss bye
-        // to negotiate.
+        // Both probed players must be engine-paired (in a Swiss board or the
+        // engine's own bye — a forced or cup bye wasn't the engine's choice, so
+        // there is nothing to explain about it). `PHANTOM` stands for the bye
+        // itself (the nil UUID, never a real player id) — it's in scope exactly
+        // when this round actually has an engine-chosen bye to negotiate.
+        let swiss_bye = round.swiss_bye();
         let in_swiss = |id: TournamentId| {
-            round.bye == Some(id) || swiss_boards.iter().any(|&(x, y)| x == id || y == id)
+            swiss_bye == Some(id) || swiss_boards.iter().any(|&(x, y)| x == id || y == id)
         };
         for id in [a, b] {
             if id == PHANTOM {
-                if round.bye.is_none() {
+                if swiss_bye.is_none() {
                     return Ok(Counterfactual {
                         scoped_out: Some(ScopeReason::Absent),
                         cost_delta: Vec::new(),
@@ -956,7 +991,7 @@ impl Tournament {
             &self.settings,
             completed,
             &swiss_boards,
-            round.bye,
+            swiss_bye,
             a,
             b,
         ))
@@ -997,19 +1032,25 @@ impl Tournament {
             .filter(|bd| matches!(bd.source, PairingSource::Forced))
             .map(|bd| Board::pending(bd.player1, bd.player2, 0, PairingSource::Forced))
             .collect();
-        let forced_bye = match (a == PHANTOM, b == PHANTOM) {
-            (true, false) => Some(b),
-            (false, true) => Some(a),
-            _ => {
-                forced_boards.push(Board::pending(a, b, 0, PairingSource::Forced));
-                None
+        // The byes the referee had already fixed carry over; the engine's own bye
+        // (if this round had one) goes back up for grabs.
+        let mut forced_byes: Vec<TournamentId> = round.forced_byes().collect();
+        match (a == PHANTOM, b == PHANTOM) {
+            // Forcing onto the bye. Already forced there (so the referee is
+            // re-asking for what they have) is a no-op, not a double entry.
+            (true, false) | (false, true) => {
+                let id = if a == PHANTOM { b } else { a };
+                if !forced_byes.contains(&id) {
+                    forced_byes.push(id);
+                }
             }
-        };
+            _ => forced_boards.push(Board::pending(a, b, 0, PairingSource::Forced)),
+        }
         let draft = RoundDraft {
             number: round.number,
-            absent: round.absent.clone(),
+            absent: round.absentees().collect(),
             forced_boards,
-            forced_bye,
+            forced_byes,
         };
 
         // Drop the round and re-confirm from the reconstructed draft. Earlier
@@ -1026,8 +1067,13 @@ impl Tournament {
         round: &Round,
         id: TournamentId,
     ) -> Result<ScopeReason, TournamentError> {
-        if round.absent.contains(&id) {
-            return Ok(ScopeReason::Absent);
+        if let Some(sitout) = round.sitout(id) {
+            return Ok(match sitout.kind {
+                SitoutKind::ForcedBye => ScopeReason::Forced,
+                SitoutKind::CupBye { .. } => ScopeReason::Cup,
+                // The engine's own bye would have passed the in_swiss check.
+                SitoutKind::Absent | SitoutKind::Bye => ScopeReason::Absent,
+            });
         }
         for bd in &round.boards {
             if bd.player1 == id || bd.player2 == id {
@@ -1086,6 +1132,40 @@ impl Tournament {
         }
         round.completed = round.is_complete();
         Ok(&round.boards[board_index])
+    }
+
+    /// Set what a round is worth to a player who sat it out — the `0+` / `0=` /
+    /// `0−` in their cross-table cell.
+    ///
+    /// The tournament's
+    /// [`half_point_absences`](crate::settings::TournamentSettings::half_point_absences)
+    /// setting only picks the value an absence *starts* at when the round is
+    /// confirmed; this is how a referee overrules it for one player in one round
+    /// (an excused absence, a bye they judge shouldn't score, …). Completed
+    /// rounds are fair game — re-scoring a past round is the whole point — and
+    /// only the score moves: why the player sat out is untouched, so this can
+    /// never change how a later round pairs.
+    pub fn set_sitout_value(
+        &mut self,
+        round_number: u32,
+        player: TournamentId,
+        value: SitoutValue,
+    ) -> Result<&Round, TournamentError> {
+        let round = self
+            .rounds
+            .iter_mut()
+            .find(|r| r.number == round_number)
+            .ok_or(TournamentError::RoundNotFound(round_number))?;
+        let sitout = round
+            .sitouts
+            .iter_mut()
+            .find(|s| s.player == player)
+            .ok_or(TournamentError::PlayerNotSittingOut {
+                round: round_number,
+                player,
+            })?;
+        sitout.value = value;
+        Ok(round)
     }
 
     /// Mark a board as a no-show, or clear it.
@@ -1411,7 +1491,7 @@ mod tests {
             assert!(!long_players.contains(&b.player1));
             assert!(!long_players.contains(&b.player2));
         }
-        assert!(r2.bye.is_none_or(|x| !long_players.contains(&x)));
+        assert!(r2.byes().all(|x| !long_players.contains(&x)));
 
         // The long flag can no longer be touched on round 1 (not the current round).
         assert_eq!(
@@ -1609,7 +1689,7 @@ mod tests {
             let round = t.confirm_round().unwrap();
             assert_eq!(round.number, 1);
             assert_eq!(round.boards.len(), 1); // 3 players → 1 board + 1 bye
-            assert!(round.bye.is_some());
+            assert!(round.swiss_bye().is_some());
         }
 
         // Playing the only board completes round 1 automatically, unlocking round 2.
@@ -1912,9 +1992,9 @@ mod tests {
 
         // Round 1: C absent, A vs B.
         t.prepare_round().unwrap();
-        t.update_draft(vec![c], vec![], None).unwrap();
+        t.update_draft(vec![c], vec![], Vec::new()).unwrap();
         t.confirm_round().unwrap();
-        assert_eq!(t.rounds[0].absent, vec![c]);
+        assert_eq!(t.rounds[0].absentees().collect::<Vec<_>>(), vec![c]);
         assert_eq!(t.rounds[0].boards.len(), 1); // A vs B, no bye
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
 
@@ -1945,15 +2025,122 @@ mod tests {
         t.prepare_round().unwrap();
         // Force A vs C, and E as the bye (5 present → odd, ok).
         let forced = vec![Board::pending(ids[0], ids[2], 0, PairingSource::Swiss)];
-        t.update_draft(vec![], forced, Some(ids[4])).unwrap();
+        t.update_draft(vec![], forced, vec![ids[4]]).unwrap();
         let round = t.confirm_round().unwrap();
-        assert_eq!(round.bye, Some(ids[4]));
+        assert_eq!(round.byes().collect::<Vec<_>>(), vec![ids[4]]);
         // A vs C is present as a board; B and D auto-paired.
         assert!(round
             .boards
             .iter()
             .any(|b| b.player1 == ids[0] && b.player2 == ids[2]));
         assert_eq!(round.boards.len(), 2);
+    }
+
+    #[test]
+    fn several_byes_can_be_forced_in_one_round() {
+        // Two of five players are forced onto byes, leaving three to pair — an odd
+        // count, so the engine byes one more of its own accord. All three byes
+        // score their point.
+        let mut t = Tournament::new("Byes").unwrap();
+        for n in ["A", "B", "C", "D", "E"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        let all: Vec<TournamentId> = t.players.iter().map(|p| p.tournament_id.unwrap()).collect();
+
+        t.prepare_round().unwrap();
+        t.update_draft(vec![], vec![], vec![all[0], all[1]])
+            .unwrap();
+        let round = t.confirm_round().unwrap();
+
+        assert_eq!(
+            round.forced_byes().collect::<Vec<_>>(),
+            vec![all[0], all[1]]
+        );
+        // Three left over is odd, so the engine adds its own bye and pairs the rest.
+        assert!(round.swiss_bye().is_some(), "the odd leftover is byed");
+        assert_eq!(round.byes().count(), 3);
+        assert_eq!(round.boards.len(), 1);
+        // Every bye scores its point.
+        assert!(round
+            .sitouts
+            .iter()
+            .all(|s| s.value == SitoutValue::Full && s.kind.is_bye()));
+    }
+
+    #[test]
+    fn a_forced_bye_no_longer_needs_an_odd_field() {
+        // Four players and one forced bye: the three left over are odd, so the
+        // engine byes a second player rather than rejecting the draft.
+        let mut t = Tournament::new("Even").unwrap();
+        for n in ["A", "B", "C", "D"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        let first = t.players[0].tournament_id.unwrap();
+        t.prepare_round().unwrap();
+        t.update_draft(vec![], vec![], vec![first]).unwrap();
+        let round = t.confirm_round().unwrap();
+        assert_eq!(round.byes().count(), 2);
+        assert_eq!(round.boards.len(), 1);
+    }
+
+    #[test]
+    fn set_sitout_value_rescores_a_past_round_but_not_who_sat_out() {
+        // Three players, one absent: the referee decides that absence was excused
+        // and worth a full point. The score follows; the reason does not.
+        let mut t = Tournament::new("Excused").unwrap();
+        for n in ["A", "B", "C"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        let c = t.players[2].tournament_id.unwrap();
+        t.prepare_round().unwrap();
+        t.update_draft(vec![c], vec![], vec![]).unwrap();
+        t.confirm_round().unwrap();
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        assert!(t.rounds[0].completed);
+
+        let points_of = |t: &Tournament, tid: TournamentId| {
+            let id = t
+                .players
+                .iter()
+                .find(|p| p.tournament_id == Some(tid))
+                .unwrap()
+                .id;
+            t.standings()
+                .into_iter()
+                .find(|s| s.player_id == id)
+                .unwrap()
+                .points
+        };
+        assert_eq!(points_of(&t, c), 0); // absences score nothing by default
+
+        t.set_sitout_value(1, c, SitoutValue::Full).unwrap();
+        assert_eq!(points_of(&t, c), 2); // a full point = 2 half-points
+
+        // Still an absence, so it never made them "had a bye" for pairing.
+        assert_eq!(t.rounds[0].sitout(c).unwrap().kind, SitoutKind::Absent);
+        assert_eq!(t.rounds[0].absentees().collect::<Vec<_>>(), vec![c]);
+    }
+
+    #[test]
+    fn set_sitout_value_rejects_a_player_who_played() {
+        let mut t = Tournament::new("Played").unwrap();
+        for n in ["A", "B"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        let a = t.players[0].tournament_id.unwrap();
+        assert_eq!(
+            t.set_sitout_value(1, a, SitoutValue::Half).unwrap_err(),
+            TournamentError::PlayerNotSittingOut {
+                round: 1,
+                player: a
+            }
+        );
     }
 
     #[test]
@@ -2027,12 +2214,16 @@ mod tests {
         t.confirm_round().unwrap();
 
         let r1 = t.rounds.last().unwrap();
-        let bye = r1.bye.expect("odd count byes someone");
+        let bye = r1.swiss_bye().expect("odd count byes someone");
         let playing = r1.boards[0].player1;
 
         let round = t.force_pairing(playing, PHANTOM).unwrap();
         assert_eq!(round.number, 1, "the same round is re-paired");
-        assert_eq!(round.bye, Some(playing), "the forced player now byes");
+        assert_eq!(
+            round.byes().collect::<Vec<_>>(),
+            vec![playing],
+            "the forced player now byes"
+        );
         assert!(
             round
                 .boards
@@ -2053,7 +2244,7 @@ mod tests {
         t.confirm_round().unwrap();
 
         let r1 = t.rounds.last().unwrap();
-        let bye = r1.bye.expect("odd count byes someone");
+        let bye = r1.swiss_bye().expect("odd count byes someone");
 
         let cf = t
             .explain_counterfactual(1, bye, PHANTOM, CounterfactualMode::Forbid)
@@ -2580,10 +2771,13 @@ mod tests {
         // so clear that to keep them in the round (the referee's call).
         let draft = t.prepare_round().unwrap();
         assert!(draft.absent.contains(&s_tid[0]) && draft.absent.contains(&s_tid[7]));
-        t.update_draft(Vec::new(), Vec::new(), None).unwrap();
+        t.update_draft(Vec::new(), Vec::new(), Vec::new()).unwrap();
         t.confirm_round().unwrap();
         assert!(
-            t.rounds[1].cup_byes.contains(&s_tid[3]),
+            matches!(
+                t.rounds[1].sitout(s_tid[3]).map(|s| s.kind),
+                Some(SitoutKind::CupBye { .. })
+            ),
             "s3 gets the cup bye"
         );
         for dropped in [s_tid[0], s_tid[7]] {
@@ -2714,7 +2908,8 @@ mod tests {
         // Mark the top seed absent — their QF board is still generated (unplayed),
         // to be forfeited by the referee.
         t.prepare_round().unwrap();
-        t.update_draft(vec![tid(&t, s[0])], vec![], None).unwrap();
+        t.update_draft(vec![tid(&t, s[0])], vec![], Vec::new())
+            .unwrap();
         t.confirm_round().unwrap();
         let board = find_board(&t, 1, s[0], s[7]).expect("bracket board created despite absence");
         assert!(matches!(board.source, PairingSource::Cup { .. }));

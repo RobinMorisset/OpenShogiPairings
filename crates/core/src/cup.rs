@@ -45,11 +45,14 @@ pub struct CupMatch {
 }
 
 /// The cup pairings for one round: the two-player bracket matches, plus any
-/// players who advance unopposed (a cup bye — see [`Round::cup_byes`]).
+/// players who advance unopposed (a cup bye), each with the stage they advanced
+/// through. A cup bye becomes a [`SitoutKind::CupBye`] sit-out on the round.
+///
+/// [`SitoutKind::CupBye`]: crate::round::SitoutKind::CupBye
 #[derive(Debug, Clone, Default)]
 pub struct CupPairings {
     pub matches: Vec<CupMatch>,
-    pub byes: Vec<TournamentId>,
+    pub byes: Vec<(TournamentId, CupStage)>,
 }
 
 /// The cup podium, once the final round is decided. Each place is `None` when it
@@ -350,7 +353,7 @@ fn push_pairing(
             player2,
             stage,
         }),
-        (Some(p), None) | (None, Some(p)) => out.byes.push(p),
+        (Some(p), None) | (None, Some(p)) => out.byes.push((p, stage)),
         (None, None) => {}
     }
 }
@@ -629,9 +632,7 @@ mod tests {
                     ..Board::pending(w, l, 0, PairingSource::Swiss)
                 })
                 .collect(),
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: Vec::new(),
+            sitouts: Vec::new(),
             completed: true,
         }
     }

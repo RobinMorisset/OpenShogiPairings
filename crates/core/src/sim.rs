@@ -108,7 +108,7 @@ pub fn cup_eligibility(
         .rounds
         .iter()
         .take(attendance_rounds)
-        .flat_map(|r| r.absent.iter().copied())
+        .flat_map(|r| r.absentees())
         .collect();
     base.players
         .iter()
@@ -585,8 +585,9 @@ pub fn simulate_run(
         // silently reappear playing every round. Rounds beyond the base's recorded
         // history carry no attendance, so everyone plays.
         if let Some(real) = base.rounds.get(round_idx as usize) {
-            if !real.absent.is_empty() {
-                tournament.update_draft(real.absent.clone(), Vec::new(), None)?;
+            let absent: Vec<TournamentId> = real.absentees().collect();
+            if !absent.is_empty() {
+                tournament.update_draft(absent, Vec::new(), Vec::new())?;
             }
         }
         // The simulator auto-fills every board and never displays them, so skip
@@ -640,6 +641,7 @@ pub fn simulate_run(
 mod tests {
     use super::*;
     use crate::player::NewPlayer;
+    use crate::round::{Sitout, SitoutKind, SitoutValue};
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
 
@@ -1119,7 +1121,7 @@ Nr Name    Nat Elo  1   Pts
 ";
         let base = crate::import_american_grid(grid).unwrap();
         assert_eq!(base.rounds.len(), 1);
-        assert_eq!(base.rounds[0].absent.len(), 2); // C and D really sat out
+        assert_eq!(base.rounds[0].absentees().count(), 2); // C and D really sat out
 
         let mut rng = ChaCha8Rng::seed_from_u64(7);
         let out = simulate_run(
@@ -1337,9 +1339,11 @@ Nr Name    Nat Elo  1   Pts
         t.rounds.push(crate::round::Round {
             number: 1,
             boards: Vec::new(),
-            bye: None,
-            cup_byes: Vec::new(),
-            absent: vec![fr_absent_tid],
+            sitouts: vec![Sitout {
+                player: fr_absent_tid,
+                kind: SitoutKind::Absent,
+                value: SitoutValue::Zero,
+            }],
             completed: true,
         });
 
