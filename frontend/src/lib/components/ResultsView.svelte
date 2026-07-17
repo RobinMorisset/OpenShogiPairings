@@ -894,7 +894,9 @@
   tr.cat-dim {
     opacity: 0.35;
   }
-  tr.cat-highlight {
+  /* Override the zebra stripe (tbody tr:nth-child(even)) so every highlighted
+     row is the same color regardless of its odd/even position. */
+  tbody tr.cat-highlight {
     background: var(--bg-hover-strong);
   }
   .cell-tip {
