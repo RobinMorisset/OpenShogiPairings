@@ -24,6 +24,14 @@ the rest.
    CI's `check-version` job verifies this and fails the release before building
    if any is out of sync.
 
+   Bump the root `version` in
+   [`frontend/package-lock.json`](../frontend/package-lock.json) to match too —
+   both the top-level field and the one under `packages[""]`, so the lockfile
+   mirrors `package.json`. Nothing re-syncs it automatically (unlike the two
+   `Cargo.lock`s, which the pre-commit hook re-resolves), so it drifts otherwise;
+   `npm install` in `frontend/` updates it, or edit the two lines by hand. It is
+   not part of the `check-version` gate.
+
 2. **Tag and push:**
 
    ```sh
