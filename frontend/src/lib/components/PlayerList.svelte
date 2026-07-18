@@ -315,10 +315,17 @@
 
 {#snippet cell(player: Player, field: Field, numeric: boolean)}
   {#if editing?.id === player.id && editing.field === field}
+    <!-- size="1" keeps the input from inflating the auto-sized column past the
+         cell's normal width: it fills the column via width:100% instead. Without
+         it, editing a cell widened the column, and committing (on blur) shrank it
+         back mid-click, so a click aimed at a sibling cell's expanded area missed.
+         Rating uses type=text + inputmode=numeric (not type=number, which ignores
+         size); buildEdit already validates it as a non-negative integer. -->
     <input
       class="cell-input"
-      type={numeric ? "number" : "text"}
-      min={numeric ? "0" : undefined}
+      type="text"
+      inputmode={numeric ? "numeric" : undefined}
+      size="1"
       value={draft}
       oninput={(e) => (draft = e.currentTarget.value)}
       onkeydown={onKeydown}
