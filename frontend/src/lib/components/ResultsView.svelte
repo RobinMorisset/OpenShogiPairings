@@ -172,29 +172,28 @@
     return leaders;
   });
 
-  // The categories the referee has selected to highlight. Kept as an array (a
-  // reassigned-on-toggle value) so Svelte reactivity is straightforward.
-  let highlightedCategories = $state<string[]>([]);
-  const filtering = $derived(highlightedCategories.length > 0);
+  // The one category the referee has selected to highlight, or null for none —
+  // highlighting two at once isn't useful, so picking a category replaces any
+  // previous choice.
+  let highlightedCategory = $state<string | null>(null);
+  const filtering = $derived(highlightedCategory !== null);
 
-  // Drop any selection that points at a now-deleted category, so filtering never
-  // stays "active" with nothing left to highlight.
+  // Drop the selection if it points at a now-deleted category, so filtering
+  // never stays "active" with nothing left to highlight.
   $effect(() => {
     const valid = new Set(categories.map((c) => c.id));
-    if (highlightedCategories.some((c) => !valid.has(c))) {
-      highlightedCategories = highlightedCategories.filter((c) => valid.has(c));
+    if (highlightedCategory !== null && !valid.has(highlightedCategory)) {
+      highlightedCategory = null;
     }
   });
 
   function toggleHighlight(id: string) {
-    highlightedCategories = highlightedCategories.includes(id)
-      ? highlightedCategories.filter((c) => c !== id)
-      : [...highlightedCategories, id];
+    highlightedCategory = highlightedCategory === id ? null : id;
   }
 
-  // Whether a player belongs to any currently-highlighted category.
+  // Whether the player belongs to the currently-highlighted category.
   function isHighlighted(player: Player): boolean {
-    return (player.categories ?? []).some((c) => highlightedCategories.includes(c));
+    return highlightedCategory !== null && (player.categories ?? []).includes(highlightedCategory);
   }
 
   type PlayedCell = {
@@ -545,7 +544,7 @@
         <button
           type="button"
           class="cat-chip"
-          class:active={highlightedCategories.includes(cat.id)}
+          class:active={highlightedCategory === cat.id}
           onclick={() => toggleHighlight(cat.id)}
         >{cat.name}</button>
       {/each}
@@ -553,7 +552,7 @@
         <button
           type="button"
           class="cat-chip clear"
-          onclick={() => (highlightedCategories = [])}
+          onclick={() => (highlightedCategory = null)}
         >{$_("resultsView.clearHighlight")}</button>
       {/if}
     </div>
