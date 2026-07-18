@@ -7,7 +7,34 @@ This project does NOT adhere to semantic versioning. Assume that even minor
 version changes can change the save format and thus break compatibility; it
 will be explicitly mentioned in the changelog for that version though.
 
+## [1.2.0] - 2026-07-18
+
+Backwards compatible with v1.1.0
+
+### Added
+
+- **Customizable player categories** such as Women or U18, with a way to highlight
+  these players in the Standings tab.
+- **Import/Export of tournament settings** There was already an export button, but
+  no import in the UI yet.
+
+### Fixed
+
+- In the Players tab, editing a cell was shifting columns width, making it hard to click
+  reliably on another cell.
+- In Round tab, in alphabetical mode, the column headers were misaligned with their contents.
+- Throughout the app, buttons would often dim for a fraction of a second whenever another button was clicked
+- In Round tab, clicking on a player to mark them a winner would in some cases cause the
+  "Why these pairings ?" section to disappear for a split second, making the layout flicker.
+- Hid various unnecessary elements of the interface in print mode.
+- Made everything black-and-white in print mode (checkmarks and medal emojis were not always)
+- Fixed a Windows-specific bug where the select elements in the hidden panel at the bottom of the
+  Round tab would keep a white background even in dark mode.
+- In the Settings tab, the tie-breaker picker overflowed its column.
+
 ## [1.1.0] - 2026-07-17
+
+NOT backwards compatible with v1.0.0.
 
 ### Added
 
