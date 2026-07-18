@@ -120,6 +120,10 @@ button {
   color: inherit;
   font: inherit;
   cursor: pointer;
+  /* Delay the disabled-state dim (opacity below): a quick action toggles `busy`
+     true→false within the delay, so buttons never flash to 50% and back. A
+     genuinely slow request still dims after the delay, keeping the busy cue. */
+  transition: opacity 0.1s ease 0.25s;
 }
 button:hover:not(:disabled) {
   border-color: var(--border-hover);
