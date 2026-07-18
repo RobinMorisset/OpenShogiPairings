@@ -962,5 +962,13 @@
     button.sitout {
       border-color: transparent !important;
     }
+    /* The medals (🥇🥈🥉) and category-leader star (⭐) are colour emoji, whose
+       glyph colour ignores `color: #000`. Desaturate them so the printout stays
+       black & white while still marking podium places and category leaders. */
+    .medal,
+    .cat-star,
+    .podium {
+      filter: grayscale(1);
+    }
   }
 </style>
