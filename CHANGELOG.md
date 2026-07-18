@@ -13,24 +13,28 @@ Backwards compatible with v1.1.0
 
 ### Added
 
-- **Customizable player categories** such as Women or U18, with a way to highlight
-  these players in the Standings tab.
-- **Import/Export of tournament settings** There was already an export button, but
-  no import in the UI yet.
+- **Customizable player categories**, such as Women or U18, with a way to
+  highlight these players in the Standings tab.
+- **Import of tournament settings.** The Settings tab already had an export
+  button; it now has a matching import button too.
 
 ### Fixed
 
-- In the Players tab, editing a cell was shifting columns width, making it hard to click
-  reliably on another cell.
-- In Round tab, in alphabetical mode, the column headers were misaligned with their contents.
-- Throughout the app, buttons would often dim for a fraction of a second whenever another button was clicked
-- In Round tab, clicking on a player to mark them a winner would in some cases cause the
-  "Why these pairings ?" section to disappear for a split second, making the layout flicker.
-- Hid various unnecessary elements of the interface in print mode.
-- Made everything black-and-white in print mode (checkmarks and medal emojis were not always)
-- Fixed a Windows-specific bug where the select elements in the hidden panel at the bottom of the
-  Round tab would keep a white background even in dark mode.
+- Throughout the app, buttons would often dim for a fraction of a second
+  whenever another button was clicked.
+- In the Players tab, editing a cell shifted the column widths, making it hard
+  to reliably click another cell.
+- In the Round tab, in alphabetical mode, the column headers were misaligned
+  with their contents.
+- In the Round tab, clicking a player to mark them a winner would in some cases
+  make the "Why these pairings?" section disappear for a split second, causing
+  the layout to flicker.
+- On Windows, the select elements in the hidden panel at the bottom of the
+  Round tab kept a white background even in dark mode.
 - In the Settings tab, the tie-breaker picker overflowed its column.
+- In print mode, various unnecessary interface elements are now hidden.
+- In print mode, everything is now black-and-white (checkmarks and medal emojis
+  were previously left in color).
 
 ## [1.1.0] - 2026-07-17
 
@@ -77,11 +81,11 @@ NOT backwards compatible with v1.0.0.
 
 ### Fixed
 
-- Fixed a silent integer overflow that could occur when pairing a round with
-  thousands of players.
-- Fixed races when several referees change the same tournament on the same
-  server concurrently.
-- Fixed a wrong amount of jitter in the simulator for players that started a
+- Pairing a round with thousands of players could trigger a silent integer
+  overflow.
+- When several referees changed the same tournament on the same server
+  concurrently, their edits could race.
+- The simulator applied the wrong amount of jitter to players that started a
   tournament as unrated and finished it as provisional.
 
 ### Internal
