@@ -196,15 +196,25 @@
   // round tab is open (and refetched when the tournament changes, since editing
   // an earlier result can shift a later round's ledger).
   let roundExplanation = $state<RoundExplanation | null>(null);
+  // Which round the panel currently shows, so we only blank it when moving to a
+  // different round — not on every tournament update.
+  let explanationRound = -1;
   $effect(() => {
     const round = activeRound;
     void tournament; // re-run on any tournament update
     if (!round) {
       roundExplanation = null;
+      explanationRound = -1;
       return;
     }
+    // Keep the current explanation on screen while re-fetching after an in-round
+    // update (e.g. recording a winner): the pairing rationale doesn't change, so
+    // blanking it would just flicker the panel out and back, shifting the table.
+    if (round.number !== explanationRound) {
+      roundExplanation = null;
+      explanationRound = round.number;
+    }
     let cancelled = false;
-    roundExplanation = null;
     fetchRoundExplanation(round.number)
       .then((ex) => {
         if (!cancelled) roundExplanation = ex;
