@@ -597,8 +597,8 @@
       <thead>
         <tr>
           <th class="num">{$_("roundView.board")}</th>
-          <th>{$_("roundView.playerColumn")}</th>
-          <th>{$_("roundView.opponentColumn")}</th>
+          <th class="alpha-name">{$_("roundView.playerColumn")}</th>
+          <th class="alpha-name">{$_("roundView.opponentColumn")}</th>
           {#if handicapPolicy === "suggested"}
             <th class="suggested-col">{$_("roundView.suggested")}</th>
           {/if}
@@ -1214,6 +1214,15 @@
   }
   .p1-col .player {
     text-align: right;
+  }
+  /* Indent these headers to line up with the names below, whose text sits after
+     the .player box's left padding/border plus a reserved (usually hidden)
+     winner checkmark. Mirror that inset with an invisible ::before so the header
+     no longer looks offset from the column of names. */
+  th.alpha-name::before {
+    content: "✓ ";
+    visibility: hidden;
+    padding-left: calc(0.5rem + 1px);
   }
 
   .player {
