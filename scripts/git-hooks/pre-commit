@@ -40,12 +40,19 @@ for manifest in Cargo.toml frontend/src-tauri/Cargo.toml; do
   fi
 done
 
-echo "== svelte-check =="
-# On Windows (Git Bash / MSYS), node isn't on the shell PATH by default.
-case "$(uname -s)" in
-  MINGW* | MSYS* | CYGWIN*) export PATH="/c/Program Files/nodejs:$PATH" ;;
-esac
-( cd frontend && npm run check )
+# svelte-check and the i18n check only look at frontend sources, so skip them
+# both when nothing under frontend/ is staged (saves ~1-2s on backend commits).
+staged_fe=$(git diff --cached --name-only --diff-filter=ACM -- 'frontend/')
+if [ -n "$staged_fe" ]; then
+  echo "== svelte-check =="
+  # On Windows (Git Bash / MSYS), node isn't on the shell PATH by default.
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*) export PATH="/c/Program Files/nodejs:$PATH" ;;
+  esac
+  ( cd frontend && npm run check )
 
-echo "== i18n locale keys =="
-node scripts/check-i18n-keys.mjs
+  echo "== i18n locale keys =="
+  node scripts/check-i18n-keys.mjs
+else
+  echo "== svelte-check / i18n: skipped (no staged frontend changes) =="
+fi
