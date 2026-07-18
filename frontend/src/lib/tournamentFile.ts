@@ -60,6 +60,32 @@ function parseTournament(text: string): Tournament {
   return parsed;
 }
 
+/** Minimal structural check that a parsed value looks like exported settings. */
+function isSettingsLike(value: unknown): value is TournamentSettings {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.pairing === "object" && v.pairing !== null && Array.isArray(v.tiebreaks)
+  );
+}
+
+/**
+ * Parse settings JSON text. Only a light shape check here; the server does
+ * authoritative validation when the settings are applied.
+ */
+function parseSettings(text: string): TournamentSettings {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("That file is not valid JSON.");
+  }
+  if (!isSettingsLike(parsed)) {
+    throw new Error("That file does not look like exported settings.");
+  }
+  return parsed;
+}
+
 /**
  * Save the tournament to a user-chosen file.
  *
@@ -76,7 +102,20 @@ export function saveTournament(tournament: Tournament): Promise<boolean> {
  * Returns the parsed tournament, or `null` if the user cancelled.
  */
 export function loadTournament(): Promise<Tournament | null> {
-  return isTauri() ? loadViaTauri() : loadViaBrowser();
+  return isTauri()
+    ? loadViaTauri(parseTournament, DIALOG_FILTERS)
+    : loadViaBrowser(parseTournament);
+}
+
+/**
+ * Load tournament settings from a user-chosen JSON file (the shape
+ * `saveSettings` writes). Returns the parsed settings, or `null` if the user
+ * cancelled. Throws if the file isn't valid JSON / doesn't look like settings.
+ */
+export function loadSettings(): Promise<TournamentSettings | null> {
+  return isTauri()
+    ? loadViaTauri(parseSettings, SETTINGS_FILTERS)
+    : loadViaBrowser(parseSettings);
 }
 
 /** Suffix used for exported American Grid documents. */
@@ -167,19 +206,22 @@ async function saveViaTauri(tournament: Tournament): Promise<boolean> {
   return true;
 }
 
-async function loadViaTauri(): Promise<Tournament | null> {
+async function loadViaTauri<T>(
+  parse: (text: string) => T,
+  filters: { name: string; extensions: string[] }[],
+): Promise<T | null> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const { invoke } = await import("@tauri-apps/api/core");
 
   const selected = await open({
     multiple: false,
     directory: false,
-    filters: DIALOG_FILTERS,
+    filters,
   });
   if (typeof selected !== "string") return null; // cancelled
 
   const text = await invoke<string>("read_text_file", { path: selected });
-  return parseTournament(text);
+  return parse(text);
 }
 
 // ---------------------------------------------------------------------------
@@ -199,7 +241,7 @@ function saveViaBrowser(tournament: Tournament): Promise<boolean> {
   return Promise.resolve(true);
 }
 
-function loadViaBrowser(): Promise<Tournament | null> {
+function loadViaBrowser<T>(parse: (text: string) => T): Promise<T | null> {
   return new Promise((resolve, reject) => {
     const input = document.createElement("input");
     input.type = "file";
@@ -208,7 +250,7 @@ function loadViaBrowser(): Promise<Tournament | null> {
     document.body.appendChild(input);
 
     let settled = false;
-    const finish = (result: Tournament | null) => {
+    const finish = (result: T | null) => {
       if (settled) return;
       settled = true;
       input.remove();
@@ -219,8 +261,7 @@ function loadViaBrowser(): Promise<Tournament | null> {
       const file = input.files?.[0];
       if (!file) return finish(null);
       try {
-        const tournament = parseTournament(await file.text());
-        finish(tournament);
+        finish(parse(await file.text()));
       } catch (err) {
         if (!settled) {
           settled = true;

@@ -290,8 +290,10 @@
   },
   "settings": {
     "finalizedWarning": "Les inscriptions sont finalisées — modifier les groupes MacMahon changera les points de tous les joueurs et les appariements futurs.",
+    "importExportTitle": "Importer / exporter les réglages",
     "exportSettings": "Exporter les réglages",
-    "exportSettingsDesc": "Télécharger ces réglages en JSON — par exemple pour comparer des variantes d'appariement avec l'outil de simulation.",
+    "exportSettingsDesc": "Télécharger ces réglages en JSON — par exemple pour comparer des variantes d'appariement avec l'outil de simulation — ou charger un fichier déjà exporté pour l'appliquer ici.",
+    "importSettings": "Importer des réglages…",
     "pairingModeTitle": "Mode d'appariement",
     "pairingModeDesc": "Comment chaque ronde est appariée.",
     "pairingModeSwiss": "Suisse / MacMahon (par défaut)",

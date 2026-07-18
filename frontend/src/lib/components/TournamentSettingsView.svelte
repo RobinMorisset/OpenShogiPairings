@@ -17,7 +17,7 @@
     TournamentSettings,
   } from "../types";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
-  import { saveSettings } from "../tournamentFile";
+  import { loadSettings, saveSettings } from "../tournamentFile";
   import { gradeRank } from "../grade";
   import { cleanThresholds, eqThresholds, normExempt, type ThresholdRow } from "../thresholds";
   import { handicapChoice, type HandicapChoice } from "../handicap";
@@ -38,6 +38,21 @@
   // or to share a configuration). Fire-and-forget: a cancelled dialog is a no-op.
   function exportSettings() {
     void saveSettings("tournament", settings);
+  }
+
+  // Load a settings JSON file and apply it. The server validates the result (and
+  // any error surfaces on the app's banner via onUpdate → run); only the file
+  // read / parse can fail here, which we show inline. A cancelled dialog is a
+  // no-op. The synced-from-prop $effect refreshes every control afterwards.
+  let importError = $state<string | null>(null);
+  async function importSettings() {
+    importError = null;
+    try {
+      const loaded = await loadSettings();
+      if (loaded) onUpdate(loaded);
+    } catch (err) {
+      importError = err instanceof Error ? err.message : String(err);
+    }
   }
 
   // Distinct club names among the players (first spelling kept) with their
@@ -1196,11 +1211,19 @@
   </div>
 
   <div class="section">
-    <h3>{$_("settings.exportSettings")}</h3>
+    <h3>{$_("settings.importExportTitle")}</h3>
     <p class="desc">{$_("settings.exportSettingsDesc")}</p>
-    <button type="button" class="ghost small" onclick={exportSettings}>
-      {$_("settings.exportSettings")}
-    </button>
+    <div class="settings-io">
+      <button type="button" class="ghost small" onclick={exportSettings}>
+        {$_("settings.exportSettings")}
+      </button>
+      <button type="button" class="ghost small" onclick={importSettings} disabled={busy}>
+        {$_("settings.importSettings")}
+      </button>
+    </div>
+    {#if importError}
+      <p class="import-error" role="alert">{importError}</p>
+    {/if}
   </div>
 </div>
 
@@ -1286,6 +1309,16 @@
     font-size: 0.85rem;
     margin: 0 0 1rem;
     line-height: 1.4;
+  }
+  .settings-io {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .import-error {
+    color: var(--color-danger);
+    font-size: 0.85rem;
+    margin: 0.5rem 0 0;
   }
   .thresholds {
     display: flex;

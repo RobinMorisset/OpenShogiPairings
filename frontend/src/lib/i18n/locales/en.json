@@ -290,8 +290,10 @@
   },
   "settings": {
     "finalizedWarning": "Registration is finalized — changing the MacMahon groups will change everyone's points and future pairings.",
+    "importExportTitle": "Import / export settings",
     "exportSettings": "Export settings",
-    "exportSettingsDesc": "Download these settings as a JSON file — e.g. to compare pairing variants with the simulation tool.",
+    "exportSettingsDesc": "Download these settings as a JSON file — e.g. to compare pairing variants with the simulation tool — or load a previously exported file to apply it here.",
+    "importSettings": "Import settings…",
     "pairingModeTitle": "Pairing mode",
     "pairingModeDesc": "How each round is paired.",
     "pairingModeSwiss": "Swiss / MacMahon (default)",
