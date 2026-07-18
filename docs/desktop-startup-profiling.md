@@ -2,15 +2,19 @@
 
 Why the packaged desktop app takes a beat to appear, where that time actually
 goes, and how to measure it reliably enough to tell a real speedup from noise.
-The numbers below were gathered on **macOS**; the point of writing this down is
-so the same investigation can be repeated on **Windows** and the two compared,
+The numbers below were gathered on **macOS**; the point of writing this down was
+so the same investigation could be repeated on **Windows** and the two compared,
 since the app is a Tauri build and the bottleneck turned out to be the native
-side, which differs completely between platforms.
+side, which differs completely between platforms. That Windows run has now been
+done — see [Windows results](#windows-results) at the end.
 
 - **Environment measured:** macOS 26.5.2 (build 25F84), Apple Silicon, Tauri
   2.11, `--no-bundle` release build, commit `e39ff12`.
 - **Harness:** [`scripts/startup-bench.py`](../scripts/startup-bench.py) — runs
-  as-is on macOS, Windows and Linux.
+  as-is on macOS and Linux. On Windows the **warm** mode runs as-is, but **cold**
+  mode needs two fixes first (see [Windows results](#windows-results)): the
+  webview purge path is wrong, and the cold trick doesn't reproduce the Windows
+  first-launch penalty at all.
 
 ## TL;DR of the macOS findings
 
@@ -219,17 +223,85 @@ Recording these because each looked plausible and cost time to rule out:
   CFBundle/CFPreferences frames are normal AppKit chatter, not a `--no-bundle`
   artifact.
 
-## Windows notes (fill in when you run it)
+## Windows results
 
-- **Purge paths.** `scripts/startup-bench.py` deletes the webview profile between
-  cold runs; the Windows/WebView2 paths in `webview_data_dirs()` are a
-  best-effort guess. **Verify them against your actual build** before trusting a
-  cold number — after one cold run, check whether a `*.WebView2` /`EBWebView`
-  folder was created and adjust if needed.
+Repeated on **Windows 10 Home 22H2 (build 19045)**, x64, Tauri 2.11,
+`--no-bundle` release build, commit `fd6d7fb`, same
+[`scripts/startup-bench.py`](../scripts/startup-bench.py). Windows Defender
+real-time protection **on**. The short version: **the shape matches macOS — a
+fast warm launch dominated by native window init, plus a large one-time
+first-launch penalty that lands entirely before `main()` — but every number is
+smaller, and the first-launch penalty is keyed differently (see below), which
+made the stock harness under-report it.**
+
+### The numbers
+
+| metric                          | Windows           | macOS (above)     |
+| ------------------------------- | ----------------- | ----------------- |
+| Warm launch → picker painted    | **0.382 s** (sd 0.005, n=15) | ~0.49 s |
+| First-ever launch → painted     | **~0.82 s** (~2.1× warm)     | ~1.1–1.4 s (2.5–3×) |
+| `exec` → `main()` **warm**      | **~8 ms**         | ~20 ms            |
+| `exec` → `main()` **cold**      | **~370–630 ms**   | ~599 ms           |
+| `run()` → `setup()` gap (warm)  | **~288 ms**       | ~235 ms           |
+| TCP bind (`setup` → `bound`)    | **~2.9 ms**       | ~0.3 ms           |
+
+Warm phase timeline (file-based `mark()` marks, medians, n=8):
+
+| mark    | elapsed | what it is                                        |
+| ------- | ------- | ------------------------------------------------- |
+| `main`  | ~7.8 ms | `exec` + the loader reaching `main()`             |
+| `run`   | +0.4 ms | our code starts                                   |
+| `setup` | ~293 ms | **the gap is WebView2 + Win32 window init**       |
+| `bound` | +2.9 ms | TCP bind                                           |
+| painted | ~389 ms | + webview boot + JS parse + first render (~90 ms) |
+
+Cold (first exec of a freshly built binary): `main` ~373 ms, `bound` ~710 ms,
+painted ~821 ms — i.e. ~365 ms of the ~430 ms cold penalty is spent *before
+`main()`*, exactly as on macOS.
+
+### What matches macOS and what differs
+
+- **Same overall shape.** Warm is fast; the quarter-second before the UI reacts
+  is native window init inside `tauri::Builder::run()` (here **WebView2 +
+  Win32**, there AppKit + WebKit); a large one-time first-launch penalty sits
+  almost entirely before `main()` and is the OS vetting a new executable, not
+  our code. None of it is a bug.
+- **Everything is a bit faster on Windows.** Warm paint 0.38 s vs 0.49 s;
+  `exec`→`main()` ~8 ms vs ~20 ms (fewer/faster DLL loads than macOS's 533
+  dylibs); first launch ~0.82 s vs ~1.1–1.4 s.
+- **The native window-init gap is slightly larger** (~288 ms vs ~235 ms) and is
+  still the dominant warm cost and the only thing worth caring about — and it is
+  WebView2/Win32 framework work, not ours.
+
+### Two methodology traps specific to Windows (both cost time here)
+
+1. **`--mode cold` does *not* reproduce the first-launch penalty on Windows.**
+   The macOS penalty is keyed to the file/inode, so the harness's "copy to a
+   fresh name" defeats the OS cache and each cold run is genuinely cold. On
+   Windows the penalty is **Defender scanning novel executable *content*** — a
+   byte-identical copy under a new name hits Defender's cache and launches warm.
+   So `--mode cold` reported ~0.41 s (barely above warm) and looked like "no
+   first-launch cost", which is wrong. **To see the real Windows first-launch
+   cost you must launch a genuinely new build's binary directly** (novel
+   content), once — which is what the phase-timeline warmup / a first-exec probe
+   do, giving the ~0.82 s above. A rebuild with any code change pays it once;
+   identical bytes never pay it again.
+
+2. **`webview_data_dirs()`'s Windows guesses purge nothing.** WebView2 keys its
+   user-data folder on the **app identifier**, not the exe name:
+   `%LOCALAPPDATA%\org.openshogipairings.desktop\EBWebView` (verified — tournament
+   data lives separately under `%APPDATA%\openshogipairings\tournaments`, so
+   purging the webview folder is safe). The harness's `<name>.WebView2` /
+   `<name>\EBWebView` guesses never match, so a renamed cold copy silently reuses
+   a warm webview profile. With the correct folder purged, a cold webview adds
+   only ~30 ms over warm. `scripts/startup-bench.py` still ships the wrong Windows
+   paths (and its `--purge-glob` override, referenced above, doesn't actually
+   exist) — fix `webview_data_dirs()` before trusting its Windows cold numbers.
+
 - **`.exe` naming.** The harness appends `.exe` to its throwaway copies on
-  Windows automatically.
-- **Expect a different split.** The ~20ms loader + ~0.25s AppKit split is
-  macOS-specific. On Windows the loader cost and especially the WebView2 init
-  cost may differ substantially — that comparison is the whole reason this doc
-  exists. Record the phase timeline and a WPA capture alongside the macOS
-  numbers above.
+  Windows automatically — that part works.
+- **WPA capture not done.** A full WPR/WPA symbolicated capture (the Windows
+  analog of macOS `sample`) needs elevation and was not run. It's unnecessary to
+  place the cost: the phase timeline already pins the warm quarter-second to the
+  `run()`→`setup()` gap, i.e. WebView2 + Win32 window creation. Run WPA only if
+  someone wants that gap broken down further.

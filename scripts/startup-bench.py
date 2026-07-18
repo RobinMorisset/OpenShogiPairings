@@ -59,9 +59,13 @@ DEFAULT_PORT = 47999
 #
 # macOS is verified: with no Info.plist (a `--no-bundle` build) WKWebView keys
 # the store on the EXECUTABLE NAME, so a renamed copy transparently gets a fresh
-# one. The Windows and Linux paths are best-effort guesses — CHECK THEM against
-# your actual build before trusting a cold number, and override with
-# --purge-glob if they are wrong.
+# one. Windows is verified too, but the opposite way: WebView2 keys its user-data
+# folder on the app IDENTIFIER, not the exe name, so renaming the copy does NOT
+# get a fresh profile — the fixed identifier path below is what must be purged.
+# (See docs/desktop-startup-profiling.md; note also that cold mode does not
+# reproduce the Windows first-launch penalty at all, since that is Defender
+# scanning novel *content*, which a byte-identical copy caches past.)
+# The Linux path is still a best-effort guess — check it against your build.
 # --------------------------------------------------------------------------
 def webview_data_dirs(exe_path: str, name: str) -> list[str]:
     system = platform.system()
@@ -71,9 +75,13 @@ def webview_data_dirs(exe_path: str, name: str) -> list[str]:
     if system == "Windows":
         local = os.environ.get("LOCALAPPDATA", os.path.join(home, "AppData", "Local"))
         return [
-            # WebView2's default when the host doesn't pick one.
+            # VERIFIED: Tauri/wry key the WebView2 user-data folder on the app
+            # identifier, not the exe filename, so this fixed path (not a
+            # per-copy `name`-based one) is the profile every cold copy reuses.
+            os.path.join(local, "org.openshogipairings.desktop", "EBWebView"),
+            # Kept as fallbacks in case a future build lets the host/WebView2
+            # pick a name-based location instead.
             os.path.join(os.path.dirname(os.path.abspath(exe_path)), name + ".WebView2"),
-            # What Tauri/wry typically set instead.
             os.path.join(local, name, "EBWebView"),
         ]
     return [os.path.join(home, ".local", "share", name)]
