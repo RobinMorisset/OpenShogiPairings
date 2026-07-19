@@ -14,7 +14,7 @@ exclude = ["frontend/src-tauri"]
 version = "1.2.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/robingeek/OpenShogiPairings"
+repository = "https://github.com/RobinMorisset/OpenShogiPairings"
 
 [workspace.dependencies]
 osp-core = { path = "crates/core" }

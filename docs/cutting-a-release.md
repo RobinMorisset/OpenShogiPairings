@@ -75,9 +75,14 @@ public API, not the app tag, so it moves only when the matching crate changes.
 To cut a crate release: bump `version` in
 [`crates/matching/Cargo.toml`](../crates/matching/Cargo.toml) (follow semver for
 the crate's own API — patch for fixes, minor for additions, major for breaking
-changes), commit on `main`, then from `crates/matching/` run `cargo publish`
-(`cargo publish --dry-run` first to sanity-check the package). This is a separate
-act from tagging an app release; neither triggers the other.
+changes), add a matching entry to
+[`crates/matching/CHANGELOG.md`](../crates/matching/CHANGELOG.md) (crates.io has
+no changelog of its own; this file ships in the package and renders on docs.rs),
+commit on `main`, then from `crates/matching/` run `cargo publish`
+(`cargo publish --dry-run` first to sanity-check the package). Publish only after
+the changelog entry is committed — like the crate itself, a published version is
+immutable. This is a separate act from tagging an app release; neither triggers
+the other.
 
 ## Notes
 
