@@ -17,6 +17,10 @@ name = "fesa-players"
 path = "src/bin/fesa-players.rs"
 
 [[bin]]
+name = "fesa-dump"
+path = "src/bin/fesa-dump.rs"
+
+[[bin]]
 name = "cup-detect"
 path = "src/bin/cup-detect.rs"
 
