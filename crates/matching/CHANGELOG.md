@@ -5,6 +5,26 @@ All notable changes to `integer-blossom` are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) over its own public API
 (independent of the OpenShogiPairings application it lives alongside).
 
+## 1.4.0 - 2026-07-19
+
+### Changed
+- Structure-of-arrays edge storage: the edge matrix is now three parallel
+  matrices (weights / near endpoints / far endpoints) instead of an array of
+  `Edge` structs. The hot scans read only the weight matrix (plus the far
+  endpoint on blossom columns), cutting the bytes they stream by 2–3× — worth
+  ~9% per solve on `i128` lexicographic instances at n=1000, more end-to-end
+  where the caller's costs stay wide. Pure layout change: solves are
+  bit-identical to 1.3.0.
+- Vertex ids in the big `O(n²)` tables shrank from `u32` to `u16`, halving the
+  endpoint and `flower_from` tables. **New documented limit: n ≤ 32767**,
+  asserted at both entry points (far above any realistic field; ids must hold
+  blossom indices up to `2n`).
+
+### Added
+- `examples/bench.rs`: a deterministic, dependency-free micro-benchmark over
+  lexicographic-ladder and pure-ELO instance families (`cargo run --release
+  --example bench`).
+
 ## 1.3.0 - 2026-07-19
 
 ### Changed

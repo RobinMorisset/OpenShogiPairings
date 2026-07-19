@@ -58,8 +58,12 @@ Pitfalls that make numbers non-comparable:
 diff -q scratch/baseline.txt scratch/candidate.txt && echo "byte-identical"
 ```
 
-Determinism is thread-independent, so multi-thread output must equal
-single-thread output — a quick self-check.
+**Anchor runs must be single-threaded** (`RAYON_NUM_THREADS=1`): multithreaded
+output is *almost* deterministic but flips a couple of summary lines roughly
+once per 1000 runs (a near-tie decided by rayon scheduling — known bug), so a
+multithreaded anchor produces false diffs. Single-thread output is perfectly
+repeatable. Also regenerate the baseline from committed source in the same
+session — don't trust an anchor file from an earlier working-tree build.
 
 ## 4. Sampling profile (where the time goes)
 

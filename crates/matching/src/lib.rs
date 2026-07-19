@@ -79,15 +79,23 @@ macro_rules! impl_weight {
 impl_weight!(i32, i64, i128);
 
 /// A vertex index. The algorithm works in `usize` (loop counters, array indices),
-/// but the two large `O(n²)` tables — the [`Blossom::g`] edge matrix and
-/// [`Blossom::flower_from`] — *store* vertices, and for the field sizes we pair
-/// (hundreds, never near `u32::MAX`) a 4-byte id halves that footprint versus a
-/// `usize`, tightening the hot column scans. Stored as `Vid`, used as `usize`.
-type Vid = u32;
+/// but the large `O(n²)` tables — the [`Blossom::gu`]/[`Blossom::gv`] endpoint
+/// matrices and [`Blossom::flower_from`] — *store* vertices, and for the field
+/// sizes we pair (hundreds) a 2-byte id keeps those tables small and their scans
+/// cheap. Stored as `Vid`, used as `usize`. A stored value can be a blossom index
+/// (up to `2n`), so the supported instance size is `2n ≤ u16::MAX`, i.e.
+/// **n ≤ 32767** — asserted at the public entry points, and far above any
+/// realistic tournament field.
+type Vid = u16;
 
 /// One graph edge, carrying the *real* endpoints it stands for. For a super-vertex
-/// (contracted blossom) `b`, `g[b][x]` records the best underlying real edge, so
-/// `u`/`v` are always real-vertex indices even when the slot is `g[b][x]`.
+/// (contracted blossom) `b`, slot `(b, x)` records the best underlying real edge,
+/// so `u`/`v` are always real-vertex indices even for a super-vertex slot.
+///
+/// This is a *materialized view*: edges are stored column-split across the
+/// [`Blossom::gw`]/[`Blossom::gu`]/[`Blossom::gv`] matrices (so the hot
+/// weight-only scans never touch endpoint bytes), and an `Edge` is assembled by
+/// [`Blossom::g`] only on the paths that need the endpoints.
 ///
 /// `w` holds the caller's weight **pre-scaled by 4** (see [`Blossom::set_edge`]):
 /// the ×2 every slack computation needs is baked in at write time instead of
@@ -107,14 +115,22 @@ struct Edge<W> {
 struct Blossom<W> {
     n: usize,
     n_x: usize,
-    /// The `sz × sz` edge matrix, row-major in a single allocation: entry `(u, v)`
-    /// is at `u * stride + v` (see [`Blossom::g`]). One block, rather than a
-    /// `Vec<Vec>`, so the algorithm's column scans (`for u { g[u][x] }` in
-    /// `set_slack`/`update_slack`, the hot path) stay in one strided region the
-    /// prefetcher can follow instead of chasing `n` separate heap rows.
-    g: Vec<Edge<W>>,
-    /// Row stride of `g` — the allocated width `2 * n_cap + 1` for the largest
-    /// instance seen, so a reused buffer keeps a consistent layout.
+    /// The `sz × sz` edge matrices, row-major in single allocations: entry
+    /// `(u, v)` is at `u * stride + v`. Structure-of-arrays: `gw` holds the
+    /// (pre-scaled) weights, `gu`/`gv` the real endpoints of the edge each slot
+    /// stands for. The hot scans (`matching`'s edge loop, the
+    /// `set_slack`/`update_slack` column scans) read only `gw` — and `gv` when a
+    /// blossom column makes the far endpoint non-implied — so splitting the
+    /// weights from the endpoints cuts the bytes those loops stream by 2–3×
+    /// versus an array-of-`Edge` layout (which also carried padding at `i128`).
+    /// For a slot `(u, v)` with `u, v ≤ n` both real, the endpoints are always
+    /// exactly `(u, v)` (blossom formation only rewrites super-vertex rows and
+    /// columns), so the real–real fast paths never load `gu`/`gv` at all.
+    gw: Vec<W>,
+    gu: Vec<Vid>,
+    gv: Vec<Vid>,
+    /// Row stride of `gw`/`gu`/`gv` — the allocated width `2 * n_cap + 1` for the
+    /// largest instance seen, so a reused buffer keeps a consistent layout.
     stride: usize,
     lab: Vec<W>,
     mate: Vec<usize>,
@@ -142,15 +158,12 @@ struct Blossom<W> {
 impl<W: Weight> Blossom<W> {
     fn new(n: usize) -> Self {
         let sz = 2 * n + 1;
-        let nil_edge = Edge {
-            u: 0,
-            v: 0,
-            w: W::ZERO,
-        };
         Blossom {
             n,
             n_x: n,
-            g: vec![nil_edge; sz * sz],
+            gw: vec![W::ZERO; sz * sz],
+            gu: vec![0; sz * sz],
+            gv: vec![0; sz * sz],
             stride: sz,
             lab: vec![W::ZERO; sz],
             mate: vec![0; sz],
@@ -186,14 +199,12 @@ impl<W: Weight> Blossom<W> {
         if sz > self.stride {
             // A larger instance than any before: reallocate the buffers wide enough
             // (the old contents are stale and would be overwritten anyway, so there
-            // is nothing to copy). `g` is laid out at the new stride from here on.
-            let nil = Edge {
-                u: 0,
-                v: 0,
-                w: W::ZERO,
-            };
+            // is nothing to copy). The matrices are laid out at the new stride from
+            // here on.
             self.stride = sz;
-            self.g = vec![nil; sz * sz];
+            self.gw = vec![W::ZERO; sz * sz];
+            self.gu = vec![0; sz * sz];
+            self.gv = vec![0; sz * sz];
             self.flower_from = vec![0; sz * (n + 1)];
             self.ff_stride = n + 1;
             self.lab.resize(sz, W::ZERO);
@@ -207,17 +218,41 @@ impl<W: Weight> Blossom<W> {
         }
     }
 
-    /// Edge `(u, v)` of the flattened matrix (returned by value — `Edge` is `Copy`).
+    /// Materialize edge `(u, v)` from the split matrices — the general accessor,
+    /// for paths that need the real endpoints (either index may be a blossom).
     #[inline]
     fn g(&self, u: usize, v: usize) -> Edge<W> {
-        self.g[u * self.stride + v]
+        let i = u * self.stride + v;
+        Edge {
+            u: self.gu[i],
+            v: self.gv[i],
+            w: self.gw[i],
+        }
     }
 
-    /// Mutable edge `(u, v)`, for the few sites that overwrite an edge or zero its
-    /// weight in place.
+    /// Weight of slot `(u, v)` alone — the hot accessor; touches no endpoint bytes.
     #[inline]
-    fn g_mut(&mut self, u: usize, v: usize) -> &mut Edge<W> {
-        &mut self.g[u * self.stride + v]
+    fn w_at(&self, u: usize, v: usize) -> W {
+        self.gw[u * self.stride + v]
+    }
+
+    /// Slack of slot `(u, x)` for a **real** row `u ≤ n` (so the near endpoint is
+    /// `u` itself) and an arbitrary column `x`: loads the weight and only the far
+    /// endpoint. Equivalent to `e_delta(self.g(u, x))` minus the `gu` load.
+    #[inline]
+    fn slack_at(&self, u: usize, x: usize) -> W {
+        let i = u * self.stride + x;
+        debug_assert_eq!(self.gu[i] as usize, u, "row {u} is not the near endpoint");
+        self.lab[u] + self.lab[self.gv[i] as usize] - self.gw[i]
+    }
+
+    /// Store `e` into slot `(a, b)` of the split matrices.
+    #[inline]
+    fn set_g(&mut self, a: usize, b: usize, e: Edge<W>) {
+        let i = a * self.stride + b;
+        self.gu[i] = e.u;
+        self.gv[i] = e.v;
+        self.gw[i] = e.w;
     }
 
     /// Entry `(u, v)` of the flattened `flower_from` matrix.
@@ -237,9 +272,9 @@ impl<W: Weight> Blossom<W> {
         // and initial duals (half a stored row-maximum) are always even.
         let w = w.double().double();
         let (u, v) = (u as Vid, v as Vid);
-        *self.g_mut(u as usize, v as usize) = Edge { u, v, w };
+        self.set_g(u as usize, v as usize, Edge { u, v, w });
         // Reverse orientation: endpoints swapped (field-named, not positional).
-        *self.g_mut(v as usize, u as usize) = Edge { u: v, v: u, w };
+        self.set_g(v as usize, u as usize, Edge { u: v, v: u, w });
     }
 
     /// Reduced cost (slack) of an edge; zero means the edge is tight. The
@@ -250,8 +285,7 @@ impl<W: Weight> Blossom<W> {
     }
 
     fn update_slack(&mut self, u: usize, x: usize) {
-        if self.slack[x] == 0 || self.e_delta(self.g(u, x)) < self.e_delta(self.g(self.slack[x], x))
-        {
+        if self.slack[x] == 0 || self.slack_at(u, x) < self.slack_at(self.slack[x], x) {
             self.slack[x] = u;
         }
     }
@@ -259,7 +293,7 @@ impl<W: Weight> Blossom<W> {
     fn set_slack(&mut self, x: usize) {
         self.slack[x] = 0;
         for u in 1..=self.n {
-            if self.g(u, x).w > W::ZERO && self.st[u] != x && self.s[self.st[u]] == 0 {
+            if self.w_at(u, x) > W::ZERO && self.st[u] != x && self.s[self.st[u]] == 0 {
                 self.update_slack(u, x);
             }
         }
@@ -392,8 +426,11 @@ impl<W: Weight> Blossom<W> {
 
         self.set_st(b, b);
         for x in 1..=self.n_x {
-            self.g_mut(b, x).w = W::ZERO;
-            self.g_mut(x, b).w = W::ZERO;
+            // Weight zero marks the slot unset; the stale endpoints beside it are
+            // never read (every reader checks the weight, or the copy loop below
+            // overwrites the slot on its first member before comparing).
+            self.gw[b * self.stride + x] = W::ZERO;
+            self.gw[x * self.stride + b] = W::ZERO;
         }
         for x in 1..=self.n {
             self.set_flower_from(b, x, 0);
@@ -406,11 +443,11 @@ impl<W: Weight> Blossom<W> {
             let xs = self.flower[b][mi];
             for x in 1..=self.n_x {
                 let gxsx = self.g(xs, x);
-                let gxxs = self.g(x, xs);
                 let gbx = self.g(b, x);
                 if gbx.w == W::ZERO || self.e_delta(gxsx) < self.e_delta(gbx) {
-                    *self.g_mut(b, x) = gxsx;
-                    *self.g_mut(x, b) = gxxs;
+                    let gxxs = self.g(x, xs);
+                    self.set_g(b, x, gxsx);
+                    self.set_g(x, b, gxxs);
                 }
             }
             for x in 1..=self.n {
@@ -508,10 +545,22 @@ impl<W: Weight> Blossom<W> {
                 if self.s[self.st[u]] == 1 {
                     continue;
                 }
+                // `u` (from the queue) and `v` are both real vertices, so slot
+                // `(u, v)` always has implied endpoints: the scan reads only the
+                // contiguous `gw` row plus `lab`/`st`, never `gu`/`gv`. `st[u]`
+                // is re-read per iteration — `on_found_edge` may contract `u`
+                // into a fresh blossom mid-scan.
+                let row = u * self.stride;
                 for v in 1..=self.n {
-                    if self.g(u, v).w > W::ZERO && self.st[u] != self.st[v] {
-                        if self.e_delta(self.g(u, v)) == W::ZERO {
-                            if self.on_found_edge(self.g(u, v)) {
+                    let w = self.gw[row + v];
+                    if w > W::ZERO && self.st[u] != self.st[v] {
+                        if self.lab[u] + self.lab[v] - w == W::ZERO {
+                            let e = Edge {
+                                u: u as Vid,
+                                v: v as Vid,
+                                w,
+                            };
+                            if self.on_found_edge(e) {
                                 return true;
                             }
                         } else {
@@ -529,7 +578,7 @@ impl<W: Weight> Blossom<W> {
             }
             for x in 1..=self.n_x {
                 if self.st[x] == x && self.slack[x] != 0 {
-                    let delta = self.e_delta(self.g(self.slack[x], x));
+                    let delta = self.slack_at(self.slack[x], x);
                     if self.s[x] == -1 {
                         d = d.min(delta);
                     } else if self.s[x] == 0 {
@@ -571,7 +620,7 @@ impl<W: Weight> Blossom<W> {
                 if self.st[x] == x
                     && self.slack[x] != 0
                     && self.st[self.slack[x]] != x
-                    && self.e_delta(self.g(self.slack[x], x)) == W::ZERO
+                    && self.slack_at(self.slack[x], x) == W::ZERO
                     && self.on_found_edge(self.g(self.slack[x], x))
                 {
                     return true;
@@ -606,9 +655,10 @@ impl<W: Weight> Blossom<W> {
         // Row maxima, gathered into `lab` (they become the duals below).
         for u in 1..=self.n {
             let mut m = W::ZERO;
+            let row = u * self.stride;
             for v in 1..=self.n {
                 self.set_flower_from(u, v, if u == v { u } else { 0 });
-                let w = self.g(u, v).w;
+                let w = self.gw[row + v];
                 if w > m {
                     m = w;
                 }
@@ -648,11 +698,14 @@ impl<W: Weight> Blossom<W> {
             if self.mate[u] != 0 {
                 continue;
             }
+            let row = u * self.stride;
             for v in 1..=self.n {
+                // Real–real slot: endpoints implied, slack straight from `gw`.
+                let w = self.gw[row + v];
                 if v != u
                     && self.mate[v] == 0
-                    && self.g(u, v).w > W::ZERO
-                    && self.e_delta(self.g(u, v)) == W::ZERO
+                    && w > W::ZERO
+                    && self.lab[u] + self.lab[v] - w == W::ZERO
                 {
                     self.mate[u] = v;
                     self.mate[v] = u;
@@ -706,6 +759,10 @@ fn solve_pooled<W: Weight, T>(
 /// it) touches one contiguous allocation rather than `n` rows.
 pub fn max_weight_matching<W: Weight>(weight: &[W], n: usize) -> Vec<Option<usize>> {
     assert_eq!(weight.len(), n * n, "weight must be a row-major n×n matrix");
+    assert!(
+        2 * n <= Vid::MAX as usize,
+        "instance too large: the solver stores vertex ids as u16, supporting n ≤ 32767"
+    );
     if n == 0 {
         return Vec::new();
     }
@@ -748,6 +805,10 @@ pub fn min_weight_perfect_matching<W: Weight>(cost: &[W], n: usize) -> Vec<usize
     assert!(
         n.is_multiple_of(2),
         "a perfect matching needs an even vertex count"
+    );
+    assert!(
+        2 * n <= Vid::MAX as usize,
+        "instance too large: the solver stores vertex ids as u16, supporting n ≤ 32767"
     );
     if n == 0 {
         return Vec::new();
@@ -794,7 +855,8 @@ thread_local! {
 }
 
 /// A per-thread cache of reusable [`Blossom`] solvers, one per weight type. The
-/// solver's buffers are the dominant allocation — `g` alone is `(2n+1)²` edges —
+/// solver's buffers are the dominant allocation — the edge matrices alone are
+/// three `(2n+1)²` tables —
 /// and a caller like osp-sim runs thousands of same-sized matchings per thread,
 /// so keeping the buffers and merely [`Blossom::reset`]ting them between calls
 /// turns those per-call allocations into one per thread.

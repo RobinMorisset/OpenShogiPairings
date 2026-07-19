@@ -98,8 +98,8 @@ const FLOAT_BASE: i128 = 720;
 /// `i32` or `i64` — narrower arithmetic the blossom solver runs faster with.
 /// Only a ladder that genuinely needs `i128`'s headroom pays for it.
 ///
-/// The `/ 16` margin covers the solver's internal doubling and its `MAX / 4`
-/// "infinity" sentinel with room to spare.
+/// The `/ 16` margin covers the solver's internal ×4 weight scaling and its
+/// `MAX / 4` "infinity" sentinel with room to spare.
 fn solve_matching(cost: &[i128], n: usize) -> Vec<usize> {
     let max = cost.iter().copied().max().unwrap_or(0);
     if max <= i32::MAX as i128 / 16 {
@@ -108,7 +108,7 @@ fn solve_matching(cost: &[i128], n: usize) -> Vec<usize> {
         min_weight_perfect_matching(&narrow::<i64>(cost), n)
     } else {
         // The narrow tiers require `max <= TYPE::MAX / 16` (headroom for the
-        // solver's internal edge-weight doubling and its `MAX / 4` "infinity"
+        // solver's internal ×4 edge-weight scaling and its `MAX / 4` "infinity"
         // sentinel); the i128 tier needs the same guard, or a cost that reaches
         // this range overflows *inside* the solver — silently, in release.
         // There is no wider integer to fall back to, so this is a hard scale
