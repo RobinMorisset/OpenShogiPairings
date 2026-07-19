@@ -14,6 +14,12 @@
 //! each edge `offset - cost`, with `offset` chosen above every cost so all
 //! weights stay ≥ 1, therefore yields the minimum-cost perfect matching.
 //!
+//! Both are exposed: [`max_weight_matching`] solves the general problem — an
+//! arbitrary (possibly sparse, possibly odd-order) graph, leaving a vertex
+//! unmatched where that is optimal — and [`min_weight_perfect_matching`] applies
+//! the reduction above. Both are thin wrappers over one pooled solver, differing
+//! only in how they fill edges and shape the result.
+//!
 //! Weights are generic over [`Weight`] so callers can pick a type just wide
 //! enough for their largest weight — `i32`/`i64` for most instances, `i128`
 //! when more headroom is needed (e.g. to stack large lexicographic
@@ -152,12 +158,13 @@ impl<W: Weight> Blossom<W> {
     /// working buffers if this instance is larger than any this solver has seen.
     ///
     /// No stale data needs clearing: `solve`/`matching` re-initialize every piece
-    /// of live state within `1..=2n` each run, the complete-graph `set_edge`
-    /// overwrites every real edge, and a super-vertex's row/column is zeroed when
-    /// its blossom is formed — so a buffer left over from an earlier (larger or
-    /// smaller) instance is correct as long as it is big enough. Growth only ever
-    /// extends the buffers (indices `1..=2n` are all a smaller `n` could have
-    /// touched), never truncates.
+    /// of live state within `1..=2n` each run, both entry points call `set_edge`
+    /// for every vertex pair (`max_weight_matching` clamping an absent edge to a
+    /// zero weight) so every real edge slot is overwritten, and a super-vertex's
+    /// row/column is zeroed when its blossom is formed — so a buffer left over
+    /// from an earlier (larger or smaller) instance is correct as long as it is
+    /// big enough. Growth only ever extends the buffers (indices `1..=2n` are all
+    /// a smaller `n` could have touched), never truncates.
     fn reset(&mut self, n: usize) {
         self.n = n;
         self.n_x = n;
@@ -580,6 +587,69 @@ impl<W: Weight> Blossom<W> {
     }
 }
 
+/// Compute a maximum-total-weight matching of the `n` vertices, where `weight` is
+/// the **row-major** `n × n` weight matrix — the weight of the edge between `i`
+/// and `j` is `weight[i * n + j]`. Returns `mate`, where `mate[i]` is `Some(j)` if
+/// `i` is matched to `j` and `None` if `i` is left unmatched.
+///
+/// The graph need not be complete and `n` need not be even: a vertex is left
+/// unmatched whenever matching it cannot increase the total. An entry that is
+/// **zero or negative** is treated as *no usable edge* — such a pair is never
+/// matched (a max-weight matching would never pick a non-positive edge anyway) —
+/// so a caller encodes a sparse graph by leaving absent edges at zero.
+///
+/// `weight` must have exactly `n * n` entries. Only the strict **upper triangle**
+/// (`i < j`) is read — the weight is taken as symmetric, so the diagonal and the
+/// lower triangle are ignored and a caller may leave them unset. The matrix is a
+/// flat slice, not `&[Vec<_>]`, so a caller building it (and the solver reading
+/// it) touches one contiguous allocation rather than `n` rows.
+/// Solve one `n`-vertex instance on the per-thread pooled solver: `set_edges`
+/// writes the graph (it must call `set_edge` for *every* vertex pair so no stale
+/// pooled edge survives — see [`Blossom::reset`]), then each vertex's raw mate is
+/// passed through `map_mate` to build the result in a single allocation.
+///
+/// Both public entry points funnel through here so they share the pool and its
+/// buffer reuse; they differ only in how they fill edges and shape the output.
+/// `map_mate` receives the raw 1-indexed partner (`0` meaning unmatched).
+fn solve_pooled<W: Weight, T>(
+    n: usize,
+    set_edges: impl FnOnce(&mut Blossom<W>),
+    map_mate: impl Fn(usize) -> T,
+) -> Vec<T> {
+    POOL.with(|pool| {
+        let mut pool = pool.borrow_mut();
+        let bl = pool.get::<W>(n);
+        bl.reset(n);
+        set_edges(bl);
+        bl.solve();
+        (1..=n).map(|u| map_mate(bl.mate[u])).collect()
+    })
+}
+
+pub fn max_weight_matching<W: Weight>(weight: &[W], n: usize) -> Vec<Option<usize>> {
+    assert_eq!(weight.len(), n * n, "weight must be a row-major n×n matrix");
+    if n == 0 {
+        return Vec::new();
+    }
+
+    solve_pooled(
+        n,
+        |bl| {
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    // The solver reads a non-positive weight as "no edge"; clamp to
+                    // zero so every edge slot is still overwritten — a reused pool
+                    // buffer may hold a previous instance's edges (see `reset`).
+                    let w = weight[i * n + j];
+                    bl.set_edge(i + 1, j + 1, if w > W::ZERO { w } else { W::ZERO });
+                }
+            }
+        },
+        // Raw mate `0` means unmatched; otherwise de-bias to a 0-indexed partner.
+        |m| (m != 0).then(|| m - 1),
+    )
+}
+
 /// Compute a minimum-total-cost **perfect** matching of the `n` vertices, where
 /// `cost` is the **row-major** `n × n` cost matrix — the cost of pairing `i` with
 /// `j` is `cost[i * n + j]`. Returns `mate`, where `mate[i]` is the partner of
@@ -592,8 +662,8 @@ impl<W: Weight> Blossom<W> {
 /// the complete graph every vertex is pairable, so a perfect matching always
 /// exists.
 ///
-/// The matrix is a flat slice, not `&[Vec<_>]`, so a caller building it (and the
-/// solver reading it) touches one contiguous allocation rather than `n` rows.
+/// The matrix is a flat slice, not `&[Vec<_>]`, so a caller building it touches
+/// one contiguous allocation rather than `n` rows.
 pub fn min_weight_perfect_matching<W: Weight>(cost: &[W], n: usize) -> Vec<usize> {
     assert_eq!(cost.len(), n * n, "cost must be a row-major n×n matrix");
     assert!(
@@ -605,7 +675,13 @@ pub fn min_weight_perfect_matching<W: Weight>(cost: &[W], n: usize) -> Vec<usize
     }
 
     // Reduce min-cost-perfect to max-weight: weight = offset - cost, with offset
-    // above every cost so all weights are ≥ 1 (keeping the matching perfect).
+    // above every cost so all weights are ≥ 1. Every edge of the complete graph is
+    // then positive, so the maximum-weight matching is necessarily perfect (any
+    // two unmatched vertices could be joined by a positive edge) — and, since its
+    // total weight is `offset·(n/2) − total_cost`, maximizing weight minimizes
+    // cost. So the max-weight matching is exactly the min-cost perfect one. The
+    // `offset - cost` edges are fed straight to the solver rather than through a
+    // materialized weight matrix, so no `n²` buffer is allocated per call.
     let mut max_cost = W::ZERO;
     for i in 0..n {
         for j in (i + 1)..n {
@@ -617,18 +693,19 @@ pub fn min_weight_perfect_matching<W: Weight>(cost: &[W], n: usize) -> Vec<usize
     }
     let offset = max_cost + W::ONE;
 
-    POOL.with(|pool| {
-        let mut pool = pool.borrow_mut();
-        let bl = pool.get::<W>(n);
-        bl.reset(n);
-        for i in 0..n {
-            for j in (i + 1)..n {
-                bl.set_edge(i + 1, j + 1, offset - cost[i * n + j]);
+    solve_pooled(
+        n,
+        |bl| {
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    bl.set_edge(i + 1, j + 1, offset - cost[i * n + j]);
+                }
             }
-        }
-        bl.solve();
-        (1..=n).map(|u| bl.mate[u] - 1).collect()
-    })
+        },
+        // Every vertex is matched (the matching is perfect), so the raw mate is
+        // always ≥ 1; de-bias to a 0-indexed partner.
+        |m| m - 1,
+    )
 }
 
 thread_local! {
@@ -720,6 +797,52 @@ mod tests {
             assert_eq!(mate[mate[i]], i, "matching is not a valid involution");
             if i < mate[i] {
                 t += cost[i][mate[i]];
+            }
+        }
+        t
+    }
+
+    /// Reference: maximum total weight over all matchings (not necessarily
+    /// perfect), by exhaustive recursion. Mirrors `max_weight_matching`'s
+    /// semantics — a non-positive weight is "no edge", and a vertex may be left
+    /// unmatched. Only usable for tiny `n`.
+    fn brute_max_weight(w: &[Vec<i128>]) -> i128 {
+        let n = w.len();
+        fn rec(w: &[Vec<i128>], used: &mut Vec<bool>, n: usize) -> i128 {
+            let i = match (0..n).find(|&i| !used[i]) {
+                Some(i) => i,
+                None => return 0,
+            };
+            used[i] = true;
+            // Option 1: leave `i` unmatched.
+            let mut best = rec(w, used, n);
+            // Option 2: match `i` to any later usable (positive-weight) partner.
+            for j in (i + 1)..n {
+                if !used[j] && w[i][j] > 0 {
+                    used[j] = true;
+                    best = best.max(w[i][j] + rec(w, used, n));
+                    used[j] = false;
+                }
+            }
+            used[i] = false;
+            best
+        }
+        rec(w, &mut vec![false; n], n)
+    }
+
+    /// Total weight of `mate`, checking it is a valid matching that only uses
+    /// positive-weight edges.
+    fn total_weight(w: &[Vec<i128>], mate: &[Option<usize>]) -> i128 {
+        let n = w.len();
+        let mut t = 0;
+        for i in 0..n {
+            if let Some(j) = mate[i] {
+                assert_ne!(j, i, "vertex matched to itself");
+                assert_eq!(mate[j], Some(i), "matching is not a valid involution");
+                assert!(w[i][j] > 0, "matched a non-positive (absent) edge {i}-{j}");
+                if i < j {
+                    t += w[i][j];
+                }
             }
         }
         t
@@ -839,6 +962,71 @@ mod tests {
             mate[0], 1,
             "should not pair the two most-penalized vertices"
         );
+    }
+
+    #[test]
+    fn max_weight_leaves_a_vertex_unmatched() {
+        // A triangle of positive edges (odd order): the best matching takes the
+        // single heaviest edge and leaves the third vertex unmatched.
+        let w = vec![vec![0, 5, 3], vec![5, 0, 4], vec![3, 4, 0]];
+        let mate = max_weight_matching(&flat(&w), w.len());
+        assert_eq!(total_weight(&w, &mate), 5);
+        assert_eq!(mate[0], Some(1));
+        assert_eq!(mate[1], Some(0));
+        assert_eq!(mate[2], None);
+    }
+
+    #[test]
+    fn max_weight_respects_absent_edges() {
+        // Only two positive edges exist; a zero weight is "no edge" and must never
+        // be matched. Best matching is the pair of disjoint present edges.
+        let w = vec![
+            vec![0, 7, 0, 0],
+            vec![7, 0, 0, 0],
+            vec![0, 0, 0, 9],
+            vec![0, 0, 9, 0],
+        ];
+        let mate = max_weight_matching(&flat(&w), w.len());
+        assert_eq!(total_weight(&w, &mate), 16);
+        assert_eq!(mate[0], Some(1));
+        assert_eq!(mate[2], Some(3));
+    }
+
+    #[test]
+    fn max_weight_matches_brute_force_on_sparse_instances() {
+        // Random instances with many zero weights (a sparse graph) and odd as well
+        // as even orders, checked against the exhaustive max-weight oracle.
+        let mut seed: u64 = 0x2545F4914F6CDD1D;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+
+        for &n in &[1usize, 2, 3, 4, 5, 6, 7, 8] {
+            for _ in 0..300 {
+                let mut w = vec![vec![0i128; n]; n];
+                #[allow(clippy::needless_range_loop)]
+                for i in 0..n {
+                    for j in (i + 1)..n {
+                        // ~1/3 of pairs are absent (weight 0); the rest 1..=1000.
+                        let c = match next() % 3 {
+                            0 => 0,
+                            _ => (next() % 1000 + 1) as i128,
+                        };
+                        w[i][j] = c;
+                        w[j][i] = c;
+                    }
+                }
+                let mate = max_weight_matching(&flat(&w), n);
+                assert_eq!(
+                    total_weight(&w, &mate),
+                    brute_max_weight(&w),
+                    "n={n}, w={w:?}, mate={mate:?}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -5,3 +5,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+authors = ["Robin Morisset"]
+readme = "README.md"
+keywords = ["matching", "blossom", "graph", "optimization", "pairing"]
+categories = ["algorithms", "mathematics"]
+# `n.is_multiple_of(2)` in the public API was stabilized in Rust 1.87.
+rust-version = "1.87"
