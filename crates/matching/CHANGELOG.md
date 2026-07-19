@@ -5,6 +5,14 @@ All notable changes to `integer-blossom` are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) over its own public API
 (independent of the OpenShogiPairings application it lives alongside).
 
+## Unreleased
+
+### Added
+- `stats` feature (off by default, **not a stable API**): per-thread counters
+  and region timers over the solver's internal phases, printed by
+  `examples/bench.rs` when built with `--features stats`. Zero hot-path cost
+  when disabled.
+
 ## 1.4.0 - 2026-07-19
 
 ### Changed
