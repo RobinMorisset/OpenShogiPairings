@@ -608,10 +608,10 @@
         {#each alphaRows as row (row.key)}
           <tr class:bye-row={!row.board}>
             <td class="num"
-              >{row.number}{#if row.board?.long}<span
-                  class="long-badge"
-                  title={$_("roundView.longTitle")}>★2R</span
-                >{/if}</td
+              >{#if row.board}{row.number}{#if row.board.long}<span
+                    class="long-badge"
+                    title={$_("roundView.longTitle")}>★2R</span
+                  >{/if}{/if}</td
             >
             <td>
               <span
@@ -804,7 +804,7 @@
             {/if}
           </tr>
         {/each}
-        {#each byeSitouts as sitout, i (sitout.player)}
+        {#each byeSitouts as sitout (sitout.player)}
           {@const isCup = typeof sitout.kind !== "string"}
           <tr class="bye-row">
             <td class="src-col">
@@ -814,7 +814,7 @@
                 <span class="compromise print-hide" title={ledgerTooltip(byeLedger!)}>⚠</span>
               {/if}
             </td>
-            <td class="num">{round.boards.length + i + 1}</td>
+            <td class="num"></td>
             <td class="p1-col">
               <span class="player winner">{name(sitout.player)}</span>
             </td>
