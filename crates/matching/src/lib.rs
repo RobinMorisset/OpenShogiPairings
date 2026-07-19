@@ -111,6 +111,11 @@ pub mod stats {
         pub blossoms_expanded: u64,
         /// `set_slack` invocations (each is an O(n) column scan).
         pub set_slack_calls: u64,
+        /// Rows scanned in the queue-drain loop — each is an O(n) sweep, so
+        /// `scan_rows × n` is the scan's total streamed-entry count, the number
+        /// that structural improvements (tree preservation, sparsification)
+        /// must shrink.
+        pub scan_rows: u64,
         /// `solve` initialization: state resets, row-maxima duals, greedy seed.
         pub t_init: Duration,
         /// Per-phase re-initialization: `s`/`slack` resets and root queue build.
@@ -673,11 +678,21 @@ impl<W: Weight> Blossom<W> {
                     if self.s[self.st[u]] == 1 {
                         continue;
                     }
+                    stat!(|s| s.scan_rows += 1);
                     // `u` (from the queue) and `v` are both real vertices, so slot
                     // `(u, v)` always has implied endpoints: the scan reads only the
                     // contiguous `gw` row plus `lab`/`st`, never `gu`/`gv`. `st[u]`
                     // is re-read per iteration — `on_found_edge` may contract `u`
                     // into a fresh blossom mid-scan.
+                    //
+                    // Measured (see `scan_rows`): this loop's cost is the row
+                    // *count* times the streaming floor of its three loads — a
+                    // branch-light two-pass variant with component-deduplicated
+                    // `update_slack` calls benchmarked at ±0% (the repeated calls
+                    // it removed were already cache-hot and predicted), so the
+                    // simple form is kept. Reducing rows (tree preservation
+                    // across augmentations) or row length (sparsification) is
+                    // where scan time can still be won.
                     let row = u * self.stride;
                     for v in 1..=self.n {
                         let w = self.gw[row + v];

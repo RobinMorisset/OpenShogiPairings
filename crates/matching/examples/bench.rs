@@ -124,6 +124,10 @@ fn print_stats(total: std::time::Duration) {
         s.set_slack_calls,
     );
     println!(
+        "      scan:   {:.0} rows/solve",
+        s.scan_rows as f64 / s.solves.max(1) as f64,
+    );
+    println!(
         "      time:   init {:4.1}%  phase-init {:4.1}%  scan {:4.1}%  dual {:4.1}%   \
          [ofe-scan {:4.1}%  augment {:4.1}%  blossom+ {:4.1}%  blossom- {:4.1}%  set_slack {:4.1}%]",
         pct(s.t_init),
