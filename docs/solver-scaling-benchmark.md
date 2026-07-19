@@ -131,10 +131,52 @@ from N³. The cause of the extra cost and steeper slope is not investigated here
 
 ---
 
+## Run 3 — pure ELO pairing + tuned Laplace
+
+Same instances and method as Runs 1–2, with two differences: the config is pure
+ELO pairing (no MacMahon, no half-point absences), and `--runs` is **5** rather
+than 10 (per-run cost is ~8× Swiss at N=1000), still K=10 repeats and fixed across
+this run's series. The config is field-independent — one file for every N:
+
+```json
+{"pairing":{"kind":"elo","estimator":{"prior_shape_unrated":"laplace","unrated_prior_center":700,"unrated_k":260,"upward_looseness_unrated":300}}}
+```
+
+`pairing.kind = elo` replaces score-group Swiss with pairing that minimizes the
+squared estimated-ELO difference on each board; the estimator carries the
+settings-tab "Tuned Laplace" unrated prior. MacMahon / floater / club knobs do not
+apply under ELO pairing.
+
+| N | ms/run | 95% CI | rel. err | Run 1 (Swiss) | ratio |
+|---:|---:|:---:|---:|---:|---:|
+| 50 | 12.39 | [11.7, 13.1] | 5.5% | 3.38 | 3.66 |
+| 100 | 32.56 | [32.1, 33.0] | 1.3% | 7.69 | 4.23 |
+| 200 | 123.97 | [123.3, 124.6] | 0.5% | 27.18 | 4.56 |
+| 400 | 603.81 | [596.8, 610.8] | 1.2% | 101.27 | 5.96 |
+| 800 | 3487.20 | [3462.0, 3512.4] | 0.7% | 469.93 | 7.42 |
+| 1000 | 6233.54 | [6192.3, 6274.8] | 0.7% | 749.97 | 8.31 |
+
+**Scaling exponent** (log-log fit of ms/run vs N):
+
+- All 6 points: **b = 2.12** (R² = 0.990)
+- N ≥ 200 only: **b = 2.44**
+- Local slopes: 50→100: 1.39 · 100→200: 1.93 · 200→400: 2.28 · 400→800: 2.53 · 800→1000: 2.60
+
+**Reading it.** ELO pairing is the heaviest config measured — 3.7× Swiss at N=50
+rising to 8.3× at N=1000 — and the steepest: N ≥ 200 fit ≈ N²·⁴. Unlike Runs 1–2,
+whose local slopes plateaued around 2.1–2.2, here the local slope is **still
+climbing at the top of the range** (2.60 at 800→1000), so within 50–1000 it has not
+settled and is the closest of the three to N³. The cause is not investigated here.
+
+For comparison, the N ≥ 200 exponents across configs: Run 1 (Swiss) ≈ 2.08,
+Run 2 (est-ELO MacMahon) ≈ 2.21, Run 3 (ELO pairing) ≈ 2.44.
+
+---
+
 ## Planned: further configurations
 
-Candidate configs for later runs: floater/club constraints, the hybrid cup,
-degressive MacMahon (`drops_after_round`), and **Run 3: pure ELO pairing**
-(`pairing.kind = elo`) + the tuned-Laplace unrated prior — a prior experiment
-found it ~4× slower at N=100, so recalibrate at N=1000 before a full run. Each
-logged as a new "Run N — …" section with the same method, comparable to Runs 1–2.
+Candidate configs for later runs: floater/club constraints, the hybrid cup, and
+degressive MacMahon (`drops_after_round`). Each logged as a new "Run N — …"
+section with the same method, comparable to Runs 1–3. Given Run 3's still-climbing
+slope, extending the ELO-pairing series past N=1000 would show whether it reaches
+N³.
