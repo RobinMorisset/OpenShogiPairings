@@ -1,6 +1,6 @@
 ---
 name: profile-osp-sim
-description: How to run and profile the osp-sim Monte-Carlo simulator on this repo — timed benchmarks and a macOS sampling profile that finds hot functions and attributes allocation churn. Use when asked to profile osp-sim, measure its speed, find where time or allocations go, or verify a performance change.
+description: How to run and profile the osp-sim Monte-Carlo simulator on this repo — timed benchmarks, a macOS sampling profile that finds hot functions and attributes allocation churn, and a synthetic-tournament scaling benchmark for how cost grows with field size N (the blossom solver's O(N^3)). Use when asked to profile osp-sim, measure its speed or scaling, find where time or allocations go, or verify a performance change.
 ---
 
 # Profiling osp-sim
@@ -9,6 +9,11 @@ The benchmark is `osp-sim` running the **WOSC 2024** tournament many times.
 `osp-sim` is deterministic at a fixed `--seed`, so its stdout is a valid
 correctness anchor: a byte-identical diff before/after a change proves you
 didn't alter behavior.
+
+WOSC (~107 players) is the fixed baseline for a *before/after* comparison. To
+measure how cost grows with **field size N** — the O(N³) question for the blossom
+solver — use synthetic tournaments instead (§5); the real corpus tops out around
+100 players.
 
 All commands run from the repo root. Put scratch files in your session
 scratchpad, not the repo.
@@ -107,13 +112,64 @@ frame up to its nearest osp_core / integer_blossom / osp_sim caller:
 python3 .claude/skills/profile-osp-sim/attrib_alloc.py scratch/sample.txt
 ```
 
+## 5. Scaling with field size (synthetic tournaments)
+
+To measure how cost grows with N, profile fake tournaments from
+`scripts/gen_fake_tournament.py`. It samples real FESA players (their joined
+pre/post ELO plus per-player attendance) and emits an ordinary FESA result file,
+so the graphs the solver sees stay realistic well past the corpus's ~100-player
+ceiling. See the script's docstring for why the base's own results don't matter
+(osp-sim re-pairs from scratch).
+
+**Prerequisite: the sampling table** `test_files/fesa_results/fesa_elo_pairs.json`.
+It is gitignored (it travels in the `fesa_results.zip` archive, not git). If it's
+missing, either unzip that archive so the tree lands back at
+`test_files/fesa_results/`, or regenerate the pipeline (step 1 fetches ~3800
+files from fesashogi.eu, so it needs network and a few minutes):
+
+```sh
+python scripts/fesa_fetch_all.py          # 1. fetch+convert every FESA season
+python scripts/fesa_filter_valid.py       # 2. move files osp-sim rejects to invalid/ (~2.7%)
+python scripts/fesa_extract_elo_pairs.py  # 3. pool the per-player sampling table
+```
+
+**Generate a size series** — fixed rounds and seed, so only N varies:
+
+```sh
+for N in 50 100 200 400 800; do
+  python scripts/gen_fake_tournament.py $N --rounds 9 --seed 0 --out scratch/fake_$N.txt
+done
+```
+
+**Time each** exactly as §2 (single-thread, fixed `--runs`, fixed `--seed`):
+
+```sh
+for N in 50 100 200 400 800; do
+  RAYON_NUM_THREADS=1 /usr/bin/time -l \
+    ./target/release/osp-sim --results scratch/fake_$N.txt --runs 200 --seed 0 \
+    > /dev/null 2> scratch/t_$N.txt
+  printf "N=%-4s " $N; grep real scratch/t_$N.txt
+done
+```
+
+- A run does ~N/2 boards × 9 rounds, so wall time per run already grows with N;
+  fewer `--runs` than WOSC's 1000 is fine, but keep it **fixed across the
+  series** (changing it is the #1 cause of a fake trend). Fit `time/run` vs N on
+  a log-log scale — slope ≈ 3 if the matching dominates as expected.
+- To see *where* the time goes at a chosen N, point the §4 sampling profile at a
+  `fake_$N.txt` instead of WOSC — the pairing share should climb with N.
+- Both generation and osp-sim are deterministic at a fixed `--seed`, so the
+  series is reproducible. Keep `--rounds` ≤ ~12 (deeper than any real event makes
+  synthetic attendance flatten); irrelevant to an N-series, which fixes R.
+
 ## Known shape of the profile (baseline, as of the tid-native refactor)
 
 Use these as a sanity check that your measurement is sane:
 - **Pairing is ~74% of runtime** — `confirm_round_unordered` → `pair_round_weighted`.
 - Within pairing, the **blossom `min_weight_perfect_matching` solver is the
   dominant cost** (~50%+ of total). It allocates almost nothing (reusable
-  buffers). Further speedups have to attack the matching algorithm itself.
+  buffers). Further speedups have to attack the matching algorithm itself — and
+  §5 measures its N-scaling directly (its share should grow with field size).
 - **Allocation churn is dominated by `compute_scores`** rebuilding a fresh
   `Scores` every call (~10×/run) — its `index: HashMap<Uuid,u32>` and the
   push-grown `opponents`/`defeated` `Vec`s. Scoring/standings/ELO CPU time is
