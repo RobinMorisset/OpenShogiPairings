@@ -1,7 +1,7 @@
 # OpenShogiPairings
 
 [![CI](https://github.com/RobinMorisset/OpenShogiPairings/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/RobinMorisset/OpenShogiPairings/actions/workflows/ci.yml)
-[![coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/RobinMorisset/f05cf66791d190fa3defbb2ebf1dbcb6/raw/osp-coverage.json)](https://github.com/RobinMorisset/OpenShogiPairings/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/RobinMorisset/f05cf66791d190fa3defbb2ebf1dbcb6/raw/osp-coverage.json)](#coverage)
 
 Tournament management software for shogi, built to fit shogi's needs rather than
 reusing go/chess software. Built around a **client/server** architecture so
