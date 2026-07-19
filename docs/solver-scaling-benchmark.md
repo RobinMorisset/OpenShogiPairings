@@ -91,54 +91,59 @@ Absolute ms are machine-specific; the **exponent** is the portable result.
 
 Same instances, series, and method as Run 1 — only the pairing config differs.
 Each instance is paired under a per-instance config from `mm-grades <file> 10`
-(variant `c`), with `half_point_absences` added:
+(variant `c`), with `half_point_absences` added. In the nested `PairingMode` shape
+osp-sim deserializes (`pairing.macmahon.{thresholds,source}`):
 
-- **`macmahon_thresholds`** — on FESA grade boundaries, every group ≥ 10 players.
+- **MacMahon thresholds** — on FESA grade boundaries, every group ≥ 10 players.
   Group count grows with the field: 4 / 7 / 13 / 17 / 20 / 20 for
   N = 50 / 100 / 200 / 400 / 800 / 1000 (saturating ~20 as the field outgrows the
   grade boundaries above the floor).
-- **`macmahon_from_estimated_elo: true`** — group by the ELO estimated from
-  results, re-fit each round.
-- **`elo_k_multiplier_percent: 0`** — pin rated/provisional players, estimate the
-  unrated only. Load-bearing: the default is 100, so it must be set explicitly.
-- **Tuned Laplace unrated prior** — `elo_prior_shape_unrated: laplace`,
-  `elo_unrated_prior_center: 700`, `elo_unrated_k: 260`,
-  `elo_upward_looseness_unrated_percent: 300` — the settings-tab "Tuned Laplace"
-  preset verbatim.
+- **`source: from_estimate`** — group by the ELO estimated from results, re-fit
+  each round.
+- **`k_multiplier: 0`** — pin rated/provisional players, estimate the unrated only.
+  Load-bearing: the default is 100, so it must be set explicitly.
+- **Tuned Laplace unrated prior** — `prior_shape_unrated: laplace`,
+  `unrated_prior_center: 700`, `unrated_k: 260`, `upward_looseness_unrated: 300` —
+  the settings-tab "Tuned Laplace" preset verbatim.
 - **`half_point_absences: true`** — an absent player scores ½.
+
+> **Correction (supersedes the first Run 2).** The originally-logged Run 2 used
+> `mm-grades`' old *flat* config layout (`macmahon_thresholds`, `elo_*`, … at top
+> level). That layout predates the `PairingMode` enum refactor; osp-sim nests those
+> keys under `pairing` now and drops unknown ones, so the config was silently
+> ignored and the run actually measured **default Swiss + half-point absences**
+> (≈ 3.6/8.2/30.7/112.6/538.3/865.4 ms/run, ~1.1× Run 1). `mm-grades` now emits the
+> nested shape; the numbers below are the real config.
 
 `ms/run` is compared against Run 1 (default Swiss) at the same N:
 
 | N | ms/run | 95% CI | rel. err | Run 1 (Swiss) | ratio |
 |---:|---:|:---:|---:|---:|---:|
-| 50 | 3.56 | [3.22, 3.90] | 9.6% | 3.38 | 1.05 |
-| 100 | 8.23 | [8.04, 8.42] | 2.3% | 7.69 | 1.07 |
-| 200 | 30.74 | [30.42, 31.05] | 1.0% | 27.18 | 1.13 |
-| 400 | 112.57 | [110.88, 114.26] | 1.5% | 101.27 | 1.11 |
-| 800 | 538.33 | [528.20, 548.45] | 1.9% | 469.93 | 1.15 |
-| 1000 | 865.36 | [855.73, 875.00] | 1.1% | 749.97 | 1.15 |
+| 50 | 6.73 | [6.5, 7.0] | 3.8% | 3.38 | 1.99 |
+| 100 | 15.33 | [15.1, 15.5] | 1.3% | 7.69 | 1.99 |
+| 200 | 58.56 | [58.0, 59.2] | 1.0% | 27.18 | 2.15 |
+| 400 | 236.05 | [232.9, 239.2] | 1.3% | 101.27 | 2.33 |
+| 800 | 1218.21 | [1203.4, 1233.0] | 1.2% | 469.93 | 2.59 |
+| 1000 | 1984.08 | [1958.0, 2010.1] | 1.3% | 749.97 | 2.65 |
 
 **Scaling exponent** (log-log fit of ms/run vs N):
 
-- All 6 points: **b = 1.88** (R² = 0.992)
-- N ≥ 200 only: **b = 2.09**
-- Local slopes: 50→100: 1.21 · 100→200: 1.90 · 200→400: 1.87 · 400→800: 2.26 · 800→1000: 2.13
+- All 6 points: **b = 1.95** (R² = 0.990)
+- N ≥ 200 only: **b = 2.21**
+- Local slopes: 50→100: 1.19 · 100→200: 1.93 · 200→400: 2.01 · 400→800: 2.37 · 800→1000: 2.19
 
-**Reading it.** The richer rule set costs a roughly **constant ~10–15% overhead**
-at N ≥ 200 (the per-round est-ELO fit and MacMahon grouping), but the **exponent
-is unchanged — still ≈ N²·¹**, matching Run 1 within noise. MacMahon reshapes the
-edge *weights* (score bands from estimated ELO) but the graph is still complete
-and the weight distribution still keeps the blossom solver off its worst case; the
-added work is per-round bookkeeping proportional to the field, i.e. a
-multiplicative constant, not a higher-order term. So on realistic fields a denser,
-more constrained config buys the referee its behavior at a constant-factor price,
-not a worse scaling class.
+**Reading it.** Estimate-based MacMahon is markedly heavier than default Swiss,
+and the overhead grows with N — from ~2.0× at N ≤ 100 to ~2.65× at N = 1000 (a
+growing, not constant, premium). The log-log exponent is **≈ N²·² at N ≥ 200**
+(local slope peaking 2.37 at 400→800), somewhat above Run 1's ≈ N²·¹ and still far
+from N³. The cause of the extra cost and steeper slope is not investigated here.
 
 ---
 
 ## Planned: further configurations
 
-Later runs can push on the parts most likely to bend the exponent — floater/club
-constraints and the hybrid cup (which add structured penalty weights), or
-degressive MacMahon (`drops_after_round`) — each logged as a new "Run N — …"
-section with the same method, comparable to Runs 1–2.
+Candidate configs for later runs: floater/club constraints, the hybrid cup,
+degressive MacMahon (`drops_after_round`), and **Run 3: pure ELO pairing**
+(`pairing.kind = elo`) + the tuned-Laplace unrated prior — a prior experiment
+found it ~4× slower at N=100, so recalibrate at N=1000 before a full run. Each
+logged as a new "Run N — …" section with the same method, comparable to Runs 1–2.
