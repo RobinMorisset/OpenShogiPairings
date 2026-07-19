@@ -1,6 +1,7 @@
 # OpenShogiPairings
 
 [![CI](https://github.com/RobinMorisset/OpenShogiPairings/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/RobinMorisset/OpenShogiPairings/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/RobinMorisset/f05cf66791d190fa3defbb2ebf1dbcb6/raw/osp-coverage.json)](https://github.com/RobinMorisset/OpenShogiPairings/actions/workflows/ci.yml)
 
 Tournament management software for shogi, built to fit shogi's needs rather than
 reusing go/chess software. Built around a **client/server** architecture so
@@ -481,12 +482,10 @@ must do (they can't be scripted here):
    read/write, then in this repo's **Settings → Secrets and variables → Actions**
    add a secret `GIST_TOKEN` (the PAT) and a variable `COVERAGE_GIST_ID` (the ID).
 
-Once both exist, the next push to `main` publishes the number, and this badge goes
-live at the top of the README (swap in the Gist ID):
-
-```md
-[![coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/RobinMorisset/<GIST_ID>/raw/osp-coverage.json)](https://github.com/RobinMorisset/OpenShogiPairings/actions/workflows/ci.yml)
-```
+With both in place, every push to `main` refreshes the number in the Gist
+([`f05cf66…`](https://gist.github.com/RobinMorisset/f05cf66791d190fa3defbb2ebf1dbcb6)),
+which the coverage badge at the top of this README reads via
+[shields.io](https://shields.io).
 
 The frontend uses [vitest](https://vitest.dev) (`npm test`) for unit tests but has
 no coverage tooling wired up, by design — very little testable logic lives there.
