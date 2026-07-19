@@ -8,12 +8,12 @@ All notable changes to `integer-blossom` are documented here. The format follows
 ## 1.3.0 - 2026-07-19
 
 ### Added
-- `examples/bench.rs`: a deterministic, dependency-free micro-benchmark, with
-  two modes — synthetic lexicographic-ladder / pure-ELO instance families
-  (`cargo run --release --example bench`), and **replay of captured real
-  instances** (`-- --replay <dir>`, reading the `.ospm` blobs written by
-  osp-core's `OSP_MATCHING_DUMP` hook) reported per (n, weight-width) with the
-  same adaptive width selection as osp-core.
+- `examples/bench.rs`: a dependency-free replay benchmark over **captured real
+  instances** (`cargo run --release --example bench -- <dir>`, reading the
+  `.ospm` blobs written by osp-core's `OSP_MATCHING_DUMP` hook), reported per
+  (n, weight-width) with the same adaptive width selection as osp-core.
+  Synthetic instance families were tried and removed: measured against
+  captures they mispredicted the real cost shape badly.
 - `stats` feature (off by default, **not a stable API**): per-thread counters
   and region timers over the solver's internal phases, printed by
   `examples/bench.rs` when built with `--features stats`. Zero hot-path cost

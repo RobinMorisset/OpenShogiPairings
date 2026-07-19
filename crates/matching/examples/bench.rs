@@ -1,74 +1,24 @@
-//! Deterministic micro-benchmark of `min_weight_perfect_matching`, isolated
-//! from the surrounding application. Run with:
+//! Replay benchmark for `min_weight_perfect_matching` over **captured real
+//! instances** — the cost matrices the OpenShogiPairings engine actually
+//! produces, dumped by osp-core's `OSP_MATCHING_DUMP` hook. Synthetic instance
+//! families were deliberately removed: measured against captures they
+//! mispredicted the real cost shape badly (wrong dominant bucket, ~6× off on
+//! Swiss wall time), so captures are the only supported diet.
 //!
 //! ```sh
-//! cargo run --release -p integer-blossom --example bench
+//! # capture (one .ospm file per solve; single thread for canonical numbering)
+//! RAYON_NUM_THREADS=1 OSP_MATCHING_DUMP=scratch/cap_swiss \
+//!   osp-sim --results scratch/fake_1000.txt --runs 1 --seed 0 > /dev/null
+//! # replay (add --features stats for the region/counter breakdown)
+//! cargo run --release -p integer-blossom --example bench -- scratch/cap_swiss
 //! ```
 //!
-//! Two instance families bracket the costs the OpenShogiPairings engine feeds
-//! the solver:
-//!
-//! * `lex` — lexicographic rule ladders: a coarse band difference scaled by a
-//!   huge multiplier, plus a smooth ELO-shaped tail. This is the typical shape
-//!   outside pure-ELO pairing, and the reason the engine usually instantiates
-//!   the solver at `i128`.
-//! * `elo` — pure squared-ELO-difference costs, the smooth surface where the
-//!   greedy tight-edge seed pre-matches most of the field.
-//!
-//! Everything (instances and iteration counts) is deterministic, so runs are
-//! comparable across code changes on the same machine. Per-(family, n), a few
-//! pre-generated instances are cycled so the per-thread solver pool is
-//! exercised the way the application exercises it, while generation cost stays
-//! outside the timed region.
+//! Use one capture directory per configuration. Timings are reported per
+//! (n, weight width), where the width mirrors osp-core's adaptive narrowing —
+//! so the report also shows which integer width real instances exercise.
 
 use integer_blossom::min_weight_perfect_matching;
 use std::time::Instant;
-
-fn xorshift(s: &mut u64) -> u64 {
-    *s ^= *s << 13;
-    *s ^= *s >> 7;
-    *s ^= *s << 17;
-    *s
-}
-
-/// Pure squared-ELO-difference costs: ELOs spread over 500..2900.
-fn elo_costs(n: usize, seed: u64) -> Vec<i128> {
-    let mut s = seed | 1;
-    let elos: Vec<i128> = (0..n)
-        .map(|_| 500 + (xorshift(&mut s) % 2400) as i128)
-        .collect();
-    let mut cost = vec![0i128; n * n];
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d = elos[i] - elos[j];
-            cost[i * n + j] = d * d;
-        }
-    }
-    cost
-}
-
-/// Lexicographic-ladder costs: band difference times a 1e18 multiplier
-/// (dominant rule), squared ELO difference as the tail (minor rule). Bands
-/// mimic score groups after most of a 9-round event: ~10 distinct levels.
-fn lex_costs(n: usize, seed: u64) -> Vec<i128> {
-    let mut s = seed | 1;
-    let elos: Vec<i128> = (0..n)
-        .map(|_| 500 + (xorshift(&mut s) % 2400) as i128)
-        .collect();
-    let bands: Vec<i128> = (0..n).map(|_| (xorshift(&mut s) % 10) as i128).collect();
-    const M: i128 = 1_000_000_000_000_000_000; // 1e18: dwarfs any tail sum
-    let mut cost = vec![0i128; n * n];
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d = elos[i] - elos[j];
-            cost[i * n + j] = (bands[i] - bands[j]).abs() * M + d * d;
-        }
-    }
-    cost
-}
-
-/// An instance generator: `(n, seed) -> cost matrix`.
-type CostGen = fn(usize, u64) -> Vec<i128>;
 
 /// One captured instance: `b"OSPM1"`, `n` as `u64` LE, then `n*n` `i128` LE
 /// values (the format written by osp-core's `OSP_MATCHING_DUMP` hook).
@@ -104,8 +54,7 @@ fn solve_adaptive(cost: &[i128], n: usize) -> (usize, &'static str) {
 }
 
 /// Replay a directory of captured instances: a warm-up pass, then `REPS` timed
-/// passes, reported per (n, weight width). Point it at one capture directory
-/// per configuration.
+/// passes, reported per (n, weight width).
 fn replay(dir: &str) {
     const REPS: usize = 3;
     let mut paths: Vec<_> = std::fs::read_dir(dir)
@@ -117,6 +66,8 @@ fn replay(dir: &str) {
     assert!(!paths.is_empty(), "no .ospm captures in {dir}");
     let instances: Vec<(usize, Vec<i128>)> = paths.iter().map(|p| read_instance(p)).collect();
 
+    // Warm up the pool (and the branch predictor); discard the warm-up's
+    // stats so the breakdown covers only the timed passes.
     let mut sink = 0usize;
     for (n, cost) in &instances {
         sink += solve_adaptive(cost, *n).0;
@@ -153,45 +104,17 @@ fn replay(dir: &str) {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if let Some(i) = args.iter().position(|a| a == "--replay") {
-        replay(args.get(i + 1).expect("--replay needs a directory"));
-        return;
-    }
-    const INSTANCES: usize = 3;
-    let families: [(&str, CostGen); 2] = [("lex", lex_costs), ("elo", elo_costs)];
-    for (name, gen) in families {
-        for n in [200usize, 500, 1000] {
-            let instances: Vec<Vec<i128>> = (0..INSTANCES)
-                .map(|k| gen(n, 0x9E3779B97F4A7C15 ^ (k as u64 + 1)))
-                .collect();
-            // Warm up the pool (and the branch predictor) once per size.
-            let mut sink = 0usize;
-            sink += min_weight_perfect_matching(&instances[0], n)[0];
-            // Discard the warm-up's stats so the breakdown covers only the
-            // timed iterations.
-            #[cfg(feature = "stats")]
-            let _ = integer_blossom::stats::take();
-            // Iteration count fixed per n so before/after runs do identical work.
-            let iters = match n {
-                200 => 60,
-                500 => 15,
-                _ => 4,
-            };
-            let t0 = Instant::now();
-            for it in 0..iters {
-                let mate = min_weight_perfect_matching(&instances[it % INSTANCES], n);
-                sink += mate[0];
-            }
-            let ms = t0.elapsed().as_secs_f64() * 1000.0 / iters as f64;
-            println!("{name}  n={n:<5} {ms:9.2} ms/solve   (iters={iters}, sink={sink})");
-            print_stats(t0.elapsed());
-        }
-    }
+    // Sole argument: a capture directory (a leading `--replay` is tolerated
+    // for compatibility with older invocations).
+    let dir = std::env::args()
+        .skip(1)
+        .find(|a| a != "--replay")
+        .expect("usage: bench [--replay] <capture-dir>  (see module docs)");
+    replay(&dir);
 }
 
 /// With `--features stats`, print the cost-shape breakdown accumulated over the
-/// timed iterations (the warm-up solve's stats were discarded). Region docs —
+/// timed passes (the warm-up pass's stats were discarded). Region docs —
 /// including which buckets overlap — live on `integer_blossom::stats::Stats`.
 #[cfg(feature = "stats")]
 fn print_stats(total: std::time::Duration) {

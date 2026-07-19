@@ -174,8 +174,9 @@ done
 ## 6. Capture-replay: solver benchmarks on the real graphs
 
 To attribute time *inside* the matching solver on the exact cost matrices
-osp-sim produces (instead of `examples/bench.rs`'s synthetic families — which
-mispredict real structure badly; see below):
+osp-sim produces, use `examples/bench.rs` — captures are its only diet
+(synthetic families were tried and removed: they mispredicted the real cost
+shape badly; see below):
 
 ```sh
 # capture: one file per solve (9 rounds = 9 files for --runs 1); single
@@ -183,7 +184,7 @@ mispredict real structure badly; see below):
 RAYON_NUM_THREADS=1 OSP_MATCHING_DUMP=scratch/cap_swiss \
   ./target/release/osp-sim --results scratch/fake_1000.txt --runs 1 --seed 0 > /dev/null
 # replay: add --features stats for the region/counter breakdown
-cargo run --release -p integer-blossom --example bench -- --replay scratch/cap_swiss
+cargo run --release -p integer-blossom --example bench -- scratch/cap_swiss
 ```
 
 Use one capture directory per config. Files are `solve_*_n{N}.ospm`
@@ -192,11 +193,11 @@ the width mirrors osp-core's adaptive narrowing — so it also shows which
 integer width real instances exercise (measured at N≈1000: Swiss/MacMahon
 round 1 `i32`, later rounds `i128`; pure-ELO mostly `i64`).
 
-Real-graph shape differs sharply from the synthetic families (captured
-2026-07-19, N≈900–940): real Swiss solves are ~6× cheaper than the `lex`
-family predicts (greedy seed covers ~97% of pairs; `add_blossom` ~45% and the
-dual block ~60% of solve time, scan only ~23%); pure-ELO is scan 53% /
-blossom-formation 35%. Trust replay numbers over synthetic ones.
+Known real-graph shape (captured 2026-07-19, N≈900–940): Swiss — greedy seed
+covers ~97% of pairs, `add_blossom` ~45% and the dual block ~60% of solve
+time, scan only ~23%; MacMahon — same family, ~2× the phases/rows of Swiss;
+pure-ELO — scan 53% / blossom-formation 35%. (The removed synthetic families
+had predicted a scan-dominated shape and ~6× the real Swiss wall time.)
 
 ## Known shape of the profile (baseline, as of the tid-native refactor)
 

@@ -86,9 +86,10 @@ a CSR of all n(n−1)/2 edges. Memory is comparable to the SoA matrices.
 
 **Gates**: all existing oracle/metamorphic/pool tests pass (totals only —
 tie-breaks will shift, so osp-sim anchors are re-baselined, single-thread, as
-for 1.3.0); bench families **plus a new n=100 point** (real tournaments live
-there) within ~10% of 1.3.0 on the dense path; stats show the `add_blossom`
-share collapsed; `scan_rows` unchanged (preservation comes later).
+for 1.3.0); replay benchmarks on the three N≈1000 capture sets **plus a new
+N≈100 capture** (e.g. WOSC — real tournaments live there) within ~10% of
+1.3.0 on the dense path; stats show the `add_blossom` share collapsed;
+`scan_rows` unchanged (preservation comes later).
 
 ## Stage B — sparsification + dual-certificate loop
 
@@ -189,10 +190,9 @@ n=1000 down ≥5× (~58k → ≤ ~10k); wall-time targets (hypotheses): lex n=10
   burden; osp-sim anchor is a smoke test, not the proof.
 - **Testing ladder per stage**: unit (oracle n ≤ 10, exhaustive) → metamorphic
   (n ≤ 200) → sparse≡dense equivalence (Stage B+) → osp-sim ST smoke →
-  bench + stats gates. Bench diet: **captured real instances first**
-  (capture-replay, `--replay`; skill §6), synthetic families as portable
-  fallback — the two disagree on the cost shape, and real graphs win the
-  argument.
+  bench + stats gates. Bench diet: **captured real instances only**
+  (capture-replay; skill §6) — the synthetic families were removed after
+  captures showed they mispredict the real cost shape.
 - **Risk register**:
   1. z-term scale factor in the certificate (Stage B step 4) — wrong ⇒
      silently accepts suboptimal matchings. Mitigated by blossom-heavy
