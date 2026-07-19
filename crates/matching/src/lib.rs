@@ -587,22 +587,6 @@ impl<W: Weight> Blossom<W> {
     }
 }
 
-/// Compute a maximum-total-weight matching of the `n` vertices, where `weight` is
-/// the **row-major** `n × n` weight matrix — the weight of the edge between `i`
-/// and `j` is `weight[i * n + j]`. Returns `mate`, where `mate[i]` is `Some(j)` if
-/// `i` is matched to `j` and `None` if `i` is left unmatched.
-///
-/// The graph need not be complete and `n` need not be even: a vertex is left
-/// unmatched whenever matching it cannot increase the total. An entry that is
-/// **zero or negative** is treated as *no usable edge* — such a pair is never
-/// matched (a max-weight matching would never pick a non-positive edge anyway) —
-/// so a caller encodes a sparse graph by leaving absent edges at zero.
-///
-/// `weight` must have exactly `n * n` entries. Only the strict **upper triangle**
-/// (`i < j`) is read — the weight is taken as symmetric, so the diagonal and the
-/// lower triangle are ignored and a caller may leave them unset. The matrix is a
-/// flat slice, not `&[Vec<_>]`, so a caller building it (and the solver reading
-/// it) touches one contiguous allocation rather than `n` rows.
 /// Solve one `n`-vertex instance on the per-thread pooled solver: `set_edges`
 /// writes the graph (it must call `set_edge` for *every* vertex pair so no stale
 /// pooled edge survives — see [`Blossom::reset`]), then each vertex's raw mate is
@@ -626,6 +610,22 @@ fn solve_pooled<W: Weight, T>(
     })
 }
 
+/// Compute a maximum-total-weight matching of the `n` vertices, where `weight` is
+/// the **row-major** `n × n` weight matrix — the weight of the edge between `i`
+/// and `j` is `weight[i * n + j]`. Returns `mate`, where `mate[i]` is `Some(j)` if
+/// `i` is matched to `j` and `None` if `i` is left unmatched.
+///
+/// The graph need not be complete and `n` need not be even: a vertex is left
+/// unmatched whenever matching it cannot increase the total. An entry that is
+/// **zero or negative** is treated as *no usable edge* — such a pair is never
+/// matched (a max-weight matching would never pick a non-positive edge anyway) —
+/// so a caller encodes a sparse graph by leaving absent edges at zero.
+///
+/// `weight` must have exactly `n * n` entries. Only the strict **upper triangle**
+/// (`i < j`) is read — the weight is taken as symmetric, so the diagonal and the
+/// lower triangle are ignored and a caller may leave them unset. The matrix is a
+/// flat slice, not `&[Vec<_>]`, so a caller building it (and the solver reading
+/// it) touches one contiguous allocation rather than `n` rows.
 pub fn max_weight_matching<W: Weight>(weight: &[W], n: usize) -> Vec<Option<usize>> {
     assert_eq!(weight.len(), n * n, "weight must be a row-major n×n matrix");
     if n == 0 {
