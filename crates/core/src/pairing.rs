@@ -101,6 +101,7 @@ const FLOAT_BASE: i128 = 720;
 /// The `/ 16` margin covers the solver's internal ×4 weight scaling and its
 /// `MAX / 4` "infinity" sentinel with room to spare.
 fn solve_matching(cost: &[i128], n: usize) -> Vec<usize> {
+    dump_matching_instance(cost, n);
     let max = cost.iter().copied().max().unwrap_or(0);
     if max <= i32::MAX as i128 / 16 {
         min_weight_perfect_matching(&narrow::<i32>(cost), n)
@@ -121,6 +122,40 @@ fn solve_matching(cost: &[i128], n: usize) -> Vec<usize> {
         );
         min_weight_perfect_matching(cost, n)
     }
+}
+
+/// Capture hook: when `OSP_MATCHING_DUMP` names a directory, every cost matrix
+/// handed to the solver is also written there as a little-endian binary blob
+/// (`b"OSPM1"`, `n` as `u64`, then the `n*n` `i128` values) for offline replay
+/// by `integer-blossom`'s `examples/bench.rs --replay` — solver benchmarks on
+/// the exact graphs this engine produces rather than synthetic families.
+///
+/// Best-effort by design: I/O errors are swallowed (a failed dump must never
+/// affect pairing), and the cost when the variable is unset is one lazily
+/// initialized check. File names carry a process-wide sequence number, so
+/// multithreaded runs dump safely — but for a *canonical* capture set, run
+/// single-threaded with `--runs 1` (the sequence order is then deterministic).
+fn dump_matching_instance(cost: &[i128], n: usize) {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::OnceLock;
+    static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let Some(dir) = DIR.get_or_init(|| {
+        let dir = std::env::var_os("OSP_MATCHING_DUMP").map(PathBuf::from)?;
+        std::fs::create_dir_all(&dir).ok()?;
+        Some(dir)
+    }) else {
+        return;
+    };
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let mut buf = Vec::with_capacity(13 + cost.len() * 16);
+    buf.extend_from_slice(b"OSPM1");
+    buf.extend_from_slice(&(n as u64).to_le_bytes());
+    for c in cost {
+        buf.extend_from_slice(&c.to_le_bytes());
+    }
+    let _ = std::fs::write(dir.join(format!("solve_{seq:05}_n{n}.ospm")), buf);
 }
 
 /// Convert a row-major `i128` cost matrix down to a narrower [`Weight`] type.

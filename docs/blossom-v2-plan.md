@@ -7,14 +7,21 @@ augmentations** (shrink the number of scans) — combined into one staged rewrit
 
 ## Why these two, and why together
 
-Measured (stats build, n=1000, i128 lex family, 2026-07-19):
+Measured (stats build, 2026-07-19), on the synthetic families *and* on
+captured real osp-sim instances (capture-replay, N≈900–940 — see the
+profile-osp-sim skill §6). The real-graph shape differs sharply from the
+synthetic guess, and both stages have a dominant bucket to attack:
 
-- The queue-drain edge scan is ~80% of solve time, and it is bound by **row
-  count × streaming floor**: ~58k O(n) row-sweeps per solve (~350 per phase ×
-  165 phases). Per-row micro-optimization is a measured dead end (±0%).
-- `add_blossom` is 14–24% — almost entirely the O(n_x) contracted-row merge,
-  ~650 blossom formations per solve.
-- Everything else is single digits.
+- **Scan**: on synthetic lex the queue-drain edge scan is ~80% and bound by
+  **row count × streaming floor** (~58k O(n) row-sweeps per solve); per-row
+  micro-optimization is a measured dead end (±0%). On *real* graphs the scan
+  is 23% (Swiss — greedy seeds ~97% of pairs, leaving little tree growth) to
+  53% (pure-ELO, ~28k rows/solve).
+- **`add_blossom`**: 14–24% synthetic — but **~45% on real Swiss and ~35% on
+  real ELO** (up to ~1400 formations/solve; band/tie structure makes odd
+  tight cycles endemic). Almost entirely the O(n_x) contracted-row merge that
+  Stage A deletes.
+- Everything else is single digits on both.
 
 Sparsification divides the *width* of every sweep (n → k); preservation divides
 the *count* (one sweep per vertex state-change instead of one per vertex per
@@ -28,8 +35,10 @@ Cost model (scan entries streamed per lex n=1000 solve):
 now ≈ 58k×1000 = 58M → after B ≈ 58k×k ≈ 1M (+ n²/2 ≈ 500k certificate pass)
 → after C ≈ ~10k×k ≈ 160k (+ certificate). Ceiling ~50× on the scan bucket;
 overall wall-time hypothesis ~5–10× at n=1000 (Amdahl: `add_blossom` shrinks
-with it; init + certificate become the floor). Hypotheses, not promises — each
-stage's gate re-measures.
+with it; init + certificate become the floor). On real Swiss graphs the
+weighting shifts: Stage A's merge-deletion alone attacks the ~45% bucket, so
+A is expected to carry a large share of the real-world win before B/C land.
+Hypotheses, not promises — each stage's gate re-measures.
 
 ---
 
@@ -173,13 +182,17 @@ n=1000 down ≥5× (~58k → ≤ ~10k); wall-time targets (hypotheses): lex n=10
 ## Cross-cutting
 
 - **Determinism & anchors**: every stage changes tie-breaking; totals are the
-  invariant, byte-anchors re-baseline per stage (single-thread only — the
-  multithread ~1/1000 divergence is a separate open bug). The crate's oracle +
-  metamorphic + new equivalence tests carry the correctness burden; osp-sim
-  anchor is a smoke test, not the proof.
+  invariant, byte-anchors re-baseline per stage (the former multithread
+  ~1/1000 tie-order divergence has since been fixed — "canonical tie orders";
+  single-thread remains the convention for comparable wall times). The
+  crate's oracle + metamorphic + new equivalence tests carry the correctness
+  burden; osp-sim anchor is a smoke test, not the proof.
 - **Testing ladder per stage**: unit (oracle n ≤ 10, exhaustive) → metamorphic
   (n ≤ 200) → sparse≡dense equivalence (Stage B+) → osp-sim ST smoke →
-  bench + stats gates.
+  bench + stats gates. Bench diet: **captured real instances first**
+  (capture-replay, `--replay`; skill §6), synthetic families as portable
+  fallback — the two disagree on the cost shape, and real graphs win the
+  argument.
 - **Risk register**:
   1. z-term scale factor in the certificate (Stage B step 4) — wrong ⇒
      silently accepts suboptimal matchings. Mitigated by blossom-heavy

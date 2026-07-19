@@ -58,12 +58,13 @@ Pitfalls that make numbers non-comparable:
 diff -q scratch/baseline.txt scratch/candidate.txt && echo "byte-identical"
 ```
 
-**Anchor runs must be single-threaded** (`RAYON_NUM_THREADS=1`): multithreaded
-output is *almost* deterministic but flips a couple of summary lines roughly
-once per 1000 runs (a near-tie decided by rayon scheduling — known bug), so a
-multithreaded anchor produces false diffs. Single-thread output is perfectly
-repeatable. Also regenerate the baseline from committed source in the same
-session — don't trust an anchor file from an earlier working-tree build.
+Prefer single-threaded anchors (`RAYON_NUM_THREADS=1`). A former bug made
+multithreaded output flip a near-tie roughly once per 1000 runs; it was fixed
+by canonicalizing tie orders ("keep pooled solves history-independent /
+canonical tie orders") — if a multithreaded anchor mismatches its
+single-thread twin, first check that fix is in your build. Also regenerate
+the baseline from committed source in the same session — don't trust an
+anchor file from an earlier working-tree build.
 
 ## 4. Sampling profile (where the time goes)
 
@@ -165,6 +166,33 @@ done
 - Both generation and osp-sim are deterministic at a fixed `--seed`, so the
   series is reproducible. Keep `--rounds` ≤ ~12 (deeper than any real event makes
   synthetic attendance flatten); irrelevant to an N-series, which fixes R.
+
+## 6. Capture-replay: solver benchmarks on the real graphs
+
+To attribute time *inside* the matching solver on the exact cost matrices
+osp-sim produces (instead of `examples/bench.rs`'s synthetic families — which
+mispredict real structure badly; see below):
+
+```sh
+# capture: one file per solve (9 rounds = 9 files for --runs 1); single
+# thread so the sequence numbering is canonical
+RAYON_NUM_THREADS=1 OSP_MATCHING_DUMP=scratch/cap_swiss \
+  ./target/release/osp-sim --results scratch/fake_1000.txt --runs 1 --seed 0 > /dev/null
+# replay: add --features stats for the region/counter breakdown
+cargo run --release -p integer-blossom --example bench -- --replay scratch/cap_swiss
+```
+
+Use one capture directory per config. Files are `solve_*_n{N}.ospm`
+(~16·N²/1e6 MB each); the replay reports per-(n, weight-width) ms/solve, where
+the width mirrors osp-core's adaptive narrowing — so it also shows which
+integer width real instances exercise (measured at N≈1000: Swiss/MacMahon
+round 1 `i32`, later rounds `i128`; pure-ELO mostly `i64`).
+
+Real-graph shape differs sharply from the synthetic families (captured
+2026-07-19, N≈900–940): real Swiss solves are ~6× cheaper than the `lex`
+family predicts (greedy seed covers ~97% of pairs; `add_blossom` ~45% and the
+dual block ~60% of solve time, scan only ~23%); pure-ELO is scan 53% /
+blossom-formation 35%. Trust replay numbers over synthetic ones.
 
 ## Known shape of the profile (baseline, as of the tid-native refactor)
 

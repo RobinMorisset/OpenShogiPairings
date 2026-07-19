@@ -70,7 +70,94 @@ fn lex_costs(n: usize, seed: u64) -> Vec<i128> {
 /// An instance generator: `(n, seed) -> cost matrix`.
 type CostGen = fn(usize, u64) -> Vec<i128>;
 
+/// One captured instance: `b"OSPM1"`, `n` as `u64` LE, then `n*n` `i128` LE
+/// values (the format written by osp-core's `OSP_MATCHING_DUMP` hook).
+fn read_instance(path: &std::path::Path) -> (usize, Vec<i128>) {
+    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("reading {path:?}: {e}"));
+    assert!(
+        bytes.len() >= 13 && &bytes[..5] == b"OSPM1",
+        "{path:?}: not an OSPM1 capture"
+    );
+    let n = u64::from_le_bytes(bytes[5..13].try_into().unwrap()) as usize;
+    assert_eq!(bytes.len(), 13 + n * n * 16, "{path:?}: truncated");
+    let cost = bytes[13..]
+        .chunks_exact(16)
+        .map(|c| i128::from_le_bytes(c.try_into().unwrap()))
+        .collect();
+    (n, cost)
+}
+
+/// Mirror of osp-core's `solve_matching` width selection, so replay exercises
+/// the same solver monomorphization osp-sim would (and reports which width
+/// real instances actually use). Returns (`mate[0]`, width name).
+fn solve_adaptive(cost: &[i128], n: usize) -> (usize, &'static str) {
+    let max = cost.iter().copied().max().unwrap_or(0);
+    if max <= i32::MAX as i128 / 16 {
+        let narrow: Vec<i32> = cost.iter().map(|&c| c as i32).collect();
+        (min_weight_perfect_matching(&narrow, n)[0], "i32")
+    } else if max <= i64::MAX as i128 / 16 {
+        let narrow: Vec<i64> = cost.iter().map(|&c| c as i64).collect();
+        (min_weight_perfect_matching(&narrow, n)[0], "i64")
+    } else {
+        (min_weight_perfect_matching(cost, n)[0], "i128")
+    }
+}
+
+/// Replay a directory of captured instances: a warm-up pass, then `REPS` timed
+/// passes, reported per (n, weight width). Point it at one capture directory
+/// per configuration.
+fn replay(dir: &str) {
+    const REPS: usize = 3;
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("reading {dir}: {e}"))
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "ospm"))
+        .collect();
+    paths.sort();
+    assert!(!paths.is_empty(), "no .ospm captures in {dir}");
+    let instances: Vec<(usize, Vec<i128>)> = paths.iter().map(|p| read_instance(p)).collect();
+
+    let mut sink = 0usize;
+    for (n, cost) in &instances {
+        sink += solve_adaptive(cost, *n).0;
+    }
+    #[cfg(feature = "stats")]
+    let _ = integer_blossom::stats::take();
+
+    // (n, width) -> (solve count, total seconds)
+    let mut groups: std::collections::BTreeMap<(usize, &'static str), (u64, f64)> =
+        std::collections::BTreeMap::new();
+    let t0 = Instant::now();
+    for _ in 0..REPS {
+        for (n, cost) in &instances {
+            let t = Instant::now();
+            let (m, width) = solve_adaptive(cost, *n);
+            let e = groups.entry((*n, width)).or_insert((0, 0.0));
+            e.0 += 1;
+            e.1 += t.elapsed().as_secs_f64();
+            sink += m;
+        }
+    }
+    let total = t0.elapsed();
+    println!(
+        "replay {dir}: {} instances x {REPS} passes (sink={sink})",
+        instances.len()
+    );
+    for ((n, width), (count, secs)) in &groups {
+        println!(
+            "  n={n:<5} {width:<5} {:9.2} ms/solve   (solves={count})",
+            1000.0 * secs / *count as f64
+        );
+    }
+    print_stats(total);
+}
+
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--replay") {
+        replay(args.get(i + 1).expect("--replay needs a directory"));
+        return;
+    }
     const INSTANCES: usize = 3;
     let families: [(&str, CostGen); 2] = [("lex", lex_costs), ("elo", elo_costs)];
     for (name, gen) in families {

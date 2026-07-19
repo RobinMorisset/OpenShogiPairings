@@ -12,6 +12,11 @@ All notable changes to `integer-blossom` are documented here. The format follows
   and region timers over the solver's internal phases, printed by
   `examples/bench.rs` when built with `--features stats`. Zero hot-path cost
   when disabled.
+- `examples/bench.rs --replay <dir>`: benchmark captured real instances
+  (`.ospm` blobs written by osp-core's `OSP_MATCHING_DUMP` hook) instead of
+  the synthetic families, reporting per-(n, weight-width) timings with the
+  same adaptive width selection as osp-core. Example-only; no library API
+  change.
 
 ## 1.4.0 - 2026-07-19
 
