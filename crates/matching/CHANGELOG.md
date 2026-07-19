@@ -5,6 +5,27 @@ All notable changes to `integer-blossom` are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) over its own public API
 (independent of the OpenShogiPairings application it lives alongside).
 
+## 1.3.0 - 2026-07-19
+
+### Changed
+- Much faster solves, especially on smooth cost surfaces (up to ~3× end-to-end
+  in the osp-sim ELO-pairing benchmark at N=1000):
+  - Tighter dual initialization: `min_weight_perfect_matching` starts each
+    vertex's dual at half its own best edge weight (per-vertex) instead of a
+    uniform global maximum; `max_weight_matching` keeps the uniform start its
+    zero-dual termination rule requires.
+  - Greedy seed: initially-tight edges between unmatched vertices are matched
+    before the first phase, skipping one full alternating-tree phase per pair.
+  - Edge weights are stored pre-scaled ×4, removing the doubling from the slack
+    computation (the innermost hot expression) and keeping all initial duals
+    even (the parity invariant behind exact slack halving).
+- **Headroom requirement tightened**: because of the internal ×4 scaling, a
+  weight type now needs roughly three bits of headroom above the largest raw
+  weight (previously roughly two). Callers near the top of `i32`/`i64` should
+  widen; typical lexicographic `i128` stacks are unaffected.
+- Tie-breaking among equally-optimal matchings may differ from 1.2.x (results
+  remain optimal and deterministic).
+
 ## 1.2.1 - 2026-07-19
 
 ### Fixed

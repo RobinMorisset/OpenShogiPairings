@@ -39,7 +39,9 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 
 /// Edge-weight type for the blossom solver: a signed integer wide enough to
-/// hold the caller's largest weight without overflow.
+/// hold the caller's largest weight without overflow. Weights are pre-scaled
+/// **×4** internally (see [`Edge`]), and slacks sum two duals, so the type
+/// needs roughly three bits of headroom above the largest raw weight.
 pub trait Weight:
     Copy
     + Ord
@@ -86,6 +88,13 @@ type Vid = u32;
 /// One graph edge, carrying the *real* endpoints it stands for. For a super-vertex
 /// (contracted blossom) `b`, `g[b][x]` records the best underlying real edge, so
 /// `u`/`v` are always real-vertex indices even when the slot is `g[b][x]`.
+///
+/// `w` holds the caller's weight **pre-scaled by 4** (see [`Blossom::set_edge`]):
+/// the ×2 every slack computation needs is baked in at write time instead of
+/// being recomputed in [`Blossom::e_delta`] (the hottest expression), and the
+/// second ×2 keeps every initial dual — including the per-vertex duals the
+/// perfect-matching path uses — **even**, which is the parity invariant that
+/// keeps all slacks halvable without truncation.
 #[derive(Clone, Copy)]
 struct Edge<W> {
     u: Vid,
@@ -124,6 +133,10 @@ struct Blossom<W> {
     flower: Vec<Vec<usize>>,
     q: VecDeque<usize>,
     t: usize,
+    /// Whether this solve seeks a *perfect* matching (the min-cost reduction) or
+    /// the general max-weight matching. It selects the dual initialization and
+    /// the termination rule — see [`Blossom::solve`].
+    perfect: bool,
 }
 
 impl<W: Weight> Blossom<W> {
@@ -151,6 +164,7 @@ impl<W: Weight> Blossom<W> {
             flower: vec![Vec::new(); sz],
             q: VecDeque::new(),
             t: 0,
+            perfect: false,
         }
     }
 
@@ -219,15 +233,20 @@ impl<W: Weight> Blossom<W> {
     }
 
     fn set_edge(&mut self, u: usize, v: usize, w: W) {
+        // Stored pre-scaled ×4 (see `Edge`): `e_delta` then needs no doubling,
+        // and initial duals (half a stored row-maximum) are always even.
+        let w = w.double().double();
         let (u, v) = (u as Vid, v as Vid);
         *self.g_mut(u as usize, v as usize) = Edge { u, v, w };
         // Reverse orientation: endpoints swapped (field-named, not positional).
         *self.g_mut(v as usize, u as usize) = Edge { u: v, v: u, w };
     }
 
-    /// Reduced cost (slack) of an edge; zero means the edge is tight.
+    /// Reduced cost (slack) of an edge; zero means the edge is tight. The
+    /// stored weight is pre-scaled (see [`Blossom::set_edge`]), so this is a
+    /// plain add/sub — it is the hottest expression in the solver.
     fn e_delta(&self, e: Edge<W>) -> W {
-        self.lab[e.u as usize] + self.lab[e.v as usize] - e.w.double()
+        self.lab[e.u as usize] + self.lab[e.v as usize] - e.w
     }
 
     fn update_slack(&mut self, u: usize, x: usize) {
@@ -521,7 +540,15 @@ impl<W: Weight> Blossom<W> {
             for u in 1..=self.n {
                 match self.s[self.st[u]] {
                     0 => {
-                        if self.lab[u] <= d {
+                        // Max-weight termination: an outer dual about to hit 0
+                        // means its root is best left unmatched. Sound only
+                        // because uniform initialization keeps every root's
+                        // dual in lockstep (they reach 0 together). The perfect
+                        // path skips it — its LP has unrestricted duals, and
+                        // its tighter per-vertex initialization gives roots
+                        // *different* duals, under which aborting on the first
+                        // zero would wrongly strand still-matchable roots.
+                        if !self.perfect && self.lab[u] <= d {
                             return false;
                         }
                         self.lab[u] -= d;
@@ -558,7 +585,12 @@ impl<W: Weight> Blossom<W> {
         }
     }
 
-    fn solve(&mut self) {
+    /// Solve the instance currently in `g`. `perfect` selects the perfect-
+    /// matching mode (tighter per-vertex dual initialization, no zero-dual
+    /// termination) versus the general max-weight mode (uniform duals, whose
+    /// lockstep root trajectories make the zero-dual termination sound).
+    fn solve(&mut self, perfect: bool) {
+        self.perfect = perfect;
         for u in 1..=self.n {
             self.mate[u] = 0;
         }
@@ -571,17 +603,62 @@ impl<W: Weight> Blossom<W> {
             self.st[b] = 0;
             self.flower[b].clear();
         }
-        let mut w_max = W::ZERO;
+        // Row maxima, gathered into `lab` (they become the duals below).
         for u in 1..=self.n {
+            let mut m = W::ZERO;
             for v in 1..=self.n {
                 self.set_flower_from(u, v, if u == v { u } else { 0 });
-                if self.g(u, v).w > w_max {
-                    w_max = self.g(u, v).w;
+                let w = self.g(u, v).w;
+                if w > m {
+                    m = w;
                 }
             }
+            self.lab[u] = m;
         }
+        if perfect {
+            // Per-vertex initialization: half the (×4-scaled) row maximum, the
+            // tightest feasible symmetric dual — `lab[u] + lab[v] ≥ w` holds
+            // because each side is at least half the edge's own weight, and a
+            // mutual-maximum pair starts exactly tight, feeding the greedy
+            // seed below. Halving a ×4 weight is exact and even, so all duals
+            // share a parity and every slack stays halvable.
+            for u in 1..=self.n {
+                self.lab[u] = self.lab[u].half();
+            }
+        } else {
+            // Uniform initialization, required by the zero-dual termination
+            // (see `matching`): every dual starts at half the global maximum.
+            let mut w_max = W::ZERO;
+            for u in 1..=self.n {
+                if self.lab[u] > w_max {
+                    w_max = self.lab[u];
+                }
+            }
+            let w_max = w_max.half();
+            for u in 1..=self.n {
+                self.lab[u] = w_max;
+            }
+        }
+        // Greedy seed: match any two unmatched vertices joined by an initially
+        // tight edge. Each pair found is an augmenting path of length one the
+        // phase loop no longer has to grow a forest to discover, and matching
+        // only tight edges preserves complementary slackness, so the phases
+        // continue correctly from this primal state.
         for u in 1..=self.n {
-            self.lab[u] = w_max;
+            if self.mate[u] != 0 {
+                continue;
+            }
+            for v in 1..=self.n {
+                if v != u
+                    && self.mate[v] == 0
+                    && self.g(u, v).w > W::ZERO
+                    && self.e_delta(self.g(u, v)) == W::ZERO
+                {
+                    self.mate[u] = v;
+                    self.mate[v] = u;
+                    break;
+                }
+            }
         }
         while self.matching() {}
     }
@@ -597,6 +674,7 @@ impl<W: Weight> Blossom<W> {
 /// `map_mate` receives the raw 1-indexed partner (`0` meaning unmatched).
 fn solve_pooled<W: Weight, T>(
     n: usize,
+    perfect: bool,
     set_edges: impl FnOnce(&mut Blossom<W>),
     map_mate: impl Fn(usize) -> T,
 ) -> Vec<T> {
@@ -605,7 +683,7 @@ fn solve_pooled<W: Weight, T>(
         let bl = pool.get::<W>(n);
         bl.reset(n);
         set_edges(bl);
-        bl.solve();
+        bl.solve(perfect);
         (1..=n).map(|u| map_mate(bl.mate[u])).collect()
     })
 }
@@ -634,6 +712,7 @@ pub fn max_weight_matching<W: Weight>(weight: &[W], n: usize) -> Vec<Option<usiz
 
     solve_pooled(
         n,
+        false,
         |bl| {
             for i in 0..n {
                 for j in (i + 1)..n {
@@ -695,6 +774,7 @@ pub fn min_weight_perfect_matching<W: Weight>(cost: &[W], n: usize) -> Vec<usize
 
     solve_pooled(
         n,
+        true,
         |bl| {
             for i in 0..n {
                 for j in (i + 1)..n {
@@ -943,6 +1023,28 @@ mod tests {
                 assert_eq!(got, want, "n={n}, cost={cost:?}, mate={mate:?}");
             }
         }
+    }
+
+    #[test]
+    fn perfect_matching_survives_asymmetric_duals() {
+        // Regression guard for the perfect path's termination rule. With the
+        // tight per-vertex dual initialization, roots start with *different*
+        // duals; the max-weight zero-dual abort (still active for
+        // `max_weight_matching`) would fire here on vertex 0 — whose edges are
+        // all expensive, so its dual starts tiny — while a perfect matching
+        // still needs it matched. The perfect path must ignore that abort and
+        // keep adjusting duals (negative if need be) until the matching is
+        // perfect. Constructed so that after the greedy seed pairs 2-3 (the
+        // mutually-cheapest pair), roots 0 and 1 remain with very different
+        // initial duals.
+        let cost = vec![
+            vec![0, 100, 96, 100],
+            vec![100, 0, 51, 100],
+            vec![96, 51, 0, 1],
+            vec![100, 100, 1, 0],
+        ];
+        let mate = min_weight_perfect_matching(&flat(&cost), cost.len());
+        assert_eq!(total_of(&cost, &mate), brute_min_cost(&cost));
     }
 
     #[test]
