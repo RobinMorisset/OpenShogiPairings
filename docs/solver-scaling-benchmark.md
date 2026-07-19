@@ -87,10 +87,58 @@ Absolute ms are machine-specific; the **exponent** is the portable result.
 
 ---
 
-## Planned: complex configurations
+## Run 2 — MacMahon (grade bands, ≥10/group) + est-ELO + tuned Laplace + half-point absences
 
-The next runs repeat this exact series with richer `--configs` (MacMahon bands,
-floater/club constraints, hybrid cup, …) to see whether denser or more
-constrained graphs push the exponent up toward N³. Each will be logged here as a
-new "Run N — …" section with the same method, so they are directly comparable to
-Run 1's default-Swiss baseline.
+Same instances, series, and method as Run 1 — only the pairing config differs.
+Each instance is paired under a per-instance config from `mm-grades <file> 10`
+(variant `c`), with `half_point_absences` added:
+
+- **`macmahon_thresholds`** — on FESA grade boundaries, every group ≥ 10 players.
+  Group count grows with the field: 4 / 7 / 13 / 17 / 20 / 20 for
+  N = 50 / 100 / 200 / 400 / 800 / 1000 (saturating ~20 as the field outgrows the
+  grade boundaries above the floor).
+- **`macmahon_from_estimated_elo: true`** — group by the ELO estimated from
+  results, re-fit each round.
+- **`elo_k_multiplier_percent: 0`** — pin rated/provisional players, estimate the
+  unrated only. Load-bearing: the default is 100, so it must be set explicitly.
+- **Tuned Laplace unrated prior** — `elo_prior_shape_unrated: laplace`,
+  `elo_unrated_prior_center: 700`, `elo_unrated_k: 260`,
+  `elo_upward_looseness_unrated_percent: 300` — the settings-tab "Tuned Laplace"
+  preset verbatim.
+- **`half_point_absences: true`** — an absent player scores ½.
+
+`ms/run` is compared against Run 1 (default Swiss) at the same N:
+
+| N | ms/run | 95% CI | rel. err | Run 1 (Swiss) | ratio |
+|---:|---:|:---:|---:|---:|---:|
+| 50 | 3.56 | [3.22, 3.90] | 9.6% | 3.38 | 1.05 |
+| 100 | 8.23 | [8.04, 8.42] | 2.3% | 7.69 | 1.07 |
+| 200 | 30.74 | [30.42, 31.05] | 1.0% | 27.18 | 1.13 |
+| 400 | 112.57 | [110.88, 114.26] | 1.5% | 101.27 | 1.11 |
+| 800 | 538.33 | [528.20, 548.45] | 1.9% | 469.93 | 1.15 |
+| 1000 | 865.36 | [855.73, 875.00] | 1.1% | 749.97 | 1.15 |
+
+**Scaling exponent** (log-log fit of ms/run vs N):
+
+- All 6 points: **b = 1.88** (R² = 0.992)
+- N ≥ 200 only: **b = 2.09**
+- Local slopes: 50→100: 1.21 · 100→200: 1.90 · 200→400: 1.87 · 400→800: 2.26 · 800→1000: 2.13
+
+**Reading it.** The richer rule set costs a roughly **constant ~10–15% overhead**
+at N ≥ 200 (the per-round est-ELO fit and MacMahon grouping), but the **exponent
+is unchanged — still ≈ N²·¹**, matching Run 1 within noise. MacMahon reshapes the
+edge *weights* (score bands from estimated ELO) but the graph is still complete
+and the weight distribution still keeps the blossom solver off its worst case; the
+added work is per-round bookkeeping proportional to the field, i.e. a
+multiplicative constant, not a higher-order term. So on realistic fields a denser,
+more constrained config buys the referee its behavior at a constant-factor price,
+not a worse scaling class.
+
+---
+
+## Planned: further configurations
+
+Later runs can push on the parts most likely to bend the exponent — floater/club
+constraints and the hybrid cup (which add structured penalty weights), or
+degressive MacMahon (`drops_after_round`) — each logged as a new "Run N — …"
+section with the same method, comparable to Runs 1–2.
