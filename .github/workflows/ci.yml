@@ -105,7 +105,7 @@ jobs:
       # Skipped until the Gist setup exists (see README), so this never reddens CI.
       - name: Publish coverage badge
         if: ${{ github.ref == 'refs/heads/main' && env.GIST_TOKEN != '' && env.GIST_ID != '' }}
-        uses: schneegans/dynamic-badges-action@v1.7.0
+        uses: schneegans/dynamic-badges-action@v1.9.0
         with:
           auth: ${{ env.GIST_TOKEN }}
           gistID: ${{ env.GIST_ID }}
