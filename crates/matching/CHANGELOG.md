@@ -5,6 +5,36 @@ All notable changes to `integer-blossom` are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) over its own public API
 (independent of the OpenShogiPairings application it lives alongside).
 
+## Unreleased
+
+### Added
+- `stats` feature (off by default, **not a stable API**): per-thread counters
+  and region timers over the solver's internal phases, printed by
+  `examples/bench.rs` when built with `--features stats`. Zero hot-path cost
+  when disabled.
+- `examples/bench.rs --replay <dir>`: benchmark captured real instances
+  (`.ospm` blobs written by osp-core's `OSP_MATCHING_DUMP` hook) instead of
+  the synthetic families, reporting per-(n, weight-width) timings with the
+  same adaptive width selection as osp-core. Example-only; no library API
+  change.
+
+## 1.4.1 - 2026-07-19
+
+### Fixed
+- Pooled solves are now **history-independent**: which of several cost-tied
+  optimal matchings is returned no longer depends on what the same thread's
+  reused solver buffers held from earlier solves. Blossom formation wrote an
+  intra-blossom member edge's weight onto the super-vertex's diagonal slot,
+  and a later larger solve read that stale diagonal in its row-maximum dual
+  initialization; a weight-0 (absent) edge could also enter the blossom
+  best-edge comparison through stale endpoint bytes. Results were always
+  optimal, but callers running many solves per thread (osp-sim under rayon)
+  saw work-stealing-dependent tie choices. Guarded by the new
+  `pooled_solver_matches_a_fresh_thread_exactly` test.
+- Tie-breaking among equally-optimal matchings may accordingly differ from
+  1.4.0 in solves that previously read stale buffer state (they now match
+  what a fresh solver returns).
+
 ## 1.4.0 - 2026-07-19
 
 ### Changed

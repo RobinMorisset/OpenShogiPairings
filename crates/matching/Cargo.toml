@@ -15,3 +15,9 @@ keywords = ["matching", "blossom", "graph", "optimization", "pairing"]
 categories = ["algorithms", "mathematics"]
 # `n.is_multiple_of(2)` in the public API was stabilized in Rust 1.87.
 rust-version = "1.87"
+
+[features]
+# Internal profiling: per-thread counters and region timers on the solver,
+# printed by `examples/bench.rs`. Off by default (zero hot-path cost); the
+# `stats` module is not a stable API.
+stats = []

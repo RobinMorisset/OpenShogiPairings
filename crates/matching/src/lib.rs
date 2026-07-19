@@ -78,6 +78,115 @@ macro_rules! impl_weight {
 }
 impl_weight!(i32, i64, i128);
 
+/// Solver instrumentation, compiled only under the `stats` feature (off by
+/// default — the hot path carries zero instrumentation otherwise). **Not a
+/// stable API**: this exists for profiling the solver's internal cost shape
+/// (see `examples/bench.rs --features stats`) and may change freely.
+///
+/// Counters and region timers accumulate per thread; [`stats::take`] returns
+/// and resets them. Region times are attributed at the algorithm's structural
+/// boundaries; the doc on each field says what it covers and which fields
+/// *overlap* (a sub-region timed inside an enclosing region is included in
+/// both — subtract to get exclusive figures).
+#[cfg(feature = "stats")]
+pub mod stats {
+    use std::cell::RefCell;
+    use std::time::Duration;
+
+    /// Accumulated solver statistics for the current thread.
+    #[derive(Default, Clone, Debug)]
+    pub struct Stats {
+        /// Completed `solve` calls.
+        pub solves: u64,
+        /// Phases run (calls to the phase loop that had at least one root).
+        pub phases: u64,
+        /// Dual adjustments applied (iterations of the phase loop's dual block).
+        pub adjustments: u64,
+        /// Pairs matched by the greedy tight-edge seed.
+        pub greedy_pairs: u64,
+        /// Augmentations (successful `on_found_edge` outcomes).
+        pub augments: u64,
+        /// Blossoms formed / expanded.
+        pub blossoms_formed: u64,
+        pub blossoms_expanded: u64,
+        /// `set_slack` invocations (each is an O(n) column scan).
+        pub set_slack_calls: u64,
+        /// Rows scanned in the queue-drain loop — each is an O(n) sweep, so
+        /// `scan_rows × n` is the scan's total streamed-entry count, the number
+        /// that structural improvements (tree preservation, sparsification)
+        /// must shrink.
+        pub scan_rows: u64,
+        /// `solve` initialization: state resets, row-maxima duals, greedy seed.
+        pub t_init: Duration,
+        /// Per-phase re-initialization: `s`/`slack` resets and root queue build.
+        pub t_phase_init: Duration,
+        /// The queue-drain edge scan, *including* `on_found_edge` calls made
+        /// from it (subtract [`Stats::t_ofe_scan`] for the pure scan).
+        pub t_scan: Duration,
+        /// `on_found_edge` time at the scan-loop call site (inside `t_scan`).
+        pub t_ofe_scan: Duration,
+        /// The dual block: `d` computation, label updates, post-adjustment
+        /// tight-edge re-scan, and blossom expansions (inclusive of
+        /// [`Stats::t_expand`] and any augment/blossom work the re-scan finds).
+        pub t_dual: Duration,
+        /// `augment` bodies (inside `t_scan` or `t_dual` via `on_found_edge`).
+        pub t_augment: Duration,
+        /// `add_blossom` bodies, inclusive of their `set_slack` call.
+        pub t_add_blossom: Duration,
+        /// `expand_blossom` bodies, inclusive of their `set_slack` calls.
+        pub t_expand: Duration,
+        /// All `set_slack` bodies (inside `t_add_blossom`/`t_expand`).
+        pub t_set_slack: Duration,
+    }
+
+    thread_local! {
+        static STATS: RefCell<Stats> = RefCell::default();
+    }
+
+    /// Run `f` on this thread's accumulator.
+    pub fn with<R>(f: impl FnOnce(&mut Stats) -> R) -> R {
+        STATS.with(|s| f(&mut s.borrow_mut()))
+    }
+
+    /// Take this thread's accumulated stats, resetting them to zero.
+    pub fn take() -> Stats {
+        with(std::mem::take)
+    }
+}
+
+/// Bump a stats counter: `stat!(|s| s.phases += 1)`. Expands to nothing
+/// without the `stats` feature.
+#[cfg(feature = "stats")]
+macro_rules! stat {
+    ($f:expr) => {
+        crate::stats::with($f)
+    };
+}
+#[cfg(not(feature = "stats"))]
+macro_rules! stat {
+    ($f:expr) => {};
+}
+
+/// Time `$body`, accumulating into the named [`stats::Stats`] duration field.
+/// Expands to plain `$body` without the `stats` feature. `$body` must not
+/// `return`/`break` out of the macro (the accumulation would be skipped) —
+/// bind the result and branch outside instead.
+#[cfg(feature = "stats")]
+macro_rules! timed {
+    ($field:ident, $body:expr) => {{
+        let __start = std::time::Instant::now();
+        let __r = $body;
+        crate::stats::with(|s| s.$field += __start.elapsed());
+        __r
+    }};
+}
+#[cfg(not(feature = "stats"))]
+macro_rules! timed {
+    ($field:ident, $body:expr) => {
+        $body
+    };
+}
+
 /// A vertex index. The algorithm works in `usize` (loop counters, array indices),
 /// but the large `O(n²)` tables — the [`Blossom::gu`]/[`Blossom::gv`] endpoint
 /// matrices and [`Blossom::flower_from`] — *store* vertices, and for the field
@@ -301,12 +410,15 @@ impl<W: Weight> Blossom<W> {
     }
 
     fn set_slack(&mut self, x: usize) {
-        self.slack[x] = 0;
-        for u in 1..=self.n {
-            if self.w_at(u, x) > W::ZERO && self.st[u] != x && self.s[self.st[u]] == 0 {
-                self.update_slack(u, x);
+        stat!(|s| s.set_slack_calls += 1);
+        timed!(t_set_slack, {
+            self.slack[x] = 0;
+            for u in 1..=self.n {
+                if self.w_at(u, x) > W::ZERO && self.st[u] != x && self.s[self.st[u]] == 0 {
+                    self.update_slack(u, x);
+                }
             }
-        }
+        })
     }
 
     fn q_push(&mut self, x: usize) {
@@ -371,17 +483,20 @@ impl<W: Weight> Blossom<W> {
     }
 
     fn augment(&mut self, mut u: usize, mut v: usize) {
-        loop {
-            let xnv = self.st[self.mate[u]];
-            self.set_match(u, v);
-            if xnv == 0 {
-                return;
+        timed!(
+            t_augment,
+            loop {
+                let xnv = self.st[self.mate[u]];
+                self.set_match(u, v);
+                if xnv == 0 {
+                    break;
+                }
+                let next_u = self.st[self.pa[xnv]];
+                self.set_match(xnv, next_u);
+                u = next_u;
+                v = xnv;
             }
-            let next_u = self.st[self.pa[xnv]];
-            self.set_match(xnv, next_u);
-            u = next_u;
-            v = xnv;
-        }
+        )
     }
 
     fn get_lca(&mut self, mut u: usize, mut v: usize) -> usize {
@@ -403,6 +518,11 @@ impl<W: Weight> Blossom<W> {
     }
 
     fn add_blossom(&mut self, u: usize, lca: usize, v: usize) {
+        stat!(|s| s.blossoms_formed += 1);
+        timed!(t_add_blossom, self.add_blossom_inner(u, lca, v))
+    }
+
+    fn add_blossom_inner(&mut self, u: usize, lca: usize, v: usize) {
         let mut b = self.n + 1;
         while b <= self.n_x && self.st[b] != 0 {
             b += 1;
@@ -492,6 +612,11 @@ impl<W: Weight> Blossom<W> {
     }
 
     fn expand_blossom(&mut self, b: usize) {
+        stat!(|s| s.blossoms_expanded += 1);
+        timed!(t_expand, self.expand_blossom_inner(b))
+    }
+
+    fn expand_blossom_inner(&mut self, b: usize) {
         // `set_st` only descends into each member's own sub-cycle, so `flower[b]`
         // is stable here — index it rather than cloning.
         let mut mi = 0;
@@ -542,6 +667,7 @@ impl<W: Weight> Blossom<W> {
         } else if self.s[v] == 0 {
             let lca = self.get_lca(u, v);
             if lca == 0 {
+                stat!(|s| s.augments += 1);
                 self.augment(u, v);
                 self.augment(v, u);
                 return true;
@@ -556,51 +682,89 @@ impl<W: Weight> Blossom<W> {
     /// path is found (returns `true`, matching grew by one edge) or no further
     /// improvement is possible (returns `false`).
     fn matching(&mut self) -> bool {
-        for i in 1..=self.n_x {
-            self.s[i] = -1;
-            self.slack[i] = 0;
-        }
-        self.q.clear();
-        for x in 1..=self.n_x {
-            if self.st[x] == x && self.mate[x] == 0 {
-                self.pa[x] = 0;
-                self.s[x] = 0;
-                self.q_push(x);
+        timed!(t_phase_init, {
+            for i in 1..=self.n_x {
+                self.s[i] = -1;
+                self.slack[i] = 0;
             }
-        }
+            self.q.clear();
+            for x in 1..=self.n_x {
+                if self.st[x] == x && self.mate[x] == 0 {
+                    self.pa[x] = 0;
+                    self.s[x] = 0;
+                    self.q_push(x);
+                }
+            }
+        });
         if self.q.is_empty() {
             return false;
         }
+        stat!(|s| s.phases += 1);
         loop {
-            while let Some(u) = self.q.pop_front() {
-                if self.s[self.st[u]] == 1 {
-                    continue;
-                }
-                // `u` (from the queue) and `v` are both real vertices, so slot
-                // `(u, v)` always has implied endpoints: the scan reads only the
-                // contiguous `gw` row plus `lab`/`st`, never `gu`/`gv`. `st[u]`
-                // is re-read per iteration — `on_found_edge` may contract `u`
-                // into a fresh blossom mid-scan.
-                let row = u * self.stride;
-                for v in 1..=self.n {
-                    let w = self.gw[row + v];
-                    if w > W::ZERO && self.st[u] != self.st[v] {
-                        if self.lab[u] + self.lab[v] - w == W::ZERO {
-                            let e = Edge {
-                                u: u as Vid,
-                                v: v as Vid,
-                                w,
-                            };
-                            if self.on_found_edge(e) {
-                                return true;
+            // The queue-drain edge scan. The labeled block (rather than a
+            // `return` inside) lets the `timed!` accumulation complete before
+            // an augmentation exits the phase.
+            let augmented = timed!(t_scan, 'scan: {
+                while let Some(u) = self.q.pop_front() {
+                    if self.s[self.st[u]] == 1 {
+                        continue;
+                    }
+                    stat!(|s| s.scan_rows += 1);
+                    // `u` (from the queue) and `v` are both real vertices, so slot
+                    // `(u, v)` always has implied endpoints: the scan reads only the
+                    // contiguous `gw` row plus `lab`/`st`, never `gu`/`gv`. `st[u]`
+                    // is re-read per iteration — `on_found_edge` may contract `u`
+                    // into a fresh blossom mid-scan.
+                    //
+                    // Measured (see `scan_rows`): this loop's cost is the row
+                    // *count* times the streaming floor of its three loads — a
+                    // branch-light two-pass variant with component-deduplicated
+                    // `update_slack` calls benchmarked at ±0% (the repeated calls
+                    // it removed were already cache-hot and predicted), so the
+                    // simple form is kept. Reducing rows (tree preservation
+                    // across augmentations) or row length (sparsification) is
+                    // where scan time can still be won.
+                    let row = u * self.stride;
+                    for v in 1..=self.n {
+                        let w = self.gw[row + v];
+                        if w > W::ZERO && self.st[u] != self.st[v] {
+                            if self.lab[u] + self.lab[v] - w == W::ZERO {
+                                let e = Edge {
+                                    u: u as Vid,
+                                    v: v as Vid,
+                                    w,
+                                };
+                                let hit = timed!(t_ofe_scan, self.on_found_edge(e));
+                                if hit {
+                                    break 'scan true;
+                                }
+                            } else {
+                                let x = self.st[v];
+                                self.update_slack(u, x);
                             }
-                        } else {
-                            let x = self.st[v];
-                            self.update_slack(u, x);
                         }
                     }
                 }
+                false
+            });
+            if augmented {
+                return true;
             }
+            // The dual block: pick `d`, shift labels, re-scan the now-tight
+            // edges, expand spent blossoms. `Some(r)` exits the phase with `r`.
+            let outcome = timed!(t_dual, self.dual_adjust());
+            if let Some(r) = outcome {
+                return r;
+            }
+        }
+    }
+
+    /// One dual adjustment of the current phase (the phase loop's non-scan
+    /// half). Returns `Some(true)` when the re-scan augments, `Some(false)` on
+    /// the max-weight zero-dual termination, `None` to continue the phase.
+    fn dual_adjust(&mut self) -> Option<bool> {
+        stat!(|s| s.adjustments += 1);
+        {
             let mut d = W::inf();
             for b in (self.n + 1)..=self.n_x {
                 if self.st[b] == b && self.s[b] == 1 {
@@ -629,7 +793,7 @@ impl<W: Weight> Blossom<W> {
                         // *different* duals, under which aborting on the first
                         // zero would wrongly strand still-matchable roots.
                         if !self.perfect && self.lab[u] <= d {
-                            return false;
+                            return Some(false);
                         }
                         self.lab[u] -= d;
                     }
@@ -654,7 +818,7 @@ impl<W: Weight> Blossom<W> {
                     && self.slack_at(self.slack[x], x) == W::ZERO
                     && self.on_found_edge(self.g(self.slack[x], x))
                 {
-                    return true;
+                    return Some(true);
                 }
             }
             for b in (self.n + 1)..=self.n_x {
@@ -663,6 +827,7 @@ impl<W: Weight> Blossom<W> {
                 }
             }
         }
+        None
     }
 
     /// Solve the instance currently in `g`. `perfect` selects the perfect-
@@ -670,6 +835,13 @@ impl<W: Weight> Blossom<W> {
     /// termination) versus the general max-weight mode (uniform duals, whose
     /// lockstep root trajectories make the zero-dual termination sound).
     fn solve(&mut self, perfect: bool) {
+        stat!(|s| s.solves += 1);
+        timed!(t_init, self.solve_init(perfect));
+        while self.matching() {}
+    }
+
+    /// `solve`'s pre-phase work: state resets, dual initialization, greedy seed.
+    fn solve_init(&mut self, perfect: bool) {
         self.perfect = perfect;
         for u in 1..=self.n {
             self.mate[u] = 0;
@@ -743,13 +915,13 @@ impl<W: Weight> Blossom<W> {
                     && w > W::ZERO
                     && self.lab[u] + self.lab[v] - w == W::ZERO
                 {
+                    stat!(|s| s.greedy_pairs += 1);
                     self.mate[u] = v;
                     self.mate[v] = u;
                     break;
                 }
             }
         }
-        while self.matching() {}
     }
 }
 
