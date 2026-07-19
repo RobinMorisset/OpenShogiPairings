@@ -71,17 +71,8 @@ compared against.
 **Reading it.** Over N = 50–1000 the cost scales like **≈ N²·¹**, not N³. The low
 end is dragged down by fixed per-run/startup cost amortized over only 10 runs
 (50→100 slope 1.2), so the N ≥ 200 fit (~2.1) is the trustworthy asymptotic
-figure, and it is stable rather than climbing toward 3.
-
-This sub-N³ behavior comes from the **weights**, not the graph size. The pairing
-graph is **complete** — every pair of players is an edge, with forbidden pairings
-(rematches, float violations, …) carried as large penalty weights rather than
-removed — so E = O(N²) regardless. What keeps the solver below its worst case is
-how those weights are distributed on realistic fields: the score+rating structure
-makes good augmenting paths easy to find, so the primal-dual search forms few
-blossoms and converges in far fewer steps than an adversarial weighting would
-force. The N³ bound is a worst-case guarantee; on realistic default-Swiss weight
-distributions the solver behaves closer to N².
+figure, and it is stable rather than climbing toward 3. Why it sits below the N³
+worst case is not investigated here.
 
 Absolute ms are machine-specific; the **exponent** is the portable result.
 
