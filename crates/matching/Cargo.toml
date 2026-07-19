@@ -1,7 +1,11 @@
 [package]
 name = "integer-blossom"
 description = "Minimum-weight perfect matching (blossom algorithm) on a general graph, with integer edge weights"
-version.workspace = true
+# Deliberately NOT inherited from the workspace: this crate is published to
+# crates.io independently, so its semver tracks its own public API rather than the
+# application's release cadence. Bump it only when the matching crate itself
+# changes.
+version = "1.2.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

@@ -33,7 +33,12 @@ jobs:
           # The Rust workspace version feeds osp_core::VERSION (the /api/health
           # payload and the client's "server upgraded" check), so it must match
           # the tag too. It's the first `version = "..."` under
-          # [workspace.package] in the root Cargo.toml.
+          # [workspace.package] in the root Cargo.toml. Every workspace member
+          # inherits it (version.workspace = true) EXCEPT `integer-blossom`, which
+          # is published to crates.io independently and carries its own version on
+          # its own release cadence — so it is deliberately NOT checked against the
+          # app tag here. Do not add a check for it: its version is meant to
+          # diverge from the app's.
           ws=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/^version = "([^"]+)".*/\1/')
           # The desktop crate is excluded from the workspace, so it carries its
           # own [package] version — the first `version = "..."` in its manifest.

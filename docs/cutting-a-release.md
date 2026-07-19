@@ -24,6 +24,15 @@ the rest.
    CI's `check-version` job verifies this and fails the release before building
    if any is out of sync.
 
+   > **Not** part of the app version bump:
+   > [`crates/matching`](../crates/matching/Cargo.toml) (`integer-blossom`) is
+   > published to crates.io independently and carries its own `[package]`
+   > version, deliberately decoupled from the workspace. Leave it alone when
+   > cutting an app release — it is bumped only when the matching crate itself
+   > changes and is released on its own cadence (see below). `check-version`
+   > does not gate it, and must not: its version is meant to diverge from the
+   > app's.
+
    Bump the root `version` in
    [`frontend/package-lock.json`](../frontend/package-lock.json) to match too —
    both the top-level field and the one under `packages[""]`, so the lockfile
@@ -56,6 +65,19 @@ the rest.
 Use the **Run workflow** button on the Actions tab — the workflow allows manual
 `workflow_dispatch`. It builds on both platforms without needing a tag, so you
 can confirm the pipeline is green before committing to a real version.
+
+## Releasing the `integer-blossom` crate
+
+[`crates/matching`](../crates/matching/Cargo.toml) is published to crates.io on
+its own schedule, independent of the desktop app above. Its version tracks *its*
+public API, not the app tag, so it moves only when the matching crate changes.
+
+To cut a crate release: bump `version` in
+[`crates/matching/Cargo.toml`](../crates/matching/Cargo.toml) (follow semver for
+the crate's own API — patch for fixes, minor for additions, major for breaking
+changes), commit on `main`, then from `crates/matching/` run `cargo publish`
+(`cargo publish --dry-run` first to sanity-check the package). This is a separate
+act from tagging an app release; neither triggers the other.
 
 ## Notes
 
