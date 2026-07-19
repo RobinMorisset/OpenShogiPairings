@@ -5,57 +5,19 @@ All notable changes to `integer-blossom` are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) over its own public API
 (independent of the OpenShogiPairings application it lives alongside).
 
-## Unreleased
+## 1.3.0 - 2026-07-19
 
 ### Added
+- `examples/bench.rs`: a deterministic, dependency-free micro-benchmark, with
+  two modes — synthetic lexicographic-ladder / pure-ELO instance families
+  (`cargo run --release --example bench`), and **replay of captured real
+  instances** (`-- --replay <dir>`, reading the `.ospm` blobs written by
+  osp-core's `OSP_MATCHING_DUMP` hook) reported per (n, weight-width) with the
+  same adaptive width selection as osp-core.
 - `stats` feature (off by default, **not a stable API**): per-thread counters
   and region timers over the solver's internal phases, printed by
   `examples/bench.rs` when built with `--features stats`. Zero hot-path cost
   when disabled.
-- `examples/bench.rs --replay <dir>`: benchmark captured real instances
-  (`.ospm` blobs written by osp-core's `OSP_MATCHING_DUMP` hook) instead of
-  the synthetic families, reporting per-(n, weight-width) timings with the
-  same adaptive width selection as osp-core. Example-only; no library API
-  change.
-
-## 1.4.1 - 2026-07-19
-
-### Fixed
-- Pooled solves are now **history-independent**: which of several cost-tied
-  optimal matchings is returned no longer depends on what the same thread's
-  reused solver buffers held from earlier solves. Blossom formation wrote an
-  intra-blossom member edge's weight onto the super-vertex's diagonal slot,
-  and a later larger solve read that stale diagonal in its row-maximum dual
-  initialization; a weight-0 (absent) edge could also enter the blossom
-  best-edge comparison through stale endpoint bytes. Results were always
-  optimal, but callers running many solves per thread (osp-sim under rayon)
-  saw work-stealing-dependent tie choices. Guarded by the new
-  `pooled_solver_matches_a_fresh_thread_exactly` test.
-- Tie-breaking among equally-optimal matchings may accordingly differ from
-  1.4.0 in solves that previously read stale buffer state (they now match
-  what a fresh solver returns).
-
-## 1.4.0 - 2026-07-19
-
-### Changed
-- Structure-of-arrays edge storage: the edge matrix is now three parallel
-  matrices (weights / near endpoints / far endpoints) instead of an array of
-  `Edge` structs. The hot scans read only the weight matrix (plus the far
-  endpoint on blossom columns), cutting the bytes they stream by 2–3× — worth
-  ~9% per solve on `i128` lexicographic instances at n=1000, more end-to-end
-  where the caller's costs stay wide. Pure layout change: solves are
-  bit-identical to 1.3.0.
-- Vertex ids in the big `O(n²)` tables shrank from `u32` to `u16`, halving the
-  endpoint and `flower_from` tables. **New documented limit: n ≤ 32767**,
-  asserted at both entry points (far above any realistic field; ids must hold
-  blossom indices up to `2n`).
-
-### Added
-- `examples/bench.rs`: a deterministic, dependency-free micro-benchmark over
-  lexicographic-ladder and pure-ELO instance families (`cargo run --release
-  --example bench`).
-
-## 1.3.0 - 2026-07-19
 
 ### Changed
 - Much faster solves, especially on smooth cost surfaces (up to ~3× end-to-end
@@ -69,12 +31,32 @@ All notable changes to `integer-blossom` are documented here. The format follows
   - Edge weights are stored pre-scaled ×4, removing the doubling from the slack
     computation (the innermost hot expression) and keeping all initial duals
     even (the parity invariant behind exact slack halving).
+  - Structure-of-arrays edge storage: three parallel matrices (weights / near
+    endpoints / far endpoints) instead of an array of `Edge` structs. The hot
+    scans read only the weight matrix (plus the far endpoint on blossom
+    columns), cutting the bytes they stream by 2–3×.
+- Vertex ids in the big `O(n²)` tables shrank from `u32` to `u16`, halving the
+  endpoint and `flower_from` tables. **New documented limit: n ≤ 32767**,
+  asserted at both entry points (far above any realistic field; ids must hold
+  blossom indices up to `2n`).
 - **Headroom requirement tightened**: because of the internal ×4 scaling, a
   weight type now needs roughly three bits of headroom above the largest raw
   weight (previously roughly two). Callers near the top of `i32`/`i64` should
   widen; typical lexicographic `i128` stacks are unaffected.
 - Tie-breaking among equally-optimal matchings may differ from 1.2.x (results
   remain optimal and deterministic).
+
+### Fixed
+- Pooled solves are **history-independent**: which of several cost-tied
+  optimal matchings is returned no longer depends on what the same thread's
+  reused solver buffers held from earlier solves. Blossom formation wrote an
+  intra-blossom member edge's weight onto the super-vertex's diagonal slot,
+  and a later larger solve read that stale diagonal in its row-maximum dual
+  initialization; a weight-0 (absent) edge could also enter the blossom
+  best-edge comparison through stale endpoint bytes. Results were always
+  optimal, but callers running many solves per thread (osp-sim under rayon)
+  saw work-stealing-dependent tie choices. Guarded by the
+  `pooled_solver_matches_a_fresh_thread_exactly` test.
 
 ## 1.2.1 - 2026-07-19
 

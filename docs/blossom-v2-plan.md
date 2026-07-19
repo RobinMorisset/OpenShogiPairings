@@ -1,6 +1,6 @@
 # Blossom v2 plan: sparse core with preserved trees
 
-Target: the two structural levers left after the 1.3.0/1.4.0 constant-factor
+Target: the two structural levers left after the 1.3.0 constant-factor
 work on [`integer-blossom`](../crates/matching/src/lib.rs) — **sparsification**
 (shrink each scan from O(n) to O(k)) and **tree preservation across
 augmentations** (shrink the number of scans) — combined into one staged rewrite.
@@ -87,7 +87,7 @@ a CSR of all n(n−1)/2 edges. Memory is comparable to the SoA matrices.
 **Gates**: all existing oracle/metamorphic/pool tests pass (totals only —
 tie-breaks will shift, so osp-sim anchors are re-baselined, single-thread, as
 for 1.3.0); bench families **plus a new n=100 point** (real tournaments live
-there) within ~10% of 1.4.0 on the dense path; stats show the `add_blossom`
+there) within ~10% of 1.3.0 on the dense path; stats show the `add_blossom`
 share collapsed; `scan_rows` unchanged (preservation comes later).
 
 ## Stage B — sparsification + dual-certificate loop
