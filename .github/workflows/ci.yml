@@ -65,3 +65,53 @@ jobs:
         run: npm test
       - name: i18n locale keys in sync
         run: node scripts/check-i18n-keys.mjs
+
+  # Coverage of the shipped library crates (osp-core, integer-blossom, osp-server),
+  # measured with cargo-llvm-cov. Binary entry points (server/src/main.rs) are
+  # excluded — they are 0%-by-nature glue that would understate real coverage — and
+  # the sim crate (a dev-only Monte-Carlo tool, all binaries) is out of scope
+  # entirely. This matches the number the README badge advertises.
+  #
+  # Informational only: it never fails the build (a coverage dip is a signal, not a
+  # gate). The badge is published from main pushes via a Gist, but only once the
+  # one-time setup exists (a GIST_TOKEN secret + a COVERAGE_GIST_ID variable, see the
+  # README "Coverage" section) — until then the publish step simply skips, so this
+  # job stays green with nothing to configure.
+  coverage:
+    runs-on: ubuntu-latest
+    env:
+      GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+      GIST_ID: ${{ vars.COVERAGE_GIST_ID }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Measure coverage
+        run: |
+          cargo llvm-cov -p osp-core -p integer-blossom -p osp-server \
+            --ignore-filename-regex 'main\.rs$' \
+            --json --output-path coverage.json
+          pct=$(jq '.data[0].totals.lines.percent' coverage.json)
+          printf 'Line coverage (shipped libs): %.2f%%\n' "$pct"
+          printf 'COVERAGE_PCT=%.1f\n' "$pct" >> "$GITHUB_ENV"
+      # Skipped until the Gist setup exists (see README), so this never reddens CI.
+      - name: Publish coverage badge
+        if: ${{ github.ref == 'refs/heads/main' && env.GIST_TOKEN != '' && env.GIST_ID != '' }}
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ env.GIST_TOKEN }}
+          gistID: ${{ env.GIST_ID }}
+          filename: osp-coverage.json
+          label: coverage
+          message: ${{ env.COVERAGE_PCT }}%
+          valColorRange: ${{ env.COVERAGE_PCT }}
+          minColorRange: 50
+          maxColorRange: 95

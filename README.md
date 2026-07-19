@@ -1,5 +1,7 @@
 # OpenShogiPairings
 
+[![CI](https://github.com/RobinMorisset/OpenShogiPairings/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/RobinMorisset/OpenShogiPairings/actions/workflows/ci.yml)
+
 Tournament management software for shogi, built to fit shogi's needs rather than
 reusing go/chess software. Built around a **client/server** architecture so
 that multiple referees can edit the same tournament live, from their own
@@ -452,9 +454,39 @@ Rust coverage uses [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov)
 ```sh
 cargo llvm-cov -p osp-core --summary-only      # core only
 cargo llvm-cov -p osp-server --summary-only    # server only
-cargo llvm-cov --workspace --summary-only      # both combined
+cargo llvm-cov --workspace --summary-only      # everything, incl. binaries
 cargo llvm-cov --workspace --html              # HTML report in target/llvm-cov/html/index.html
+
+# The exact figure the CI badge reports: the shipped library crates, with
+# binary entry points (server/src/main.rs) excluded.
+cargo llvm-cov -p osp-core -p integer-blossom -p osp-server \
+  --ignore-filename-regex 'main\.rs$' --summary-only
 ```
 
-The frontend uses [vitest](https://vitest.dev) (`npm test`) for unit tests, but
-has no coverage tooling wired up yet — see [TODO.md](TODO.md).
+**What the badge measures.** The `coverage` job in CI reports the shipped library
+crates (`osp-core`, `integer-blossom`, `osp-server`) and *excludes* binary entry
+points — `server/src/main.rs` and the whole `osp-sim` dev tool are 0%-by-nature
+glue that would understate the real figure. The measured logic sits at ~95% line
+coverage; the residual gaps are deliberately-untested server I/O (the live FESA
+fetch in `ratings.rs`, the SSE stream in `live.rs`), not core logic. The job is
+informational — it never fails the build.
+
+**Enabling the badge (one-time GitHub setup).** The badge reads its number from a
+GitHub Gist that CI keeps up to date. Two account-side steps, which the repo owner
+must do (they can't be scripted here):
+
+1. Create a **secret** Gist (any single file, e.g. `osp-coverage.json` with `{}`),
+   and note its ID (the hash in its URL).
+2. Create a [fine-grained PAT](https://github.com/settings/tokens) with **Gist**
+   read/write, then in this repo's **Settings → Secrets and variables → Actions**
+   add a secret `GIST_TOKEN` (the PAT) and a variable `COVERAGE_GIST_ID` (the ID).
+
+Once both exist, the next push to `main` publishes the number, and this badge goes
+live at the top of the README (swap in the Gist ID):
+
+```md
+[![coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/RobinMorisset/<GIST_ID>/raw/osp-coverage.json)](https://github.com/RobinMorisset/OpenShogiPairings/actions/workflows/ci.yml)
+```
+
+The frontend uses [vitest](https://vitest.dev) (`npm test`) for unit tests but has
+no coverage tooling wired up, by design — very little testable logic lives there.
