@@ -563,13 +563,17 @@ struct PlayerProb {
     top3: f64,
 }
 
-/// Strength order (strongest first) for a strength map.
+/// Strength order (strongest first) for a strength map. Ties broken by
+/// tournament number: without a total order, equal strengths would keep the
+/// `HashMap`'s iteration order, which varies per process *and* per rayon worker
+/// thread — the fidelity/hit metrics would then differ from run to run.
 fn strength_order(strengths: &StrengthMap) -> Vec<TournamentId> {
     let mut ids: Vec<TournamentId> = strengths.keys().copied().collect();
     ids.sort_by(|a, b| {
         strengths[b]
             .partial_cmp(&strengths[a])
             .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.cmp(b))
     });
     ids
 }
@@ -644,8 +648,13 @@ fn append_strength_rows(
     names: &HashMap<TournamentId, String>,
 ) {
     for (i, o) in outcomes.iter().enumerate() {
-        for (id, strength) in &o.strengths {
-            let player = names.get(id).map(String::as_str).unwrap_or("?");
+        // Sorted by tournament number: HashMap iteration order varies per process
+        // and per thread, and the dump should be reproducible.
+        let mut rows: Vec<(TournamentId, f64)> =
+            o.strengths.iter().map(|(&id, &s)| (id, s)).collect();
+        rows.sort_by_key(|&(id, _)| id);
+        for (id, strength) in rows {
+            let player = names.get(&id).map(String::as_str).unwrap_or("?");
             buf.push_str(&format!("{variant},{i},\"{player}\",{strength:.2}\n"));
         }
     }
@@ -757,7 +766,10 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
             e.1 += games as u64;
         }
     }
-    let ids: Vec<TournamentId> = pool.keys().copied().collect();
+    // Sorted: HashMap order varies per process/thread, and it feeds both the
+    // float-summation order and the tie order inside the welfare computation.
+    let mut ids: Vec<TournamentId> = pool.keys().copied().collect();
+    ids.sort_unstable();
     let values: Vec<f64> = ids
         .iter()
         .map(|id| pool[id].0 / pool[id].1 as f64)

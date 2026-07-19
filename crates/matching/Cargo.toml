@@ -5,7 +5,7 @@ description = "Minimum-weight perfect matching (blossom algorithm) on a general 
 # crates.io independently, so its semver tracks its own public API rather than the
 # application's release cadence. Bump it only when the matching crate itself
 # changes.
-version = "1.4.0"
+version = "1.4.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

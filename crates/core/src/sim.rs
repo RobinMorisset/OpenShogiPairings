@@ -302,7 +302,10 @@ pub fn welfare_shortfall(values: &[f64], weights: &[f64]) -> Vec<f64> {
 /// Each player's game interest for one tournament: `(player, Σ entropy, #games)`,
 /// where a game's interest is its outcome entropy ([`binary_entropy`]) on the two
 /// true strengths. Byes are not games (skipped); a player with no games is absent
-/// from the result. The building block for [`interest_welfare`].
+/// from the result. Sorted by tournament number: a `HashMap`-iteration order here
+/// would vary per process and per thread, and it feeds float summations
+/// (welfare) whose rounding depends on term order — the whole simulation must be
+/// bitwise reproducible. The building block for [`interest_welfare`].
 pub fn player_game_interest(
     tournament: &Tournament,
     strengths: &StrengthMap,
@@ -325,7 +328,10 @@ pub fn player_game_interest(
             }
         }
     }
-    sum.into_iter().map(|(id, s)| (id, s, count[&id])).collect()
+    let mut interest: Vec<(TournamentId, f64, u32)> =
+        sum.into_iter().map(|(id, s)| (id, s, count[&id])).collect();
+    interest.sort_by_key(|&(id, _, _)| id);
+    interest
 }
 
 /// The **game-interest** metric: the game-count-weighted Sen welfare of the

@@ -58,12 +58,15 @@ Pitfalls that make numbers non-comparable:
 diff -q scratch/baseline.txt scratch/candidate.txt && echo "byte-identical"
 ```
 
-**Anchor runs must be single-threaded** (`RAYON_NUM_THREADS=1`): multithreaded
-output is *almost* deterministic but flips a couple of summary lines roughly
-once per 1000 runs (a near-tie decided by rayon scheduling — known bug), so a
-multithreaded anchor produces false diffs. Single-thread output is perfectly
-repeatable. Also regenerate the baseline from committed source in the same
-session — don't trust an anchor file from an earlier working-tree build.
+Output is byte-identical regardless of thread count (multithreaded ==
+`RAYON_NUM_THREADS=1`, and repeatable across processes), so either works as an
+anchor. (This once wasn't true: the pooled blossom solver leaked stale state
+between solves on a worker thread, flipping near-tie summary lines under rayon
+scheduling — fixed in integer-blossom 1.4.1, guarded by its
+`pooled_solver_matches_a_fresh_thread_exactly` test.) Still prefer
+`RAYON_NUM_THREADS=1` for anchors so the *timing* context matches §2. Also
+regenerate the baseline from committed source in the same session — don't
+trust an anchor file from an earlier working-tree build.
 
 ## 4. Sampling profile (where the time goes)
 

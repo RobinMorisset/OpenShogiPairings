@@ -192,6 +192,16 @@ impl<W: Weight> Blossom<W> {
     /// from an earlier (larger or smaller) instance is correct as long as it is
     /// big enough. Growth only ever extends the buffers (indices `1..=2n` are all
     /// a smaller `n` could have touched), never truncates.
+    ///
+    /// Reuse must preserve more than optimality: the solver must return the
+    /// *identical* matching a fresh solver would — among cost-tied optima, the
+    /// choice must not depend on buffer history, or callers running many solves
+    /// per thread (osp-sim under rayon) become nondeterministic under work
+    /// stealing. That hinges on two invariants beyond the rewrites above: every
+    /// diagonal weight stays 0 for the buffer's life (`add_blossom` skips
+    /// `x == b` in its copy loop), and weight-0 slots — whose neighbouring
+    /// endpoint bytes may be stale — are never read for anything but the weight.
+    /// Guarded by the `pooled_solver_matches_a_fresh_thread_exactly` test.
     fn reset(&mut self, n: usize) {
         self.n = n;
         self.n_x = n;
@@ -442,7 +452,28 @@ impl<W: Weight> Blossom<W> {
         while mi < self.flower[b].len() {
             let xs = self.flower[b][mi];
             for x in 1..=self.n_x {
+                // Never write the diagonal `(b, b)`: once the first member's
+                // column-`b` entries are in, `g(xs, b)` holds an *intra-blossom*
+                // member edge, and copying it onto `(b, b)` would leave a stale
+                // positive weight there after the solve. A later, larger solve on
+                // this pooled buffer then reads that slot as a real vertex's
+                // diagonal in its row-maximum scan, inflating an initial dual and
+                // silently steering which cost-tied optimal matching is returned
+                // — solver output must never depend on pool history. Skipping
+                // keeps the invariant "every diagonal weight is 0" for the
+                // buffer's whole life.
+                if x == b {
+                    continue;
+                }
                 let gxsx = self.g(xs, x);
+                // A weight-0 slot is "no edge" (sparse max-weight instances): not
+                // a candidate for the blossom's best edge to `x`. It must not win
+                // the comparison below — its `e_delta` reads whatever stale
+                // endpoints sit beside the zero weight, which depends on buffer
+                // history.
+                if gxsx.w == W::ZERO {
+                    continue;
+                }
                 let gbx = self.g(b, x);
                 if gbx.w == W::ZERO || self.e_delta(gxsx) < self.e_delta(gbx) {
                     let gxxs = self.g(x, xs);
@@ -652,14 +683,19 @@ impl<W: Weight> Blossom<W> {
             self.st[b] = 0;
             self.flower[b].clear();
         }
-        // Row maxima, gathered into `lab` (they become the duals below).
+        // Row maxima, gathered into `lab` (they become the duals below). The
+        // diagonal is skipped: it is no real edge, and although every diagonal
+        // weight is 0 by invariant (`set_edge` never writes one and
+        // `add_blossom`'s copy loop skips `x == b`), reading it here is exactly
+        // where a stale diagonal from a reused pool buffer would leak into the
+        // duals — this scan must stay correct on its own.
         for u in 1..=self.n {
             let mut m = W::ZERO;
             let row = u * self.stride;
             for v in 1..=self.n {
                 self.set_flower_from(u, v, if u == v { u } else { 0 });
                 let w = self.gw[row + v];
-                if w > m {
+                if v != u && w > m {
                     m = w;
                 }
             }
@@ -1206,6 +1242,74 @@ mod tests {
         let mate = min_weight_perfect_matching(&flat(&cost), cost.len());
         assert_eq!(mate[0], 1);
         assert_eq!(mate[2], 3);
+    }
+
+    #[test]
+    fn pooled_solver_matches_a_fresh_thread_exactly() {
+        // The per-thread pool must be *history-independent*: solving an instance
+        // after other (differently-sized) instances on the same thread must
+        // return the exact same matching a fresh solver would — not merely one of
+        // equal cost. (A stale buffer once leaked a previous solve's blossom
+        // weights through the diagonal into the next solve's initial duals,
+        // steering which of several cost-tied optimal matchings was returned —
+        // making osp-sim's rayon output depend on work-stealing history.)
+        // Tie-rich instances (tiny cost range) with interleaved sizes exercise
+        // exactly that: the sizes straddle each other so one solve's blossom
+        // index range lands inside the next solve's real-vertex range.
+        let mut seed: u64 = 0xA5A5_5A5A_DEAD_BEEF;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let mut random_cost = |n: usize, spread: u64, outlier: i64| {
+            let mut cost = vec![0i64; n * n];
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    // A tiny range forces many cost-tied optimal matchings.
+                    let c = (next() % spread) as i64;
+                    cost[i * n + j] = c;
+                    cost[j * n + i] = c;
+                }
+            }
+            // One expensive pair drives the min-cost reduction's offset (and so
+            // every other edge's *weight*) sky-high, exercising instances whose
+            // internal weights dwarf a later instance's.
+            if outlier > 0 && n >= 2 {
+                cost[1] = outlier;
+                cost[n] = outlier;
+            }
+            cost
+        };
+
+        // Alternate a big-weight tied instance (blossom-forming, huge internal
+        // weights) with a *larger* cheap tied instance, so the first solve's
+        // blossom index range lands inside the second's real-vertex range.
+        let mut instances: Vec<(usize, Vec<i64>)> = Vec::new();
+        for k in 0..12 {
+            let n1 = 40 + 2 * (k % 5);
+            let n2 = n1 + 20;
+            instances.push((n1, random_cost(n1, 3, 1_000)));
+            instances.push((n2, random_cost(n2, 3, 0)));
+        }
+        let dirty: Vec<Vec<usize>> = instances
+            .iter()
+            .map(|(n, cost)| min_weight_perfect_matching(cost, *n))
+            .collect();
+
+        // The same instances, each solved on its own brand-new thread (fresh
+        // pool, no history), must match exactly.
+        for (k, (n, cost)) in instances.iter().enumerate() {
+            let (n, cost) = (*n, cost.clone());
+            let fresh = std::thread::spawn(move || min_weight_perfect_matching(&cost, n))
+                .join()
+                .unwrap();
+            assert_eq!(
+                dirty[k], fresh,
+                "instance {k} (n={n}): pooled result depends on solver history"
+            );
+        }
     }
 
     #[test]
