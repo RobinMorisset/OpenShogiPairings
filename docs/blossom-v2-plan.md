@@ -86,9 +86,22 @@ share collapsed; `scan_rows` unchanged (preservation comes later).
 Pipeline inside `min_weight_perfect_matching` (public signature unchanged),
 active above a size threshold (~n ≥ 128, benched; below it, full-graph CSR):
 
-1. **Candidate graph**: per vertex, the k cheapest incident edges
-   (deterministic `(cost, index)` order; k = 16 initially, tuned by bench),
-   symmetrized by union.
+1. **Candidate graph**: any deterministic per-vertex edge set — the seed
+   carries **no correctness burden** (steps 3–5 guarantee exactness whatever
+   it contains), only a convergence-speed one, so it need not be uniform-k
+   and should lean on caller structure. Two seeders:
+   - *Solver default* (dense entry, property tests): per vertex, the k
+     cheapest incident edges (deterministic `(cost, index)` order; k = 16
+     initially, tuned by bench), symmetrized by union.
+   - *Caller-supplied* via a new `min_weight_perfect_matching_seeded(cost, n,
+     seed_edges)` entry (full cost matrix still required — certificate and
+     densify touch arbitrary pairs). osp-core's seeder: per player, the ~8
+     cheapest in-points-group pairs plus the ~4 cheapest one-step ascender
+     and ~4 descender pairs — ranked by the *real ladder cost* (rematch/club
+     penalties included), degrading to whole-group for small groups and to
+     plain ELO-distance k-NN in pure-ELO mode. Union symmetrization makes
+     multi-step float cascades decompose into covered one-step edges;
+     expected convergence 1–2 iterations.
 2. **Solve** on the subgraph (Stage A core, perfect mode).
 3. **Stuck** (some root exhausts, `d == inf`): the subgraph has no perfect
    matching or its duals can't progress — double k (rebuild, cold re-solve);
@@ -181,5 +194,14 @@ n=1000 down ≥5× (~58k → ≤ ~10k); wall-time targets (hypotheses): lex n=10
      numbers satisfy.
 - **Out of scope, noted**: osp-core builds full O(n²) i128 cost matrices per
   round before the solver ever runs — once the solver is sparse, a direct
-  sparse entry from `pairing.rs` (build only k-NN costs) is the natural next
-  step, but it is an osp-core change, not part of this plan.
+  sparse entry from `pairing.rs` (build only seeded candidate costs) is the
+  natural next step, but it is an osp-core change, not part of this plan.
+  The path there is **block-pruning the certificate**: a violation at (i, j)
+  means an omitted edge is cheaper than the pair's dual budget
+  (`cost(i,j) < offset − (lab[i]+lab[j])/4`), so with per-group maxima of
+  `lab` and caller-known lower bounds on cross-group costs (float penalties
+  grow with group distance), whole group×group blocks are excluded in O(1) —
+  making the certificate, and hence the whole pipeline, sub-quadratic in
+  rule evaluations. Requires a cost-oracle API instead of a materialized
+  matrix; design it only after Stage B's measured iteration counts confirm
+  the seeded convergence.
