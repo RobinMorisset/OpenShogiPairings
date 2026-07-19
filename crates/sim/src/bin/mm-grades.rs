@@ -26,6 +26,10 @@
 //!         multiplier / default Gaussian prior), so results can move them.
 //! If no thresholds are selected (e.g. `N` larger than the field allows), it
 //! writes nothing.
+//!
+//! Configs use the nested `PairingMode` layout `TournamentSettings` deserializes
+//! (`pairing.macmahon.{thresholds,source}`); a flat top-level layout is silently
+//! ignored, since unknown keys are dropped.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -137,35 +141,46 @@ fn main() -> ExitCode {
         .map(|&b| serde_json::json!({ "criterion": { "kind": "elo", "value": b } }))
         .collect();
 
-    // The configs, all sharing the same thresholds.
-    let cfg_a = serde_json::json!({ "macmahon_thresholds": thresholds });
-    let cfg_b = serde_json::json!({
-        "macmahon_thresholds": thresholds,
-        "macmahon_from_estimated_elo": true,
-        // k = 0 pins every rated *and* provisional player (the provisional
-        // multiplier stacks multiplicatively onto this zero), estimating unrated
-        // players only.
-        "elo_k_multiplier_percent": 0,
-        "elo_prior_shape_unrated": "flat",
-    });
-    let cfg_c = serde_json::json!({
-        "macmahon_thresholds": thresholds,
-        "macmahon_from_estimated_elo": true,
-        "elo_k_multiplier_percent": 0,
-        "elo_prior_shape_unrated": "laplace",
-        "elo_unrated_prior_center": 700,
-        "elo_unrated_k": 260,
-        "elo_upward_looseness_unrated_percent": 300,
-    });
-    // Like `b`, but rated/provisional players are *not* pinned: the default K
+    // The configs, all sharing the same thresholds, in the **nested**
+    // `PairingMode` shape `osp-sim` deserializes (Swiss > macmahon > {thresholds,
+    // source}). A flat top-level layout (`macmahon_thresholds`, `elo_*`, …) is
+    // silently dropped — those were top-level fields before the PairingMode enum
+    // refactor, and `TournamentSettings` ignores unknown keys.
+    let with_source = |source: serde_json::Value| {
+        serde_json::json!({
+            "pairing": { "kind": "swiss", "macmahon": {
+                "thresholds": thresholds.clone(),
+                "source": source,
+            } }
+        })
+    };
+    // `a` — static MacMahon (thresholds alone).
+    let cfg_a = with_source(serde_json::json!({ "kind": "static" }));
+    // `b` — MacMahon from the live estimate; k = 0 pins every rated *and*
+    // provisional player (estimating unrated only), unrated on a Flat prior.
+    let cfg_b = with_source(serde_json::json!({
+        "kind": "from_estimate",
+        "estimator": { "k_multiplier": 0, "prior_shape_unrated": "flat" },
+    }));
+    // `c` — like `b` but the unrated prior is the tuned asymmetric Huber-Laplace
+    // (the settings-tab "Tuned Laplace": centre 700, k 260, upward looseness 300%).
+    let cfg_c = with_source(serde_json::json!({
+        "kind": "from_estimate",
+        "estimator": {
+            "k_multiplier": 0,
+            "prior_shape_unrated": "laplace",
+            "unrated_prior_center": 700,
+            "unrated_k": 260,
+            "upward_looseness_unrated": 300,
+        },
+    }));
+    // `d` — like `b` but rated/provisional players are *not* pinned: the default K
     // multiplier lets their estimated ELO follow the default (Gaussian) prior
-    // around their rating, so results can move them. Unrated players still use the
-    // Flat prior.
-    let cfg_d = serde_json::json!({
-        "macmahon_thresholds": thresholds,
-        "macmahon_from_estimated_elo": true,
-        "elo_prior_shape_unrated": "flat",
-    });
+    // around their rating, so results can move them. Unrated still use Flat.
+    let cfg_d = with_source(serde_json::json!({
+        "kind": "from_estimate",
+        "estimator": { "prior_shape_unrated": "flat" },
+    }));
 
     let stem = Path::new(path)
         .file_stem()
