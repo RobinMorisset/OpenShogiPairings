@@ -3,11 +3,47 @@
 # Full test suite runs in pre-push instead, to keep commits snappy.
 set -e
 
-echo "== rustfmt --check (staged .rs) =="
+echo "== rustfmt (staged .rs) =="
+# Auto-format the staged .rs files instead of just gating on them. A commit
+# captures the INDEX, not the working tree, so we re-stage what rustfmt rewrites
+# — but only for files that are FULLY staged. Re-staging a file that also has
+# unstaged changes would silently fold that unstaged work into the commit, so a
+# partially-staged file that rustfmt would rewrite is reported and gates instead.
 staged_rs=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')
 if [ -n "$staged_rs" ]; then
+  # Files with unstaged changes (partial staging), space-wrapped for a `case`
+  # membership test that stays clean under `set -e`.
+  unstaged_rs=" $(git diff --name-only -- '*.rs' | tr '\n' ' ') "
+
+  bad_partial=""
   # shellcheck disable=SC2086
-  rustfmt --edition 2021 --check $staged_rs
+  for f in $staged_rs; do
+    before=$(git hash-object -- "$f")
+    rustfmt --edition 2021 "$f"
+    after=$(git hash-object -- "$f")
+    [ "$before" = "$after" ] && continue   # already formatted, nothing to do
+
+    case "$unstaged_rs" in
+      *" $f "*)
+        # Partially staged: can't fold the reformat in without also grabbing the
+        # unstaged hunks. Flag it and gate below.
+        bad_partial="$bad_partial $f" ;;
+      *)
+        # Fully staged: re-stage the formatted version — just normalizes what's
+        # already going into the commit.
+        git add -- "$f"
+        echo "   formatted and re-staged: $f" ;;
+    esac
+  done
+
+  if [ -n "$bad_partial" ]; then
+    echo
+    echo "pre-commit: partially staged .rs file(s) still need formatting:"
+    # shellcheck disable=SC2086
+    for f in $bad_partial; do echo "    $f"; done
+    echo "  Stage them fully (git add <file>), or format + stage by hand, then re-commit."
+    exit 1
+  fi
 fi
 
 echo "== cargo clippy =="

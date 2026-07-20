@@ -440,8 +440,10 @@ Versioned hooks live in [`scripts/git-hooks/`](scripts/git-hooks) (not
 git config core.hooksPath scripts/git-hooks
 ```
 
-- `pre-commit` — `cargo fmt --check`, `cargo clippy --workspace --all-targets
-  -- -D warnings`, `svelte-check`, and an i18n locale-key check
+- `pre-commit` — rustfmt (auto-formats staged `.rs` files and re-stages them, so
+  a formatting nit doesn't fail the commit; a partially-staged file it would
+  rewrite is reported and gates instead), `cargo clippy --workspace
+  --all-targets -- -D warnings`, `svelte-check`, and an i18n locale-key check
   (`scripts/check-i18n-keys.mjs`, catching keys that exist in one locale but
   not the other). Fast; keeps the tree clean commit by commit.
 - `pre-push` — the full test suite: `cargo test --workspace` and the frontend
