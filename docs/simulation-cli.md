@@ -97,10 +97,12 @@ ratings.
 Each `--configs` file is a complete
 [`TournamentSettings`](../crates/core/src/settings.rs) JSON object (not a patch) —
 the same shape the server accepts and `normalized()` cleans up. Unset fields take
-their defaults, so a minimal variant is small, e.g. a single ELO MacMahon band:
+their defaults, so a minimal variant is small, e.g. a single ELO MacMahon band
+(MacMahon lives nested under the tagged `pairing` union, **not** at the top level —
+a top-level `macmahon_thresholds` key is silently ignored):
 
 ```json
-{ "macmahon_thresholds": [ { "criterion": { "kind": "elo", "value": 1486 } } ] }
+{ "pairing": { "kind": "swiss", "macmahon": { "thresholds": [ { "criterion": { "kind": "elo", "value": 1486 } } ], "source": { "kind": "static" } } } }
 ```
 
 The Settings tab in the app has an **"Export settings"** button that downloads

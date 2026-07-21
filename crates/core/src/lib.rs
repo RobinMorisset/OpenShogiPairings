@@ -47,8 +47,8 @@ pub use round::{
 };
 pub use settings::{
     ClubProtection, EloEstimator, EloPriorShape, FloaterStyle, HandicapDisplay, HandicapPolicy,
-    MacMahon, MacMahonSource, PairingMode, Ratio, RatioAtLeastOne, Tiebreak, TournamentSettings,
-    UnratedK,
+    MacMahon, MacMahonSource, MacMahonThreshold, PairingMode, Ratio, RatioAtLeastOne,
+    ThresholdCriterion, Tiebreak, TournamentSettings, UnratedK,
 };
 pub use standings::{compute_standings, Standing};
 pub use tournament::{
