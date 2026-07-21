@@ -327,6 +327,7 @@ impl ThresholdCriterion {
 /// round after which it stops applying.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct MacMahonThreshold {
     pub criterion: ThresholdCriterion,
     /// Degressive MacMahon ("accelerated Swiss"): if `Some(n)`, this threshold
@@ -465,6 +466,7 @@ fn default_elo_upward_looseness_percent() -> RatioAtLeastOne {
 /// there is no way to carry estimator settings with no estimate behind them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct EloEstimator {
     /// K multiplier `m` (see [`TournamentSettings::elo_k_multiplier`]). `0` pins
     /// every rated player to their registration rating.
@@ -536,6 +538,7 @@ pub enum MacMahonSource {
 /// none.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct MacMahon {
     /// Thresholds (sorted, de-duplicated) defining the starting groups. Empty
     /// means everyone starts at 0.
@@ -594,6 +597,7 @@ impl Default for PairingMode {
 /// a category never affects pairing, MacMahon points or the ranking itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct PlayerCategory {
     /// Stable identifier, minted by the client when the category is created, so a
     /// player's membership (which references this id) survives a later rename.
@@ -609,8 +613,22 @@ pub struct PlayerCategory {
 /// without disturbing the rest of the tournament shape. Added as an additive,
 /// defaulted field, so tournaments saved before it existed still load (with no
 /// MacMahon groups).
+///
+/// `deny_unknown_fields`: an unrecognised key is a hard error, not silently
+/// dropped. A stale or misplaced key (e.g. a top-level `macmahon_thresholds` from
+/// before MacMahon moved under `pairing`) would otherwise parse into the default
+/// and quietly disable the setting the caller asked for — the exact failure that
+/// made every `mm-grades` config a no-op copy of plain Swiss. Backward compat is
+/// unaffected (old saves have *fewer* fields, filled by `#[serde(default)]`); the
+/// cost is forward compat — a settings field added in a newer build makes that
+/// save unreadable by an older one, which `format_version` is there to gate. The
+/// nested `#[serde(tag = "kind")]` enums (`PairingMode`, `MacMahonSource`, …) can't
+/// carry this attribute (serde forbids it on internally-tagged enums), so a typo
+/// *inside* one of those objects is still tolerated; the top-level guard here is
+/// what catches the whole-schema drift.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct TournamentSettings {
     /// How the tournament is paired: Swiss/MacMahon over static ratings (with the
     /// floater/airtight/club/MacMahon knobs) or ELO mode over a live estimate (see
@@ -1509,5 +1527,38 @@ mod tests {
         // Omitted in the payload → the default (Classic).
         let s: TournamentSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(s.floater_style(), FloaterStyle::Classic);
+    }
+
+    #[test]
+    fn unknown_fields_are_rejected_not_silently_dropped() {
+        // The pre-refactor flat schema (MacMahon at the top level) must be a hard
+        // error, not parse into a default that silently disables MacMahon — the bug
+        // that made every mm-grades config a no-op copy of plain Swiss.
+        let flat =
+            r#"{ "macmahon_thresholds": [ { "criterion": { "kind": "elo", "value": 1486 } } ] }"#;
+        let err = serde_json::from_str::<TournamentSettings>(flat).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unknown field `macmahon_thresholds`"),
+            "expected an unknown-field error, got: {err}"
+        );
+
+        // The guard reaches the nested config structs too.
+        let bad_estimator = r#"{ "pairing": { "kind": "swiss", "macmahon": {
+            "thresholds": [], "source": { "kind": "from_estimate",
+            "estimator": { "elo_k_multiplier_percent": 0 } } } } }"#;
+        let err = serde_json::from_str::<TournamentSettings>(bad_estimator).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unknown field `elo_k_multiplier_percent`"),
+            "expected an unknown-field error on the estimator, got: {err}"
+        );
+
+        // A correct nested config still parses and populates MacMahon.
+        let good = r#"{ "pairing": { "kind": "swiss", "macmahon": {
+            "thresholds": [ { "criterion": { "kind": "elo", "value": 1486 } } ],
+            "source": { "kind": "static" } } } }"#;
+        let s: TournamentSettings = serde_json::from_str(good).unwrap();
+        assert_eq!(s.macmahon_thresholds().len(), 1);
     }
 }

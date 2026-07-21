@@ -11,6 +11,19 @@ import type { Tiebreak } from "./Tiebreak";
  * without disturbing the rest of the tournament shape. Added as an additive,
  * defaulted field, so tournaments saved before it existed still load (with no
  * MacMahon groups).
+ *
+ * `deny_unknown_fields`: an unrecognised key is a hard error, not silently
+ * dropped. A stale or misplaced key (e.g. a top-level `macmahon_thresholds` from
+ * before MacMahon moved under `pairing`) would otherwise parse into the default
+ * and quietly disable the setting the caller asked for — the exact failure that
+ * made every `mm-grades` config a no-op copy of plain Swiss. Backward compat is
+ * unaffected (old saves have *fewer* fields, filled by `#[serde(default)]`); the
+ * cost is forward compat — a settings field added in a newer build makes that
+ * save unreadable by an older one, which `format_version` is there to gate. The
+ * nested `#[serde(tag = "kind")]` enums (`PairingMode`, `MacMahonSource`, …) can't
+ * carry this attribute (serde forbids it on internally-tagged enums), so a typo
+ * *inside* one of those objects is still tolerated; the top-level guard here is
+ * what catches the whole-schema drift.
  */
 export type TournamentSettings = { 
 /**
