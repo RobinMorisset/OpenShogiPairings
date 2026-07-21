@@ -145,15 +145,15 @@ maximisation and buys three things over the box:
 estimates move fast — see §2.4 for exactly how fast, and the trade-off if it
 proves too jumpy in practice.
 
-Both ends of this prior are **referee-tunable** (defaults reproduce the above):
-`elo_unrated_prior_center` is the mean, and `elo_unrated_k` sets the width via the
-*same* `σ₀ = √(K · s)` law a rated player's K obeys — so the referee tunes one
+Both ends of this prior are **referee-tunable** (defaults reproduce the above): the
+estimator's `unrated_prior_center` is the mean, and `unrated_k` sets the width via
+the *same* `σ₀ = √(K · s)` law a rated player's K obeys — so the referee tunes one
 familiar quantity rather than a raw standard deviation (a rated K is ~16–40; the
 unrated default `705` gives `σ ≈ 350`). The center and K are stored as integers so
 the settings stay `Eq`; `elo_unrated_k()` clamps K ≥ 1. The estimator is unaffected
 by the overall multiplier `m` and the provisional multiplier for unrated players —
 an unrated player has no registration rating to drift from or be provisional about,
-so `elo_unrated_k` is itself the only width knob. The simulator's oracle mirrors
+so `unrated_k` is itself the only width knob. The simulator's oracle mirrors
 these as `--oracle-unrated-center` / `--oracle-unrated-k` (its own truth-model
 knobs, distinct from a variant's settings), so the true world's newcomer spread can
 be studied independently of what a variant *believes* about newcomers.
@@ -228,7 +228,7 @@ referee can pick fatter tails, an upward tilt, both, or neither.
 
 - **Width mapping.** The Laplace scale is variance-matched to the Gaussian,
   `b_down = σ₀/√2`, so the existing knobs (`m`, provisional multiplier,
-  `elo_unrated_k`) keep their meaning — they still set `σ₀`, which sets `b_down`.
+  `unrated_k`) keep their meaning — they still set `σ₀`, which sets `b_down`.
 - **Asymmetry, per player category — and it works for *both* shapes.** The upward
   arm is widened by a ratio `r ≥ 1`: for the Laplace `b_up = r · b_down`, and for
   the Gaussian `σ_up = r · σ₀` (a **two-piece normal** — std `σ₀` below the mean,
@@ -236,12 +236,12 @@ referee can pick fatter tails, an upward tilt, both, or neither.
   under-rated improver) clear on less evidence than a downward one, while the
   downward arm stays as tight as before. `r = 1` is symmetric and, for the
   Gaussian, collapses back to the plain `N(μ₀, σ₀²)` exactly. `r` is set
-  **separately for the three prior categories** — `elo_upward_looseness_
-  established`, `_provisional`, `_unrated` — because a global tilt is rarely what
-  you want: a reliable FESA rating deserves little upward bias, whereas a newcomer
-  who beats the field is far more likely genuinely strong than lucky, so the
-  unrated (and, to a lesser degree, provisional) categories are where the
-  asymmetry earns its keep. Each player reads the `r` of the same category that
+  **separately for the three prior categories** — the estimator fields
+  `upward_looseness_established`, `_provisional`, `_unrated` — because a global tilt
+  is rarely what you want: a reliable FESA rating deserves little upward bias,
+  whereas a newcomer who beats the field is far more likely genuinely strong than
+  lucky, so the unrated (and, to a lesser degree, provisional) categories are where
+  the asymmetry earns its keep. Each player reads the `r` of the same category that
   set its width (§2.1/§2.2). All three default to `1`.
 - **Still log-concave.** For the Laplace, `−|d|` is concave, so the objective stays
   concave and the MAP unique; the only wrinkle is the kink at `d = 0`, where the
@@ -262,7 +262,7 @@ alone** — the maximum-likelihood performance rating over their games. This
 reproduces the FESA rating program's treatment of unrated newcomers (the
 `performance2` Newton solve), where a strong veteran arriving without an ELO is
 rated straight off the field they beat, with no regularisation toward the unrated
-centre. It is meant for the `elo_prior_shape_unrated` slot; the upward-looseness
+centre. It is meant for the `prior_shape_unrated` slot; the upward-looseness
 knobs don't apply (there's no arm to widen). Because a flat prior can't bound an
 all-win or all-loss likelihood, those scorelines follow `turnering.py`'s guards,
 applied in `estimate_elos`:
@@ -380,15 +380,15 @@ preserved by construction.
 
 **Club protection is intentionally dropped in this mode.** It would sit below
 EloGap, whose real-valued squared-gap costs are essentially never tied, so a club
-tie-break would almost never change a pairing — not worth the tier. The
-`club_protection_*` settings are simply ignored when the ELO mode is on.
+tie-break would almost never change a pairing — not worth the tier. Club protection
+is a Swiss-only knob (`pairing.club_protection`, present only on the
+`PairingMode::Swiss` variant) and is structurally absent from the `Elo` variant.
 
-### 6a. Estimate-based MacMahon (`macmahon_from_estimated_elo`)
+### 6a. Estimate-based MacMahon (`pairing.macmahon.source = from_estimate`)
 
 An orthogonal way to hybridize — this one touches **scoring**, not the pairing
 rule list, so it composes with plain Swiss pairing (it's moot under pure ELO,
-which ignores MacMahon). When
-`macmahon_from_estimated_elo` is on, `compute_scores`
+which ignores MacMahon). When MacMahon's source is `from_estimate`, `compute_scores`
 ([`crates/core/src/scoring.rs`](../crates/core/src/scoring.rs)) awards each
 player's MacMahon starting points from the **live ELO estimate** instead of their
 registration rating: it calls `estimate_elos(...)` once and, for each player,
@@ -410,30 +410,62 @@ ELO context it wouldn't use. The `Tiebreak::EstElo` ranking criterion becomes
 valid here too (a live estimate is maintained), so `normalized()` keeps it
 whenever either `elo_estimate_needed()` **or** `macmahon_from_estimate_active()`.
 
-Note this uses the same `elo_k_multiplier_percent` / `elo_provisional_multiplier_percent`
-knobs as the pairing modes; their inputs live in the pairing-mode section of the
-settings UI, so under plain Swiss the estimator runs with the stored defaults.
+Note this uses the same `k_multiplier` / `provisional_multiplier` estimator knobs
+as pure-ELO pairing (the `EloEstimator` under `macmahon.source = from_estimate`
+carries them); their inputs live in the pairing-mode section of the settings UI,
+so under plain Swiss the estimator runs with the stored defaults.
 
 ## 7. Settings shape
 
-Add to `TournamentSettings` (additive, defaulted, so old saves still load):
+> **Post-refactor note.** This section originally added flat `elo_*` /
+> `elo_pairing_enabled` / `macmahon_from_estimated_elo` fields directly to
+> `TournamentSettings`. The settings have since been refactored into the sum type
+> [`PairingMode`](../crates/core/src/settings.rs): the pairing model is now the
+> tagged `pairing` union (not a boolean), and the estimator knobs moved onto an
+> [`EloEstimator`](../crates/core/src/settings.rs) struct carried by whichever model
+> maintains a live estimate. The accessor methods below (`settings.elo_k_multiplier()`
+> etc.) are unchanged — they read whichever estimator is in play — so only the field
+> names differ. The mapping:
+>
+> | original flat name | current location |
+> | --- | --- |
+> | `elo_pairing_enabled: bool` | `pairing` = `{ "kind": "elo", "estimator": … }` (vs the `"swiss"` variant) |
+> | `macmahon_from_estimated_elo: bool` | `pairing.macmahon.source` = `{ "kind": "from_estimate", "estimator": … }` (vs `{ "kind": "static" }`) |
+> | `club_protection_*` | `pairing.club_protection` (Swiss variant only) |
+> | `elo_k_multiplier_percent` | `estimator.k_multiplier` |
+> | `elo_provisional_multiplier_percent` | `estimator.provisional_multiplier` |
+> | `elo_unrated_prior_center` | `estimator.unrated_prior_center` |
+> | `elo_unrated_k` | `estimator.unrated_k` |
+> | `elo_prior_shape_{established,provisional,unrated}` | `estimator.prior_shape_{…}` |
+> | `elo_upward_looseness_{…}_percent` | `estimator.upward_looseness_{…}` |
 
-- `elo_pairing_enabled: bool` — the pure-ELO mode switch. Mutually exclusive with
-  MacMahon in the UI (greys out thresholds, removals, floater style, fold, and the
-  club-protection controls — implemented by wrapping those sections in a disabled
-  `<fieldset>`). Off by default.
-- `macmahon_from_estimated_elo: bool` — award MacMahon from the live estimate
-  rather than the registration rating (see §6a). Independent of the pairing-mode
-  switch (composes with plain Swiss). Inert unless there's an ELO
-  threshold (`macmahon_from_estimate_active()`); the UI greys the checkbox out
-  until then. Off by default.
-- `elo_k_multiplier_percent: u32` — the single knob `m`, stored as an integer
+`pairing` is additive/defaulted (old saves load as plain Swiss). It is either
+`{ "kind": "swiss", floater_style, airtight_groups, club_protection, macmahon }`
+or `{ "kind": "elo", estimator }`:
+
+- **Pure-ELO pairing** — the `PairingMode::Elo` variant. Mutually exclusive with
+  MacMahon *by construction*: the Swiss-only knobs (thresholds, removals, floater
+  style, fold, club protection) don't exist on this variant, and the UI greys out
+  those sections. Selected by making `pairing` the `elo` variant rather than by a
+  boolean toggle.
+- **Estimate-based MacMahon** — `pairing.macmahon.source` =
+  `{ "kind": "from_estimate", "estimator": … }` awards MacMahon from the live
+  estimate rather than the registration rating (see §6a); `{ "kind": "static" }` is
+  the default. Independent of the pairing model (composes with plain Swiss). Inert
+  unless there's an ELO threshold (`macmahon_from_estimate_active()`); the UI greys
+  the checkbox out until then.
+
+The estimator knobs are the fields of `EloEstimator` (the same struct on the `elo`
+pairing variant and on the `from_estimate` MacMahon source, so they mean the same
+in either):
+
+- `k_multiplier: u32` — the single knob `m`, stored as an integer
   percent (`100` = ×1.0) so `TournamentSettings` stays `Eq` (an `f64` field would
   break the derive, and the tournament `Eq` that the undo-snapshot store relies
   on). Read as a float via `settings.elo_k_multiplier()`. Default `100`, expected
   100–400; the UI presents it as a decimal multiplier. Normalization clamps it to
   ≥ 1 (a zero-width prior would be degenerate).
-- `elo_provisional_multiplier_percent: u32` — an **extra** K multiplier for a
+- `provisional_multiplier: u32` — an **extra** K multiplier for a
   *provisionally*-rated player (default `200` = ×2.0, clamped ≥ 100). A rated
   player is provisional when they aren't in the FESA list (`Player.fesa_games`
   is `None` — rating typed by hand) or their FESA game count is below
@@ -446,13 +478,13 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   FESA list is often stale and referees routinely bump a known player's rating —
   and cleared only when the *last name* is edited (a possibly different entry) or
   the rating is removed entirely.
-- `elo_unrated_prior_center: u32` — the mean of the unrated prior (default `600`;
+- `unrated_prior_center: u32` — the mean of the unrated prior (default `600`;
   see §2.2). Read as a float via `settings.elo_unrated_prior_center()`.
-- `elo_unrated_k: u32` — the K setting the unrated prior's width via `σ₀ = √(K·s)`
+- `unrated_k: u32` — the K setting the unrated prior's width via `σ₀ = √(K·s)`
   (default `705 ≈ σ 350`; see §2.2). Read via `settings.elo_unrated_k()`, which
   clamps K ≥ 1; normalization stores the clamped value. Unlike `m` and the
   provisional multiplier, this is the *only* width knob for an unrated player.
-- `elo_prior_shape_{established,provisional,unrated}: EloPriorShape` — the prior
+- `prior_shape_{established,provisional,unrated}: EloPriorShape` — the prior
   shape **per player category**: `Gaussian` (default), the fatter-tailed,
   optionally asymmetric `Laplace`, or the improper `Flat` (the `turnering.py`
   performance rating — no prior; see §2.5). A plain enum (`#[serde(rename_all =
@@ -465,7 +497,7 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   Gaussian (a fat tail there just loosens the anchor and adds noise). The Settings
   UI exposes a single selector bound to the *unrated* shape; established and
   provisional are written `Gaussian`.
-- `elo_upward_looseness_{established,provisional,unrated}_percent: u32` — the
+- `upward_looseness_{established,provisional,unrated}: u32` — the
   asymmetry ratio `r` for the Laplace prior, **one per player category**, integer
   percent (`100` = ×1.0 = symmetric, the default for all three). Read via
   `settings.elo_upward_looseness_{established,provisional,unrated}()`;
@@ -475,17 +507,16 @@ Add to `TournamentSettings` (additive, defaulted, so old saves still load):
   normal, the Laplace widens its upward scale); the UI shows the three inputs
   whenever a live estimate is maintained.
 
-There are ten `elo_*` estimate knobs (`elo_k_multiplier_percent`,
-`elo_provisional_multiplier_percent`, `elo_unrated_prior_center`, `elo_unrated_k`,
-the three `elo_prior_shape_*`, and the three `elo_upward_looseness_*_percent`), but
-the Settings UI deliberately exposes only **two** derived controls whenever a live
-estimate is maintained (pure ELO pairing, or estimate-based MacMahon (§6a) with an
-ELO threshold): *Estimate* — unrated players only (`elo_k_multiplier_percent = 0`,
-the default, pinning rated players to their registration rating) or all players
-(`= 100`); and *Unrated prior* — the flat performance rating
-(`elo_prior_shape_unrated = flat`, the default) or a tuned asymmetric Laplace
-(`laplace` with `elo_unrated_prior_center = 700`, `elo_unrated_k = 260`,
-`elo_upward_looseness_unrated_percent = 300`). The remaining knobs (the provisional
+There are ten estimator knobs (`k_multiplier`, `provisional_multiplier`,
+`unrated_prior_center`, `unrated_k`, the three `prior_shape_*`, and the three
+`upward_looseness_*`), but the Settings UI deliberately exposes only **two** derived
+controls whenever a live estimate is maintained (pure ELO pairing, or estimate-based
+MacMahon (§6a) with an ELO threshold): *Estimate* — unrated players only
+(`k_multiplier = 0`, the default, pinning rated players to their registration
+rating) or all players (`= 100`); and *Unrated prior* — the flat performance rating
+(`prior_shape_unrated = flat`, the default) or a tuned asymmetric Laplace
+(`laplace` with `unrated_prior_center = 700`, `unrated_k = 260`,
+`upward_looseness_unrated = 300`). The remaining knobs (the provisional
 multiplier, the per-category shapes and loosenesses) keep their defaults through
 the UI and are reachable only via the settings JSON / the simulator CLI, where the
 full estimator is still exercised for research. The FESA K table, `s`, and the
