@@ -92,7 +92,7 @@ tournament. For how it's built, see [Architecture](#architecture) below.
 - **Click-to-edit** any player cell in place; forced pairings and a forced
   bye when hand-tuning a round draft.
 - **Print** pairings, **save/load** a tournament as a portable JSON file.
-- **English and French UI**, light/dark theme.
+- **English, French and German UI**, light/dark theme.
 - Runs as a **single portable desktop executable** (no install, no command
   line) or in a plain browser against a hosted server — same app either way.
 
@@ -444,8 +444,8 @@ git config core.hooksPath scripts/git-hooks
   a formatting nit doesn't fail the commit; a partially-staged file it would
   rewrite is reported and gates instead), `cargo clippy --workspace
   --all-targets -- -D warnings`, `svelte-check`, and an i18n locale-key check
-  (`scripts/check-i18n-keys.mjs`, catching keys that exist in one locale but
-  not the other). Fast; keeps the tree clean commit by commit.
+  (`scripts/check-i18n-keys.mjs`, catching keys that exist in some locales but
+  not all). Fast; keeps the tree clean commit by commit.
 - `pre-push` — the full test suite: `cargo test --workspace` and the frontend
   tests (`npm test`). Slower, so it only runs before sharing work.
 

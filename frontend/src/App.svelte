@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { _ } from "svelte-i18n";
+  import { _, locale } from "svelte-i18n";
   import { untrack } from "svelte";
   import {
     addPlayer,
@@ -807,7 +807,9 @@
             <ul class="backups-list">
               {#each backups as b (b.id)}
                 <li>
-                  <span class="backup-time">{new Date(b.taken_at * 1000).toLocaleString()}</span>
+                  <span class="backup-time"
+                    >{new Date(b.taken_at * 1000).toLocaleString($locale ?? undefined)}</span
+                  >
                   <span class="backup-label">{b.label}</span>
                   <button
                     type="button"

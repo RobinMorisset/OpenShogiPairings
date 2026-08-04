@@ -10,12 +10,14 @@ export interface LocaleOption {
 export const SUPPORTED_LOCALES: LocaleOption[] = [
   { code: "en", label: "English" },
   { code: "fr", label: "Français" },
+  { code: "de", label: "Deutsch" },
 ];
 
 const STORAGE_KEY = "osp-locale";
 
 register("en", () => import("./locales/en.json"));
 register("fr", () => import("./locales/fr.json"));
+register("de", () => import("./locales/de.json"));
 
 function isSupported(code: string): boolean {
   return SUPPORTED_LOCALES.some((l) => l.code === code);
@@ -34,6 +36,13 @@ function getInitialLocale(): string {
 init({
   fallbackLocale: "en",
   initialLocale: getInitialLocale(),
+});
+
+// Keep the document language in sync with the UI language, so screen readers,
+// `:lang()` rules and browser hyphenation follow it instead of the hardcoded
+// `lang="en"` in index.html.
+locale.subscribe((code) => {
+  if (code) document.documentElement.lang = code;
 });
 
 /** Switch the active UI language and persist the choice. */
