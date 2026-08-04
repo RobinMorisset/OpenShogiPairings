@@ -11,6 +11,7 @@ use axum::Json;
 use osp_core::{CsvImportError, TournamentError};
 use serde::Serialize;
 
+use crate::error_codes::LOCALIZED_ERROR_CODES;
 use crate::state::MutateError;
 
 /// An error that can be returned from an API handler.
@@ -18,7 +19,8 @@ use crate::state::MutateError;
 pub enum ApiError {
     /// A request needs a tournament to exist, but none has been created yet.
     NoTournament,
-    /// The request was malformed or violated a domain rule (400).
+    /// The request was malformed (400) in a way no domain error describes —
+    /// plumbing, not a rule the referee broke, so it stays English.
     BadRequest(String),
     /// A referenced resource (e.g. a player) does not exist (404).
     NotFound(String),
@@ -33,6 +35,10 @@ pub enum ApiError {
     /// response can add a stable machine `code` (and interpolation `values`) the
     /// client localizes — the English `error` string is only a fallback.
     CsvImport(CsvImportError),
+    /// A domain rule was violated. Carries the domain error rather than its
+    /// message, so the response can add the `code` and `values` the client
+    /// localizes; [`domain_status`] decides 400 vs 404.
+    Domain(TournamentError),
 }
 
 /// JSON body sent for every error: always an `error` message, plus — for errors
@@ -80,45 +86,139 @@ fn csv_error_payload(err: &CsvImportError) -> (&'static str, BTreeMap<String, St
     }
 }
 
+/// The HTTP status for a domain error: 404 when the request named something
+/// that doesn't exist, 400 when it broke a rule.
+fn domain_status(err: &TournamentError) -> StatusCode {
+    match err {
+        TournamentError::PlayerNotFound(_)
+        | TournamentError::CategoryNotFound(_)
+        | TournamentError::RoundNotFound(_)
+        | TournamentError::BoardNotFound { .. }
+        // The sit-out addressed by the route doesn't exist: that player
+        // played a board that round, or wasn't in it.
+        | TournamentError::PlayerNotSittingOut { .. }
+        | TournamentError::AdjustmentNotFound { .. } => StatusCode::NOT_FOUND,
+        _ => StatusCode::BAD_REQUEST,
+    }
+}
+
+/// The stable machine `code` and interpolation `values` for a domain error, or
+/// `None` for errors that stay English.
+///
+/// The match is deliberately exhaustive rather than ending in a `_` arm: a new
+/// [`TournamentError`] variant must not compile until someone decides which half
+/// it belongs to.
+///
+/// `None` is the right answer for a variant the referee can only reach if the
+/// client is buggy (a route naming a board that isn't there, a draft that the UI
+/// should never have submitted). Translating those would dress up a broken
+/// invariant as ordinary UI; leaving them in English marks them as what they
+/// are — a bug report worth copying verbatim into an issue.
+///
+/// Values must be language-neutral (numbers, ids); the catalogues interpolate
+/// them into the translated sentence.
+fn domain_payload(err: &TournamentError) -> Option<(&'static str, BTreeMap<String, String>)> {
+    /// Shorthand for a code with no interpolation values.
+    fn bare(code: &'static str) -> Option<(&'static str, BTreeMap<String, String>)> {
+        Some((code, BTreeMap::new()))
+    }
+    /// Shorthand for a code with interpolation values.
+    fn with(
+        code: &'static str,
+        values: impl IntoIterator<Item = (&'static str, String)>,
+    ) -> Option<(&'static str, BTreeMap<String, String>)> {
+        Some((
+            code,
+            values
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
+        ))
+    }
+
+    match err {
+        // Registration and players.
+        TournamentError::EmptyTournamentName => bare("empty_tournament_name"),
+        TournamentError::EmptyPlayerName => bare("empty_player_name"),
+        TournamentError::RegistrationAlreadyFinalized => bare("registration_already_finalized"),
+        TournamentError::RegistrationNotFinalized => bare("registration_not_finalized"),
+        TournamentError::CannotRemoveCupPlayer => bare("cannot_remove_cup_player"),
+        TournamentError::CannotRemovePlayedPlayer => bare("cannot_remove_played_player"),
+
+        // Rounds.
+        TournamentError::PreviousRoundNotComplete => bare("previous_round_not_complete"),
+        TournamentError::NotEnoughPresentPlayers { needed, have } => with(
+            "not_enough_present_players",
+            [
+                ("needed", needed.to_string()),
+                ("have", have.to_string()),
+            ],
+        ),
+        TournamentError::NoRoundToCancel => bare("no_round_to_cancel"),
+        TournamentError::RoundHasResults => bare("round_has_results"),
+        TournamentError::UnresolvedLongGame { round } => {
+            with("unresolved_long_game", [("round", round.to_string())])
+        }
+
+        // Handicaps.
+        TournamentError::HandicapNeedsRatingDifference => bare("handicap_needs_rating_difference"),
+        TournamentError::HandicapNotAllowedForCup => bare("handicap_not_allowed_for_cup"),
+
+        // Cup.
+        TournamentError::CupSizeRequired => bare("cup_size_required"),
+        TournamentError::InvalidCupSize { size } => {
+            with("invalid_cup_size", [("size", size.to_string())])
+        }
+        TournamentError::NotEnoughEligiblePlayers { needed, have } => with(
+            "not_enough_eligible_players",
+            [
+                ("needed", needed.to_string()),
+                ("have", have.to_string()),
+            ],
+        ),
+
+        // Point adjustments.
+        TournamentError::EmptyAdjustmentReason => bare("empty_adjustment_reason"),
+        TournamentError::ZeroPointAdjustment => bare("zero_point_adjustment"),
+
+        // Saved files and settings.
+        TournamentError::UnsupportedFormatVersion { found, supported } => with(
+            "unsupported_format_version",
+            [
+                ("found", found.to_string()),
+                ("supported", supported.to_string()),
+            ],
+        ),
+        // The inner text comes from the deserializer, so it can't be translated;
+        // the catalogues wrap it in a translated sentence and show it as detail.
+        TournamentError::MalformedSave(details) => {
+            with("malformed_save", [("details", details.clone())])
+        }
+        TournamentError::EloEstimateUnanchored => bare("elo_estimate_unanchored"),
+
+        // English only: reachable only through a client bug or a race the UI
+        // already handles by reloading (see the 409 path in `live`).
+        TournamentError::PlayerNotFound(_)
+        | TournamentError::CategoryNotFound(_)
+        | TournamentError::RoundNotFound(_)
+        | TournamentError::BoardNotFound { .. }
+        | TournamentError::PlayerNotSittingOut { .. }
+        | TournamentError::AdjustmentNotFound { .. }
+        | TournamentError::DraftAlreadyExists
+        | TournamentError::NoDraft
+        | TournamentError::NoCurrentRound
+        | TournamentError::NotCurrentRound
+        | TournamentError::CupBracketInconsistent
+        // TODO: `InvalidDraft` carries a free-form English string built at ~8
+        // call sites; it needs to become a structured enum before it can be
+        // translated. Referee-visible, so worth doing.
+        | TournamentError::InvalidDraft(_) => None,
+    }
+}
+
 impl From<TournamentError> for ApiError {
     fn from(err: TournamentError) -> Self {
-        match err {
-            TournamentError::EmptyTournamentName
-            | TournamentError::EmptyPlayerName
-            | TournamentError::NotEnoughPresentPlayers { .. }
-            | TournamentError::RegistrationAlreadyFinalized
-            | TournamentError::RegistrationNotFinalized
-            | TournamentError::PreviousRoundNotComplete
-            | TournamentError::DraftAlreadyExists
-            | TournamentError::NoDraft
-            | TournamentError::InvalidDraft(_)
-            | TournamentError::NoRoundToCancel
-            | TournamentError::NoCurrentRound
-            | TournamentError::RoundHasResults
-            | TournamentError::NotCurrentRound
-            | TournamentError::UnresolvedLongGame { .. }
-            | TournamentError::HandicapNeedsRatingDifference
-            | TournamentError::HandicapNotAllowedForCup
-            | TournamentError::UnsupportedFormatVersion { .. }
-            | TournamentError::MalformedSave(_)
-            | TournamentError::EloEstimateUnanchored
-            | TournamentError::CupSizeRequired
-            | TournamentError::InvalidCupSize { .. }
-            | TournamentError::NotEnoughEligiblePlayers { .. }
-            | TournamentError::CannotRemoveCupPlayer
-            | TournamentError::CannotRemovePlayedPlayer
-            | TournamentError::CupBracketInconsistent
-            | TournamentError::EmptyAdjustmentReason
-            | TournamentError::ZeroPointAdjustment => ApiError::BadRequest(err.to_string()),
-            TournamentError::PlayerNotFound(_)
-            | TournamentError::CategoryNotFound(_)
-            | TournamentError::RoundNotFound(_)
-            | TournamentError::BoardNotFound { .. }
-            // The sit-out addressed by the route doesn't exist: that player
-            // played a board that round, or wasn't in it.
-            | TournamentError::PlayerNotSittingOut { .. }
-            | TournamentError::AdjustmentNotFound { .. } => ApiError::NotFound(err.to_string()),
-        }
+        ApiError::Domain(err)
     }
 }
 
@@ -134,35 +234,212 @@ impl From<MutateError> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        // CSV import errors carry a localization code + values, not just a message.
-        if let ApiError::CsvImport(err) = &self {
-            let (code, values) = csv_error_payload(err);
-            let body = ErrorBody {
-                error: err.to_string(),
-                code: Some(code),
-                values,
-            };
-            return (StatusCode::BAD_REQUEST, Json(body)).into_response();
-        }
-        let (status, message) = match self {
+        // Errors carrying a localization code + values, not just a message. The
+        // `error` string stays English throughout: it is the fallback the client
+        // shows for an untranslated code, and what turns up in logs and `curl`.
+        let (status, body) = match self {
+            ApiError::CsvImport(err) => {
+                let (code, values) = csv_error_payload(&err);
+                (
+                    StatusCode::BAD_REQUEST,
+                    ErrorBody {
+                        error: err.to_string(),
+                        code: Some(code),
+                        values,
+                    },
+                )
+            }
+            ApiError::Domain(err) => {
+                let status = domain_status(&err);
+                let (code, values) = match domain_payload(&err) {
+                    Some((code, values)) => (Some(code), values),
+                    None => (None, BTreeMap::new()),
+                };
+                (
+                    status,
+                    ErrorBody {
+                        error: err.to_string(),
+                        code,
+                        values,
+                    },
+                )
+            }
             ApiError::NoTournament => (
                 StatusCode::NOT_FOUND,
-                "no tournament exists; create one first".to_string(),
+                ErrorBody {
+                    error: "no tournament exists; create one first".to_string(),
+                    code: Some("no_tournament"),
+                    values: BTreeMap::new(),
+                },
             ),
-            ApiError::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
-            ApiError::NotFound(message) => (StatusCode::NOT_FOUND, message),
+            ApiError::BadRequest(message) => (StatusCode::BAD_REQUEST, ErrorBody::message(message)),
+            ApiError::NotFound(message) => (StatusCode::NOT_FOUND, ErrorBody::message(message)),
+            // The client turns 401 into the login screen and 409 into a reload,
+            // both by status code, so these messages are never shown as-is.
             ApiError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
-                "authentication required".to_string(),
+                ErrorBody::message("authentication required".to_string()),
             ),
             ApiError::VersionConflict => (
                 StatusCode::CONFLICT,
-                "the tournament changed since your last view; reload and retry".to_string(),
+                ErrorBody::message(
+                    "the tournament changed since your last view; reload and retry".to_string(),
+                ),
             ),
-            ApiError::Upstream(message) => (StatusCode::BAD_GATEWAY, message),
-            // Handled above (needs the code/values payload, not just a message).
-            ApiError::CsvImport(_) => unreachable!("CsvImport is handled before this match"),
+            ApiError::Upstream(message) => (StatusCode::BAD_GATEWAY, ErrorBody::message(message)),
         };
-        (status, Json(ErrorBody::message(message))).into_response()
+        debug_assert!(
+            body.code
+                .is_none_or(|code| LOCALIZED_ERROR_CODES.contains(&code)),
+            "error code {:?} is missing from LOCALIZED_ERROR_CODES, so the frontend \
+             cannot have a translation for it",
+            body.code,
+        );
+        (status, Json(body)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use osp_core::TournamentId;
+    use uuid::Uuid;
+
+    /// One instance of every [`TournamentError`] variant.
+    ///
+    /// The exhaustive `match` in [`domain_payload`] makes the compiler demand a
+    /// decision about each new variant; this list is what lets the tests below
+    /// check that decision was carried through to a registered code. Adding a
+    /// variant without adding it here weakens those tests, so keep them in step.
+    fn every_domain_error() -> Vec<TournamentError> {
+        let uuid = Uuid::nil();
+        vec![
+            TournamentError::EmptyTournamentName,
+            TournamentError::EmptyPlayerName,
+            TournamentError::PlayerNotFound(uuid),
+            TournamentError::CategoryNotFound(uuid),
+            TournamentError::RegistrationAlreadyFinalized,
+            TournamentError::RegistrationNotFinalized,
+            TournamentError::PreviousRoundNotComplete,
+            TournamentError::DraftAlreadyExists,
+            TournamentError::NoDraft,
+            TournamentError::NotEnoughPresentPlayers { needed: 2, have: 1 },
+            TournamentError::InvalidDraft("whatever".to_string()),
+            TournamentError::NoRoundToCancel,
+            TournamentError::NoCurrentRound,
+            TournamentError::RoundHasResults,
+            TournamentError::NotCurrentRound,
+            TournamentError::UnresolvedLongGame { round: 3 },
+            TournamentError::RoundNotFound(7),
+            TournamentError::BoardNotFound { round: 2, board: 5 },
+            TournamentError::PlayerNotSittingOut {
+                round: 2,
+                player: TournamentId(4),
+            },
+            TournamentError::HandicapNeedsRatingDifference,
+            TournamentError::HandicapNotAllowedForCup,
+            TournamentError::UnsupportedFormatVersion {
+                found: 9,
+                supported: 3,
+            },
+            TournamentError::MalformedSave("trailing comma".to_string()),
+            TournamentError::EloEstimateUnanchored,
+            TournamentError::CupSizeRequired,
+            TournamentError::InvalidCupSize { size: 12 },
+            TournamentError::NotEnoughEligiblePlayers { needed: 8, have: 5 },
+            TournamentError::CannotRemoveCupPlayer,
+            TournamentError::CannotRemovePlayedPlayer,
+            TournamentError::CupBracketInconsistent,
+            TournamentError::EmptyAdjustmentReason,
+            TournamentError::ZeroPointAdjustment,
+            TournamentError::AdjustmentNotFound {
+                player: uuid,
+                adjustment: uuid,
+            },
+        ]
+    }
+
+    /// A code the frontend has never heard of degrades that message back to the
+    /// server's English fallback — silently, which is exactly the failure this
+    /// registry exists to prevent.
+    #[test]
+    fn every_emitted_code_is_registered() {
+        for err in every_domain_error() {
+            let Some((code, _)) = domain_payload(&err) else {
+                continue;
+            };
+            assert!(
+                LOCALIZED_ERROR_CODES.contains(&code),
+                "domain_payload returns {code:?} for {err:?}, but it is not in \
+                 LOCALIZED_ERROR_CODES, so no locale can translate it"
+            );
+        }
+        for err in [
+            CsvImportError::Empty,
+            CsvImportError::MissingNameColumns,
+            CsvImportError::RowsMissingLastName { rows: vec![2, 5] },
+        ] {
+            let (code, _) = csv_error_payload(&err);
+            assert!(
+                LOCALIZED_ERROR_CODES.contains(&code),
+                "csv_error_payload returns {code:?}, which is not in LOCALIZED_ERROR_CODES"
+            );
+        }
+    }
+
+    /// The inverse: a registered code nothing emits is dead weight that would
+    /// keep an unused key alive in every catalogue.
+    #[test]
+    fn every_registered_code_is_emitted() {
+        let mut emitted: Vec<&str> = every_domain_error()
+            .iter()
+            .filter_map(|err| domain_payload(err).map(|(code, _)| code))
+            .collect();
+        emitted.extend([
+            "csv_empty",
+            "csv_missing_name_columns",
+            "csv_rows_missing_last_name",
+        ]);
+        // Not produced by a domain error: built directly in `into_response`.
+        emitted.push("no_tournament");
+
+        for code in LOCALIZED_ERROR_CODES {
+            assert!(
+                emitted.contains(code),
+                "{code:?} is registered in LOCALIZED_ERROR_CODES but nothing emits it"
+            );
+        }
+    }
+
+    /// Interpolation values are what the translated sentence is built from, so a
+    /// missing one leaves a literal `{needed}` in the referee's face.
+    #[test]
+    fn payload_values_cover_the_error() {
+        let err = TournamentError::NotEnoughPresentPlayers { needed: 2, have: 1 };
+        let (code, values) = domain_payload(&err).expect("localized");
+        assert_eq!(code, "not_enough_present_players");
+        assert_eq!(values.get("needed").map(String::as_str), Some("2"));
+        assert_eq!(values.get("have").map(String::as_str), Some("1"));
+    }
+
+    /// Internal errors keep their English message and carry no code, so the
+    /// client shows the text verbatim.
+    #[test]
+    fn internal_errors_are_not_localized() {
+        assert!(domain_payload(&TournamentError::CupBracketInconsistent).is_none());
+        assert!(domain_payload(&TournamentError::BoardNotFound { round: 1, board: 0 }).is_none());
+    }
+
+    /// The 400/404 split has to survive the move out of the `From` impl.
+    #[test]
+    fn domain_status_splits_missing_from_invalid() {
+        assert_eq!(
+            domain_status(&TournamentError::PlayerNotFound(Uuid::nil())),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            domain_status(&TournamentError::RoundHasResults),
+            StatusCode::BAD_REQUEST
+        );
     }
 }

@@ -35,6 +35,7 @@
     subscribeToChanges,
     type DraftUpdate,
   } from "./lib/api";
+  import { describeApiError } from "./lib/errorCodes";
   import type {
     BackupInfo,
     CupBracketView,
@@ -447,25 +448,8 @@
     };
   });
 
-  // Server error `code` → translation key, for errors the UI localizes (rather
-  // than showing the server's English fallback message). The server also sends
-  // any interpolation `values` (e.g. the offending CSV rows).
-  const ERROR_CODE_KEYS: Record<string, string> = {
-    csv_empty: "playerRegistration.csvErrorEmpty",
-    csv_missing_name_columns: "playerRegistration.csvErrorMissingColumns",
-    csv_rows_missing_last_name: "playerRegistration.csvErrorRowsMissingLastName",
-  };
-
   function describe(err: unknown): string {
-    if (err instanceof ApiError && err.status === 0) {
-      return $_("app.cannotReachServer");
-    }
-    // A tagged, localizable server error: translate it (with its interpolation
-    // values) rather than showing the English fallback.
-    if (err instanceof ApiError && err.code && ERROR_CODE_KEYS[err.code]) {
-      return $_(ERROR_CODE_KEYS[err.code], { values: err.values ?? {} });
-    }
-    return err instanceof Error ? err.message : String(err);
+    return describeApiError(err, $_);
   }
 
   /** Run an async action with shared busy/error handling. */

@@ -8,6 +8,7 @@
     loginAdmin,
     replaceTournament,
   } from "../api";
+  import { describeApiError } from "../errorCodes";
   import { currentTournamentId, getToken, initialTab } from "../session";
   import { loadTournament } from "../tournamentFile";
   import CreateTournament from "./CreateTournament.svelte";
@@ -38,10 +39,7 @@
   }
 
   function describe(err: unknown): string {
-    if (err instanceof ApiError && err.status === 0) {
-      return $_("app.cannotReachServer");
-    }
-    return err instanceof Error ? err.message : String(err);
+    return describeApiError(err, $_);
   }
 
   function select(id: string) {

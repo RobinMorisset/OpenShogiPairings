@@ -15,6 +15,7 @@
 mod auth;
 mod backup;
 mod error;
+mod error_codes;
 mod live;
 mod ratings;
 mod registry;
