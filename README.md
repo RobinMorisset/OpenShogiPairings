@@ -92,7 +92,8 @@ tournament. For how it's built, see [Architecture](#architecture) below.
 - **Click-to-edit** any player cell in place; forced pairings and a forced
   bye when hand-tuning a round draft.
 - **Print** pairings, **save/load** a tournament as a portable JSON file.
-- **English, French, German and Japanese UI**, light/dark theme.
+- **UI in nine languages** (English, French, German, Japanese, Russian,
+  Belarusian, Ukrainian, Slovak, Polish), light/dark theme.
 - Runs as a **single portable desktop executable** (no install, no command
   line) or in a plain browser against a hosted server — same app either way.
 

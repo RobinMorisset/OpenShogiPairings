@@ -12,6 +12,11 @@ export const SUPPORTED_LOCALES: LocaleOption[] = [
   { code: "fr", label: "Français" },
   { code: "de", label: "Deutsch" },
   { code: "ja", label: "日本語" },
+  { code: "ru", label: "Русский" },
+  { code: "be", label: "Беларуская" },
+  { code: "uk", label: "Українська" },
+  { code: "sk", label: "Slovenčina" },
+  { code: "pl", label: "Polski" },
 ];
 
 const STORAGE_KEY = "osp-locale";
@@ -20,6 +25,11 @@ register("en", () => import("./locales/en.json"));
 register("fr", () => import("./locales/fr.json"));
 register("de", () => import("./locales/de.json"));
 register("ja", () => import("./locales/ja.json"));
+register("ru", () => import("./locales/ru.json"));
+register("be", () => import("./locales/be.json"));
+register("uk", () => import("./locales/uk.json"));
+register("sk", () => import("./locales/sk.json"));
+register("pl", () => import("./locales/pl.json"));
 
 function isSupported(code: string): boolean {
   return SUPPORTED_LOCALES.some((l) => l.code === code);

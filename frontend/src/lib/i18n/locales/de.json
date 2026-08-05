@@ -326,10 +326,9 @@
     "gradeKindDan": "Dan",
     "gradeKindKyu": "Kyu",
     "startingPoints": "Startpunkte",
-    "playerCountSingular": "{count} Spieler",
-    "playerCountPlural": "{count} Spieler",
-    "pointsValueSingular": "{points} Punkt",
-    "pointsValuePlural": "{points} Punkte",
+    "playerCount": "{count, plural, one {# Spieler} other {# Spieler}}",
+    "pointsValue": "{points, plural, one {# Punkt} other {# Punkte}}",
+    "startingPointCount": "{max, plural, one {Startpunkt} other {Startpunkte}}",
     "degressiveTitle": "Beschleunigtes Schweizer System, auch degressives MacMahon genannt",
     "degressiveDesc": "Kreuzen Sie bei einer Schwelle „endet nach Runde“ an, damit sie nach dieser Runde entfällt und der Vorsprung aus den Startpunkten verblasst, während das Feld zusammenrückt. Jede Schwelle kann ihre eigene Endrunde bekommen.",
     "dropAfterRoundCheckbox": "Endet nach Runde",
@@ -338,8 +337,6 @@
     "roundsRangeLabel": "Runden {from}–{to}",
     "roundPlus": "Runde {n}+",
     "upTo": "bis",
-    "startingPointSingular": "Startpunkt",
-    "startingPointsPlural": "Startpunkte",
     "airtightGroupsTitle": "Abgeschottete Gruppen",
     "airtightGroupsDesc": "Für die ersten N Runden vermeidet eine zusätzliche Regel (direkt unterhalb der Wiederholungssperre, oberhalb der Punktgleichheit), Spieler mit unterschiedlich vielen MacMahon-Punkten zu paaren — die Strafe wächst mit dem Quadrat des Abstands, wie bei den anderen Abstandsregeln. Standardmäßig aus.",
     "macmahonFromEloTitle": "MacMahon nach geschätztem ELO",
@@ -411,20 +408,52 @@
     "eloEstimateUnanchored": "Der ELO-Schätzung fehlt ein Anker für ihre Skala. Fügen Sie einen gewerteten Spieler hinzu, fixieren Sie die Wertungen (K-Multiplikator 0), oder wählen Sie einen nicht-flachen Prior für Ungewertete."
   },
   "tiebreaks": {
-    "points": { "label": "Punkte", "title": "Gesamtpunktzahl: MacMahon-Start + Siege" },
-    "sos_m": { "title": "Summe der Gegnerpunkte (einschließlich MacMahon)" },
-    "sos_w": { "title": "Summe der Siege der Gegner" },
-    "sodos_m": { "title": "Summe der Punkte der geschlagenen Gegner" },
-    "sodos_w": { "title": "Summe der Siege der geschlagenen Gegner" },
-    "sosos_m": { "title": "Summe der SOSM-Werte der Gegner" },
-    "sosos_w": { "title": "Summe der SOSW-Werte der Gegner" },
-    "sos_m1": { "title": "SOSM ohne den schwächsten Gegner" },
-    "sos_m2": { "title": "SOSM ohne die beiden schwächsten Gegner" },
-    "sos_w1": { "title": "SOSW ohne den schwächsten Gegner" },
-    "sos_w2": { "title": "SOSW ohne die beiden schwächsten Gegner" },
-    "cuss_m": { "title": "Kumulative Summe des laufenden Punktestands Runde für Runde" },
-    "cuss_w": { "title": "Kumulative Summe der laufenden Siegzahl Runde für Runde" },
-    "dc": { "title": "Direkter Vergleich: Siege unter Spielern, die in allen vorherigen Kriterien gleich stehen, sofern sie alle gegeneinander gespielt haben" },
-    "est_elo": { "label": "Gesch. ELO", "title": "Laufende bayessche Schätzung der aktuellen Spielstärke des Spielers" }
+    "points": {
+      "label": "Punkte",
+      "title": "Gesamtpunktzahl: MacMahon-Start + Siege"
+    },
+    "sos_m": {
+      "title": "Summe der Gegnerpunkte (einschließlich MacMahon)"
+    },
+    "sos_w": {
+      "title": "Summe der Siege der Gegner"
+    },
+    "sodos_m": {
+      "title": "Summe der Punkte der geschlagenen Gegner"
+    },
+    "sodos_w": {
+      "title": "Summe der Siege der geschlagenen Gegner"
+    },
+    "sosos_m": {
+      "title": "Summe der SOSM-Werte der Gegner"
+    },
+    "sosos_w": {
+      "title": "Summe der SOSW-Werte der Gegner"
+    },
+    "sos_m1": {
+      "title": "SOSM ohne den schwächsten Gegner"
+    },
+    "sos_m2": {
+      "title": "SOSM ohne die beiden schwächsten Gegner"
+    },
+    "sos_w1": {
+      "title": "SOSW ohne den schwächsten Gegner"
+    },
+    "sos_w2": {
+      "title": "SOSW ohne die beiden schwächsten Gegner"
+    },
+    "cuss_m": {
+      "title": "Kumulative Summe des laufenden Punktestands Runde für Runde"
+    },
+    "cuss_w": {
+      "title": "Kumulative Summe der laufenden Siegzahl Runde für Runde"
+    },
+    "dc": {
+      "title": "Direkter Vergleich: Siege unter Spielern, die in allen vorherigen Kriterien gleich stehen, sofern sie alle gegeneinander gespielt haben"
+    },
+    "est_elo": {
+      "label": "Gesch. ELO",
+      "title": "Laufende bayessche Schätzung der aktuellen Spielstärke des Spielers"
+    }
   }
 }

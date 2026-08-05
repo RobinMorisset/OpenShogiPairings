@@ -326,10 +326,9 @@
     "gradeKindDan": "dan",
     "gradeKindKyu": "kyu",
     "startingPoints": "Starting points",
-    "playerCountSingular": "{count} player",
-    "playerCountPlural": "{count} players",
-    "pointsValueSingular": "{points} point",
-    "pointsValuePlural": "{points} points",
+    "playerCount": "{count, plural, one {# player} other {# players}}",
+    "pointsValue": "{points, plural, one {# point} other {# points}}",
+    "startingPointCount": "{max, plural, one {starting point} other {starting points}}",
     "degressiveTitle": "Accelerated Swiss, a.k.a. degressive MacMahon",
     "degressiveDesc": "Check “stops after round” on a threshold to drop it once that round is complete, so the starting-point head start fades as the field converges. Each threshold can be given its own stopping round.",
     "dropAfterRoundCheckbox": "Stops after round",
@@ -338,8 +337,6 @@
     "roundsRangeLabel": "rounds {from}–{to}",
     "roundPlus": "round {n}+",
     "upTo": "up to",
-    "startingPointSingular": "starting point",
-    "startingPointsPlural": "starting points",
     "airtightGroupsTitle": "Airtight groups",
     "airtightGroupsDesc": "For the first N rounds, an extra rule (just below no-rematch, above equal-scores) avoids pairing players with a different number of MacMahon points — penalty grows with the square of the gap, like the other gap rules. Off by default.",
     "macmahonFromEloTitle": "MacMahon from estimated ELO",
@@ -411,20 +408,52 @@
     "eloEstimateUnanchored": "The ELO estimate has nothing to anchor its scale. Add a rated player, pin ratings (K multiplier 0), or choose a non-flat unrated prior."
   },
   "tiebreaks": {
-    "points": { "label": "Points", "title": "Total score: MacMahon start + wins" },
-    "sos_m": { "title": "Sum of opponents' points (MacMahon-inclusive)" },
-    "sos_w": { "title": "Sum of opponents' wins" },
-    "sodos_m": { "title": "Sum of defeated opponents' points" },
-    "sodos_w": { "title": "Sum of defeated opponents' wins" },
-    "sosos_m": { "title": "Sum of opponents' SOSM" },
-    "sosos_w": { "title": "Sum of opponents' SOSW" },
-    "sos_m1": { "title": "SOSM dropping the lowest-scoring opponent" },
-    "sos_m2": { "title": "SOSM dropping the two lowest-scoring opponents" },
-    "sos_w1": { "title": "SOSW dropping the lowest-scoring opponent" },
-    "sos_w2": { "title": "SOSW dropping the two lowest-scoring opponents" },
-    "cuss_m": { "title": "Cumulative sum of the running points total each round" },
-    "cuss_w": { "title": "Cumulative sum of the running win total each round" },
-    "dc": { "title": "Direct confrontation: wins among players tied on every earlier criterion, when they've all played each other" },
-    "est_elo": { "label": "Est. ELO", "title": "Live Bayesian estimate of the player's current strength" }
+    "points": {
+      "label": "Points",
+      "title": "Total score: MacMahon start + wins"
+    },
+    "sos_m": {
+      "title": "Sum of opponents' points (MacMahon-inclusive)"
+    },
+    "sos_w": {
+      "title": "Sum of opponents' wins"
+    },
+    "sodos_m": {
+      "title": "Sum of defeated opponents' points"
+    },
+    "sodos_w": {
+      "title": "Sum of defeated opponents' wins"
+    },
+    "sosos_m": {
+      "title": "Sum of opponents' SOSM"
+    },
+    "sosos_w": {
+      "title": "Sum of opponents' SOSW"
+    },
+    "sos_m1": {
+      "title": "SOSM dropping the lowest-scoring opponent"
+    },
+    "sos_m2": {
+      "title": "SOSM dropping the two lowest-scoring opponents"
+    },
+    "sos_w1": {
+      "title": "SOSW dropping the lowest-scoring opponent"
+    },
+    "sos_w2": {
+      "title": "SOSW dropping the two lowest-scoring opponents"
+    },
+    "cuss_m": {
+      "title": "Cumulative sum of the running points total each round"
+    },
+    "cuss_w": {
+      "title": "Cumulative sum of the running win total each round"
+    },
+    "dc": {
+      "title": "Direct confrontation: wins among players tied on every earlier criterion, when they've all played each other"
+    },
+    "est_elo": {
+      "label": "Est. ELO",
+      "title": "Live Bayesian estimate of the player's current strength"
+    }
   }
 }

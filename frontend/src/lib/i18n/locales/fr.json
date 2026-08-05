@@ -326,10 +326,9 @@
     "gradeKindDan": "dan",
     "gradeKindKyu": "kyu",
     "startingPoints": "Points de départ",
-    "playerCountSingular": "{count} joueur",
-    "playerCountPlural": "{count} joueurs",
-    "pointsValueSingular": "{points} point",
-    "pointsValuePlural": "{points} points",
+    "playerCount": "{count, plural, one {# joueur} other {# joueurs}}",
+    "pointsValue": "{points, plural, one {# point} other {# points}}",
+    "startingPointCount": "{max, plural, one {point de départ} other {points de départ}}",
     "degressiveTitle": "Suisse accéléré, dit MacMahon dégressif",
     "degressiveDesc": "Cochez « s'arrête après la ronde » sur un seuil pour le supprimer une fois cette ronde terminée, afin que l'avance de départ s'estompe à mesure que le groupe se resserre. Chaque seuil peut avoir sa propre ronde d'arrêt.",
     "dropAfterRoundCheckbox": "S'arrête après la ronde",
@@ -338,8 +337,6 @@
     "roundsRangeLabel": "rondes {from}–{to}",
     "roundPlus": "ronde {n}+",
     "upTo": "jusqu'à",
-    "startingPointSingular": "point de départ",
-    "startingPointsPlural": "points de départ",
     "airtightGroupsTitle": "Groupes étanches",
     "airtightGroupsDesc": "Pour les N premières rondes, une règle supplémentaire (juste sous l'anti-répétition, au-dessus de l'égalité des scores) évite d'apparier des joueurs ayant un nombre différent de points MacMahon — la pénalité augmente avec le carré de l'écart, comme les autres règles d'écart. Désactivé par défaut.",
     "macmahonFromEloTitle": "MacMahon d'après l'ELO estimé",
@@ -411,20 +408,52 @@
     "eloEstimateUnanchored": "L'estimation ELO n'a rien pour ancrer son échelle. Ajoutez un joueur classé, figez les classements (multiplicateur K à 0), ou choisissez un prior non plat pour les non classés."
   },
   "tiebreaks": {
-    "points": { "label": "Points", "title": "Score total : base MacMahon + victoires" },
-    "sos_m": { "title": "Somme des points des adversaires (MacMahon inclus)" },
-    "sos_w": { "title": "Somme des victoires des adversaires" },
-    "sodos_m": { "title": "Somme des points des adversaires battus" },
-    "sodos_w": { "title": "Somme des victoires des adversaires battus" },
-    "sosos_m": { "title": "Somme des SOSM des adversaires" },
-    "sosos_w": { "title": "Somme des SOSW des adversaires" },
-    "sos_m1": { "title": "SOSM sans le moins bon adversaire" },
-    "sos_m2": { "title": "SOSM sans les deux moins bons adversaires" },
-    "sos_w1": { "title": "SOSW sans le moins bon adversaire" },
-    "sos_w2": { "title": "SOSW sans les deux moins bons adversaires" },
-    "cuss_m": { "title": "Somme cumulative du total de points ronde par ronde" },
-    "cuss_w": { "title": "Somme cumulative du total de victoires ronde par ronde" },
-    "dc": { "title": "Confrontation directe : victoires entre joueurs à égalité sur tous les critères précédents, lorsqu'ils se sont tous rencontrés" },
-    "est_elo": { "label": "ELO est.", "title": "Estimation bayésienne en temps réel du niveau actuel du joueur" }
+    "points": {
+      "label": "Points",
+      "title": "Score total : base MacMahon + victoires"
+    },
+    "sos_m": {
+      "title": "Somme des points des adversaires (MacMahon inclus)"
+    },
+    "sos_w": {
+      "title": "Somme des victoires des adversaires"
+    },
+    "sodos_m": {
+      "title": "Somme des points des adversaires battus"
+    },
+    "sodos_w": {
+      "title": "Somme des victoires des adversaires battus"
+    },
+    "sosos_m": {
+      "title": "Somme des SOSM des adversaires"
+    },
+    "sosos_w": {
+      "title": "Somme des SOSW des adversaires"
+    },
+    "sos_m1": {
+      "title": "SOSM sans le moins bon adversaire"
+    },
+    "sos_m2": {
+      "title": "SOSM sans les deux moins bons adversaires"
+    },
+    "sos_w1": {
+      "title": "SOSW sans le moins bon adversaire"
+    },
+    "sos_w2": {
+      "title": "SOSW sans les deux moins bons adversaires"
+    },
+    "cuss_m": {
+      "title": "Somme cumulative du total de points ronde par ronde"
+    },
+    "cuss_w": {
+      "title": "Somme cumulative du total de victoires ronde par ronde"
+    },
+    "dc": {
+      "title": "Confrontation directe : victoires entre joueurs à égalité sur tous les critères précédents, lorsqu'ils se sont tous rencontrés"
+    },
+    "est_elo": {
+      "label": "ELO est.",
+      "title": "Estimation bayésienne en temps réel du niveau actuel du joueur"
+    }
   }
 }

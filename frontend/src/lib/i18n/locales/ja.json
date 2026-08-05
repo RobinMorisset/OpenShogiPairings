@@ -326,10 +326,9 @@
     "gradeKindDan": "段",
     "gradeKindKyu": "級",
     "startingPoints": "初期点",
-    "playerCountSingular": "{count}名",
-    "playerCountPlural": "{count}名",
-    "pointsValueSingular": "{points}点",
-    "pointsValuePlural": "{points}点",
+    "playerCount": "{count, plural, other {#名}}",
+    "pointsValue": "{points, plural, other {#点}}",
+    "startingPointCount": "{max, plural, other {初期点}}",
     "degressiveTitle": "加速式スイス（逓減マクマホン）",
     "degressiveDesc": "しきい値の「この回戦で終了」にチェックを入れると、その回戦の終了後にそのしきい値が外れ、初期点による差が徐々に解消されます。しきい値ごとに終了する回戦を指定できます。",
     "dropAfterRoundCheckbox": "この回戦で終了",
@@ -338,8 +337,6 @@
     "roundsRangeLabel": "第{from}〜{to}回戦",
     "roundPlus": "第{n}回戦以降",
     "upTo": "〜",
-    "startingPointSingular": "初期点",
-    "startingPointsPlural": "初期点",
     "airtightGroupsTitle": "厳密グループ",
     "airtightGroupsDesc": "最初のN回戦では、マクマホン点の異なる選手同士を組み合わせないようにする規則が追加されます（優先度は再戦回避のすぐ下、同点同士の組み合わせより上）。他の差の規則と同様、罰点は差の2乗で大きくなります。既定では無効です。",
     "macmahonFromEloTitle": "推定レーティングによるマクマホン",
@@ -411,20 +408,52 @@
     "eloEstimateUnanchored": "レーティング推定の基準となる値がありません。レーティングのある選手を追加するか、レーティングを固定する（K倍率を0にする）か、レーティングなしの事前分布を平坦以外にしてください。"
   },
   "tiebreaks": {
-    "points": { "label": "持ち点", "title": "合計点: マクマホン初期点 + 勝数" },
-    "sos_m": { "title": "対戦相手の持ち点の合計（マクマホン点を含む）" },
-    "sos_w": { "title": "対戦相手の勝数の合計" },
-    "sodos_m": { "title": "勝った相手の持ち点の合計" },
-    "sodos_w": { "title": "勝った相手の勝数の合計" },
-    "sosos_m": { "title": "対戦相手のSOSMの合計" },
-    "sosos_w": { "title": "対戦相手のSOSWの合計" },
-    "sos_m1": { "title": "最下位の相手1名を除いたSOSM" },
-    "sos_m2": { "title": "下位の相手2名を除いたSOSM" },
-    "sos_w1": { "title": "最下位の相手1名を除いたSOSW" },
-    "sos_w2": { "title": "下位の相手2名を除いたSOSW" },
-    "cuss_m": { "title": "各回戦終了時点の持ち点の累計" },
-    "cuss_w": { "title": "各回戦終了時点の勝数の累計" },
-    "dc": { "title": "直接対決: それまでの基準がすべて並んだ選手同士が全員対戦している場合の、その中での勝数" },
-    "est_elo": { "label": "推定レート", "title": "現在の棋力のベイズ推定値（リアルタイム）" }
+    "points": {
+      "label": "持ち点",
+      "title": "合計点: マクマホン初期点 + 勝数"
+    },
+    "sos_m": {
+      "title": "対戦相手の持ち点の合計（マクマホン点を含む）"
+    },
+    "sos_w": {
+      "title": "対戦相手の勝数の合計"
+    },
+    "sodos_m": {
+      "title": "勝った相手の持ち点の合計"
+    },
+    "sodos_w": {
+      "title": "勝った相手の勝数の合計"
+    },
+    "sosos_m": {
+      "title": "対戦相手のSOSMの合計"
+    },
+    "sosos_w": {
+      "title": "対戦相手のSOSWの合計"
+    },
+    "sos_m1": {
+      "title": "最下位の相手1名を除いたSOSM"
+    },
+    "sos_m2": {
+      "title": "下位の相手2名を除いたSOSM"
+    },
+    "sos_w1": {
+      "title": "最下位の相手1名を除いたSOSW"
+    },
+    "sos_w2": {
+      "title": "下位の相手2名を除いたSOSW"
+    },
+    "cuss_m": {
+      "title": "各回戦終了時点の持ち点の累計"
+    },
+    "cuss_w": {
+      "title": "各回戦終了時点の勝数の累計"
+    },
+    "dc": {
+      "title": "直接対決: それまでの基準がすべて並んだ選手同士が全員対戦している場合の、その中での勝数"
+    },
+    "est_elo": {
+      "label": "推定レート",
+      "title": "現在の棋力のベイズ推定値（リアルタイム）"
+    }
   }
 }

@@ -709,10 +709,10 @@
         {#each bands as b (b.points)}
           <li>
             <strong>
-              {$_(b.points === 1 ? "settings.pointsValueSingular" : "settings.pointsValuePlural", { values: { points: b.points } })}
+              {$_("settings.pointsValue", { values: { points: b.points } })}
             </strong>
             <span class="band-count">
-              ({$_(b.count === 1 ? "settings.playerCountSingular" : "settings.playerCountPlural", { values: { count: b.count } })})
+              ({$_("settings.playerCount", { values: { count: b.count } })})
             </span>
           </li>
         {/each}
@@ -734,7 +734,7 @@
             <li>
               <span class="band">{s.label}</span> → {$_("settings.upTo")}
               <strong>{s.max}</strong>
-              {$_(s.max === 1 ? "settings.startingPointSingular" : "settings.startingPointsPlural")}
+              {$_("settings.startingPointCount", { values: { max: s.max } })}
             </li>
           {/each}
         </ul>
