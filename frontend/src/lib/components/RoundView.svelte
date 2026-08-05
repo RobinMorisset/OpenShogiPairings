@@ -16,7 +16,7 @@
   } from "../types";
   import { sourceBadge } from "../pairingSource";
   import { handicapGiverId } from "../boardOutcome";
-  import { absent, toggledNoShow } from "../noShow";
+  import { absent, isDecided, toggledNoShow } from "../noShow";
   import { printPage } from "../platform";
   import type { HandicapChoice } from "../handicap";
 
@@ -104,8 +104,7 @@
   // path). Mirrors the server's `set_board_long` guards.
   function longToggleDisabled(board: Board): boolean {
     if (busy || !isCurrentRound) return true;
-    const decided = board.result != null || board.no_show != null;
-    return decided && !board.long;
+    return isDecided(board) && !board.long;
   }
 
   // Toggle `side`'s no-show independently, so the two buttons together cover all

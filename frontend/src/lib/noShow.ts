@@ -6,7 +6,22 @@
 // up" buttons together cover all four states. Kept as a standalone module (out
 // of RoundView) so the logic is unit-tested.
 
-import type { NoShow, Winner } from "./types";
+import type { Board, NoShow, Winner } from "./types";
+
+/**
+ * Whether a board's outcome is settled: a recorded result *or* a no-show.
+ *
+ * Mirrors `Board::is_decided` in `crates/core/src/round.rs`. The two fields are
+ * mutually exclusive by construction — `set_board_no_show` clears `result` when
+ * it sets `no_show`, because no game was played — so testing `result` alone
+ * silently treats every forfeited board as still open. Server-side guards
+ * (re-pairing a round, flagging a long game) are written against `is_decided`,
+ * so any client guard that mirrors one has to use this, or it enables a control
+ * whose request the server rejects.
+ */
+export function isDecided(board: Board): boolean {
+  return board.result != null || board.no_show != null;
+}
 
 /**
  * Whether `side` is currently a no-show on this board — true for that side, and

@@ -36,6 +36,7 @@
     type DraftUpdate,
   } from "./lib/api";
   import { describeApiError } from "./lib/errorCodes";
+  import { isDecided } from "./lib/noShow";
   import type {
     BackupInfo,
     CupBracketView,
@@ -244,13 +245,16 @@
   const enoughPlayers = $derived((tournament?.players.length ?? 0) >= 2);
 
   // The active round can be re-paired (via "force this pairing") only if it is
-  // the current, in-progress round with no results recorded yet.
+  // the current, in-progress round with nothing decided yet. `isDecided` covers
+  // no-shows as well as results, matching the server's guard — a forfeited board
+  // has no `result`, so checking that alone would leave the button enabled on a
+  // request `force_pairing` rejects.
   const canForceActiveRound = $derived(
     !!activeRound &&
       !!currentRound &&
       activeRound.number === currentRound.number &&
       !activeRound.completed &&
-      activeRound.boards.every((b) => b.result == null),
+      !activeRound.boards.some(isDecided),
   );
 
   // Hybrid cup: which bracket sizes are choosable at finalization depends on how
