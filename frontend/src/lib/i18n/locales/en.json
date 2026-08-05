@@ -137,7 +137,6 @@
     "needsDifferentRatings": "Needs two players with different ratings",
     "alreadyCompletedWarning": "Every game in this round is recorded, so it counts in the standings — changing a result here updates them.",
     "clickToRecordWinner": "Click a player to record them as the winner.",
-    "byeLabel": "Bye:",
     "byeOpponent": "BYE",
     "cupByeOpponent": "CUP BYE",
     "explanation": {

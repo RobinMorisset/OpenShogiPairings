@@ -137,7 +137,6 @@
     "needsDifferentRatings": "Nécessite deux joueurs de classements différents",
     "alreadyCompletedWarning": "Toutes les parties de cette ronde sont enregistrées, elle compte donc au classement — modifier un résultat ici le met à jour.",
     "clickToRecordWinner": "Cliquez sur un joueur pour l'enregistrer comme vainqueur.",
-    "byeLabel": "Exempt :",
     "byeOpponent": "EXEMPT",
     "cupByeOpponent": "EXEMPT COUPE",
     "explanation": {
