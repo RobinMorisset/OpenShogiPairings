@@ -36,6 +36,7 @@
     type DraftUpdate,
   } from "./lib/api";
   import { describeApiError } from "./lib/errorCodes";
+  import { longPending, overrunLongRound } from "./lib/longGames";
   import { isDecided } from "./lib/noShow";
   import type {
     BackupInfo,
@@ -175,7 +176,7 @@
     if (!prev) return [];
     return prev.boards
       .map((board, index) => ({ index, board }))
-      .filter(({ board }) => board.long && board.result == null && board.no_show == null);
+      .filter(({ board }) => longPending(board));
   });
 
   // Players still busy on an unresolved long game (a two-round board from an
@@ -188,7 +189,7 @@
     const out: number[] = [];
     for (const r of tournament.rounds) {
       for (const b of r.boards) {
-        if (b.long && b.result == null && b.no_show == null) out.push(b.player1, b.player2);
+        if (longPending(b)) out.push(b.player1, b.player2);
       }
     }
     return out;
@@ -279,9 +280,16 @@
   // registration (a single undo step); from round 2 on, registration is already
   // finalized and it just prepares the next round.
   const nextRoundNumber = $derived((tournament?.rounds.length ?? 0) + 1);
+  // A long game may straddle its own round and the next, no further, so an
+  // unresolved one two rounds back blocks the next round — mirrors the guard in
+  // `prepare_round`. Without this the button stayed live and the server refused.
+  const overrunRound = $derived(
+    overrunLongRound(tournament?.rounds ?? [], nextRoundNumber),
+  );
   const startEnabled = $derived(
     !busy &&
       enoughPlayers &&
+      overrunRound === null &&
       ((phase === "registration" && cupReady) || phase === "ready"),
   );
   const startTitle = $derived(
@@ -289,9 +297,11 @@
       ? $_("app.startTitleNotReady")
       : !enoughPlayers
         ? $_("app.startTitleNeedPlayers")
-        : phase === "registration" && !cupReady
-          ? $_("app.advanceTitleNeedCup")
-          : "",
+        : overrunRound !== null
+          ? $_("app.startTitleLongGamePending", { values: { round: overrunRound } })
+          : phase === "registration" && !cupReady
+            ? $_("app.advanceTitleNeedCup")
+            : "",
   );
 
   // "Export grid" button: available only in the "ready" phase (no draft, no

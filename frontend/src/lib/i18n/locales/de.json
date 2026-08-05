@@ -27,6 +27,7 @@
     "prepareRound": "Runde {number} vorbereiten",
     "startTitleNotReady": "Beenden Sie zuerst die laufende Runde oder den Entwurf",
     "startTitleNeedPlayers": "Mindestens 2 Spieler nötig",
+    "startTitleLongGamePending": "Tragen Sie zuerst das Ergebnis der Langpartie aus Runde {round} ein",
     "exportGrid": "Kreuztabelle exportieren",
     "exportTitleNoRounds": "Schließen Sie zuerst eine Runde ab",
     "exportTitleNotReady": "Beenden Sie die laufende Runde vor dem Export",

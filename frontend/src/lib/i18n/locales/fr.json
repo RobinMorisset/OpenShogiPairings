@@ -27,6 +27,7 @@
     "prepareRound": "Préparer la ronde {number}",
     "startTitleNotReady": "Terminez la ronde en cours ou le brouillon",
     "startTitleNeedPlayers": "Il faut au moins 2 joueurs",
+    "startTitleLongGamePending": "Enregistrez d'abord le résultat de la partie longue de la ronde {round}",
     "exportGrid": "Exporter la grille",
     "exportTitleNoRounds": "Terminez d'abord une ronde",
     "exportTitleNotReady": "Terminez la ronde en cours avant d'exporter",

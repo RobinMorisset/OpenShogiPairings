@@ -27,6 +27,7 @@
     "prepareRound": "Prepare round {number}",
     "startTitleNotReady": "Finish the current round or draft first",
     "startTitleNeedPlayers": "Need at least 2 players",
+    "startTitleLongGamePending": "Record the result of the long game from round {round} first",
     "exportGrid": "Export grid",
     "exportTitleNoRounds": "Complete a round first",
     "exportTitleNotReady": "Finish the current round before exporting",
