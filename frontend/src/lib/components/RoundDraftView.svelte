@@ -1,6 +1,7 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
   import type { DraftUpdate } from "../api";
+  import { attendingPlayers, MIN_PRESENT_PLAYERS } from "../roundDraft";
   import type { Player, RoundDraft } from "../types";
 
   interface Props {
@@ -45,6 +46,9 @@
     return (a.tournament_id ?? Infinity) - (b.tournament_id ?? Infinity);
   }
   const allSorted = $derived([...players].sort(byNumber));
+  // Everyone the round will include — what the server's minimum is measured
+  // against. Distinct from `present` below, which is only the Swiss pool.
+  const attending = $derived(attendingPlayers(allSorted, draft.absent));
   // The Swiss pool: present players the cup hasn't already taken.
   const present = $derived(
     allSorted.filter((p) => !absentSet.has(tid(p)) && !cupSet.has(tid(p))),
@@ -156,8 +160,12 @@
   // Client-side validation (the server validates authoritatively too). The forced
   // byes need no parity check: whatever they leave over, the engine byes one more
   // player if the count is odd.
+  //
+  // The minimum counts `attending`, not `present`: the server's rule is about
+  // everyone the round includes, and a cup round can legitimately leave the
+  // Swiss pool empty with the whole field in the bracket.
   const problem = $derived.by<string | null>(() => {
-    if (cupPlayers.length === 0 && present.length < 2)
+    if (attending.length < MIN_PRESENT_PLAYERS)
       return $_("roundDraftView.needAtLeastTwoPresent");
     return null;
   });
