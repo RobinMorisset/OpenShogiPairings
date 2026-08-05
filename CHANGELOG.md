@@ -7,6 +7,31 @@ This project does NOT adhere to semantic versioning. Assume that even minor
 version changes can change the save format and thus break compatibility; it
 will be explicitly mentioned in the changelog for that version though.
 
+## [1.3.0] - 2026-08-05
+
+Backwards compatible with v1.1.0 and v1.2.0
+
+### Added
+
+- **Translations** of the UI in German, Japanese, Polish, Slovak, Russian,
+  Belarusian and Ukrainian, bringing it to nine languages alongside English
+  and French.
+
+### Fixed
+
+- Some error messages were untranslated and always in English.
+- Some buttons in the UI remained active (and would do nothing) when they
+  should have been greyed out.
+- Loading an invalid tournament save file created an empty tournament.
+- Loading an invalid set of settings was silently ignored, it is now clearly
+  rejected.
+
+### Changed
+
+- Some performance optimizations to the core matching algorithm; pairing one
+  round of a 1000-player tournament is now reliably between 20ms and a few
+  hundred milliseconds, depending on which pairing rules are in use.
+
 ## [1.2.0] - 2026-07-18
 
 Backwards compatible with v1.1.0
