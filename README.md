@@ -286,6 +286,7 @@ Registry-level routes (not scoped to any one tournament):
 | `GET /api/health` | Liveness check. |
 | `GET /api/tournaments` | List every known tournament (id, name, whether it's password-protected) — public, needed to render the picker before logging in anywhere. |
 | `POST /api/tournaments` | Create a new tournament: `{ "name": "...", "password"? }`. Admin-gated if `OSP_ADMIN_PASSWORD` is set. Returns `{ "id", "token"? }` (a token if the new tournament has a password, so the creator needn't immediately log in to it). |
+| `POST /api/tournaments/import` | Create a tournament from a save file (what the picker's "Load from file…" does): `{ "tournament": {…the file verbatim…}, "password"? }`. Same admin gate and same `{ "id", "token"? }` response as creating one. Deliberately a *single* request: the format version and the tournament's own invariants are checked before anything is registered, so a file this build can't read leaves nothing behind. The file's own `id` is ignored — the registry mints a fresh one, so importing the same file twice can't collide. |
 | `DELETE /api/tournaments/{id}` | Delete a tournament: its registry entry, persisted file, and backups. |
 | `POST /api/admin/login` | Exchange the admin password for a bearer token. |
 | `GET /api/ratings` | FESA rating list (server-cached) for registration autocomplete. Admin-gated. |
@@ -300,7 +301,6 @@ that tournament's bearer token if it has a password (except `/login` and
 | `POST /login` | Exchange this tournament's password for a bearer token. |
 | `GET /events` | SSE stream of this tournament's change `version`, for live sync. |
 | `GET /` | Fetch the tournament (`TournamentView`; 404 if unknown). |
-| `PUT /` | Replace the tournament wholesale (used by "load"); resets undo history. |
 | `DELETE /` | Delete the tournament. |
 | `POST /undo` | Revert the last change (server-side undo history). |
 | `GET /american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |

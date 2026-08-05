@@ -155,6 +155,15 @@ async function fetchOk(
   const token = resolveToken(authKind);
   const method = (init?.method ?? "GET").toUpperCase();
   const mutating = method === "POST" || method === "PUT" || method === "DELETE";
+  // `knownVersion` describes the tournament that is *open*, so only a request
+  // aimed at that one may declare it. A request aimed elsewhere (the picker
+  // seeding a freshly created entry, deleting another tournament) must send no
+  // version rather than one from an unrelated counter.
+  const declaresVersion =
+    mutating &&
+    knownVersion !== null &&
+    authKind.kind === "tournament" &&
+    (authKind.id ?? currentId) === currentId;
   try {
     response = await fetch(await apiUrl(path), {
       ...init,
@@ -165,9 +174,7 @@ async function fetchOk(
         ...(token ? { authorization: `Bearer ${token}` } : {}),
         // Declare the version this edit is based on, so the server can reject it
         // if another referee has since changed the tournament (409).
-        ...(mutating && authKind.kind === "tournament" && knownVersion !== null
-          ? { "x-tournament-version": String(knownVersion) }
-          : {}),
+        ...(declaresVersion ? { "x-tournament-version": String(knownVersion) } : {}),
         ...init?.headers,
       },
     });
@@ -333,6 +340,30 @@ export async function createTournamentEntry(
   return result;
 }
 
+/**
+ * Create a tournament from a save file, optionally with its own password.
+ *
+ * One atomic request: the server validates the file and registers nothing
+ * unless it passes, so a rejected load leaves no half-created tournament to
+ * clean up. Like {@link createTournamentEntry} it needs the admin token when
+ * the server has an admin password, and stores the returned tournament token
+ * so the caller can select it immediately.
+ */
+export async function importTournament(
+  tournament: Tournament,
+  password?: string,
+): Promise<CreateTournamentResult> {
+  const body: { tournament: Tournament; password?: string } = { tournament };
+  if (password) body.password = password;
+  const result = await request<CreateTournamentResult>(
+    "/api/tournaments/import",
+    { method: "POST", body: JSON.stringify(body) },
+    ADMIN_AUTH,
+  );
+  if (result.token) setToken(result.id, result.token);
+  return result;
+}
+
 /** Delete a tournament: its registry entry, persisted file, and backups. */
 export function deleteTournamentEntry(id: string): Promise<void> {
   return fetchOk(`/api/tournaments/${id}`, { method: "DELETE" }, { kind: "tournament", id }).then(
@@ -410,14 +441,6 @@ export async function fetchTournament(): Promise<TournamentResponse | null> {
     if (err instanceof ApiError && err.status === 404) return null;
     throw err;
   }
-}
-
-/** Replace the current tournament wholesale (used when loading a saved file). */
-export function replaceTournament(tournament: Tournament): Promise<TournamentResponse> {
-  return request<TournamentResponse>(scopedPath(""), {
-    method: "PUT",
-    body: JSON.stringify(tournament),
-  });
 }
 
 /** Revert the last player change (linear server-side undo history). */

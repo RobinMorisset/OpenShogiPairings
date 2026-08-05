@@ -39,8 +39,8 @@ use crate::state::TournamentRegistry;
 
 /// Build the API-only router around the given state.
 ///
-/// `/api/health` and `GET /api/tournaments` are always open; creating a
-/// tournament and the FESA ratings proxy (`/api/ratings*`) may require
+/// `/api/health` and `GET /api/tournaments` are always open; creating or
+/// importing a tournament and the FESA ratings proxy (`/api/ratings*`) may require
 /// [`AppState::admin_auth`] (see `POST /api/admin/login`); everything scoped
 /// to one tournament (`/api/tournaments/{id}/...`) may require that
 /// tournament's own password — see [`tournament::scope`].
@@ -114,9 +114,10 @@ pub async fn serve(listener: tokio::net::TcpListener) -> std::io::Result<()> {
 /// open, in-memory, API-only behaviour of [`serve`].
 #[derive(Default)]
 pub struct ServerConfig {
-    /// Gates `POST /api/tournaments` (creating new tournaments); `None` lets
-    /// anyone create one (fine on a trusted machine, risky on a public host
-    /// whose URL might circulate beyond its referees).
+    /// Gates `POST /api/tournaments` and `POST /api/tournaments/import` (the
+    /// two ways to mint a tournament); `None` lets anyone create one (fine on a
+    /// trusted machine, risky on a public host whose URL might circulate beyond
+    /// its referees).
     pub admin_password: Option<String>,
     /// Directory of the built SPA to serve same-origin; `None` = API only.
     pub static_dir: Option<PathBuf>,
@@ -185,6 +186,15 @@ mod tests {
 
     fn get(uri: &str) -> Request<Body> {
         Request::builder().uri(uri).body(Body::empty()).unwrap()
+    }
+
+    /// A `GET` carrying an `Authorization: Bearer <token>` header.
+    fn get_with_token(uri: &str, token: &str) -> Request<Body> {
+        Request::builder()
+            .uri(uri)
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap()
     }
 
     fn post_empty(uri: &str) -> Request<Body> {
@@ -720,33 +730,85 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
-    #[tokio::test]
-    async fn replace_tournament_loads_a_saved_file() {
-        let state = AppState::default();
-        let id = create(&state, "Original").await;
-
-        let mut saved = Tournament::new("Loaded Cup").unwrap();
+    /// A save file with one player, as `saveTournament` writes it.
+    fn saved_file(name: &str) -> serde_json::Value {
+        let mut saved = Tournament::new(name).unwrap();
         saved
             .add_player(osp_core::NewPlayer {
                 last_name: "Bob".into(),
                 ..Default::default()
             })
             .unwrap();
-        let saved_json = serde_json::to_value(&saved).unwrap();
+        serde_json::to_value(&saved).unwrap()
+    }
+
+    #[tokio::test]
+    async fn import_creates_a_tournament_from_a_saved_file() {
+        let state = AppState::default();
+        let saved = saved_file("Loaded Cup");
+        let file_id = saved["id"].clone();
 
         let (status, body) = send(
             router(state.clone()),
-            json_req("PUT", &t(id, ""), saved_json),
+            json_req(
+                "POST",
+                "/api/tournaments/import",
+                json!({ "tournament": saved }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let id = body["id"].as_str().unwrap().to_string();
+        // The registry mints the id; the file's own is overwritten, so importing
+        // the same file twice can't collide.
+        assert_ne!(json!(id), file_id);
+        // No password asked for, so no token to hand back.
+        assert!(body.get("token").is_none());
+
+        let (status, body) = send(
+            router(state.clone()),
+            get(&format!("/api/tournaments/{id}")),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["tournament"]["name"], "Loaded Cup");
-        // The registry's id wins over whatever id the uploaded file carried.
-        assert_eq!(body["tournament"]["id"], id.to_string());
-
-        let (status, body) = send(router(state.clone()), get(&t(id, ""))).await;
-        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tournament"]["id"], id);
         assert_eq!(body["tournament"]["players"][0]["last_name"], "Bob");
+    }
+
+    #[tokio::test]
+    async fn import_can_set_the_tournament_password() {
+        let state = AppState::default();
+        let (status, body) = send(
+            router(state.clone()),
+            json_req(
+                "POST",
+                "/api/tournaments/import",
+                json!({ "tournament": saved_file("Locked"), "password": "hunter2" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let id = body["id"].as_str().unwrap().to_string();
+        // The importer gets a session token straight away, as when creating.
+        let token = body["token"].as_str().unwrap().to_string();
+
+        // The tournament really is protected...
+        let (status, _) = send(
+            router(state.clone()),
+            get(&format!("/api/tournaments/{id}")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        // ...and the returned token opens it.
+        let (status, body) = send(
+            router(state.clone()),
+            get_with_token(&format!("/api/tournaments/{id}"), &token),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tournament"]["name"], "Locked");
     }
 
     #[tokio::test]
@@ -812,14 +874,58 @@ mod tests {
         assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
+    /// Import `file` and return the status plus the resulting registry listing,
+    /// so a rejection can be checked to have registered *nothing*.
+    async fn import(state: &AppState, file: serde_json::Value) -> (StatusCode, usize) {
+        let (status, _) = send(
+            router(state.clone()),
+            json_req(
+                "POST",
+                "/api/tournaments/import",
+                json!({ "tournament": file }),
+            ),
+        )
+        .await;
+        let (_, listed) = send(router(state.clone()), get("/api/tournaments")).await;
+        (status, listed.as_array().unwrap().len())
+    }
+
     #[tokio::test]
-    async fn replace_tournament_rejects_unknown_version() {
+    async fn import_rejects_a_file_this_build_cannot_read_without_registering_it() {
         let state = AppState::default();
-        let id = create(&state, "X").await;
-        let mut future = serde_json::to_value(Tournament::new("X").unwrap()).unwrap();
+        let mut future = saved_file("X");
         future["format_version"] = json!(999);
 
-        let (status, _) = send(router(state), json_req("PUT", &t(id, ""), future)).await;
+        // The whole reason import is one request: a rejected file must leave no
+        // half-created tournament behind for the referee to clean up.
+        let (status, registered) = import(&state, future).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(registered, 0, "a rejected import must register nothing");
+    }
+
+    #[tokio::test]
+    async fn import_rejects_a_blank_name_that_no_constructor_would_have_allowed() {
+        let state = AppState::default();
+        let mut blank = saved_file("X");
+        blank["name"] = json!("   ");
+
+        let (status, registered) = import(&state, blank).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(registered, 0);
+    }
+
+    #[tokio::test]
+    async fn import_rejects_an_unknown_field_rather_than_dropping_it() {
+        let state = AppState::default();
+        let (status, _) = send(
+            router(state.clone()),
+            json_req(
+                "POST",
+                "/api/tournaments/import",
+                json!({ "tournament": saved_file("X"), "pasword": "typo" }),
+            ),
+        )
+        .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 

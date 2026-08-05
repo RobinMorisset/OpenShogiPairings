@@ -55,13 +55,30 @@ export const ERROR_CODE_KEYS: Record<string, string> = {
   elo_estimate_unanchored: "serverError.eloEstimateUnanchored",
 };
 
-/** Message to show for a failed request, translated where the server tagged it. */
+/**
+ * An error carrying one of the stable codes above. Matched structurally rather
+ * than by class, because the client can reject something the server would have
+ * rejected the same way — a save file whose format version this build cannot
+ * read (see `TournamentFileError` in `tournamentFile.ts`) — and the referee
+ * should read the same sentence either way.
+ */
+interface Coded {
+  code?: unknown;
+  values?: unknown;
+}
+
+/** Message to show for a failed request, translated where it was tagged. */
 export function describeApiError(err: unknown, t: Translate): string {
   if (err instanceof ApiError && err.status === 0) {
     return t("app.cannotReachServer");
   }
-  if (err instanceof ApiError && err.code && ERROR_CODE_KEYS[err.code]) {
-    return t(ERROR_CODE_KEYS[err.code], { values: err.values ?? {} });
+  if (err instanceof Error) {
+    const { code, values } = err as Coded;
+    if (typeof code === "string" && ERROR_CODE_KEYS[code]) {
+      return t(ERROR_CODE_KEYS[code], {
+        values: (values as Record<string, string> | undefined) ?? {},
+      });
+    }
   }
   return err instanceof Error ? err.message : String(err);
 }

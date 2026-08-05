@@ -1481,14 +1481,22 @@ impl Tournament {
             })
     }
 
-    /// Validate a tournament that was deserialized from an untrusted source
-    /// (an uploaded save file). Currently this only checks the format version.
+    /// Validate a tournament that was deserialized from an untrusted source (an
+    /// uploaded save file).
+    ///
+    /// This is the *only* gate an imported file passes through, so every rule
+    /// that [`Tournament::new`] enforces on a tournament we build ourselves has
+    /// to be restated here — a file is not held to a constructor it never ran.
+    /// Deserializing successfully proves the shape, not the invariants.
     pub fn validate_loaded(&self) -> Result<(), TournamentError> {
         if self.format_version != TOURNAMENT_FORMAT_VERSION {
             return Err(TournamentError::UnsupportedFormatVersion {
                 found: self.format_version,
                 supported: TOURNAMENT_FORMAT_VERSION,
             });
+        }
+        if self.name.trim().is_empty() {
+            return Err(TournamentError::EmptyTournamentName);
         }
         Ok(())
     }
@@ -2550,6 +2558,22 @@ mod tests {
                 supported: TOURNAMENT_FORMAT_VERSION,
             })
         );
+    }
+
+    /// `Tournament::new` refuses a blank name, but an imported file never runs
+    /// it — nothing but `validate_loaded` stands between the JSON and the
+    /// registry, so the same rule has to hold here.
+    #[test]
+    fn validate_loaded_rejects_a_blank_name() {
+        for blank in ["", "   ", "\t\n"] {
+            let mut t = Tournament::new("Paris Open").unwrap();
+            t.name = blank.to_string();
+            assert_eq!(
+                t.validate_loaded(),
+                Err(TournamentError::EmptyTournamentName),
+                "a file named {blank:?} must not import"
+            );
+        }
     }
 
     // --- Player categories ------------------------------------------------

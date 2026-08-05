@@ -14,6 +14,26 @@ import { isTauri } from "./platform";
 /** File extension used for saved tournaments. */
 const FILE_SUFFIX = ".osp.json";
 
+/**
+ * A file we could not even read as a tournament, rejected before the server was
+ * asked.
+ *
+ * `code` and `values` are the *same* stable codes the server answers with (see
+ * `crates/server/src/error_codes.rs`), so `describeApiError` renders a
+ * translated sentence rather than an English-only one. `message` is the fallback
+ * used only if the code ever loses its mapping.
+ */
+export class TournamentFileError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly values: Record<string, string> = {},
+  ) {
+    super(message);
+    this.name = "TournamentFileError";
+  }
+}
+
 /** Filters offered in the native dialogs. */
 const DIALOG_FILTERS = [{ name: "Tournament", extensions: ["json", "osp"] }];
 
@@ -44,18 +64,31 @@ function isTournamentLike(value: unknown): value is Tournament {
 }
 
 /**
- * Parse tournament JSON text. Only a light shape check here; the server does
- * authoritative validation (including the format version) on upload.
+ * Parse tournament JSON text.
+ *
+ * Deliberately only a structural check — "did you pick the wrong file?" — with
+ * no attempt to judge the contents. `POST /api/tournaments/import` is a single
+ * atomic request that validates the file (format version, then the tournament's
+ * own invariants) and registers nothing unless it passes, so there is no
+ * half-created state for a client-side pre-check to save us from. Duplicating
+ * the server's rules here would buy one round-trip and risk this end drifting
+ * *stricter* than the authority, rejecting files that are perfectly good.
  */
-function parseTournament(text: string): Tournament {
+export function parseTournament(text: string): Tournament {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
-  } catch {
-    throw new Error("That file is not valid JSON.");
+  } catch (err) {
+    throw new TournamentFileError("That file is not valid JSON.", "malformed_save", {
+      details: err instanceof Error ? err.message : String(err),
+    });
   }
   if (!isTournamentLike(parsed)) {
-    throw new Error("That file does not look like a saved tournament.");
+    throw new TournamentFileError(
+      "That file does not look like a saved tournament.",
+      "malformed_save",
+      { details: "no id, name and players fields" },
+    );
   }
   return parsed;
 }

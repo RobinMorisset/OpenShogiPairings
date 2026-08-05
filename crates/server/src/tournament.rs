@@ -1,7 +1,6 @@
 //! Per-tournament API: fetch, replace (load), delete, player CRUD, rounds, and
 //! undo — everything nested under `/api/tournaments/{id}`.
 
-use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{header, StatusCode};
 use axum::middleware;
@@ -34,7 +33,6 @@ use crate::{auth, live};
 /// difference.
 ///
 /// - `GET    /`               fetch the tournament
-/// - `PUT    /`               replace it wholesale (load a save file)
 /// - `DELETE /`               delete the tournament
 /// - `POST   /undo`           revert the last player change
 /// - `GET    /american-grid` export the cross-table for ELO (text)
@@ -75,12 +73,7 @@ pub fn scope(state: AppState) -> Router<AppState> {
         .route("/events", get(live::events));
 
     let protected = Router::new()
-        .route(
-            "/",
-            get(get_tournament)
-                .put(replace_tournament)
-                .delete(delete_tournament),
-        )
+        .route("/", get(get_tournament).delete(delete_tournament))
         .route("/undo", post(undo))
         .route(
             "/american-grid",
@@ -249,32 +242,6 @@ async fn get_tournament(
     TournamentCtx(instance): TournamentCtx,
 ) -> Result<Json<TournamentView>, ApiError> {
     let store = instance.read();
-    view(&store)
-}
-
-/// Replace the tournament wholesale (used by "load"). The uploaded JSON's own
-/// `id` is overwritten with this instance's id, since the registry (and its
-/// persisted filename, backups, …) are keyed by it. Resets undo history.
-async fn replace_tournament(
-    TournamentCtx(instance): TournamentCtx,
-    Path(id): Path<Uuid>,
-    ExpectedVersion(expected): ExpectedVersion,
-    body: Bytes,
-) -> Result<Json<TournamentView>, ApiError> {
-    // Reject an incompatible save with a clear version error *before* the generic
-    // deserialize, whose failure on a reshaped field would otherwise be an opaque
-    // 422 (see [`crate::state::check_format_version`]).
-    crate::state::check_format_version(&body)?;
-    let mut tournament: Tournament = serde_json::from_slice(&body)
-        .map_err(|e| ApiError::BadRequest(format!("could not parse tournament: {e}")))?;
-    tournament.validate_loaded()?;
-    tournament.id = id;
-    let mut store = instance.write();
-    // Atomic optimistic-concurrency check, under the same lock the replace runs
-    // in — the middleware pre-screen alone can't close the race for a
-    // whole-tournament replace (see TournamentStore::ensure_current_version).
-    store.ensure_current_version(expected)?;
-    store.set_current(tournament);
     view(&store)
 }
 

@@ -34,7 +34,7 @@ const NOTIFY_CAPACITY: usize = 16;
 /// file therefore fails deep inside a changed field with an opaque, misleading
 /// error — hiding the real cause, the format version, which the version field
 /// exists precisely to surface. Every path that loads an untrusted save (server
-/// startup, the "load file" endpoint) runs this first, so an old file is
+/// startup, `POST /api/tournaments/import`) runs this first, so an old file is
 /// rejected loudly with a clear version message rather than mis-parsed or
 /// silently dropped. Lives in the server (not `osp-core`) because it is the
 /// server that parses JSON — core has no runtime JSON dependency.
@@ -580,18 +580,38 @@ impl TournamentRegistry {
     }
 
     /// Create a new, empty tournament named `name`, optionally protected by
-    /// `password`. Persists it (tournament + auth sidecar) if a data directory
-    /// is configured. Returns the new tournament's id and, when it has a
-    /// password, its session token — read from the freshly built `AuthConfig`,
-    /// so the caller needn't look the instance back up (and can't race a
-    /// concurrent delete doing so).
+    /// `password`.
+    ///
+    /// See [`insert`](Self::insert) for what registering entails and what the
+    /// return value means.
     pub fn create(
         &self,
         name: &str,
         password: Option<String>,
     ) -> Result<(Uuid, Option<String>), TournamentError> {
-        let tournament = Tournament::new(name)?;
-        let id = tournament.id;
+        Ok(self.insert(Tournament::new(name)?, password))
+    }
+
+    /// Register an already-built `tournament` under a fresh id, optionally
+    /// protected by `password`. Persists it (tournament + auth sidecar) if a
+    /// data directory is configured. Returns the new tournament's id and, when
+    /// it has a password, its session token — read from the freshly built
+    /// `AuthConfig`, so the caller needn't look the instance back up (and can't
+    /// race a concurrent delete doing so).
+    ///
+    /// The tournament's own `id` is overwritten: the registry, its persisted
+    /// filename and its backups are all keyed by the id minted here, so an
+    /// imported file's id cannot be allowed to collide with a tournament that
+    /// already exists. Callers importing an untrusted file must have run
+    /// [`Tournament::validate_loaded`] first — this only assigns an id, it does
+    /// not vet what it is registering.
+    pub fn insert(
+        &self,
+        mut tournament: Tournament,
+        password: Option<String>,
+    ) -> (Uuid, Option<String>) {
+        let id = Uuid::new_v4();
+        tournament.id = id;
         if let Some(dir) = &self.data_dir {
             let _ = fs::create_dir_all(dir);
         }
@@ -616,7 +636,7 @@ impl TournamentRegistry {
                     auth,
                 }),
             );
-        Ok((id, token))
+        (id, token)
     }
 
     /// Remove a tournament: its registry entry, its persisted file (+ auth

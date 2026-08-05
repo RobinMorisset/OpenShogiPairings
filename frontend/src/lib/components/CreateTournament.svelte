@@ -5,8 +5,13 @@
   interface Props {
     /** Create a new tournament with the given name and optional password. */
     onCreate: (name: string, password: string | undefined) => void;
-    /** Open a file picker and load the chosen tournament as a new entry. */
-    onLoad: () => void;
+    /**
+     * Open a file picker and load the chosen tournament as a new entry, with
+     * the same optional password the create form offers — the field below is
+     * shared, since either way the referee is adding one tournament to this
+     * server and may want it protected.
+     */
+    onLoad: (password: string | undefined) => void;
     /** True while a create/load request is in flight. */
     busy?: boolean;
   }
@@ -16,10 +21,15 @@
   let name = $state("");
   let password = $state("");
 
+  /** The password to protect the new tournament with, or none if left blank. */
+  function chosenPassword(): string | undefined {
+    return password.trim() || undefined;
+  }
+
   function submit(event: SubmitEvent) {
     event.preventDefault();
     const trimmed = name.trim();
-    if (trimmed) onCreate(trimmed, password.trim() || undefined);
+    if (trimmed) onCreate(trimmed, chosenPassword());
   }
 </script>
 
@@ -53,13 +63,22 @@
         {$_("createTournament.create")}
       </button>
     </div>
+
+    <!-- Inside the form, and below the password field, so that field plainly
+         governs both ways of adding a tournament rather than reading as
+         create-only. `type="button"` keeps it from submitting. -->
+    <div class="or">{$_("createTournament.or")}</div>
+
+    <button
+      type="button"
+      class="ghost"
+      data-testid="load-tournament"
+      disabled={busy}
+      onclick={() => onLoad(chosenPassword())}
+    >
+      {$_("createTournament.loadFromFile")}
+    </button>
   </form>
-
-  <div class="or">{$_("createTournament.or")}</div>
-
-  <button type="button" class="ghost" data-testid="load-tournament" disabled={busy} onclick={onLoad}>
-    {$_("createTournament.loadFromFile")}
-  </button>
 </section>
 
 <style>

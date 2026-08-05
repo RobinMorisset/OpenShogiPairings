@@ -269,9 +269,10 @@ an existing client, not a rewrite.
   gets the same `OSP_DATA_DIR`-equivalent wired to a local app-data path (see
   §2.3) — no config needed from the user, just a fixed local directory.
 - Native "Open file…" / "Save file…" (currently the primary way a `.osp` file
-  becomes "the" tournament) become explicit **import** (`PUT /api/tournaments`
-  with a body read from a picked file → creates a new registry entry from
-  it) and **export** (`GET /api/tournaments/{id}` → write the JSON to a
+  becomes "the" tournament) become explicit **import** (`POST
+  /api/tournaments/import` with a body read from a picked file → creates a new
+  registry entry from it in one atomic request) and **export** (`GET
+  /api/tournaments/{id}` → write the JSON to a
   picked file) actions, reachable from wherever a tournament is currently
   open — for sharing a tournament as a file, or backing it up outside the
   app's own data directory. The picker becomes the primary flow; file

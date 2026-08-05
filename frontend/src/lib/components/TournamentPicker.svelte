@@ -4,9 +4,9 @@
     ApiError,
     createTournamentEntry,
     deleteTournamentEntry,
+    importTournament,
     listTournaments,
     loginAdmin,
-    replaceTournament,
   } from "../api";
   import { describeApiError } from "../errorCodes";
   import { currentTournamentId, getToken, initialTab } from "../session";
@@ -23,7 +23,7 @@
   // stashes the pending create/load so the retry after logging in can reuse it.
   // At most one is ever set at a time.
   let pendingCreate = $state<{ name: string; password?: string } | null>(null);
-  let pendingLoad = $state<Tournament | null>(null);
+  let pendingLoad = $state<{ tournament: Tournament; password?: string } | null>(null);
   let adminPassword = $state("");
 
   async function refresh() {
@@ -80,7 +80,8 @@
         const { name, password } = pendingCreate;
         await handleCreate(name, password);
       } else if (pendingLoad) {
-        await applyLoaded(pendingLoad);
+        const { tournament, password } = pendingLoad;
+        await applyLoaded(tournament, password);
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -93,30 +94,41 @@
     }
   }
 
-  async function handleLoad() {
-    const loaded = await loadTournament();
+  async function handleLoad(password: string | undefined) {
+    error = null;
+    let loaded: Tournament | null;
+    try {
+      loaded = await loadTournament();
+    } catch (err) {
+      // Not a file we can read as a tournament at all. This must be caught: the
+      // button discards the promise, so the rejection would otherwise go
+      // nowhere and the referee would see the dialog close and nothing happen.
+      error = describe(err);
+      return;
+    }
     if (!loaded) return; // user cancelled the file dialog
-    await applyLoaded(loaded);
+    await applyLoaded(loaded, password);
   }
 
-  // Create a blank entry then seed it with the loaded file's contents. Split out
-  // of `handleLoad` so the retry after an admin login can reuse it.
-  async function applyLoaded(loaded: Tournament) {
+  // Hand the file to the server, which validates it and registers it in one
+  // step, then switch into what it created. Split out of `handleLoad` so the
+  // retry after an admin login can reuse it.
+  //
+  // Nothing exists until the import succeeds — that atomicity is the server's,
+  // not ours: a file this build can't read used to be rejected only after an
+  // empty tournament had already been created and selected.
+  async function applyLoaded(loaded: Tournament, password: string | undefined) {
     busy = true;
     error = null;
     try {
-      const { id } = await createTournamentEntry(loaded.name);
+      const { id } = await importTournament(loaded, password);
       pendingLoad = null;
       select(id);
-      // `select` synchronously updates api.ts's notion of the open tournament,
-      // so this can run right after: it seeds the new (blank) entry with the
-      // file's actual contents.
-      await replaceTournament(loaded);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         // The server requires the admin password to create tournaments —
         // stash this file and ask for it inline, exactly as handleCreate does.
-        pendingLoad = loaded;
+        pendingLoad = { tournament: loaded, password };
       } else {
         error = describe(err);
       }
