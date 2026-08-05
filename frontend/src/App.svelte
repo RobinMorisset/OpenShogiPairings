@@ -1008,7 +1008,8 @@
           <RoundDraftView
             draft={tournament.draft}
             players={tournament.players}
-            cupPlayers={[...draftCupPlayers, ...busyLongPlayers]}
+            cupPlayers={draftCupPlayers}
+            longGamePlayers={busyLongPlayers}
             onUpdate={handleUpdateDraft}
             onConfirm={handleConfirmRound}
             {busy}

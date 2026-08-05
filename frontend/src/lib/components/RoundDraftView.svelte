@@ -9,6 +9,13 @@
     players: Player[];
     /** Players the cup bracket will pair this round (not Swiss-customizable). */
     cupPlayers?: number[];
+    /**
+     * Players still finishing a long game from an earlier round. Like cup
+     * players they are outside the Swiss pairing, but for a different reason —
+     * kept separate so the UI never calls them cup players, which it did when
+     * the two arrived as one list.
+     */
+    longGamePlayers?: number[];
     /** Push the edited draft to the server. */
     onUpdate: (update: DraftUpdate) => void;
     /** Confirm the draft: pair remaining players and start the round. */
@@ -20,6 +27,7 @@
     draft,
     players,
     cupPlayers = [],
+    longGamePlayers = [],
     onUpdate,
     onConfirm,
     busy = false,
@@ -35,6 +43,10 @@
   const byId = $derived(new Map(players.map((p) => [tid(p), p])));
   const absentSet = $derived(new Set(draft.absent));
   const cupSet = $derived(new Set(cupPlayers));
+  const longSet = $derived(new Set(longGamePlayers));
+  // Both groups sit outside the Swiss pairing, for unrelated reasons. Only this
+  // union belongs in the pool arithmetic; everything else must ask which one.
+  const outsideSwiss = $derived(new Set([...cupPlayers, ...longGamePlayers]));
   const forcedIds = $derived(
     new Set([
       ...draft.forced_boards.flatMap((b) => [b.player1, b.player2]),
@@ -49,9 +61,9 @@
   // Everyone the round will include — what the server's minimum is measured
   // against. Distinct from `present` below, which is only the Swiss pool.
   const attending = $derived(attendingPlayers(allSorted, draft.absent));
-  // The Swiss pool: present players the cup hasn't already taken.
+  // The Swiss pool: present players the cup or a long game hasn't already taken.
   const present = $derived(
-    allSorted.filter((p) => !absentSet.has(tid(p)) && !cupSet.has(tid(p))),
+    allSorted.filter((p) => !absentSet.has(tid(p)) && !outsideSwiss.has(tid(p))),
   );
   // Present players not already fixed into a forced pairing / bye.
   const forceable = $derived(present.filter((p) => !forcedIds.has(tid(p))));
@@ -186,6 +198,12 @@
     </p>
   {/if}
 
+  {#if longGamePlayers.length > 0}
+    <p class="cup-note">
+      {$_("roundDraftView.longNote", { values: { count: longGamePlayers.length } })}
+    </p>
+  {/if}
+
   {#if absentCupPlayers.length > 0}
     <p class="hint warning">
       ⚠ {$_(
@@ -209,7 +227,7 @@
             disabled={busy}
             onchange={() => toggleAbsent(tid(p))}
           />
-          {label(tid(p))}{#if cupSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.cupTag")}</span>{/if}
+          {label(tid(p))}{#if cupSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.cupTag")}</span>{:else if longSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.longTag")}</span>{/if}
         </label>
       {/each}
     </div>

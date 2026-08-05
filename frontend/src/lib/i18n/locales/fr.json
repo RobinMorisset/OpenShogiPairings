@@ -247,6 +247,8 @@
     "absentThisRound": "Absents cette ronde",
     "absentDefaultHint": "Par défaut, les absents de la ronde précédente.",
     "cupTag": "coupe",
+    "longTag": "partie longue",
+    "longNote": "{count} joueurs terminent encore une partie longue d'une ronde précédente ; ils ne sont pas appariés dans cette ronde.",
     "forcedPairings": "Appariements forcés",
     "removeForcedPairing": "Retirer cet appariement forcé",
     "playerEllipsis": "Joueur…",

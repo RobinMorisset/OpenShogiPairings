@@ -247,6 +247,8 @@
     "absentThisRound": "In dieser Runde abwesend",
     "absentDefaultHint": "Voreingestellt sind die in der letzten Runde Abwesenden.",
     "cupTag": "Pokal",
+    "longTag": "Langpartie",
+    "longNote": "{count} Spieler beenden noch eine Langpartie aus einer früheren Runde und werden in dieser Runde nicht gepaart.",
     "forcedPairings": "Erzwungene Paarungen",
     "removeForcedPairing": "Diese erzwungene Paarung entfernen",
     "playerEllipsis": "Spieler…",
