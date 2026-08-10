@@ -49,7 +49,10 @@ tournament. For how it's built, see [Architecture](#architecture) below.
 - **Hybrid direct-elimination cup** alongside the Swiss (the French / European
   Championship format): top 8/16/32/64 eligible players play a seeded bracket
   over the first rounds, eliminated players drop back into the Swiss, and the
-  Standings tab shows the podium medals.
+  Standings tab shows the podium medals. Optionally the bracket is fed by a
+  **qualification round** (the German Championship format): half the bracket is
+  pre-qualified and plays the open in round 1 while the next players play off
+  for the remaining slots.
 - **Handicap games**, with a recommended handicap (FFS Annexe 7, from the
   rating gap) suggested automatically, and draws-before-the-decisive-game
   recorded for ELO purposes.
@@ -228,6 +231,19 @@ float). The semifinal losers play a small final for third place; the pairings
 view badges every board as Swiss, referee-forced, or its cup stage, and the
 Standings tab shows the podium medals (without reordering the Swiss ranking).
 
+The cup fills its bracket one of two ways (`cup_format` in the settings). With
+the **direct** format the top `size` eligible players *are* the bracket, which
+starts in round 1. With the **qualifier** format — the German Championship
+format — the top `size / 2` are pre-qualified and spend round 1 playing an
+ordinary Swiss game in the open, while the next `size` play a **qualification**
+round among themselves; its winners complete the bracket, which then runs from
+round 2. That takes `1.5 × size` eligible players (12/24/48/96 for a bracket of
+8/16/32/64) and one more round. The pre-qualified are ordinary Swiss players
+that round with one exception the pairing engine enforces: they are never paired
+with **each other** (a rule that exists only in that round). Seeding is unchanged: bracket round 1 folds the
+pre-qualified against the qualifiers in match order, so the top seed meets the
+winner of the weakest qualification match.
+
 Two experimental **ELO-based pairing modes**
 ([`crates/core/src/elo.rs`](crates/core/src/elo.rs),
 [`docs/elo-pairing-mode.md`](docs/elo-pairing-mode.md)) build on a live Bayesian
@@ -306,8 +322,8 @@ that tournament's bearer token if it has a password (except `/login` and
 | `POST /undo` | Revert the last change (server-side undo history). |
 | `GET /american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
 | `PUT /american-grid` | Import an American Grid (raw `text/plain` body), rebuilding the tournament from it — registers the players, forces every round's pairings, and replays the results. Meant for seeding a non-trivial state in tests/simulations, not surfaced in the UI. |
-| `PUT /settings` | Replace the whole `TournamentSettings`. Its shape is nested: `pairing` is a tagged union — either `{ "kind": "swiss", "floater_style": "classic"｜"median", "macmahon": { "thresholds": [ { "criterion": { "kind": "elo", "value": 1200 }, "drops_after_round"?: 3 }, { "criterion": { "kind": "grade", "grade": { "kind": "dan"｜"kyu", "level": 1 } } } ], "source": { "kind": "static" } }, "airtight_groups"?: 2, "club_protection": { "kind": "on", "rounds"?: 3, "exempt_clubs"?: ["Paris"] } }` or `{ "kind": "elo", "estimator": { … } }` for the experimental pure-ELO pairing mode. Alongside `pairing`, the top level carries `cup_enabled`, `long_boards_enabled`, `handicap_policy` (`{ "kind": "none" }｜{ "kind": "enabled", "display": …, "wiel_rule"?: false }`), `half_point_absences`, `tiebreaks` (an ordered array, e.g. `["points","sos_m",…]`), and `categories` (referee-defined player categories, an array of `{ "id", "name" }`; blank-named entries are dropped on normalization). Notes: a threshold's `criterion` mixes ELO and grade freely (each counted independently) and `drops_after_round` makes it a degressive threshold; `airtight_groups`, if set, forbids pairing across MacMahon groups during rounds `1..=n`; `club_protection` is `{ "kind": "off" }` or `{ "kind": "on", … }`; `macmahon.source` is `{ "kind": "static" }` or `{ "kind": "from_estimate", "estimator": { … } }` (estimate-based MacMahon). The `estimator` knobs are described in [`docs/elo-pairing-mode.md`](docs/elo-pairing-mode.md). |
-| `POST /finalize-registration` | Finalize registration (unlocks round 1). Body optional: `{ "cup_size": 8｜16｜32｜64 }` when the hybrid cup is enabled — seeds the top-N eligible players into a direct-elimination bracket. The UI usually skips this: `POST /rounds/prepare` finalizes round 1 in the same step. |
+| `PUT /settings` | Replace the whole `TournamentSettings`. Its shape is nested: `pairing` is a tagged union — either `{ "kind": "swiss", "floater_style": "classic"｜"median", "macmahon": { "thresholds": [ { "criterion": { "kind": "elo", "value": 1200 }, "drops_after_round"?: 3 }, { "criterion": { "kind": "grade", "grade": { "kind": "dan"｜"kyu", "level": 1 } } } ], "source": { "kind": "static" } }, "airtight_groups"?: 2, "club_protection": { "kind": "on", "rounds"?: 3, "exempt_clubs"?: ["Paris"] } }` or `{ "kind": "elo", "estimator": { … } }` for the experimental pure-ELO pairing mode. Alongside `pairing`, the top level carries `cup_enabled`, `cup_format` (`"direct"`｜`"qualifier"` — see the hybrid-cup section above; only consulted when `cup_enabled`), `long_boards_enabled`, `handicap_policy` (`{ "kind": "none" }｜{ "kind": "enabled", "display": …, "wiel_rule"?: false }`), `half_point_absences`, `tiebreaks` (an ordered array, e.g. `["points","sos_m",…]`), and `categories` (referee-defined player categories, an array of `{ "id", "name" }`; blank-named entries are dropped on normalization). Notes: a threshold's `criterion` mixes ELO and grade freely (each counted independently) and `drops_after_round` makes it a degressive threshold; `airtight_groups`, if set, forbids pairing across MacMahon groups during rounds `1..=n`; `club_protection` is `{ "kind": "off" }` or `{ "kind": "on", … }`; `macmahon.source` is `{ "kind": "static" }` or `{ "kind": "from_estimate", "estimator": { … } }` (estimate-based MacMahon). The `estimator` knobs are described in [`docs/elo-pairing-mode.md`](docs/elo-pairing-mode.md). |
+| `POST /finalize-registration` | Finalize registration (unlocks round 1). Body optional: `{ "cup_size": 8｜16｜32｜64 }` when the hybrid cup is enabled — `cup_size` is the *bracket* size; it seeds the top eligible players into it, taking `cup_size` of them under `cup_format: "direct"` and `1.5 × cup_size` under `"qualifier"` (400 if fewer are marked eligible). The UI usually skips this: `POST /rounds/prepare` finalizes round 1 in the same step. |
 | `POST /cancel-round` | Cancel the last round — discards the open draft if one is being prepared, otherwise removes the most recent round (undoable). |
 | `POST /rounds/prepare` | Begin drafting the next round. For round 1, finalizes registration first (optional `{ "cup_size" }` body, as above) in the same undo step. A round completes automatically once every board has a result, so there is no separate "complete round" call. |
 | `PUT /draft` | Edit the draft (absent set, forced pairings, forced bye). |

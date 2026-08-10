@@ -74,14 +74,23 @@
     const rounds = bracket.rounds;
     const depth = rounds.length; // number of bracket rounds incl. the final
     const step = BOX_W + COL_GAP;
-    const colXpos = (i: number) => PAD + i * step;
+    // The qualifier format prepends a play-off column, so the bracket itself
+    // starts one column further right.
+    const qualification = bracket.qualification ?? null;
+    const qualCols = qualification ? 1 : 0;
+    const colXpos = (i: number) => PAD + (i + qualCols) * step;
 
-    // Rebuild the tree top-down from the final, following the outer fold.
+    // Rebuild the tree top-down from the final, following the outer fold. The
+    // first-round nodes are kept by index so the play-off matches can be hung off
+    // the ones they feed.
+    const firstRound: TNode[] = [];
     function build(c: number, k: number): TNode {
       const node: TNode = { m: rounds[c][k], c, x: 0, cy: 0 };
       if (c > 0) {
         const lenPrev = rounds[c - 1].length;
         node.children = [build(c - 1, k), build(c - 1, lenPrev - 1 - k)];
+      } else {
+        firstRound[k] = node;
       }
       return node;
     }
@@ -123,11 +132,29 @@
     }
     walk(root);
 
-    // Column headers: the stage label above each round.
+    // The play-off column: match `j` feeds the *second* slot of first-round match
+    // `len - 1 - j` (the fold), so each sits at its target's height and the
+    // connector is a straight run into the box it feeds.
+    if (qualification) {
+      qualification.forEach((m, j) => {
+        const target = firstRound[qualification.length - 1 - j];
+        const node: PNode = { m, x: PAD, cy: target.cy, isFirstRound: true, isFinal: false };
+        nodes.push(node);
+        links.push({ d: elbow(node, target), flow: m.winner });
+      });
+    }
+
+    // Column headers: the stage label above each round, the play-off first.
     const headers = rounds.map((col, c) => ({
       x: colXpos(c) + BOX_W / 2,
       label: cupStageLabel(col[0].stage, $_),
     }));
+    if (qualification) {
+      headers.unshift({
+        x: PAD + BOX_W / 2,
+        label: cupStageLabel(qualification[0].stage, $_),
+      });
+    }
 
     const bracketBottom = top + rounds[0].length * (BOX_H + V_GAP) - V_GAP;
 
@@ -154,7 +181,7 @@
   // win is shown muted.
   const eliminated = $derived.by(() => {
     const out = new Set<number>();
-    for (const round of bracket.rounds) {
+    for (const round of [bracket.qualification ?? [], ...bracket.rounds]) {
       for (const m of round) {
         if (m.winner != null && m.player1 != null && m.player2 != null) {
           out.add(m.winner === m.player1 ? m.player2 : m.player1);

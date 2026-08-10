@@ -15,6 +15,14 @@ export type CupBracketView = {
  */
 size: number, 
 /**
+ * The qualification round, under [`CupFormat::Qualifier`] only: `size / 2`
+ * play-off matches whose winners fill the bracket alongside the
+ * pre-qualified. Kept out of `rounds` because it does not double into the
+ * next column like a bracket round does — match `j` here feeds the *second*
+ * slot of `rounds[0][size / 2 - 1 - j]`.
+ */
+qualification: Array<BracketMatch> | null, 
+/**
  * Columns of matches, index 0 = the first bracket round, last = the final.
  */
 rounds: Array<Array<BracketMatch>>, 

@@ -1,19 +1,32 @@
 //! The direct-elimination cup that runs alongside the Swiss in a hybrid
 //! tournament (the French / European Shogi Championship format).
 //!
-//! The top `size` eligible players (a power of two, 8..64) are seeded into a
-//! single-elimination bracket that occupies the first `log2(size)` rounds. Only
-//! the immutable `{size, seed_order}` is stored; the state of the bracket in any
-//! given round is **derived** by replaying the recorded results, so editing a
-//! past result or cancelling a round re-derives correctly (same philosophy as the
-//! live-recomputed scores).
+//! The `size`-player bracket (a power of two, 8..64) occupies the first
+//! `log2(size)` rounds. Only the immutable `{size, format, seed_order}` is
+//! stored; the state of the bracket in any given round is **derived** by
+//! replaying the recorded results, so editing a past result or cancelling a round
+//! re-derives correctly (same philosophy as the live-recomputed scores).
 //!
-//! Bracket shape: round 1 folds the seeds `(1,size), (2,size-1), …`; each later
-//! round folds the previous round's winners *in match order*, so seeds stay
+//! Bracket shape: round 1 folds the entrants `(1,size), (2,size-1), …`; each
+//! later round folds the previous round's winners *in match order*, so seeds stay
 //! separated exactly as in a standard seeded bracket. The semifinal's two losers
 //! meet in a **small final** for third place, played in the same (final) round as
 //! the final itself; after that round everyone — champion included — is in the
 //! Swiss pool.
+//!
+//! Two formats fill that bracket (see [`CupFormat`]):
+//!
+//! * [`Direct`](CupFormat::Direct) — the top `size` eligible players *are* the
+//!   bracket; it starts in round 1.
+//! * [`Qualifier`](CupFormat::Qualifier) — the top `size / 2` eligible players are
+//!   **pre-qualified** and spend round 1 playing an ordinary Swiss game in the
+//!   open, while the next `size` play round 1 off against each other in a
+//!   **qualification** round. Its `size / 2` winners join the pre-qualified in the
+//!   bracket, which then runs from round 2. So the cup takes `1.5 × size` eligible
+//!   players and `log2(size) + 1` rounds. Seeding still works out: bracket round 1
+//!   folds `pre-qualified ++ qualifiers-in-match-order`, and because the
+//!   qualification round is itself a fold, the top seed meets the winner of the
+//!   weakest qualification match.
 
 use std::collections::HashSet;
 
@@ -23,16 +36,47 @@ use ts_rs::TS;
 use crate::round::{CupStage, NoShow, PairingSource, Round};
 use crate::units::TournamentId;
 
-/// The valid cup sizes (top-N), each a power of two.
+/// The valid cup **bracket** sizes, each a power of two. The qualifier format
+/// needs half as many players again (see [`cup_field_size`]).
 pub const CUP_SIZES: [u32; 4] = [8, 16, 32, 64];
+
+/// How the cup bracket is filled. See the module docs for the shapes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(rename_all = "snake_case")]
+pub enum CupFormat {
+    /// The top `size` eligible players are seeded straight into the bracket,
+    /// which runs from round 1.
+    #[default]
+    Direct,
+    /// The top `size / 2` eligible players are pre-qualified (they play the open
+    /// in round 1); the next `size` play a qualification round, and its winners
+    /// complete the bracket, which runs from round 2.
+    Qualifier,
+}
+
+/// How many eligible players a cup of this bracket size and format takes: `size`
+/// for a direct bracket, `1.5 × size` for the qualifier format (`size / 2`
+/// pre-qualified plus `size` in the qualification round).
+pub const fn cup_field_size(size: u32, format: CupFormat) -> u32 {
+    match format {
+        CupFormat::Direct => size,
+        CupFormat::Qualifier => size + size / 2,
+    }
+}
 
 /// A hybrid tournament's cup, fixed at finalization.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Cup {
-    /// Bracket size (8/16/32/64).
+    /// Bracket size (8/16/32/64) — *not* the number of players taken, which is
+    /// [`cup_field_size`] of this and `format`.
     pub size: u32,
-    /// The seeded players, seed 1..size (index 0 = top seed). Frozen at finalize.
+    /// How the bracket is filled (see [`CupFormat`]).
+    pub format: CupFormat,
+    /// The seeded players, seed 1..`cup_field_size(size, format)` (index 0 = top
+    /// seed). Frozen at finalize. Under [`CupFormat::Qualifier`] the first
+    /// `size / 2` are the pre-qualified and the rest are the qualification field.
     pub seed_order: Vec<TournamentId>,
 }
 
@@ -92,6 +136,13 @@ pub struct BracketMatch {
 pub struct CupBracketView {
     /// Bracket size (top-N), for labelling / sizing.
     pub size: u32,
+    /// The qualification round, under [`CupFormat::Qualifier`] only: `size / 2`
+    /// play-off matches whose winners fill the bracket alongside the
+    /// pre-qualified. Kept out of `rounds` because it does not double into the
+    /// next column like a bracket round does — match `j` here feeds the *second*
+    /// slot of `rounds[0][size / 2 - 1 - j]`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qualification: Option<Vec<BracketMatch>>,
     /// Columns of matches, index 0 = the first bracket round, last = the final.
     pub rounds: Vec<Vec<BracketMatch>>,
     /// The third-place match — the two semifinal losers — present once the
@@ -112,9 +163,40 @@ enum CupResult {
 }
 
 impl Cup {
-    /// Number of tournament rounds the cup spans (`log2(size)`).
+    /// Number of tournament rounds the cup spans: the `log2(size)` bracket rounds
+    /// plus the qualification round, if the format has one.
     pub fn cup_rounds(&self) -> u32 {
+        self.qualification_rounds() + self.bracket_rounds()
+    }
+
+    /// Number of *bracket* rounds (`log2(size)`), excluding any qualification
+    /// round. The semifinal is bracket round `bracket_rounds() - 1`.
+    fn bracket_rounds(&self) -> u32 {
         self.size.trailing_zeros()
+    }
+
+    /// `1` when a qualification round precedes the bracket, `0` otherwise — also
+    /// the index of bracket round 1 in the cup schedule.
+    fn qualification_rounds(&self) -> u32 {
+        match self.format {
+            CupFormat::Direct => 0,
+            CupFormat::Qualifier => 1,
+        }
+    }
+
+    /// How many eligible players this cup takes (see [`cup_field_size`]).
+    pub fn field_size(&self) -> u32 {
+        cup_field_size(self.size, self.format)
+    }
+
+    /// The qualifier format's two groups of seeds: `(pre-qualified,
+    /// qualification field)`, of `size / 2` and `size` players. `None` for a
+    /// direct cup, whose seeds are all bracket entrants.
+    fn qualifier_split(&self) -> Option<(&[TournamentId], &[TournamentId])> {
+        match self.format {
+            CupFormat::Direct => None,
+            CupFormat::Qualifier => Some(self.seed_order.split_at((self.size / 2) as usize)),
+        }
     }
 
     /// The tournament round each bracket round is played in: index `i` gives the
@@ -159,13 +241,29 @@ impl Cup {
     /// winner advances unopposed as a bye.
     pub fn matches_for_round(&self, rounds: &[Round], r: u32) -> Option<CupPairings> {
         let sched = self.cup_schedule(rounds);
-        // Which bracket round (1-based) is played in tournament round `r`? None →
+        // Which cup round (0-based) is played in tournament round `r`? None →
         // `r` is a gap round or past the cup, so there are no cup pairings.
         let Some(pos) = sched.iter().position(|&t| t == r) else {
             return Some(CupPairings::default());
         };
-        let bracket = pos as u32 + 1;
-        let cup_rounds = self.cup_rounds();
+        let qual_rounds = self.qualification_rounds() as usize;
+        if pos < qual_rounds {
+            // The qualification round: the `size` seeds below the pre-qualified
+            // fold among themselves. Every slot is a known player, so this can
+            // never produce a bye.
+            let (_, qualifiers) = self
+                .qualifier_split()
+                .expect("a qualification round only exists in the qualifier format");
+            let qualifiers: Vec<Option<TournamentId>> =
+                qualifiers.iter().copied().map(Some).collect();
+            let mut pairings = CupPairings::default();
+            for pair in fold(&qualifiers) {
+                push_pairing(pair, CupStage::Qualification, &mut pairings);
+            }
+            return Some(pairings);
+        }
+        let bracket = (pos - qual_rounds) as u32 + 1;
+        let cup_rounds = self.bracket_rounds();
         let (frontier, semifinal_losers) = self.replay_to(rounds, &sched, bracket)?;
 
         let mut pairings = CupPairings::default();
@@ -187,17 +285,34 @@ impl Cup {
         Some(pairings)
     }
 
+    /// The **pre-qualified** players of tournament round `r`: the top `size / 2`
+    /// seeds, who sit out the qualification round and play the open instead.
+    /// Empty for a direct cup and for every round but the qualification round.
+    ///
+    /// They are ordinary Swiss players that round, with one exception the pairing
+    /// engine has to be told about — they must not be paired with each other, so
+    /// it needs them by name. See `Rule::CupPrequalified` in [`crate::pairing`].
+    pub fn prequalified_for_round(&self, rounds: &[Round], r: u32) -> &[TournamentId] {
+        let Some((prequalified, _)) = self.qualifier_split() else {
+            return &[];
+        };
+        if self.cup_schedule(rounds).first() == Some(&r) {
+            prequalified
+        } else {
+            &[]
+        }
+    }
+
     /// The podium, if the final round's matches are all decided; otherwise
     /// `None`. Individual places are `None` when a double no-show left them
     /// undetermined (no champion / third to award), so awarding medals never
     /// panics on a missing winner.
     pub fn podium(&self, rounds: &[Round]) -> Option<CupPodium> {
-        let cup_rounds = self.cup_rounds();
         let sched = self.cup_schedule(rounds);
-        let final_tround = sched[cup_rounds as usize - 1];
+        let final_tround = *sched.last().expect("a cup always has at least one round");
         // The final round must have been reached (its boards generated).
         rounds.iter().find(|r| r.number == final_tround)?;
-        let (frontier, semifinal_losers) = self.replay_to(rounds, &sched, cup_rounds)?;
+        let (frontier, semifinal_losers) = self.replay_to(rounds, &sched, self.bracket_rounds())?;
         let losers = semifinal_losers.expect("semifinal replayed before the final round");
 
         let (champion, runner_up) =
@@ -219,14 +334,16 @@ impl Cup {
     /// always renders. Long cup rounds are honoured via [`Self::cup_schedule`].
     pub fn bracket_view(&self, rounds: &[Round]) -> CupBracketView {
         let sched = self.cup_schedule(rounds);
-        let cup_rounds = self.cup_rounds();
+        let cup_rounds = self.bracket_rounds();
+        let qual_rounds = self.qualification_rounds() as usize;
         let mut columns: Vec<Vec<BracketMatch>> = Vec::with_capacity(cup_rounds as usize);
-        // Players entering the current bracket round (every seed known at round 1).
-        let mut frontier: Vec<Slot> = self.seed_order.iter().copied().map(Slot::Player).collect();
+        // The qualification round, when the format has one, and the players it
+        // leaves entering bracket round 1 (every seed known at round 1 otherwise).
+        let (qualification, mut frontier) = self.qualification_view(rounds, &sched);
         let mut semifinal_losers: Option<[Slot; 2]> = None;
 
         for bracket in 1..=cup_rounds {
-            let tround = sched[bracket as usize - 1];
+            let tround = sched[qual_rounds + bracket as usize - 1];
             let stage = if bracket < cup_rounds {
                 stage_before_final(frontier.len() as u32)
             } else {
@@ -256,7 +373,7 @@ impl Cup {
         }
 
         let small_final = semifinal_losers.map(|[l0, l1]| {
-            let final_tround = sched[cup_rounds as usize - 1];
+            let final_tround = sched[qual_rounds + cup_rounds as usize - 1];
             let (winner, _) = resolve_slot(rounds, final_tround, l0, l1);
             BracketMatch {
                 player1: l0.tid(),
@@ -268,9 +385,75 @@ impl Cup {
 
         CupBracketView {
             size: self.size,
+            qualification,
             rounds: columns,
             small_final,
         }
+    }
+
+    /// The qualification column for [`Self::bracket_view`] and the slots entering
+    /// bracket round 1. For a direct cup there is no column and the seeds enter
+    /// as they are; for the qualifier format the lower `size` seeds fold into
+    /// play-off matches, and the pre-qualified are followed by those matches'
+    /// winners in match order. Like the rest of the view this never fails — an
+    /// undecided play-off simply leaves a `Pending` slot.
+    fn qualification_view(
+        &self,
+        rounds: &[Round],
+        sched: &[u32],
+    ) -> (Option<Vec<BracketMatch>>, Vec<Slot>) {
+        let Some((prequalified, qualifiers)) = self.qualifier_split() else {
+            return (
+                None,
+                self.seed_order.iter().copied().map(Slot::Player).collect(),
+            );
+        };
+        let qualifiers: Vec<Slot> = qualifiers.iter().copied().map(Slot::Player).collect();
+        let mut column = Vec::with_capacity(qualifiers.len() / 2);
+        let mut winners = Vec::with_capacity(qualifiers.len() / 2);
+        for (p1, p2) in fold(&qualifiers) {
+            let (winner, _) = resolve_slot(rounds, sched[0], p1, p2);
+            column.push(BracketMatch {
+                player1: p1.tid(),
+                player2: p2.tid(),
+                winner: winner.tid(),
+                stage: CupStage::Qualification,
+            });
+            winners.push(winner);
+        }
+        let frontier = prequalified
+            .iter()
+            .copied()
+            .map(Slot::Player)
+            .chain(winners)
+            .collect();
+        (Some(column), frontier)
+    }
+
+    /// The `size` players entering bracket round 1: the seeds themselves for a
+    /// direct cup, or the pre-qualified followed by the qualification round's
+    /// winners **in match order** for the qualifier format. A winner slot is
+    /// `None` when that qualification match was a double no-show, which leaves the
+    /// pre-qualified player it feeds facing an empty slot (a cup bye). `None` when
+    /// a qualification result is still missing.
+    fn initial_frontier(
+        &self,
+        rounds: &[Round],
+        sched: &[u32],
+    ) -> Option<Vec<Option<TournamentId>>> {
+        let Some((prequalified, qualifiers)) = self.qualifier_split() else {
+            return Some(self.seed_order.iter().copied().map(Some).collect());
+        };
+        let qualifiers: Vec<Option<TournamentId>> = qualifiers.iter().copied().map(Some).collect();
+        let (winners, _) = self.play_round(rounds, sched[0], &qualifiers)?;
+        Some(
+            prequalified
+                .iter()
+                .copied()
+                .map(Some)
+                .chain(winners)
+                .collect(),
+        )
     }
 
     /// Replay the cup up to (but not including) bracket round `bracket`, returning
@@ -286,14 +469,16 @@ impl Cup {
         sched: &[u32],
         bracket: u32,
     ) -> Option<(Vec<Option<TournamentId>>, Option<[Option<TournamentId>; 2]>)> {
-        let cup_rounds = self.cup_rounds();
-        let mut frontier: Vec<Option<TournamentId>> =
-            self.seed_order.iter().copied().map(Some).collect();
+        let bracket_rounds = self.bracket_rounds();
+        // Bracket round `k` is played in `sched[qual_rounds + k - 1]`: the
+        // qualification round, when there is one, occupies the first slot.
+        let qual_rounds = self.qualification_rounds() as usize;
+        let mut frontier = self.initial_frontier(rounds, sched)?;
         let mut semifinal_losers: Option<[Option<TournamentId>; 2]> = None;
         for k in 1..bracket {
-            let tround = sched[k as usize - 1];
+            let tround = sched[qual_rounds + k as usize - 1];
             let (winners, losers) = self.play_round(rounds, tround, &frontier)?;
-            if k == cup_rounds - 1 {
+            if k == bracket_rounds - 1 {
                 semifinal_losers = Some([losers[0], losers[1]]);
             }
             frontier = winners;
@@ -641,6 +826,7 @@ mod tests {
     fn round_one_folds_the_seeds() {
         let seeds = ids(8);
         let cup = Cup {
+            format: CupFormat::Direct,
             size: 8,
             seed_order: seeds.clone(),
         };
@@ -657,6 +843,7 @@ mod tests {
     fn bracket_view_builds_the_full_tree_with_results() {
         let s = ids(8);
         let cup = Cup {
+            format: CupFormat::Direct,
             size: 8,
             seed_order: s.clone(),
         };
@@ -725,6 +912,7 @@ mod tests {
         // does. Otherwise a finalist is crowned before their opponent is even known.
         let s = ids(8);
         let cup = Cup {
+            format: CupFormat::Direct,
             size: 8,
             seed_order: s.clone(),
         };
@@ -758,6 +946,7 @@ mod tests {
         // opponent advances unopposed even though the next round isn't played yet.
         let s = ids(8);
         let cup = Cup {
+            format: CupFormat::Direct,
             size: 8,
             seed_order: s.clone(),
         };
@@ -792,6 +981,7 @@ mod tests {
     #[test]
     fn bracket_view_draws_the_empty_tree_before_any_result() {
         let cup = Cup {
+            format: CupFormat::Direct,
             size: 16,
             seed_order: ids(16),
         };
@@ -859,6 +1049,7 @@ mod tests {
     fn semifinal_winners_meet_in_the_final_and_losers_in_the_small_final() {
         let s = ids(8);
         let cup = Cup {
+            format: CupFormat::Direct,
             size: 8,
             seed_order: s.clone(),
         };
@@ -899,6 +1090,7 @@ mod tests {
     #[test]
     fn stage_names_scale_with_size() {
         let cup = Cup {
+            format: CupFormat::Direct,
             size: 32,
             seed_order: ids(32),
         };
@@ -913,6 +1105,7 @@ mod tests {
     fn a_long_cup_round_consumes_two_tournament_rounds_and_the_bracket_resumes_after() {
         let s = ids(8);
         let cup = Cup {
+            format: CupFormat::Direct,
             size: 8,
             seed_order: s.clone(),
         };
@@ -983,5 +1176,166 @@ mod tests {
         assert_eq!(podium.runner_up, Some(s[1]));
         assert_eq!(podium.third, Some(s[3]));
         assert_eq!(podium.fourth, Some(s[2]));
+    }
+
+    // --- the qualifier format ------------------------------------------------
+
+    /// A size-8 qualifier cup: seeds 1-4 pre-qualified, seeds 5-12 play off.
+    fn qualifier_cup() -> (Cup, Vec<TournamentId>) {
+        let seeds = ids(12);
+        let cup = Cup {
+            format: CupFormat::Qualifier,
+            size: 8,
+            seed_order: seeds.clone(),
+        };
+        (cup, seeds)
+    }
+
+    /// The qualification round played to form, then the bracket the top half wins.
+    /// Seeds 5-12 fold to (5,12),(6,11),(7,10),(8,9); the higher seed wins each,
+    /// so the qualifiers are 5,6,7,8 in match order.
+    fn qualifier_rounds(s: &[TournamentId]) -> Vec<Round> {
+        vec![
+            cup_round(
+                1,
+                &[
+                    (s[4], s[11], CupStage::Qualification),
+                    (s[5], s[10], CupStage::Qualification),
+                    (s[6], s[9], CupStage::Qualification),
+                    (s[7], s[8], CupStage::Qualification),
+                ],
+            ),
+            // Bracket round 1 folds [1,2,3,4] ++ [5,6,7,8] → (1,8),(2,7),(3,6),(4,5).
+            cup_round(
+                2,
+                &[
+                    (s[0], s[7], CupStage::Quarterfinal),
+                    (s[1], s[6], CupStage::Quarterfinal),
+                    (s[2], s[5], CupStage::Quarterfinal),
+                    (s[3], s[4], CupStage::Quarterfinal),
+                ],
+            ),
+            cup_round(
+                3,
+                &[
+                    (s[0], s[3], CupStage::Semifinal),
+                    (s[1], s[2], CupStage::Semifinal),
+                ],
+            ),
+            cup_round(
+                4,
+                &[
+                    (s[0], s[1], CupStage::Final),
+                    (s[2], s[3], CupStage::SmallFinal),
+                ],
+            ),
+        ]
+    }
+
+    #[test]
+    fn qualifier_takes_half_as_many_players_again_and_one_more_round() {
+        let (cup, _) = qualifier_cup();
+        assert_eq!(cup.field_size(), 12);
+        assert_eq!(cup.cup_rounds(), 4); // log2(8) + the qualification round
+        assert_eq!(cup_field_size(64, CupFormat::Qualifier), 96);
+        assert_eq!(cup_field_size(64, CupFormat::Direct), 64);
+    }
+
+    #[test]
+    fn qualifier_round_one_is_the_playoff_and_leaves_the_prequalified_in_the_open() {
+        let (cup, s) = qualifier_cup();
+        let m = cup.matches_for_round(&[], 1).unwrap().matches;
+        // Only the eight below the pre-qualified play, folded 5v12 … 8v9.
+        assert_eq!(m.len(), 4);
+        assert_eq!((m[0].player1, m[0].player2), (s[4], s[11]));
+        assert_eq!((m[3].player1, m[3].player2), (s[7], s[8]));
+        assert!(matches!(m[0].stage, CupStage::Qualification));
+        // The pre-qualified are nowhere in round 1 — they are in the Swiss pool.
+        let playing: HashSet<TournamentId> =
+            m.iter().flat_map(|m| [m.player1, m.player2]).collect();
+        assert!(s[..4].iter().all(|p| !playing.contains(p)));
+    }
+
+    #[test]
+    fn qualifier_bracket_folds_the_prequalified_against_the_qualifiers() {
+        let (cup, s) = qualifier_cup();
+        let rounds = qualifier_rounds(&s);
+        let m = cup.matches_for_round(&rounds[..1], 2).unwrap().matches;
+        // The top seed draws the winner of the *weakest* qualification match, and
+        // so on down — a plain fold of [pre-qualified ++ qualifiers].
+        assert_eq!(m.len(), 4);
+        assert_eq!((m[0].player1, m[0].player2), (s[0], s[7]));
+        assert_eq!((m[1].player1, m[1].player2), (s[1], s[6]));
+        assert_eq!((m[2].player1, m[2].player2), (s[2], s[5]));
+        assert_eq!((m[3].player1, m[3].player2), (s[3], s[4]));
+        assert!(matches!(m[0].stage, CupStage::Quarterfinal));
+    }
+
+    #[test]
+    fn qualifier_bracket_view_keeps_the_playoff_in_its_own_column() {
+        let (cup, s) = qualifier_cup();
+        let v = cup.bracket_view(&qualifier_rounds(&s));
+        // The bracket columns are the usual three; the play-off is beside them.
+        assert_eq!(v.rounds.len(), 3);
+        let q = v
+            .qualification
+            .expect("the qualifier format has a play-off");
+        assert_eq!(q.len(), 4);
+        assert_eq!((q[0].player1, q[0].player2), (Some(s[4]), Some(s[11])));
+        assert_eq!(q[0].winner, Some(s[4]));
+        assert!(matches!(q[0].stage, CupStage::Qualification));
+        // Qualification match `j` feeds the second slot of `rounds[0][3 - j]`.
+        assert_eq!(v.rounds[0][3].player2, q[0].winner);
+        assert_eq!(v.rounds[0][0].player2, q[3].winner);
+    }
+
+    #[test]
+    fn qualifier_podium_reads_the_final_a_round_later() {
+        let (cup, s) = qualifier_cup();
+        let podium = cup.podium(&qualifier_rounds(&s)).expect("final is decided");
+        assert_eq!(podium.champion, Some(s[0]));
+        assert_eq!(podium.runner_up, Some(s[1]));
+        // The small final in the fixture is won by s[2].
+        assert_eq!(podium.third, Some(s[2]));
+        assert_eq!(podium.fourth, Some(s[3]));
+    }
+
+    #[test]
+    fn a_direct_cup_has_no_qualification_column() {
+        let cup = Cup {
+            format: CupFormat::Direct,
+            size: 8,
+            seed_order: ids(8),
+        };
+        assert!(cup.bracket_view(&[]).qualification.is_none());
+        assert_eq!(cup.field_size(), 8);
+        assert_eq!(cup.cup_rounds(), 3);
+    }
+
+    #[test]
+    fn a_double_no_show_in_the_playoff_gives_its_bracket_opponent_a_bye() {
+        let (cup, s) = qualifier_cup();
+        // Seeds 8 and 9 both fail to show: their play-off advances nobody, so the
+        // seed drawn against that slot — the top seed — walks into round 2.
+        let mut qualification = cup_round(
+            1,
+            &[
+                (s[4], s[11], CupStage::Qualification),
+                (s[5], s[10], CupStage::Qualification),
+                (s[6], s[9], CupStage::Qualification),
+                (s[7], s[8], CupStage::Qualification),
+            ],
+        );
+        let dead = &mut qualification.boards[3];
+        dead.result = None;
+        dead.no_show = Some(NoShow::Both);
+
+        let pairings = cup.matches_for_round(&[qualification], 2).unwrap();
+        assert_eq!(pairings.byes, vec![(s[0], CupStage::Quarterfinal)]);
+        assert_eq!(pairings.matches.len(), 3);
+        assert_eq!(
+            (pairings.matches[0].player1, pairings.matches[0].player2),
+            (s[1], s[6])
+        );
     }
 }

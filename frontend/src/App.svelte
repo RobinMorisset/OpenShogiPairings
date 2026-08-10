@@ -259,12 +259,20 @@
   );
 
   // Hybrid cup: which bracket sizes are choosable at finalization depends on how
-  // many players the referee has marked eligible.
+  // many players the referee has marked eligible — and, under the qualifier
+  // format, a bracket of `size` takes half as many players again (mirrors
+  // `cup_field_size` in the backend).
   const cupEnabled = $derived(tournament?.settings.cup_enabled ?? false);
+  const cupFormat = $derived(tournament?.settings.cup_format ?? "direct");
   const eligibleCount = $derived(
     tournament?.players.filter((p) => p.eligible).length ?? 0,
   );
-  const validCupSizes = $derived([8, 16, 32, 64].filter((s) => s <= eligibleCount));
+  const cupFieldSize = $derived((size: number) =>
+    cupFormat === "qualifier" ? size + size / 2 : size,
+  );
+  const validCupSizes = $derived(
+    [8, 16, 32, 64].filter((s) => cupFieldSize(s) <= eligibleCount),
+  );
   let cupSizeChoice = $state<number | null>(null);
   // Default the size to the largest that fits, and keep it valid as eligibility
   // changes.
@@ -300,7 +308,7 @@
         : overrunRound !== null
           ? $_("app.startTitleLongGamePending", { values: { round: overrunRound } })
           : phase === "registration" && !cupReady
-            ? $_("app.advanceTitleNeedCup")
+            ? $_("app.advanceTitleNeedCup", { values: { needed: cupFieldSize(8) } })
             : "",
   );
 
@@ -896,11 +904,20 @@
               {#if validCupSizes.length > 0}
                 <select bind:value={cupSizeChoice} disabled={busy}>
                   {#each validCupSizes as s (s)}
-                    <option value={s}>{$_("app.cupSizeOption", { values: { size: s } })}</option>
+                    <option value={s}>
+                      {$_(
+                        cupFormat === "qualifier"
+                          ? "app.cupSizeOptionQualifier"
+                          : "app.cupSizeOption",
+                        { values: { size: s, field: cupFieldSize(s) } },
+                      )}
+                    </option>
                   {/each}
                 </select>
               {:else}
-                <span class="cup-warn">{$_("app.cupNeedMoreEligible")}</span>
+                <span class="cup-warn">
+                  {$_("app.cupNeedMoreEligible", { values: { needed: cupFieldSize(8) } })}
+                </span>
               {/if}
             </label>
           {/if}
@@ -981,6 +998,7 @@
             <PlayerList
               players={tournament.players}
               showEligible={cupEnabled}
+              {cupFormat}
               categories={tournament.settings.categories ?? []}
               finalized={tournament.registration_finalized}
               onEdit={handleEditPlayer}

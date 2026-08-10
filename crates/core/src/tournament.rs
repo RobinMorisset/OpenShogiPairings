@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-use crate::cup::{Cup, CupBracketView, CupPairings, CupPodium, CUP_SIZES};
+use crate::cup::{cup_field_size, Cup, CupBracketView, CupPairings, CupPodium, CUP_SIZES};
 use crate::pairing::{
     counterfactual_forbid, counterfactual_force, explain_pairing, pair_round_weighted,
     Counterfactual, CounterfactualMode, RoundExplanation, ScopeReason, PHANTOM,
@@ -385,10 +385,12 @@ impl Tournament {
     /// Assigns tournament numbers (highest ELO first, unrated last, ties by
     /// registration order) and gates round creation behind this explicit step.
     /// When the cup is enabled in the settings, `cup_size` must be a supported
-    /// power of two (8/16/32/64) with at least that many eligible players; the top
-    /// `cup_size` eligible players (by tournament number) are frozen into the
-    /// bracket. The cup is validated *before* any mutation, so a rejected cup
-    /// leaves registration open for the referee to fix.
+    /// bracket size (8/16/32/64); the top eligible players (by tournament number)
+    /// are frozen into the cup in seed order. How many that takes depends on the
+    /// configured [`CupFormat`]: `cup_size` for a direct bracket, half as many
+    /// again for the qualifier format, whose qualification round feeds half the
+    /// bracket (see [`cup_field_size`]). The cup is validated *before* any
+    /// mutation, so a rejected cup leaves registration open for the referee to fix.
     pub fn finalize_registration_with(
         &mut self,
         cup_size: Option<u32>,
@@ -403,19 +405,23 @@ impl Tournament {
         Self::validate_elo_scale_anchor(&self.settings, &self.players)?;
 
         // Pre-validate the cup so a bad request doesn't half-finalize.
-        let cup_size = if self.settings.cup_enabled {
+        let cup_shape = if self.settings.cup_enabled {
             let size = cup_size.ok_or(TournamentError::CupSizeRequired)?;
             if !CUP_SIZES.contains(&size) {
                 return Err(TournamentError::InvalidCupSize { size });
             }
+            // The qualifier format takes half as many players again as the
+            // bracket holds, so the eligibility floor is the *field* size.
+            let format = self.settings.cup_format;
+            let needed = cup_field_size(size, format);
             let eligible = self.players.iter().filter(|p| p.eligible).count();
-            if eligible < size as usize {
+            if eligible < needed as usize {
                 return Err(TournamentError::NotEnoughEligiblePlayers {
-                    needed: size,
+                    needed,
                     have: eligible,
                 });
             }
-            Some(size)
+            Some((size, format, needed))
         } else {
             None
         };
@@ -438,15 +444,19 @@ impl Tournament {
         }
 
         // Seed the cup from the top eligible players by tournament number.
-        if let Some(size) = cup_size {
+        if let Some((size, format, field)) = cup_shape {
             let mut eligible: Vec<&Player> = self.players.iter().filter(|p| p.eligible).collect();
             eligible.sort_by_key(|p| p.tournament_id.unwrap_or(TournamentId(u32::MAX)));
             let seed_order = eligible
                 .into_iter()
-                .take(size as usize)
+                .take(field as usize)
                 .map(|p| p.tournament_id.expect("finalized players have a number"))
                 .collect();
-            self.cup = Some(Cup { size, seed_order });
+            self.cup = Some(Cup {
+                size,
+                format,
+                seed_order,
+            });
         }
 
         self.registration_finalized = true;
@@ -553,6 +563,18 @@ impl Tournament {
     /// as registration is finalized and fills in as results land.
     pub fn cup_bracket(&self) -> Option<CupBracketView> {
         Some(self.cup.as_ref()?.bracket_view(&self.rounds))
+    }
+
+    /// The pre-qualified cup players of round `r` — empty unless `r` is a
+    /// qualifier cup's qualification round (see [`Cup::prequalified_for_round`]).
+    /// They are in the Swiss pool that round but must not be paired with each
+    /// other, which is the pairing engine's business, so every call into it gets
+    /// this list.
+    fn prequalified_in_round(&self, r: u32) -> &[TournamentId] {
+        match &self.cup {
+            Some(cup) => cup.prequalified_for_round(&self.rounds, r),
+            None => &[],
+        }
     }
 
     /// The players the cup bracket will pair in the round currently being drafted
@@ -887,6 +909,7 @@ impl Tournament {
             &swiss_present,
             &draft.forced_boards,
             &draft.forced_byes,
+            self.prequalified_in_round(draft.number),
         );
         let mut boards = cup_boards;
         boards.extend(swiss_round.boards);
@@ -1001,6 +1024,7 @@ impl Tournament {
             completed,
             &swiss_boards,
             round.swiss_bye(),
+            self.prequalified_in_round(round.number),
         ))
     }
 
@@ -1076,6 +1100,7 @@ impl Tournament {
             completed,
             &swiss_boards,
             swiss_bye,
+            self.prequalified_in_round(round.number),
             a,
             b,
         ))
@@ -2682,6 +2707,7 @@ mod tests {
 
     // --- Hybrid cup -------------------------------------------------------
 
+    use crate::cup::CupFormat;
     use crate::round::CupStage;
 
     fn enable_cup(t: &mut Tournament) {
@@ -2908,6 +2934,217 @@ mod tests {
         assert_eq!(podium.runner_up, Some(s_tid[1]));
         assert_eq!(podium.third, Some(s_tid[3]));
         assert_eq!(podium.fourth, Some(s_tid[2]));
+    }
+
+    #[test]
+    fn qualifier_cup_plays_the_prequalified_in_the_swiss_then_folds_them_in() {
+        let mut t = Tournament::new("Champ").unwrap();
+        t.update_settings(TournamentSettings {
+            cup_enabled: true,
+            cup_format: CupFormat::Qualifier,
+            ..Default::default()
+        })
+        .unwrap();
+        // A size-8 qualifier cup takes 12 eligible: E0-E3 pre-qualified, E4-E11
+        // in the qualification round. Two more players round out the Swiss.
+        let e: Vec<Uuid> = (0..12)
+            .map(|i| add_rated(&mut t, &format!("E{i}"), 2400 - i * 100, true))
+            .collect();
+        let n12 = add_rated(&mut t, "N12", 1150, false);
+        let n13 = add_rated(&mut t, "N13", 1100, false);
+
+        // Eight eligible is enough for a direct cup but not for this one.
+        assert!(matches!(
+            t.clone().finalize_registration_with(Some(16)),
+            Err(TournamentError::NotEnoughEligiblePlayers {
+                needed: 24,
+                have: 12
+            })
+        ));
+        t.finalize_registration_with(Some(8)).unwrap();
+        assert_eq!(t.cup.as_ref().unwrap().seed_order.len(), 12);
+
+        // Round 1: the play-off is cup, and the four pre-qualified are in the
+        // Swiss pool with the two non-eligible players (three Swiss boards).
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        let cup_boards: Vec<&Board> = t.rounds[0]
+            .boards
+            .iter()
+            .filter(|b| matches!(b.source, PairingSource::Cup { .. }))
+            .collect();
+        assert_eq!(cup_boards.len(), 4);
+        assert!(cup_boards.iter().all(|b| matches!(
+            b.source,
+            PairingSource::Cup {
+                stage: CupStage::Qualification
+            }
+        )));
+        // Seeds 5-12 fold 5v12, 6v11, 7v10, 8v9.
+        assert!(find_board(&t, 1, e[4], e[11]).is_some());
+        assert!(find_board(&t, 1, e[7], e[8]).is_some());
+        let prequalified: HashSet<TournamentId> = e[..4].iter().map(|&id| tid(&t, id)).collect();
+        assert!(t.rounds[0]
+            .boards
+            .iter()
+            .filter(|b| prequalified.contains(&b.player1) || prequalified.contains(&b.player2))
+            .all(|b| matches!(b.source, PairingSource::Swiss)));
+        // The whole field of 14 is paired: 4 cup + 3 Swiss boards, nobody idle.
+        assert_eq!(t.rounds[0].boards.len(), 7);
+        assert!(t.rounds[0].sitouts.is_empty());
+
+        // The higher seed wins every play-off, so E4-E7 qualify.
+        for i in 0..4 {
+            decide(&mut t, 1, e[4 + i], e[11 - i]);
+        }
+        decide_rest(&mut t, 1);
+
+        // Round 2 is the bracket's first round: [E0..E3] ++ [E4..E7] folded.
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        for (a, b) in [(0, 7), (1, 6), (2, 5), (3, 4)] {
+            assert!(matches!(
+                find_board(&t, 2, e[a], e[b]).unwrap().source,
+                PairingSource::Cup {
+                    stage: CupStage::Quarterfinal
+                }
+            ));
+        }
+        // The four beaten qualifiers drop into the Swiss alongside n12 and n13 —
+        // six players, so three Swiss boards beside the four quarterfinals.
+        let swiss: HashSet<TournamentId> = t.rounds[1]
+            .boards
+            .iter()
+            .filter(|b| matches!(b.source, PairingSource::Swiss))
+            .flat_map(|b| [b.player1, b.player2])
+            .collect();
+        let expected: HashSet<TournamentId> = e[8..]
+            .iter()
+            .chain([&n12, &n13])
+            .map(|&id| tid(&t, id))
+            .collect();
+        assert_eq!(swiss, expected);
+    }
+
+    /// The pre-qualified play the open in round 1, but never each other: the
+    /// engine's `CupPrequalified` rule keeps them apart.
+    ///
+    /// The ratings are chosen so the plain Swiss fold *would* pair them together:
+    /// the round-1 pool is one score group of eight ranked P,P,O,O,P,P,O,O, whose
+    /// top-half-vs-bottom-half fold is 1v5 and 2v6 — two all-pre-qualified boards.
+    /// Only the new rule pulls the pairing off that fold.
+    #[test]
+    fn qualifier_cup_never_pairs_two_prequalified_in_the_qualification_round() {
+        let mut t = Tournament::new("Champ").unwrap();
+        t.update_settings(TournamentSettings {
+            cup_enabled: true,
+            cup_format: CupFormat::Qualifier,
+            ..Default::default()
+        })
+        .unwrap();
+        // E0-E3 are pre-qualified, E4-E11 play the qualification round.
+        let elig_ratings = [
+            2000, 1900, 1600, 1500, 1440, 1430, 1420, 1410, 1405, 1404, 1403, 1402,
+        ];
+        let e: Vec<Uuid> = elig_ratings
+            .iter()
+            .enumerate()
+            .map(|(i, &r)| add_rated(&mut t, &format!("E{i}"), r, true))
+            .collect();
+        // Two open players slot *between* the pre-qualified and two below them,
+        // which is what puts P,P,O,O,P,P,O,O on the fold.
+        let others: Vec<Uuid> = [1800, 1700, 1000, 900]
+            .iter()
+            .enumerate()
+            .map(|(i, &r)| add_rated(&mut t, &format!("N{i}"), r, false))
+            .collect();
+        t.finalize_registration_with(Some(8)).unwrap();
+
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+
+        let prequalified: HashSet<TournamentId> = e[..4].iter().map(|&id| tid(&t, id)).collect();
+        let clashes: Vec<&Board> = t.rounds[0]
+            .boards
+            .iter()
+            .filter(|b| prequalified.contains(&b.player1) && prequalified.contains(&b.player2))
+            .collect();
+        assert!(
+            clashes.is_empty(),
+            "pre-qualified paired together: {clashes:?}"
+        );
+        // Each of them is instead out in the Swiss against one of the others.
+        let opens: HashSet<TournamentId> = others.iter().map(|&id| tid(&t, id)).collect();
+        for &p in &prequalified {
+            let board = t.rounds[0]
+                .boards
+                .iter()
+                .find(|b| b.player1 == p || b.player2 == p)
+                .expect("a pre-qualified player plays the open");
+            let opp = if board.player1 == p {
+                board.player2
+            } else {
+                board.player1
+            };
+            assert!(opens.contains(&opp));
+            assert!(matches!(board.source, PairingSource::Swiss));
+        }
+    }
+
+    /// The rule is a penalty, not a hard exclusion: with nobody entered beyond the
+    /// cup field, the pre-qualified are the only players in the round-1 Swiss pool
+    /// and have to face each other. Pairing must still succeed.
+    #[test]
+    fn prequalified_pair_each_other_when_the_open_is_empty() {
+        let mut t = Tournament::new("Champ").unwrap();
+        t.update_settings(TournamentSettings {
+            cup_enabled: true,
+            cup_format: CupFormat::Qualifier,
+            ..Default::default()
+        })
+        .unwrap();
+        let e: Vec<Uuid> = (0..12)
+            .map(|i| add_rated(&mut t, &format!("E{i}"), 2400 - i * 100, true))
+            .collect();
+        t.finalize_registration_with(Some(8)).unwrap();
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+
+        // 4 qualification boards + the 4 pre-qualified paired among themselves.
+        assert_eq!(t.rounds[0].boards.len(), 6);
+        let prequalified: HashSet<TournamentId> = e[..4].iter().map(|&id| tid(&t, id)).collect();
+        let swiss: Vec<&Board> = t.rounds[0]
+            .boards
+            .iter()
+            .filter(|b| matches!(b.source, PairingSource::Swiss))
+            .collect();
+        assert_eq!(swiss.len(), 2);
+        assert!(swiss
+            .iter()
+            .all(|b| prequalified.contains(&b.player1) && prequalified.contains(&b.player2)));
+    }
+
+    /// The rule is confined to the qualification round: from round 2 on the
+    /// eliminated and idle players pair normally, with no lingering separation.
+    #[test]
+    fn the_prequalified_rule_is_gone_after_the_qualification_round() {
+        let mut t = Tournament::new("Champ").unwrap();
+        t.update_settings(TournamentSettings {
+            cup_enabled: true,
+            cup_format: CupFormat::Qualifier,
+            ..Default::default()
+        })
+        .unwrap();
+        for i in 0..12 {
+            add_rated(&mut t, &format!("E{i}"), 2400 - i * 100, true);
+        }
+        for i in 0..4 {
+            add_rated(&mut t, &format!("N{i}"), 1150 - i * 10, false);
+        }
+        t.finalize_registration_with(Some(8)).unwrap();
+        assert_eq!(t.prequalified_in_round(1).len(), 4);
+        assert!(t.prequalified_in_round(2).is_empty());
+        assert!(t.prequalified_in_round(3).is_empty());
     }
 
     #[test]

@@ -12,6 +12,11 @@
 //!
 //! 1. **No rematch / no repeat bye** — two players never meet twice, and no one
 //!    takes the bye twice.
+//!    Immediately below it, and only in a hybrid cup's qualification round:
+//!    **no pre-qualified clash** — the cup's pre-qualified players spend that
+//!    round in the Swiss pool, but must not be paired with each other. Absent
+//!    from the rule set in every other round and every other format, so it costs
+//!    nothing to have.
 //! 2. **Bye in the lowest group** — the bye should go to the lowest-scoring free
 //!    player, not (say) the tournament leader; the penalty grows with the
 //!    *square* of the points gap to the lowest score among free players. A
@@ -177,6 +182,19 @@ where
 enum Rule {
     /// Never play the same opponent twice / never take the bye twice.
     Rematch,
+    /// (Qualifier cup, round 1 only) Never pair two **pre-qualified** cup players
+    /// with each other. They sit out the qualification round and play the open
+    /// instead, but the bracket is about to pair them against qualifiers, so a
+    /// game between two of them now would be a preview of a bracket match — and
+    /// the loser would carry a defeat into a bracket they were seeded straight
+    /// into. Only in the rule set when there *are* pre-qualified players in the
+    /// pool, which is the qualifier format's first round and nothing else.
+    ///
+    /// A penalty rather than a hard exclusion, deliberately: with 1.5×`size`
+    /// eligible players and nobody else entered, the pre-qualified are the *only*
+    /// players in the round-1 Swiss pool and must face each other. Like
+    /// [`Rule::Rematch`], the engine then takes the fewest such pairings it can.
+    CupPrequalified,
     /// The bye should go to the lowest-scoring free player; penalty is the
     /// square of the points gap to the lowest score among free players. A
     /// bye-only rule (real boards are neutral).
@@ -215,6 +233,7 @@ enum Rule {
 #[serde(rename_all = "snake_case")]
 pub enum RuleId {
     Rematch,
+    CupPrequalified,
     ByeGroup,
     AirtightGroups,
     ScoreGap,
@@ -231,8 +250,9 @@ pub enum RuleId {
 /// score/float/fold/club family for a bye-selection rule and a squared-ELO-gap
 /// rule, keeping only no-rematch above them.
 fn active_rules(settings: &TournamentSettings) -> &'static [Rule] {
-    const SWISS: [Rule; 8] = [
+    const SWISS: [Rule; 9] = [
         Rule::Rematch,
+        Rule::CupPrequalified,
         Rule::ByeGroup,
         Rule::AirtightGroups,
         Rule::ScoreGap,
@@ -241,7 +261,12 @@ fn active_rules(settings: &TournamentSettings) -> &'static [Rule] {
         Rule::Club,
         Rule::Fold,
     ];
-    const ELO: [Rule; 3] = [Rule::Rematch, Rule::ByeSelection, Rule::EloGap];
+    const ELO: [Rule; 4] = [
+        Rule::Rematch,
+        Rule::CupPrequalified,
+        Rule::ByeSelection,
+        Rule::EloGap,
+    ];
     if settings.elo_estimate_needed() {
         &ELO
     } else {
@@ -278,6 +303,10 @@ struct Ctx<'a> {
     /// Normalized club per player, indexed by tournament number (`None` for no /
     /// unknown club). Pre-normalized so the club rule is a plain comparison.
     club_norm: &'a TiSlice<TournamentId, Option<String>>,
+    /// Whether each player is a **pre-qualified** cup entrant this round (see
+    /// [`Rule::CupPrequalified`]). All `false` outside the qualifier cup's first
+    /// round, where the rule is filtered out of the set entirely.
+    prequalified: &'a TiSlice<TournamentId, bool>,
     /// (ELO mode) Rounded estimated ELO per free player, indexed by tournament
     /// number; all zero in Swiss mode.
     elo: &'a TiSlice<TournamentId, i64>,
@@ -325,6 +354,7 @@ impl Rule {
     fn id(self) -> RuleId {
         match self {
             Rule::Rematch => RuleId::Rematch,
+            Rule::CupPrequalified => RuleId::CupPrequalified,
             Rule::ByeGroup => RuleId::ByeGroup,
             Rule::AirtightGroups => RuleId::AirtightGroups,
             Rule::ScoreGap => RuleId::ScoreGap,
@@ -349,6 +379,10 @@ impl Rule {
         match self {
             // Rule 1: never play the same opponent twice.
             Rule::Rematch => i128::from(sa.opponents.contains(&b)),
+            // Rule 1b (qualifier cup, round 1): never pair two pre-qualified cup
+            // players. Only in the rule set when the set is non-empty, so the
+            // lookup is free in every other round and every other format.
+            Rule::CupPrequalified => i128::from(ctx.prequalified[a] && ctx.prequalified[b]),
             // Rule 2: bye-only rule, real boards are neutral.
             Rule::ByeGroup => 0,
             // Rule 3 (optional, first N rounds): forbid crossing MacMahon groups;
@@ -438,6 +472,9 @@ impl Rule {
         let s = ctx.scores.get_tid(player);
         match self {
             Rule::Rematch => i128::from(s.had_bye),
+            // A sit-out isn't a pairing, so two pre-qualified players can't clash
+            // on it.
+            Rule::CupPrequalified => 0,
             // The bye should go to the lowest score group; penalty is the square
             // of the gap to the lowest score among free players.
             Rule::ByeGroup => {
@@ -472,6 +509,7 @@ impl Rule {
         // needed on their bounds.
         let per_edge = match self {
             Rule::Rematch => 1,
+            Rule::CupPrequalified => 1,
             Rule::AirtightGroups => ctx.max_mm_gap * ctx.max_mm_gap,
             Rule::ScoreGap => ctx.max_gap * ctx.max_gap,
             Rule::FloatRepeat => 2 * FLOAT_BASE, // two directions, each ≤ FLOAT_BASE
@@ -646,6 +684,7 @@ struct PairingModel {
     /// O(k²) cost loop indexes rather than hashes. See [`Ctx`].
     fold: TiVec<TournamentId, Option<FoldInfo>>,
     club_norm: TiVec<TournamentId, Option<String>>,
+    prequalified: TiVec<TournamentId, bool>,
     exempt_clubs: HashSet<String>,
     elo: TiVec<TournamentId, i64>,
     elo_rank: TiVec<TournamentId, i128>,
@@ -673,6 +712,7 @@ impl PairingModel {
         settings: &TournamentSettings,
         completed_rounds: &[Round],
         free: &[TournamentId],
+        prequalified: &[TournamentId],
         need_phantom: bool,
     ) -> Self {
         let scores = compute_scores(players, settings, completed_rounds);
@@ -691,6 +731,14 @@ impl PairingModel {
                     .as_ref()
                     .map(|c| TournamentSettings::normalize_club(c));
             }
+        }
+
+        // Pre-qualified cup entrants, as a tid-indexed flag so the O(k²) cost loop
+        // indexes rather than hashes. Empty (all false) in every round but the
+        // qualifier cup's first.
+        let mut prequalified_flag: TiVec<TournamentId, bool> = vec![false; cap].into();
+        for &t in prequalified {
+            prequalified_flag[t] = true;
         }
 
         let fold = fold_ranks(&scores, &rating_by_tid, free, cap);
@@ -764,6 +812,7 @@ impl PairingModel {
             .filter(|r| match r {
                 Rule::AirtightGroups => airtight_active,
                 Rule::Club => club_active,
+                Rule::CupPrequalified => !prequalified.is_empty(),
                 Rule::ByeGroup | Rule::ByeSelection => need_phantom,
                 _ => true,
             })
@@ -773,6 +822,7 @@ impl PairingModel {
             scores,
             fold,
             club_norm,
+            prequalified: prequalified_flag,
             exempt_clubs,
             elo,
             elo_rank,
@@ -808,6 +858,7 @@ impl PairingModel {
             scores: &self.scores,
             fold: &self.fold,
             club_norm: &self.club_norm,
+            prequalified: &self.prequalified,
             round: self.round,
             floater_style: self.floater_style,
             exempt_clubs: &self.exempt_clubs,
@@ -962,6 +1013,7 @@ pub(crate) fn explain_pairing(
     completed_rounds: &[Round],
     swiss_boards: &[(TournamentId, TournamentId)],
     bye: Option<TournamentId>,
+    prequalified: &[TournamentId],
 ) -> RoundExplanation {
     // The Swiss free set the round was paired from: both players of every Swiss
     // board, plus the bye. With a bye the count is odd, so a phantom participates.
@@ -976,6 +1028,7 @@ pub(crate) fn explain_pairing(
         settings,
         completed_rounds,
         &free,
+        prequalified,
         need_phantom,
     );
     let rules = model.rules();
@@ -1228,6 +1281,7 @@ fn baseline_matching(
     completed_rounds: &[Round],
     swiss_boards: &[(TournamentId, TournamentId)],
     bye: Option<TournamentId>,
+    prequalified: &[TournamentId],
 ) -> (
     PairingModel,
     Vec<TournamentId>,
@@ -1245,6 +1299,7 @@ fn baseline_matching(
         settings,
         completed_rounds,
         &free,
+        prequalified,
         need_phantom,
     );
     let mut m0: HashSet<(TournamentId, TournamentId)> = swiss_boards
@@ -1336,6 +1391,7 @@ pub(crate) fn counterfactual_force(
     completed_rounds: &[Round],
     swiss_boards: &[(TournamentId, TournamentId)],
     bye: Option<TournamentId>,
+    prequalified: &[TournamentId],
     a: TournamentId,
     b: TournamentId,
 ) -> Counterfactual {
@@ -1346,6 +1402,7 @@ pub(crate) fn counterfactual_force(
         completed_rounds,
         swiss_boards,
         bye,
+        prequalified,
     );
 
     // Re-solve everyone but the forced pair, then add the forced edge back for
@@ -1378,6 +1435,7 @@ pub(crate) fn counterfactual_forbid(
     completed_rounds: &[Round],
     swiss_boards: &[(TournamentId, TournamentId)],
     bye: Option<TournamentId>,
+    prequalified: &[TournamentId],
     a: TournamentId,
     b: TournamentId,
 ) -> Counterfactual {
@@ -1388,6 +1446,7 @@ pub(crate) fn counterfactual_forbid(
         completed_rounds,
         swiss_boards,
         bye,
+        prequalified,
     );
 
     let mut verts = free.clone();
@@ -1412,6 +1471,7 @@ pub(crate) fn counterfactual_forbid(
 ///
 /// Preconditions (validated by the caller): every forced player is present and
 /// appears at most once.
+#[allow(clippy::too_many_arguments)]
 pub fn pair_round_weighted(
     number: u32,
     players: &[Player],
@@ -1420,6 +1480,7 @@ pub fn pair_round_weighted(
     present: &[TournamentId],
     forced_boards: &[Board],
     forced_byes: &[TournamentId],
+    prequalified: &[TournamentId],
 ) -> Round {
     let scores = compute_scores(players, settings, completed_rounds);
     // The float frozen onto each board: points(player1) − points(player2) now.
@@ -1477,6 +1538,7 @@ pub fn pair_round_weighted(
             settings,
             completed_rounds,
             &free,
+            prequalified,
             need_phantom,
         );
 
@@ -1511,6 +1573,7 @@ pub fn pair_round_weighted(
         for (&rule, &m) in model.rules.iter().zip(&model.mult) {
             match rule {
                 Rule::Rematch => fill!(Rule::Rematch, m),
+                Rule::CupPrequalified => fill!(Rule::CupPrequalified, m),
                 Rule::AirtightGroups => fill!(Rule::AirtightGroups, m),
                 Rule::ScoreGap => fill!(Rule::ScoreGap, m),
                 Rule::FloatRepeat => fill!(Rule::FloatRepeat, m),
@@ -1691,14 +1754,14 @@ mod tests {
         let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let settings = elo_settings();
 
-        let forward = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[]);
+        let forward = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[], &[]);
 
         // Same players and tournament numbers, reversed order in both the players
         // slice and the present list.
         let mut p_rev = p.clone();
         p_rev.reverse();
         let present_rev: Vec<TournamentId> = present.iter().rev().copied().collect();
-        let reversed = pair_round_weighted(1, &p_rev, &settings, &[], &present_rev, &[], &[]);
+        let reversed = pair_round_weighted(1, &p_rev, &settings, &[], &present_rev, &[], &[], &[]);
 
         assert_eq!(board_pairs(&forward), board_pairs(&reversed));
         assert_eq!(forward.swiss_bye(), reversed.swiss_bye());
@@ -1734,6 +1797,7 @@ mod tests {
             &TournamentSettings::default(),
             &[r1],
             &present,
+            &[],
             &[],
             &[],
         );
@@ -1773,6 +1837,7 @@ mod tests {
             &TournamentSettings::default(),
             &[r1],
             &present,
+            &[],
             &[],
             &[],
         );
@@ -1823,6 +1888,7 @@ mod tests {
             &present,
             &[],
             &[],
+            &[],
         );
 
         let bye = round.swiss_bye().expect("odd field needs a bye");
@@ -1871,6 +1937,7 @@ mod tests {
             &[r1],
             &present,
             &forced,
+            &[],
             &[],
         );
 
@@ -1933,6 +2000,7 @@ mod tests {
             &present,
             &[],
             &[],
+            &[],
         );
 
         assert_eq!(round.swiss_bye(), Some(b.tournament_id.unwrap())); // lowest score takes the bye
@@ -1964,7 +2032,7 @@ mod tests {
         let settings =
             TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
 
-        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[]);
+        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[], &[]);
 
         let pairs = board_pairs(&round);
         assert!(
@@ -2004,7 +2072,7 @@ mod tests {
             exempt_clubs: Vec::new(),
         });
 
-        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[]);
+        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[], &[]);
 
         assert_eq!(round.boards.len(), 2);
         let club_of = |id: TournamentId| {
@@ -2036,6 +2104,7 @@ mod tests {
             &TournamentSettings::default(),
             &[],
             &present,
+            &[],
             &[],
             &[],
         );
@@ -2075,7 +2144,7 @@ mod tests {
             rounds: None,
             exempt_clubs: vec!["  HOME ".into()],
         });
-        let round = pair_round_weighted(1, &p, &exempt, &[], &present, &[], &[]);
+        let round = pair_round_weighted(1, &p, &exempt, &[], &present, &[], &[], &[]);
         assert!(
             board_pairs(&round).contains(&unord(
                 p[0].tournament_id.unwrap(),
@@ -2088,7 +2157,7 @@ mod tests {
             rounds: None,
             exempt_clubs: Vec::new(),
         });
-        let round = pair_round_weighted(1, &p, &protected, &[], &present, &[], &[]);
+        let round = pair_round_weighted(1, &p, &protected, &[], &present, &[], &[], &[]);
         assert!(
             !board_pairs(&round).contains(&unord(
                 p[0].tournament_id.unwrap(),
@@ -2110,7 +2179,7 @@ mod tests {
         });
 
         // Pair round 2 directly (no completed rounds needed to exercise the window).
-        let round = pair_round_weighted(2, &p, &settings, &[], &present, &[], &[]);
+        let round = pair_round_weighted(2, &p, &settings, &[], &present, &[], &[], &[]);
         let pairs = board_pairs(&round);
         assert!(
             pairs.contains(&unord(
@@ -2186,6 +2255,7 @@ mod tests {
             &present,
             &[],
             &[],
+            &[],
         );
         let top: HashSet<TournamentId> = [
             p[0].tournament_id.unwrap(),
@@ -2205,7 +2275,7 @@ mod tests {
         // With airtight groups active for round 2, every board stays within its
         // MacMahon group.
         let settings_on = settings_base.with_airtight(NonZeroU32::new(2));
-        let round_on = pair_round_weighted(2, &p, &settings_on, &[r1], &present, &[], &[]);
+        let round_on = pair_round_weighted(2, &p, &settings_on, &[r1], &present, &[], &[], &[]);
         for b in &round_on.boards {
             assert_eq!(
                 top.contains(&b.player1),
@@ -2260,7 +2330,7 @@ mod tests {
             None,
         );
 
-        let round = pair_round_weighted(2, &p, &settings, &[r1], &present, &[], &[]);
+        let round = pair_round_weighted(2, &p, &settings, &[r1], &present, &[], &[], &[]);
         let top: HashSet<TournamentId> = [
             p[0].tournament_id.unwrap(),
             p[1].tournament_id.unwrap(),
@@ -2298,7 +2368,7 @@ mod tests {
         ];
         let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
-        let round = pair_round_weighted(1, &p, &elo_settings(), &[], &present, &[], &[]);
+        let round = pair_round_weighted(1, &p, &elo_settings(), &[], &present, &[], &[], &[]);
 
         let pairs = board_pairs(&round);
         assert!(
@@ -2326,7 +2396,7 @@ mod tests {
             .collect();
         let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
-        let round = pair_round_weighted(1, &p, &elo_settings(), &[], &present, &[], &[]);
+        let round = pair_round_weighted(1, &p, &elo_settings(), &[], &present, &[], &[], &[]);
 
         assert_eq!(
             round.swiss_bye(),
@@ -2369,7 +2439,7 @@ mod tests {
             None,
         );
 
-        let round = pair_round_weighted(2, &p, &settings, &[r1], &present, &[], &[]);
+        let round = pair_round_weighted(2, &p, &settings, &[r1], &present, &[], &[], &[]);
         let pairs = board_pairs(&round);
         // No rematch of the round-1 boards.
         assert!(!pairs.contains(&unord(
@@ -2413,7 +2483,7 @@ mod tests {
         let settings =
             TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
 
-        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[]);
+        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[], &[]);
         assert!(
             board_pairs(&round).contains(&unord(
                 p[2].tournament_id.unwrap(),
@@ -2440,7 +2510,7 @@ mod tests {
             TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
 
         let classic = base.clone().with_floater(FloaterStyle::Classic);
-        let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], &[]);
+        let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], &[], &[]);
         assert!(
             board_pairs(&round).contains(&unord(
                 p[0].tournament_id.unwrap(),
@@ -2450,7 +2520,7 @@ mod tests {
         );
 
         let median = base.with_floater(FloaterStyle::Median);
-        let round = pair_round_weighted(1, &p, &median, &[], &present, &[], &[]);
+        let round = pair_round_weighted(1, &p, &median, &[], &present, &[], &[], &[]);
         assert!(
             board_pairs(&round).contains(&unord(
                 p[0].tournament_id.unwrap(),
@@ -2476,7 +2546,7 @@ mod tests {
             TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
 
         let classic = base.clone().with_floater(FloaterStyle::Classic);
-        let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], &[]);
+        let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], &[], &[]);
         assert!(
             board_pairs(&round).contains(&unord(
                 p[2].tournament_id.unwrap(),
@@ -2486,7 +2556,7 @@ mod tests {
         );
 
         let median = base.with_floater(FloaterStyle::Median);
-        let round = pair_round_weighted(1, &p, &median, &[], &present, &[], &[]);
+        let round = pair_round_weighted(1, &p, &median, &[], &present, &[], &[], &[]);
         assert!(
             board_pairs(&round).contains(&unord(
                 p[1].tournament_id.unwrap(),
@@ -2511,7 +2581,7 @@ mod tests {
         let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
         let classic = TournamentSettings::default().with_floater(FloaterStyle::Classic);
-        let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], &[]);
+        let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], &[], &[]);
         assert_eq!(
             round.swiss_bye(),
             Some(p[4].tournament_id.unwrap()),
@@ -2519,7 +2589,7 @@ mod tests {
         );
 
         let median = TournamentSettings::default().with_floater(FloaterStyle::Median);
-        let round = pair_round_weighted(1, &p, &median, &[], &present, &[], &[]);
+        let round = pair_round_weighted(1, &p, &median, &[], &present, &[], &[], &[]);
         assert_eq!(
             round.swiss_bye(),
             Some(p[2].tournament_id.unwrap()),
@@ -2570,7 +2640,7 @@ mod tests {
         let has_bye_rule = |need_phantom: bool, n: u32| {
             let p: Vec<Player> = (1..=n).map(|i| player(i, Some(1500), None)).collect();
             let free: Vec<TournamentId> = (1..=n).map(TournamentId).collect();
-            let model = PairingModel::build(1, &p, &settings, &[], &free, need_phantom);
+            let model = PairingModel::build(1, &p, &settings, &[], &free, &[], need_phantom);
             model
                 .rules
                 .iter()
@@ -2634,12 +2704,14 @@ mod tests {
                 .map(|c| TournamentSettings::normalize_club(c));
         }
         let fold = fold_ranks(&scores, &rating_by_tid, &free, cap);
+        let empty_prequalified: TiVec<TournamentId, bool> = vec![false; cap].into();
         let empty_elo: TiVec<TournamentId, i64> = vec![0i64; cap].into();
         let empty_rank: TiVec<TournamentId, i128> = vec![0i128; cap].into();
         let ctx = Ctx {
             scores: &scores,
             fold: &fold,
             club_norm: &club_norm,
+            prequalified: &empty_prequalified,
             round: 2,
             floater_style: FloaterStyle::Median, // exercise the floater-selection bound
             exempt_clubs: &exempt_clubs,
@@ -2706,7 +2778,15 @@ mod tests {
             (p[2].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
         ];
 
-        let ex = explain_pairing(1, &p, &TournamentSettings::default(), &[], &boards, None);
+        let ex = explain_pairing(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &[],
+            &boards,
+            None,
+            &[],
+        );
 
         assert_eq!(ex.boards.len(), 2);
         for board in &ex.boards {
@@ -2736,7 +2816,15 @@ mod tests {
             (p[1].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
         ];
 
-        let ex = explain_pairing(1, &p, &TournamentSettings::default(), &[], &boards, None);
+        let ex = explain_pairing(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &[],
+            &boards,
+            None,
+            &[],
+        );
 
         for board in &ex.boards {
             assert!(board.contributions.is_empty());
@@ -2760,21 +2848,29 @@ mod tests {
         let settings =
             TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
         let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
-        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[]);
+        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[], &[]);
 
         let boards: Vec<(TournamentId, TournamentId)> = round
             .boards
             .iter()
             .map(|b| (b.player1, b.player2))
             .collect();
-        let ex = explain_pairing(1, &p, &settings, &[], &boards, round.swiss_bye());
+        let ex = explain_pairing(1, &p, &settings, &[], &boards, round.swiss_bye(), &[]);
 
         // Re-derive the units independently through a fresh model and compare.
         let mut free: Vec<TournamentId> = boards.iter().flat_map(|&(a, b)| [a, b]).collect();
         if let Some(b) = round.swiss_bye() {
             free.push(b);
         }
-        let model = PairingModel::build(1, &p, &settings, &[], &free, round.swiss_bye().is_some());
+        let model = PairingModel::build(
+            1,
+            &p,
+            &settings,
+            &[],
+            &free,
+            &[],
+            round.swiss_bye().is_some(),
+        );
         for (ledger, &(a, b)) in ex.boards.iter().zip(&boards) {
             let units = model.edge_units(a, b);
             let expected: i64 = model
@@ -2817,6 +2913,7 @@ mod tests {
             &[],
             &boards,
             None,
+            &[],
             p[0].tournament_id.unwrap(),
             p[1].tournament_id.unwrap(),
         );
@@ -2860,6 +2957,7 @@ mod tests {
             &[],
             &boards,
             None,
+            &[],
             p[0].tournament_id.unwrap(),
             p[2].tournament_id.unwrap(),
         );
@@ -2888,6 +2986,7 @@ mod tests {
             &[],
             &boards,
             None,
+            &[],
             p[0].tournament_id.unwrap(),
             p[1].tournament_id.unwrap(),
         );
@@ -2916,6 +3015,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             &[],
             &[],
+            &[],
         );
         let boards: Vec<(TournamentId, TournamentId)> = round
             .boards
@@ -2932,6 +3032,7 @@ mod tests {
             &[],
             &boards,
             Some(bye),
+            &[],
             bye,
             opponent,
         );
@@ -2963,6 +3064,7 @@ mod tests {
             &[],
             &boards,
             None,
+            &[],
             p[0].tournament_id.unwrap(),
             p[2].tournament_id.unwrap(),
         );
@@ -3001,6 +3103,7 @@ mod tests {
             &[],
             &boards,
             None,
+            &[],
             p[0].tournament_id.unwrap(),
             p[1].tournament_id.unwrap(),
         );
@@ -3025,6 +3128,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             &[],
             &[],
+            &[],
         );
         let boards: Vec<(TournamentId, TournamentId)> = round
             .boards
@@ -3042,6 +3146,7 @@ mod tests {
             &[],
             &boards,
             Some(bye),
+            &[],
             playing_a,
             PHANTOM,
         );
@@ -3074,6 +3179,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             &[],
             &[],
+            &[],
         );
         let boards: Vec<(TournamentId, TournamentId)> = round
             .boards
@@ -3089,6 +3195,7 @@ mod tests {
             &[],
             &boards,
             Some(bye),
+            &[],
             bye,
             PHANTOM,
         );

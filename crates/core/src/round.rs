@@ -120,10 +120,18 @@ fn is_zero(n: &i32) -> bool {
 /// Which stage of the direct-elimination cup a board belongs to. `RoundOf(n)`
 /// covers the early bracket rounds (round of 64/32/16); the last three rounds are
 /// named explicitly. Used to label cup games in the pairings view.
+///
+/// `Qualification` is the play-off round that precedes the bracket in the
+/// qualifier format ([`CupFormat::Qualifier`]) — it needs its own name because it
+/// has the same number of players as bracket round 1 and would otherwise be
+/// labelled with the same `RoundOf(n)`.
+///
+/// [`CupFormat::Qualifier`]: crate::cup::CupFormat::Qualifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
 pub enum CupStage {
+    Qualification,
     RoundOf(u32),
     Quarterfinal,
     Semifinal,

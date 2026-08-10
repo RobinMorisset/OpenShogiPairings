@@ -19,6 +19,7 @@ export type { HandicapDisplay } from "./generated/HandicapDisplay";
 export type { Counterfactual } from "./generated/Counterfactual";
 export type { CounterfactualMode } from "./generated/CounterfactualMode";
 export type { Cup } from "./generated/Cup";
+export type { CupFormat } from "./generated/CupFormat";
 export type { CupPodium } from "./generated/CupPodium";
 export type { CupStage } from "./generated/CupStage";
 export type { EloPriorShape } from "./generated/EloPriorShape";

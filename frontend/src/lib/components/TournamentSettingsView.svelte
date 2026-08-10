@@ -4,6 +4,7 @@
   import { TIEBREAKS } from "../types";
   import type {
     ClubProtection,
+    CupFormat,
     EloEstimator,
     EloPriorShape,
     GradeKind,
@@ -106,6 +107,7 @@
   let exemptClubs = $state<string[]>([]);
   let floaterStyle = $state<"classic" | "median">("classic");
   let cupEnabled = $state(false);
+  let cupFormat = $state<CupFormat>("direct");
   let longBoardsEnabled = $state(false);
   let handicapPolicy = $state<HandicapChoice>("allowed");
   let handicapWielRule = $state(false);
@@ -196,6 +198,7 @@
     const sExempt = cp?.kind === "on" ? (cp.exempt_clubs ?? []) : [];
     const sFloater = swiss?.floater_style ?? "classic";
     const sCup = settings.cup_enabled;
+    const sCupFormat = settings.cup_format ?? "direct";
     const sLong = settings.long_boards_enabled ?? false;
     const sHandicap = handicapChoice(settings.handicap_policy);
     const sHandicapWiel =
@@ -222,6 +225,7 @@
         eqStr(normExempt(exemptClubs), sExempt) &&
         floaterStyle === sFloater &&
         cupEnabled === sCup &&
+        cupFormat === sCupFormat &&
         longBoardsEnabled === sLong &&
         handicapPolicy === sHandicap &&
         handicapWielRule === sHandicapWiel &&
@@ -252,6 +256,7 @@
         exemptClubs = [...sExempt];
         floaterStyle = sFloater;
         cupEnabled = sCup;
+        cupFormat = sCupFormat;
         longBoardsEnabled = sLong;
         handicapPolicy = sHandicap;
         handicapWielRule = sHandicapWiel;
@@ -310,6 +315,7 @@
     onUpdate({
       pairing,
       cup_enabled: cupEnabled,
+      cup_format: cupFormat,
       long_boards_enabled: longBoardsEnabled,
       handicap_policy:
         handicapPolicy === "none"
@@ -414,6 +420,11 @@
 
   function setCupEnabled(v: boolean) {
     cupEnabled = v;
+    persist();
+  }
+
+  function setCupFormat(v: CupFormat) {
+    cupFormat = v;
     persist();
   }
 
@@ -924,6 +935,37 @@
       />
       {$_("settings.hybridCupCheckbox")}
     </label>
+    <!-- How the bracket is filled. Only meaningful with the cup on, so the
+         radios are disabled (but still shown) when it is off. -->
+    <label class="check indent">
+      <input
+        type="radio"
+        name="cup-format"
+        value="direct"
+        checked={cupFormat === "direct"}
+        disabled={busy || !cupEnabled}
+        onchange={() => setCupFormat("direct")}
+      />
+      {$_("settings.cupFormatDirect")}
+    </label>
+    <label class="check indent">
+      <input
+        type="radio"
+        name="cup-format"
+        value="qualifier"
+        checked={cupFormat === "qualifier"}
+        disabled={busy || !cupEnabled}
+        onchange={() => setCupFormat("qualifier")}
+      />
+      {$_("settings.cupFormatQualifier")}
+    </label>
+    <p class="desc indent">
+      {$_(
+        cupFormat === "qualifier"
+          ? "settings.cupFormatQualifierDesc"
+          : "settings.cupFormatDirectDesc",
+      )}
+    </p>
   </div>
 
   <div class="section column-start">
@@ -1309,6 +1351,14 @@
     font-size: 0.85rem;
     margin: 0 0 1rem;
     line-height: 1.4;
+  }
+  /* Sub-options of the checkbox above them (the cup format radios). */
+  .indent {
+    margin-left: 1.6rem;
+  }
+  .desc.indent {
+    margin-bottom: 0;
+    margin-top: 0.35rem;
   }
   .settings-io {
     display: flex;

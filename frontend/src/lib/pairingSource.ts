@@ -12,6 +12,8 @@ export function cupStageLabel(stage: CupStage, t: Translate): string {
   if (typeof stage === "object")
     return t("pairingSource.roundOf", { values: { n: stage.round_of } });
   switch (stage) {
+    case "qualification":
+      return t("pairingSource.qualification");
     case "quarterfinal":
       return t("pairingSource.quarterfinal");
     case "semifinal":

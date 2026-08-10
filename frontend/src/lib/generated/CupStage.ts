@@ -4,5 +4,12 @@
  * Which stage of the direct-elimination cup a board belongs to. `RoundOf(n)`
  * covers the early bracket rounds (round of 64/32/16); the last three rounds are
  * named explicitly. Used to label cup games in the pairings view.
+ *
+ * `Qualification` is the play-off round that precedes the bracket in the
+ * qualifier format ([`CupFormat::Qualifier`]) — it needs its own name because it
+ * has the same number of players as bracket round 1 and would otherwise be
+ * labelled with the same `RoundOf(n)`.
+ *
+ * [`CupFormat::Qualifier`]: crate::cup::CupFormat::Qualifier
  */
-export type CupStage = { "round_of": number } | "quarterfinal" | "semifinal" | "final" | "small_final";
+export type CupStage = "qualification" | { "round_of": number } | "quarterfinal" | "semifinal" | "final" | "small_final";

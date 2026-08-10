@@ -7,6 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+use crate::cup::CupFormat;
 use crate::player::Grade;
 
 /// An integer-percent multiplier (`100` = ×1.0), read as a float via
@@ -639,6 +640,11 @@ pub struct TournamentSettings {
     /// top eligible players. Off by default.
     #[serde(default)]
     pub cup_enabled: bool,
+    /// How that cup fills its bracket: straight from the top eligible players, or
+    /// with a qualification round feeding half the bracket (see [`CupFormat`]).
+    /// Only consulted when `cup_enabled`. Defaults to [`CupFormat::Direct`].
+    #[serde(default)]
+    pub cup_format: CupFormat,
     /// Whether the referee may flag individual boards as "long games" that last
     /// two rounds and score two points for the winner. Off by default. See
     /// `docs/two-round-boards.md`.
@@ -676,6 +682,7 @@ impl Default for TournamentSettings {
         TournamentSettings {
             pairing: PairingMode::default(),
             cup_enabled: false,
+            cup_format: CupFormat::default(),
             long_boards_enabled: false,
             handicap_policy: HandicapPolicy::default(),
             half_point_absences: false,

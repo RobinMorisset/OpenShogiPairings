@@ -7,6 +7,24 @@ This project does NOT adhere to semantic versioning. Assume that even minor
 version changes can change the save format and thus break compatibility; it
 will be explicitly mentioned in the changelog for that version though.
 
+## [Unreleased]
+
+Save files from earlier versions load, **except** one saved mid-tournament with
+the hybrid cup enabled: the cup now records which format it was seeded under, and
+that field has no default. Re-create such a tournament rather than loading it.
+
+### Added
+
+- **Hybrid cup: a qualification-round format** (Settings → Hybrid cup), used by
+  the German Championship. The top half of the bracket is pre-qualified and
+  plays an ordinary Swiss game in round 1, while the next players play a
+  qualification round among themselves; its winners complete the bracket, which
+  then runs from round 2. It takes half as many eligible players again as the
+  bracket holds — 12/24/48/96 for a bracket of 8/16/32/64 — and one more round.
+  The pre-qualified are never paired with each other in that round — a new
+  pairing rule that exists only there. The existing behaviour is the "direct
+  bracket" option, unchanged and still the default.
+
 ## [1.3.0] - 2026-08-05
 
 Backwards compatible with v1.1.0 and v1.2.0

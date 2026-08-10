@@ -1,6 +1,6 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
-  import type { NewPlayer, Player, PlayerCategory } from "../types";
+  import type { CupFormat, NewPlayer, Player, PlayerCategory } from "../types";
   import { formatGrade, gradeRank, parseGrade } from "../grade";
   import { printPage } from "../platform";
 
@@ -8,6 +8,9 @@
     players: Player[];
     /** Show the cup-eligibility column (when the hybrid cup is enabled). */
     showEligible?: boolean;
+    /** How the cup fills its bracket — the qualifier format takes half as many
+     * players again, so its cutoffs fall at different eligibility ranks. */
+    cupFormat?: CupFormat;
     /** Referee-defined categories — one checkbox column each. */
     categories?: PlayerCategory[];
     /** Registration already finalized — the cup bracket is frozen, so bulk
@@ -32,6 +35,7 @@
   let {
     players,
     showEligible = false,
+    cupFormat = "direct",
     categories = [],
     finalized = false,
     onEdit,
@@ -47,6 +51,11 @@
   const eligibleCount = $derived(players.filter((p) => p.eligible).length);
 
   const CUP_SIZES = [8, 16, 32, 64];
+
+  /** Players a bracket of `size` takes — mirrors `cup_field_size` in the backend. */
+  const cupFieldSize = $derived((size: number) =>
+    cupFormat === "qualifier" ? size + size / 2 : size,
+  );
 
   // Rank of each eligible player among all eligible players, using the same
   // order the backend uses to seed the cup at finalization (rating
@@ -73,11 +82,13 @@
     return ranks;
   });
 
-  /** The cup size this player's eligibility rank marks the cutoff for, if any. */
+  /** The bracket size this player's eligibility rank marks the cutoff for, if
+   *  any — the last player a cup of that size would take. Under the qualifier
+   *  format that is rank 12/24/48/96 for a bracket of 8/16/32/64. */
   function cupCutoff(player: Player): number | null {
     const rank = eligibleRank.get(player.id);
     if (rank == null) return null;
-    return CUP_SIZES.includes(rank) ? rank : null;
+    return CUP_SIZES.find((size) => cupFieldSize(size) === rank) ?? null;
   }
 
   // Distinct nationalities present (non-empty), with a per-nationality count,
@@ -452,7 +463,7 @@
                       class="cup-cutoff"
                       title={$_("playerList.cupCutoffTitle", { values: { size: cupCutoff(player) } })}
                     >
-                      {cupCutoff(player)}
+                      {cupFieldSize(cupCutoff(player)!)}
                     </span>
                   {/if}
                 </span>
