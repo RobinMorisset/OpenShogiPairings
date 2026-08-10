@@ -87,6 +87,7 @@ ratings.
 | `--oracle-unrated-k K` | K setting the width of an unrated player's true-strength prior, σ = √(K·s) (default 705 ≈ σ 350) |
 | `--cup-size N` | run the hybrid cup with a bracket of 8/16/32/64 (needs `--cup-nations`) |
 | `--cup-nations FR,BE,…` | nationalities eligible for the cup |
+| `--cup-format direct｜qualifier` | how the bracket is filled (default `direct`); `qualifier` adds a qualification round |
 | `--threshold T` | `|diff|` cut for `P(|diff|>T)`; repeatable; default 400 |
 | `--out DIR` | write `report.json` + per-variant ELO-diff CSV histograms |
 | `--dump-runs FILE` | per-run metrics CSV, for ad-hoc paired analysis |
@@ -162,10 +163,24 @@ attendance → `confirm_round` → auto-fill the boards.
   byes are not boards and are excluded from every game statistic.
 - **The cup.** With `--cup-size`, a hybrid direct-elimination cup runs alongside
   the Swiss. Eligibility is computed once from the base: nationality in
-  `--cup-nations` **and** present through the first `log₂(size)` rounds. The
-  bracket seeds the top `size` eligible players by rating; MacMahon and floater
-  settings don't touch it, so its outcome distribution is the same across
-  variants (given common random numbers).
+  `--cup-nations` **and** present through the cup's rounds. The bracket seeds the
+  top eligible players by rating; MacMahon and floater settings don't touch it, so
+  its outcome distribution is the same across variants (given common random
+  numbers).
+
+  `--cup-format` picks how the bracket is filled. `direct` (the default, the
+  French / European Championship) makes the top `size` eligible players the
+  bracket, over the first `log₂(size)` rounds. `qualifier` (the German
+  Championship) pre-qualifies the top `size / 2` — they play the open in round 1,
+  never each other — while the next `size` play a qualification round whose
+  winners complete the bracket, which then runs from round 2. That takes
+  `1.5 × size` eligible players and `log₂(size) + 1` rounds, and the eligibility
+  window widens to match. Too few eligible is a startup error naming the shortfall,
+  not a per-run failure.
+
+  `--cup-final`, which reconstructs a roster backward from the two finalists, is
+  always a direct bracket — that reconstruction reads the bracket off the played
+  games and knows nothing of a qualification round.
 
 ## Common random numbers
 

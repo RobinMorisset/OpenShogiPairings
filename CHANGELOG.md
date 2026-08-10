@@ -24,6 +24,8 @@ that field has no default. Re-create such a tournament rather than loading it.
   The pre-qualified are never paired with each other in that round — a new
   pairing rule that exists only there. The existing behaviour is the "direct
   bracket" option, unchanged and still the default.
+- `osp-sim --cup-format direct|qualifier`, so simulations can run either cup
+  format (see [`docs/simulation-cli.md`](docs/simulation-cli.md)).
 
 ## [1.3.0] - 2026-08-05
 

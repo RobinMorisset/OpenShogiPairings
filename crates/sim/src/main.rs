@@ -12,7 +12,7 @@ mod stats;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
@@ -24,11 +24,38 @@ use osp_core::sim::{
     welfare_shortfall, CupConfig, OracleModel, RunOutcome, StrengthMap,
 };
 use osp_core::{
-    decode_latin1, estimate_elos, import_fesa_results, reconstruct_cup_from_final, Player,
-    Tournament, TournamentId, TournamentSettings,
+    cup_field_size, decode_latin1, estimate_elos, import_fesa_results, reconstruct_cup_from_final,
+    CupFormat, Player, Tournament, TournamentId, TournamentSettings,
 };
 
 use stats::{diff_stats, mean, mean_ci95, paired_diff, spearman, wilson, DiffStats, Proportion};
+
+/// `--cup-format` on the command line. A local mirror of [`CupFormat`] because
+/// `clap::ValueEnum` has to be derived on the type, and osp-core has no business
+/// depending on clap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum CupFormatArg {
+    Direct,
+    Qualifier,
+}
+
+impl From<CupFormatArg> for CupFormat {
+    fn from(arg: CupFormatArg) -> Self {
+        match arg {
+            CupFormatArg::Direct => CupFormat::Direct,
+            CupFormatArg::Qualifier => CupFormat::Qualifier,
+        }
+    }
+}
+
+impl std::fmt::Display for CupFormatArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            CupFormatArg::Direct => "direct",
+            CupFormatArg::Qualifier => "qualifier",
+        })
+    }
+}
 
 /// Compare pairing-settings variants by simulating a tournament many times.
 #[derive(Debug, Parser)]
@@ -131,6 +158,23 @@ struct Args {
     /// Requires --cup-nations.
     #[arg(long, value_name = "N", requires = "cup_nations")]
     cup_size: Option<u32>,
+
+    /// How the bracket is filled: `direct` (the top --cup-size eligible players
+    /// are the bracket, from round 1 — the French / European Championship) or
+    /// `qualifier` (the top half is pre-qualified and plays the open in round 1
+    /// while the next --cup-size play a qualification round, and the bracket runs
+    /// from round 2 — the German Championship). The qualifier format needs half as
+    /// many eligible players again, and one more round.
+    /// Rejected alongside --cup-final: a roster reconstructed backward from the
+    /// finalists is a plain bracket, so a format given there could only be ignored.
+    #[arg(
+        long,
+        value_name = "FORMAT",
+        default_value = "direct",
+        requires = "cup_size",
+        conflicts_with = "cup_final"
+    )]
+    cup_format: CupFormatArg,
 
     /// Comma-separated nationalities eligible for the cup (e.g. FR,BE,CH). A player
     /// absent in any of the cup rounds (the first log2(size) real rounds) is
@@ -288,6 +332,7 @@ fn run(args: Args) -> Result<(), String> {
             "cup: size {size} reconstructed from finalists {:?} / {:?}",
             args.cup_final[0], args.cup_final[1]
         );
+        // A roster read backward off the final is a plain bracket by construction.
         let eligible = roster
             .into_iter()
             .filter_map(|t| {
@@ -297,7 +342,11 @@ fn run(args: Args) -> Result<(), String> {
                     .map(|p| p.id)
             })
             .collect();
-        Some(CupConfig { eligible, size })
+        Some(CupConfig {
+            eligible,
+            size,
+            format: CupFormat::Direct,
+        })
     } else if let Some(size) = args.cup_size {
         if !osp_core::CUP_SIZES.contains(&size) {
             return Err(format!(
@@ -311,15 +360,37 @@ fn run(args: Args) -> Result<(), String> {
             .map(|n| n.trim().to_uppercase())
             .filter(|n| !n.is_empty())
             .collect();
-        // A cup player must have played every cup round — the first log2(size).
-        let cup_rounds = size.trailing_zeros() as usize;
+        let format = args.cup_format.into();
+        // A cup player must have played every cup round: log2(size) of bracket,
+        // plus the qualification round when the format has one.
+        let cup_rounds =
+            size.trailing_zeros() as usize + usize::from(matches!(format, CupFormat::Qualifier));
         let eligible = cup_eligibility(&base, &nations, cup_rounds);
+        // The qualifier format takes half as many players again as the bracket
+        // holds. Check here rather than letting `simulate_run` fail per run, so a
+        // mis-sized cup is one clear message instead of `--runs` copies of it.
+        let needed = cup_field_size(size, format) as usize;
+        if eligible.len() < needed {
+            return Err(format!(
+                "a {size}-player {} cup needs {needed} eligible players, but only {} of the \
+                 {} nationalities were present through round {cup_rounds}",
+                args.cup_format,
+                eligible.len(),
+                nations.len(),
+            ));
+        }
         eprintln!(
-            "cup: size {size}, {} eligible ({} nationalities, present through round {cup_rounds})",
+            "cup: size {size} ({}), {} eligible ({} nationalities, present through round \
+             {cup_rounds})",
+            args.cup_format,
             eligible.len(),
             nations.len(),
         );
-        Some(CupConfig { eligible, size })
+        Some(CupConfig {
+            eligible,
+            size,
+            format,
+        })
     } else {
         None
     };

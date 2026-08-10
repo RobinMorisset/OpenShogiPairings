@@ -23,6 +23,7 @@ use std::collections::{HashMap, HashSet};
 use rand::Rng;
 use uuid::Uuid;
 
+use crate::cup::CupFormat;
 use crate::elo::{
     estimate_elos, oracle_prior, oracle_provisional_width, UNRATED_PRIOR_DEFAULT_K,
     UNRATED_PRIOR_MEAN,
@@ -83,14 +84,23 @@ pub enum SimError {
     NotEnoughPlayers { have: usize },
 }
 
-/// Cup-format setup for a simulation: the players eligible for the bracket (the
-/// caller has already applied whatever eligibility rule it wants — nationality,
-/// attendance, …) and the bracket size (a power of two, 8..=64). Passing this to
-/// [`simulate_run`] runs the hybrid direct-elimination cup alongside the Swiss.
+/// Cup setup for a simulation: the players eligible for the bracket (the caller
+/// has already applied whatever eligibility rule it wants — nationality,
+/// attendance, …), the bracket size (a power of two, 8..=64) and how it is filled.
+/// Passing this to [`simulate_run`] runs the hybrid direct-elimination cup
+/// alongside the Swiss.
+///
+/// `eligible` must hold at least [`crate::cup_field_size`] players — `size` for a direct
+/// bracket, half as many again for the qualifier format, whose qualification round
+/// feeds half the bracket. Fewer is a [`TournamentError::NotEnoughEligiblePlayers`]
+/// out of [`simulate_run`].
+///
+/// [`TournamentError::NotEnoughEligiblePlayers`]: crate::TournamentError::NotEnoughEligiblePlayers
 #[derive(Debug, Clone)]
 pub struct CupConfig {
     pub eligible: HashSet<Uuid>,
     pub size: u32,
+    pub format: CupFormat,
 }
 
 /// The usual cup eligibility for a **historical** base: players whose nationality
@@ -385,9 +395,10 @@ impl RunOutcome {
 /// `settings`, ready to pair round 1. Tournament numbers and any prior rounds are
 /// cleared and re-derived, so a different settings variant finalizes cleanly.
 ///
-/// The cup is controlled entirely by `cup`, not by the config's `cup_enabled`
-/// flag (the config can't carry a bracket size or an eligibility set): `Some`
-/// enables the hybrid cup with that eligibility/size, `None` runs pure Swiss.
+/// The cup is controlled entirely by `cup`, not by the config's `cup_enabled` /
+/// `cup_format` fields (the config can't carry a bracket size or an eligibility
+/// set, so keeping half the cup there would let the two disagree): `Some` enables
+/// the hybrid cup with that eligibility/size/format, `None` runs pure Swiss.
 fn fresh_state(
     base: &Tournament,
     settings: &TournamentSettings,
@@ -413,6 +424,7 @@ fn fresh_state(
     match cup {
         Some(cup) => {
             settings.cup_enabled = true;
+            settings.cup_format = cup.format;
             for p in &mut t.players {
                 p.eligible = cup.eligible.contains(&p.id);
             }
@@ -1292,7 +1304,11 @@ Nr Name    Nat Elo  1   Pts
             ("H", 1300),
         ]);
         let eligible: HashSet<Uuid> = base.players.iter().map(|p| p.id).collect();
-        let cup = CupConfig { eligible, size: 8 };
+        let cup = CupConfig {
+            eligible,
+            size: 8,
+            format: CupFormat::Direct,
+        };
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         let out = simulate_run(
             &base,
@@ -1314,6 +1330,99 @@ Nr Name    Nat Elo  1   Pts
             .players
             .iter()
             .any(|p| p.tournament_id == Some(champion)));
+    }
+
+    /// The qualifier format runs through `simulate_run` too: 12 eligible fill a
+    /// size-8 bracket over four rounds — one qualification round, then the
+    /// bracket — and the run still crowns a champion.
+    #[test]
+    fn a_qualifier_cup_config_runs_the_playoff_then_the_bracket() {
+        let base = tournament_with(&[
+            ("A", 2000),
+            ("B", 1950),
+            ("C", 1900),
+            ("D", 1850),
+            ("E", 1800),
+            ("F", 1750),
+            ("G", 1700),
+            ("H", 1650),
+            ("I", 1600),
+            ("J", 1550),
+            ("K", 1500),
+            ("L", 1450),
+            ("M", 1400),
+            ("N", 1350),
+        ]);
+        // The 12 strongest are the cup field; the other two are the open.
+        let mut by_rating: Vec<&Player> = base.players.iter().collect();
+        by_rating.sort_by_key(|p| std::cmp::Reverse(p.rating.unwrap_or(0)));
+        let eligible: HashSet<Uuid> = by_rating[..12].iter().map(|p| p.id).collect();
+        let cup = CupConfig {
+            eligible,
+            size: 8,
+            format: CupFormat::Qualifier,
+        };
+        let mut rng = ChaCha8Rng::seed_from_u64(7);
+        let out = simulate_run(
+            &base,
+            &base.settings,
+            &StrengthMap::new(),
+            &OracleModel::new(0.0, 2.0),
+            4,
+            Some(&cup),
+            &mut rng,
+        )
+        .unwrap();
+        assert_eq!(out.final_order.len(), 14);
+        let champion = out.cup_champion.expect("a decided cup has a champion");
+        assert!(base
+            .players
+            .iter()
+            .any(|p| p.tournament_id == Some(champion)));
+    }
+
+    /// The eligibility floor follows the format: 8 eligible is a whole direct
+    /// bracket but only half a qualifier one.
+    #[test]
+    fn a_qualifier_cup_needs_half_as_many_eligible_again() {
+        let base = tournament_with(&[
+            ("A", 2000),
+            ("B", 1900),
+            ("C", 1800),
+            ("D", 1700),
+            ("E", 1600),
+            ("F", 1500),
+            ("G", 1400),
+            ("H", 1300),
+        ]);
+        let eligible: HashSet<Uuid> = base.players.iter().map(|p| p.id).collect();
+        let run = |format| {
+            let cup = CupConfig {
+                eligible: eligible.clone(),
+                size: 8,
+                format,
+            };
+            let mut rng = ChaCha8Rng::seed_from_u64(1);
+            simulate_run(
+                &base,
+                &base.settings,
+                &StrengthMap::new(),
+                &OracleModel::new(0.0, 2.0),
+                3,
+                Some(&cup),
+                &mut rng,
+            )
+        };
+        assert!(run(CupFormat::Direct).is_ok());
+        assert!(matches!(
+            run(CupFormat::Qualifier),
+            Err(SimError::Tournament(
+                TournamentError::NotEnoughEligiblePlayers {
+                    needed: 12,
+                    have: 8
+                }
+            ))
+        ));
     }
 
     #[test]
@@ -1365,7 +1474,11 @@ Nr Name    Nat Elo  1   Pts
         // Cup size 8 but only 2 players → finalization refuses.
         let base = tournament_with(&[("A", 1600), ("B", 1500)]);
         let eligible: HashSet<Uuid> = base.players.iter().map(|p| p.id).collect();
-        let cup = CupConfig { eligible, size: 8 };
+        let cup = CupConfig {
+            eligible,
+            size: 8,
+            format: CupFormat::Direct,
+        };
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         let err = simulate_run(
             &base,
