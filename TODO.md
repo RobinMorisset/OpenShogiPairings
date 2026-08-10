@@ -17,7 +17,11 @@ Known limitations and future work, roughly ordered by area.
 
 - **Weak club protection** Intermediate between normal and exempt.
 
-- **Team tournaments**, basically a kind of very strong club protection
+- **Team tournaments** — design settled in
+  [docs/team-tournaments.md](docs/team-tournaments.md): teams as the pairing
+  unit, boards as the atom, derived match outcomes. First step is the
+  preliminary board-outcome sum-type refactor (own commit), then the team
+  mode itself.
 
 ## Multi-referee server
 
