@@ -53,3 +53,17 @@ Known limitations and future work, roughly ordered by area.
 
 - **More complete american grid exporter** There should be fields in the settings with the dates
   and time control of the tournament, so they can be reported in the header of the american grid;
+
+- Check whether the API route for **registration finalization** is still useful or dead code
+
+- **Reorganize the settings tab**. Some combinations make little sense (e.g. pure-ELO mode with any kind of cup)
+
+- **Fix Estimated ELO column in standings** Currently it does not seem to get updated. It should be computed if used or shown.
+
+- **Put ongoing games in the standings tab** Inspired by the WOSC website: just put them with neither + nor - (and greyed) until the game is decided.
+
+- **Tooltips of player names in standings tab** should lose the "contre" word, and gain the ELO of that player in parentheses after their name.
+
+- **Check whether counterfactuals correctly handle forced pairings/byes**
+
+- Check all instances of `#[allow(clippy::too_many_arguments)]`
