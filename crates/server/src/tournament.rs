@@ -182,7 +182,7 @@ struct TournamentView {
     /// strength, an unrated player, or a cup board).
     suggested_handicaps: Vec<Vec<Option<Handicap>>>,
     /// The winner that counts for standings/pairing per board (see
-    /// [`osp_core::round::Board::effective_winner`]), indexed like
+    /// [`osp_core::Board::effective_winner`]), indexed like
     /// `tournament.rounds[i].boards[j]`. Computed here — using the tournament's
     /// `handicap_wiel_rule` setting — so the frontend never has to re-derive it.
     /// `None` while a board is undecided.

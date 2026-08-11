@@ -11,6 +11,11 @@
 //! The server holds any number of tournaments in memory as the single source of
 //! truth shared by all connected clients; see [`AppState`] and
 //! `docs/multi-tournament.md`.
+//!
+//! Public items link to the private modules that explain them (see the note in
+//! `osp_core`'s crate docs); rustdoc renders those unlinked unless it is run with
+//! `--document-private-items`, so that warning is off here too.
+#![allow(rustdoc::private_intra_doc_links)]
 
 mod auth;
 mod backup;
@@ -24,7 +29,16 @@ mod state;
 mod tournament;
 
 pub use auth::AuthConfig;
-pub use state::AppState;
+// Everything [`AppState`] hands back — the registry and its instances, a store
+// behind a lock guard, the summaries `list` returns, the error `mutate` returns —
+// is named here too. They are reachable through its public methods either way;
+// exporting them is what lets a caller (the desktop wrapper, a test) write the
+// type down.
+pub use ratings::CachedRatings;
+pub use state::{
+    AppState, MutateError, TournamentInstance, TournamentRegistry, TournamentStore,
+    TournamentSummary,
+};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -34,8 +48,6 @@ use osp_core::HealthStatus;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
-
-use crate::state::TournamentRegistry;
 
 /// Build the API-only router around the given state.
 ///

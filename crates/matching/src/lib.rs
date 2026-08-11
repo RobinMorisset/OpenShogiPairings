@@ -33,6 +33,11 @@
 //! The implementation is original — built from the published blossom algorithm,
 //! not ported from any codebase — and is checked against a brute-force oracle in
 //! the tests below.
+//!
+//! Public items link to the private internals that explain them (see the note in
+//! `osp_core`'s crate docs); rustdoc renders those unlinked unless it is run with
+//! `--document-private-items`, so that warning is off here too.
+#![allow(rustdoc::private_intra_doc_links)]
 
 use std::any::{Any, TypeId};
 use std::cell::RefCell;

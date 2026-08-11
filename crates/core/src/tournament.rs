@@ -387,9 +387,9 @@ impl Tournament {
     /// When the cup is enabled in the settings, `cup_size` must be a supported
     /// bracket size (8/16/32/64); the top eligible players (by tournament number)
     /// are frozen into the cup in seed order. How many that takes depends on the
-    /// configured [`CupFormat`]: `cup_size` for a direct bracket, half as many
-    /// again for the qualifier format, whose qualification round feeds half the
-    /// bracket (see [`cup_field_size`]). The cup is validated *before* any
+    /// configured [`CupFormat`](crate::CupFormat): `cup_size` for a direct
+    /// bracket, half as many again for the qualifier format, whose qualification
+    /// round feeds half the bracket (see [`cup_field_size`]). The cup is validated *before* any
     /// mutation, so a rejected cup leaves registration open for the referee to fix.
     pub fn finalize_registration_with(
         &mut self,

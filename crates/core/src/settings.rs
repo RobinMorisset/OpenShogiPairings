@@ -24,7 +24,7 @@ pub enum DateError {
 }
 
 /// A calendar date in ISO `YYYY-MM-DD` form — the shape the FESA rating program
-/// reads out of an American Grid header (see [`crate::american_grid`]).
+/// reads out of an American Grid header (see [`crate::american_grid()`]).
 ///
 /// Kept as a validated string rather than pulling in a date crate: nothing here
 /// does date *arithmetic*, only prints the date back out. The validation is real

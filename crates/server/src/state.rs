@@ -128,7 +128,8 @@ impl TournamentStore {
         self.version
     }
 
-    /// Subscribe to change notifications: each message is the new [`version`].
+    /// Subscribe to change notifications: each message is the new
+    /// [`version`](Self::version).
     pub fn subscribe(&self) -> broadcast::Receiver<u32> {
         self.notifier.subscribe()
     }
@@ -292,7 +293,7 @@ impl TournamentStore {
 
     /// Confirm the caller's edit was based on the current version, for the
     /// state-replacing mutations (`set_current` via load/restore/import, and
-    /// `undo`) that don't go through [`mutate`]'s built-in check.
+    /// `undo`) that don't go through [`mutate`](Self::mutate)'s built-in check.
     ///
     /// Call it **under the write lock**, immediately before the mutation: that is
     /// what makes optimistic concurrency atomic here. [`crate::live::check_version`]

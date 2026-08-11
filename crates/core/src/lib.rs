@@ -6,6 +6,15 @@
 //! graph, and later an ILP/CP-SAT backend) will live here too so that it can be
 //! reused unchanged by the HTTP server, a future CLI client, and the Tauri
 //! desktop app.
+//!
+//! These docs are written to be read *in the source* as much as in rustdoc, so a
+//! public item freely links to the private one that explains it (the rule table
+//! behind a pairing, the estimator behind a setting). rustdoc renders those as
+//! plain text and warns; `cargo doc --document-private-items` renders them as
+//! links. The warning is silenced below because the links are deliberate — a link
+//! to something that doesn't exist at all still warns, which is the case worth
+//! hearing about.
+#![allow(rustdoc::private_intra_doc_links)]
 
 mod american_grid;
 mod csv_import;
@@ -30,7 +39,7 @@ pub use american_grid::to_grid as american_grid;
 pub use csv_import::{parse_players_csv, CsvImportError};
 pub use cup::{
     cup_field_size, knockout_champion, reconstruct_cup_from_final, BracketMatch, Cup,
-    CupBracketView, CupFormat, CupPodium, CUP_SIZES,
+    CupBracketView, CupFormat, CupMatch, CupPairings, CupPodium, CUP_SIZES,
 };
 pub use elo::{estimate_elos, PROVISIONAL_GAMES_THRESHOLD};
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
@@ -47,8 +56,9 @@ pub use round::{
 };
 pub use settings::{
     ClubProtection, DateError, EloEstimator, EloPriorShape, FloaterStyle, HandicapDisplay,
-    HandicapPolicy, IsoDate, MacMahon, MacMahonSource, MacMahonThreshold, PairingMode, Ratio,
-    RatioAtLeastOne, ThresholdCriterion, Tiebreak, TournamentDates, TournamentSettings, UnratedK,
+    HandicapPolicy, IsoDate, MacMahon, MacMahonSource, MacMahonThreshold, PairingMode,
+    PlayerCategory, Ratio, RatioAtLeastOne, ThresholdCriterion, Tiebreak, TournamentDates,
+    TournamentSettings, UnratedK,
 };
 pub use standings::{compute_standings, Standing};
 pub use tournament::{

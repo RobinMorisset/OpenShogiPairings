@@ -13,7 +13,8 @@
 
 /// Every error code the server can emit, so both ends can check they agree.
 ///
-/// [`crate::error::domain_payload`] and [`crate::error::csv_error_payload`] must
+/// `error::domain_payload` and `error::csv_error_payload` (private to that
+/// module, hence not linked) must
 /// only return codes from this list; `codes_are_registered` below enforces that
 /// for the domain half, and the exhaustive `match` in `domain_payload` forces
 /// every new [`osp_core::TournamentError`] variant to be classified as either
