@@ -196,55 +196,59 @@
               type="button"
               class="team-name"
               disabled={busy || finalized}
-              title={finalized ? "" : $_("teams.clickToRename")}
+              title={finalized ? team.name : $_("teams.clickToRename")}
               onclick={() => !finalized && startRename(team)}
             >
               {#if team.tournament_id != null}<span class="num">{team.tournament_id}</span>{/if}
               {team.name}
             </button>
           {/if}
-          <span class="size" class:short={roster.length !== size}>
-            {roster.length}/{size}
-          </span>
-          <span class="avg" title={$_("teams.averageTitle")}>
-            {average ?? "—"}
-          </span>
-          {#if adjustmentTotal(team) !== 0}
-            <span class="adj-badge">
-              {adjustmentTotal(team) > 0 ? "+" : ""}{adjustmentTotal(team)}
+          <!-- One group, so a header too narrow for everything moves the whole
+               set of controls down together instead of splitting it. -->
+          <span class="head-meta">
+            <span class="size" class:short={roster.length !== size}>
+              {roster.length}/{size}
             </span>
-          {/if}
-          <!-- Not gated on `finalized`: a bonus or penalty is decided during the
-               tournament, which is exactly when the rosters are frozen. -->
-          <button
-            type="button"
-            class="small"
-            disabled={busy}
-            title={$_("teams.adjustmentTitle")}
-            onclick={() => toggleAdjustments(team.id)}
-          >
-            ±
-          </button>
-          {#if !finalized}
+            <span class="avg" title={$_("teams.averageTitle")}>
+              {average ?? "—"}
+            </span>
+            {#if adjustmentTotal(team) !== 0}
+              <span class="adj-badge">
+                {adjustmentTotal(team) > 0 ? "+" : ""}{adjustmentTotal(team)}
+              </span>
+            {/if}
+            <!-- Not gated on `finalized`: a bonus or penalty is decided during
+                 the tournament, which is exactly when the rosters are frozen. -->
             <button
               type="button"
               class="small"
-              disabled={busy || roster.length < 2}
-              title={$_("teams.sortByRatingTitle")}
-              onclick={() => onSortByRating(team.id)}
-            >
-              {$_("teams.sortByRating")}
-            </button>
-            <button
-              type="button"
-              class="small danger"
               disabled={busy}
-              title={$_("teams.removeTitle")}
-              onclick={() => onRemove(team.id)}
+              title={$_("teams.adjustmentTitle")}
+              onclick={() => toggleAdjustments(team.id)}
             >
-              ✕
+              ±
             </button>
-          {/if}
+            {#if !finalized}
+              <button
+                type="button"
+                class="small"
+                disabled={busy || roster.length < 2}
+                title={$_("teams.sortByRatingTitle")}
+                onclick={() => onSortByRating(team.id)}
+              >
+                {$_("teams.sortByRating")}
+              </button>
+              <button
+                type="button"
+                class="small danger"
+                disabled={busy}
+                title={$_("teams.removeTitle")}
+                onclick={() => onRemove(team.id)}
+              >
+                ✕
+              </button>
+            {/if}
+          </span>
         </div>
 
         {#if adjustingId === team.id}
@@ -427,6 +431,22 @@
     gap: 0.4rem;
     flex-wrap: wrap;
   }
+  /* The name is the only elastic part of the header: a `0` basis keeps it from
+     ever being what pushes the controls onto a second line, so every card's
+     header is one line whatever its team is called. A name too long for the
+     space left ellipsises instead (renaming shows it in full). */
+  .team-name,
+  .rename {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .head-meta {
+    flex: 0 0 auto;
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
   .team-name {
     background: none;
     border: none;
@@ -435,6 +455,10 @@
     font-weight: 600;
     color: inherit;
     cursor: pointer;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .team-name:disabled {
     cursor: default;

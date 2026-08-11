@@ -992,13 +992,14 @@
       />
       {$_("settings.teamCheckbox")}
     </label>
-    <label class="indent">
+    <label class="check indent">
       {$_("settings.teamSize")}
       <input
         type="number"
         min="2"
         max="9"
-        class="num"
+        step="1"
+        class="threshold narrow"
         value={teamSize}
         disabled={busy || locked || !teamMode}
         onchange={(e) => setTeamSize(Number(e.currentTarget.value))}
