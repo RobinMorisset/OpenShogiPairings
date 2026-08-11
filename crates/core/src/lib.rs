@@ -36,8 +36,8 @@ pub use elo::{estimate_elos, PROVISIONAL_GAMES_THRESHOLD};
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
 pub use fesa_results::import_fesa_results;
 pub use pairing::{
-    pair_round_weighted, AffectedCycle, BoardLedger, Counterfactual, CounterfactualMode,
-    RoundExplanation, RuleContribution, RuleDelta, RuleId, RuleTotal, ScopeReason,
+    AffectedCycle, BoardLedger, Counterfactual, CounterfactualMode, RoundExplanation,
+    RuleContribution, RuleDelta, RuleId, RuleTotal, ScopeReason,
 };
 pub use player::{Grade, GradeKind, NewPlayer, Player, PointAdjustment};
 pub use result_import::ResultImportError;
@@ -54,7 +54,7 @@ pub use standings::{compute_standings, Standing};
 pub use tournament::{
     Tournament, TournamentError, MIN_PLAYERS_PER_ROUND, TOURNAMENT_FORMAT_VERSION,
 };
-pub use units::{HalfPoints, TournamentId, Wins};
+pub use units::{HalfPoints, TournamentId, UnitKey, Wins};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

@@ -15,7 +15,8 @@ use uuid::Uuid;
 use crate::cup::{cup_field_size, Cup, CupBracketView, CupPairings, CupPodium, CUP_SIZES};
 use crate::pairing::{
     counterfactual_forbid, counterfactual_force, explain_pairing, pair_round_weighted,
-    Counterfactual, CounterfactualMode, RoundExplanation, ScopeReason, PHANTOM,
+    player_units, Counterfactual, CounterfactualMode, PairingUnit, RoundExplanation, ScopeReason,
+    PHANTOM,
 };
 use crate::player::{NewPlayer, Player, PointAdjustment};
 use crate::round::{
@@ -25,7 +26,8 @@ use crate::round::{
 use crate::scoring::compute_scores;
 use crate::settings::TournamentSettings;
 use crate::standings::{compute_standings, Standing};
-use crate::units::TournamentId;
+use crate::units::{TournamentId, UnitKey};
+use typed_index_collections::TiVec;
 
 /// On-disk / on-the-wire format version for a serialized [`Tournament`].
 ///
@@ -583,6 +585,25 @@ impl Tournament {
         }
     }
 
+    /// The pairing engine's input for round `r`, replayed from `completed` — one
+    /// [`PairingUnit`] per player, keyed by tournament number.
+    ///
+    /// The engine knows nothing about [`Player`]: it pairs opaque units, so that
+    /// one implementation serves individual and team tournaments alike. This is
+    /// the individual side of that seam, and the only place the per-round cup
+    /// context reaches it.
+    ///
+    /// `completed` is passed rather than read off `self` because the explanation
+    /// paths replay a *past* round, from the rounds before it.
+    fn pairing_units(&self, r: u32, completed: &[Round]) -> TiVec<UnitKey, PairingUnit> {
+        player_units(
+            &self.players,
+            &self.settings,
+            completed,
+            self.prequalified_in_round(r),
+        )
+    }
+
     /// The players the cup bracket will pair in the round currently being drafted
     /// (empty when there is no draft, no cup, or the draft round is past the cup).
     /// Lets clients keep those players out of the Swiss customization UI.
@@ -906,19 +927,42 @@ impl Tournament {
         // No parity check on the forced byes: whatever they leave over, the
         // engine byes one more player if the count is odd.
 
-        // Pair the Swiss pool with the engine, then prepend the cup boards.
-        let swiss_round = pair_round_weighted(
+        // Pair the Swiss pool with the engine, then prepend the cup boards. The
+        // engine speaks in units; in individual mode a unit is a player, so each
+        // matched pair is exactly one board and the bye exactly one sit-out.
+        let units = self.pairing_units(draft.number, &self.rounds);
+        let forced_pairs: Vec<(UnitKey, UnitKey)> = draft
+            .forced_boards
+            .iter()
+            .map(|b| (UnitKey::from(b.player1), UnitKey::from(b.player2)))
+            .collect();
+        let forced_bye_keys: Vec<UnitKey> = draft
+            .forced_byes
+            .iter()
+            .copied()
+            .map(UnitKey::from)
+            .collect();
+        let swiss = pair_round_weighted(
             draft.number,
-            &self.players,
             &self.settings,
-            &self.rounds,
-            &swiss_present,
-            &draft.forced_boards,
-            &draft.forced_byes,
-            self.prequalified_in_round(draft.number),
+            &units,
+            &swiss_present
+                .iter()
+                .copied()
+                .map(UnitKey::from)
+                .collect::<Vec<_>>(),
+            &forced_pairs,
+            &forced_bye_keys,
         );
         let mut boards = cup_boards;
-        boards.extend(swiss_round.boards);
+        boards.extend(swiss.pairs.iter().map(|p| {
+            Board::pending(
+                TournamentId::from(p.a),
+                TournamentId::from(p.b),
+                p.points_diff,
+                p.source,
+            )
+        }));
 
         // Display order: cup boards first, then by the rank (from the standings
         // entering this round) of the board's best-placed player — the same
@@ -956,7 +1000,22 @@ impl Tournament {
         // each scores is frozen here — a bye is a full point, an absence follows the
         // tournament default — and the referee can re-value any of them afterwards
         // from the standings.
-        let mut sitouts = swiss_round.sitouts;
+        // The forced byes score a full point, like any bye; so does the engine's
+        // own, when the leftover field was odd.
+        let mut sitouts: Vec<Sitout> = draft
+            .forced_byes
+            .iter()
+            .map(|&player| Sitout {
+                player,
+                kind: SitoutKind::ForcedBye,
+                value: SitoutValue::Full,
+            })
+            .collect();
+        sitouts.extend(swiss.swiss_bye.map(|key| Sitout {
+            player: TournamentId::from(key),
+            kind: SitoutKind::Bye,
+            value: SitoutValue::Full,
+        }));
         sitouts.extend(cup_byes.into_iter().map(|(player, stage)| Sitout {
             player,
             kind: SitoutKind::CupBye { stage },
@@ -1017,20 +1076,19 @@ impl Tournament {
             .ok_or(TournamentError::RoundNotFound(round_number))?;
         let round = &self.rounds[idx];
         let completed = &self.rounds[..idx];
-        let swiss_boards: Vec<(TournamentId, TournamentId)> = round
+        let swiss_boards: Vec<(UnitKey, UnitKey)> = round
             .boards
             .iter()
             .filter(|b| matches!(b.source, PairingSource::Swiss))
-            .map(|b| (b.player1, b.player2))
+            .map(|b| (UnitKey::from(b.player1), UnitKey::from(b.player2)))
             .collect();
+        let units = self.pairing_units(round.number, completed);
         Ok(explain_pairing(
             round.number,
-            &self.players,
             &self.settings,
-            completed,
+            &units,
             &swiss_boards,
-            round.swiss_bye(),
-            self.prequalified_in_round(round.number),
+            round.swiss_bye().map(UnitKey::from),
         ))
     }
 
@@ -1057,11 +1115,11 @@ impl Tournament {
             .ok_or(TournamentError::RoundNotFound(round_number))?;
         let round = &self.rounds[idx];
         let completed = &self.rounds[..idx];
-        let swiss_boards: Vec<(TournamentId, TournamentId)> = round
+        let swiss_boards: Vec<(UnitKey, UnitKey)> = round
             .boards
             .iter()
             .filter(|bd| matches!(bd.source, PairingSource::Swiss))
-            .map(|bd| (bd.player1, bd.player2))
+            .map(|bd| (UnitKey::from(bd.player1), UnitKey::from(bd.player2)))
             .collect();
 
         // Both probed players must be engine-paired (in a Swiss board or the
@@ -1071,7 +1129,8 @@ impl Tournament {
         // when this round actually has an engine-chosen bye to negotiate.
         let swiss_bye = round.swiss_bye();
         let in_swiss = |id: TournamentId| {
-            swiss_bye == Some(id) || swiss_boards.iter().any(|&(x, y)| x == id || y == id)
+            let key = UnitKey::from(id);
+            swiss_bye == Some(id) || swiss_boards.iter().any(|&(x, y)| x == key || y == key)
         };
         for id in [a, b] {
             if id == PHANTOM {
@@ -1099,16 +1158,15 @@ impl Tournament {
             CounterfactualMode::Force => counterfactual_force,
             CounterfactualMode::Forbid => counterfactual_forbid,
         };
+        let units = self.pairing_units(round.number, completed);
         Ok(solve(
             round.number,
-            &self.players,
             &self.settings,
-            completed,
+            &units,
             &swiss_boards,
-            swiss_bye,
-            self.prequalified_in_round(round.number),
-            a,
-            b,
+            swiss_bye.map(UnitKey::from),
+            UnitKey::from(a),
+            UnitKey::from(b),
         ))
     }
 

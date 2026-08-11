@@ -1,8 +1,9 @@
 # Team tournaments — design
 
-Status: **draft, under discussion**. Only the [preliminary
-refactor](#preliminary-refactor-board-outcome-as-a-sum-type) has landed; nothing
-team-specific is implemented yet.
+Status: **draft, under discussion**. Landed so far: the [preliminary board-outcome
+refactor](#preliminary-refactor-board-outcome-as-a-sum-type) and the [engine's unit
+abstraction](#engine-refactor-the-unit-abstraction) — both behaviour-preserving
+groundwork. Nothing team-specific is implemented yet.
 
 A team tournament is the format that traditionally precedes European shogi
 championships (e.g. WOSC): teams of N players (usually N = 3) are the unit of
@@ -263,9 +264,11 @@ scope for v1.
 
 ### Engine refactor: the unit abstraction
 
-The matching engine (`pair_round_weighted`) already operates on opaque dense
-keys plus derived per-unit data; it never reads `Player` fields except rating
-and club. The refactor extracts that dependency into an explicit input:
+**Landed** (own commit, no behavioural change — the simulator's output over
+WOSC 2024 is byte-identical before and after). The matching engine
+(`pair_round_weighted`) already operated on opaque dense keys plus derived
+per-unit data; it never read `Player` fields except rating and club. The
+refactor extracted that dependency into an explicit input:
 
 ```rust
 /// What the engine needs to know about one pairable unit, whoever it is.
@@ -278,26 +281,40 @@ pub(crate) struct PairingUnit {
     pub last_descended: Option<u32>,
     pub rating: Option<u32>,         // fold order (team: average pairing rating)
     pub clubs: Vec<Option<String>>,  // member clubs in board order (player: one entry)
+    pub prequalified: bool,          // cup, individual mode only
+    pub elo: i64,                    // ELO pairing mode only
 }
 ```
 
-`pair_round_weighted` becomes a function of `&TiSlice<UnitKey, PairingUnit>`
-(plus settings, forced matches, forced byes) returning matched key pairs and
-at most one bye key. Two thin wrappers build the input: the existing
-player path (from `compute_scores` + `Player`), and the new team path (from
-`compute_team_scores` + `Team`). The blossom solver is untouched.
+The last two fields are not in the original sketch: the cup's pre-qualified
+flag and the live ELO estimate are *also* per-unit facts the rules read, so
+they belong on the unit rather than in a second side table. Both are inert in
+team mode, which rejects the cup and ELO pairing outright.
 
-All the rules generalize unchanged: rematch avoidance, bye-group, score gap,
+`pair_round_weighted` is now a function of `&TiSlice<UnitKey, PairingUnit>`
+(plus settings, forced pairs, forced byes) returning `UnitPairing` — matched
+key pairs, each with the `points_diff` its board(s) must freeze, and at most
+one bye key. Building the `Round` (one board per pair, or `size` boards for a
+team match) is the caller's job. `player_units` is the individual wrapper;
+the team path will add `team_units`. The blossom solver is untouched.
+
+`UnitKey` is a new dense-key newtype in `units.rs`, numbered from 1 so `0`
+stays free for the phantom (bye) vertex. The pairing *explanations*
+(`BoardLedger`, `AffectedCycle`) now reference `UnitKey` rather than
+`TournamentId` — same bare-number wire shape, read as player numbers in
+individual mode and team numbers in team mode.
+
+All the rules generalized unchanged: rematch avoidance, bye-group, score gap,
 float repeat, floater selection, fold — they only read `PairingUnit` fields.
 
-The **club rule** becomes a graded count: an edge's club cost is the number
+The **club rule** became a graded count: an edge's club cost is the number
 of board positions k where both units' board-k clubs are `Some` and equal —
 i.e. the number of same-club *games* the pairing would actually create
 (aligned positions only; a same-club pair on different boards never plays
 each other and costs nothing). Within the club rule's ladder tier the
 matching therefore minimizes the total same-club games of the round. For the
-player wrapper (`clubs` of length 1) this degenerates to exactly today's 0/1
-behavior, so one rule implementation serves both modes. There is no "team
+player wrapper (`clubs` of length 1) this degenerates to exactly the previous
+0/1 behavior, so one rule implementation serves both modes. There is no "team
 club" concept — mixed-club teams are handled naturally by the count.
 
 **Ladder bounds.** The rule multipliers are derived from per-rule worst-case
@@ -305,9 +322,11 @@ contributions (`max_total_units`). These bounds must be recomputed from the
 *team* instance parameters (team count, team points range including MacMahon
 starts and adjustments, and the club rule's per-edge maximum growing from 1
 to N) — any bound that silently assumes player-scale quantities breaks the
-exact lexicographic separation, the worst possible failure mode. The existing
-`ladder_overflow` guard stays; a debug assertion should cross-check bounds
-against the actual instance.
+exact lexicographic separation, the worst possible failure mode. Every bound
+already reads its quantity off the instance, and the club rule's per-edge
+ceiling is now `max_boards` (the widest `clubs` among the free units) instead
+of a hard-coded 1. The existing `ladder_overflow` guard stays; a debug
+assertion should cross-check bounds against the actual instance.
 
 ### From matched teams to boards
 
