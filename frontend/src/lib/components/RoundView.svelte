@@ -325,6 +325,29 @@
   // reach the pairing, so the round view has no row for them.
   const byeSitouts = $derived((round.sitouts ?? []).filter((s) => s.kind !== "absent"));
 
+  /** The byes grouped by the team that took one, so a bye team gets a header of
+   *  its own instead of its players trailing the last match as if they were
+   *  part of it. One group holding everything in an individual tournament, and
+   *  a trailing group for a sit-out whose team can't be identified. */
+  const byeGroups = $derived.by(() => {
+    if (!teamMode) return [{ team: null, sitouts: byeSitouts }];
+    const byTeam = new Map<string, { team: Team; sitouts: typeof byeSitouts }>();
+    const loose: typeof byeSitouts = [];
+    for (const sitout of byeSitouts) {
+      const team = teamOfPlayer.get(sitout.player);
+      if (!team) {
+        loose.push(sitout);
+        continue;
+      }
+      const group = byTeam.get(team.id) ?? { team, sitouts: [] };
+      group.sitouts.push(sitout);
+      byTeam.set(team.id, group);
+    }
+    const groups: { team: Team | null; sitouts: typeof byeSitouts }[] = [...byTeam.values()];
+    if (loose.length > 0) groups.push({ team: null, sitouts: loose });
+    return groups;
+  });
+
   // The bye the *engine* chose, if any. Only this one was the engine's decision,
   // so it's the only one the pairing explanations can speak about.
   const swissBye = $derived(
@@ -790,7 +813,7 @@
       </tbody>
     </table>
   {:else}
-    <table>
+    <table class:teamed={teamMode}>
       <thead>
         <tr>
           <th class="src-col"></th>
@@ -973,14 +996,30 @@
         {/each}
         {/each}
         <!-- The byes come after every match, not inside one: a sit-out belongs
-             to no match, so it must not repeat per group. -->
-        {#each byeSitouts as sitout (sitout.player)}
+             to no match, so it must not repeat per group. A team that took the
+             bye gets a header of its own, like the teams that played. -->
+        {#each byeGroups as group (group.team?.id ?? "loose")}
+          {#if group.team}
+            {@const engineBye = group.sitouts.some((s) => s.kind === "bye")}
+            <tr class="match-head">
+              <td colspan={columnCount}>
+                <span class="match-team">{group.team.name}</span>
+                <span class="match-score pending">{$_("roundView.byeOpponent")}</span>
+                <!-- The bye was the engine's decision about the *team*, so its
+                     compromise is flagged once here, not on every member. -->
+                {#if engineBye && isNoteworthy(byeLedger)}
+                  <span class="compromise print-hide" title={ledgerTooltip(byeLedger!)}>⚠</span>
+                {/if}
+              </td>
+            </tr>
+          {/if}
+          {#each group.sitouts as sitout (sitout.player)}
           {@const isCup = typeof sitout.kind !== "string"}
           <tr class="bye-row">
             <td class="src-col">
               {#if isCup}
                 🏆
-              {:else if sitout.kind === "bye" && isNoteworthy(byeLedger)}
+              {:else if !teamMode && sitout.kind === "bye" && isNoteworthy(byeLedger)}
                 <span class="compromise print-hide" title={ledgerTooltip(byeLedger!)}>⚠</span>
               {/if}
             </td>
@@ -1005,6 +1044,7 @@
               {/if}
             {/if}
           </tr>
+        {/each}
         {/each}
       </tbody>
     </table>
@@ -1140,10 +1180,20 @@
     font-style: italic;
   }
   /* A team match is one row of boards, so it gets one header naming the two
-     teams and the board wins so far — the score the match is decided on. */
+     teams and the board wins so far — the score the match is decided on. The
+     header is the shaded row, and the boards under it are plain: striping every
+     other row would cut across the matches instead of separating them (the
+     standings table does the same). */
   .match-head td {
     padding-top: 0.6rem;
     font-weight: 600;
+    border-top: 2px solid var(--border);
+  }
+  table.teamed tbody tr:nth-child(even) {
+    background: none;
+  }
+  table.teamed tbody tr.match-head {
+    background: var(--bg-stripe);
   }
   .match-team {
     margin: 0 0.4rem;
