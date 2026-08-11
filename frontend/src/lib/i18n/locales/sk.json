@@ -283,7 +283,8 @@
     "needAtLeastTwoPresent": "Sú potrební aspoň 2 prítomní hráči.",
     "teamEllipsis": "Družstvo…",
     "needAtLeastTwoTeams": "Kolo potrebuje aspoň dve prítomné družstvá.",
-    "summaryTeams": "Príprava kola {number} — družstiev v žrebovaní: {present}, neprítomných hráčov: {absent}."
+    "summaryTeams": "Príprava kola {number} — družstiev v žrebovaní: {present}, neprítomných hráčov: {absent}.",
+    "absentWholeTeam": "Označiť celé družstvo ako neprítomné v tomto kole"
   },
   "serverStatus": {
     "contacting": "Kontaktuje sa server…",

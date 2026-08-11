@@ -283,7 +283,8 @@
     "needAtLeastTwoPresent": "出場者が2名以上必要です。",
     "teamEllipsis": "チーム…",
     "needAtLeastTwoTeams": "1ラウンドには少なくとも2チームの参加が必要です。",
-    "summaryTeams": "第 {number} ラウンドの準備 — 組み合わせ対象 {present} チーム、欠席 {absent} 人。"
+    "summaryTeams": "第 {number} ラウンドの準備 — 組み合わせ対象 {present} チーム、欠席 {absent} 人。",
+    "absentWholeTeam": "このラウンドはチーム全員を欠場にする"
   },
   "serverStatus": {
     "contacting": "サーバーに接続中…",

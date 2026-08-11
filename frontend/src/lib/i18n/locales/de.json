@@ -283,7 +283,8 @@
     "needAtLeastTwoPresent": "Mindestens 2 anwesende Spieler nötig.",
     "teamEllipsis": "Mannschaft…",
     "needAtLeastTwoTeams": "Eine Runde braucht mindestens zwei anwesende Mannschaften.",
-    "summaryTeams": "Runde {number} wird vorbereitet — {present} Mannschaften in der Auslosung, {absent} abwesende(r) Spieler."
+    "summaryTeams": "Runde {number} wird vorbereitet — {present} Mannschaften in der Auslosung, {absent} abwesende(r) Spieler.",
+    "absentWholeTeam": "Die ganze Mannschaft für diese Runde als abwesend markieren"
   },
   "serverStatus": {
     "contacting": "Verbindung zum Server…",

@@ -283,7 +283,8 @@
     "needAtLeastTwoPresent": "Патрэбна не менш за 2 прысутных гульцоў.",
     "teamEllipsis": "Каманда…",
     "needAtLeastTwoTeams": "Для тура патрэбны прынамсі дзве прысутныя каманды.",
-    "summaryTeams": "Падрыхтоўка тура {number} — камандаў у жараб'ёўцы: {present}, адсутных гульцоў: {absent}."
+    "summaryTeams": "Падрыхтоўка тура {number} — камандаў у жараб'ёўцы: {present}, адсутных гульцоў: {absent}.",
+    "absentWholeTeam": "Пазначыць усю каманду як адсутную ў гэтым туры"
   },
   "serverStatus": {
     "contacting": "Злучэнне з серверам…",

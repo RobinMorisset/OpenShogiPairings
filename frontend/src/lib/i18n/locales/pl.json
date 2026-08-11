@@ -283,7 +283,8 @@
     "needAtLeastTwoPresent": "Potrzeba co najmniej 2 obecnych graczy.",
     "teamEllipsis": "Drużyna…",
     "needAtLeastTwoTeams": "Runda wymaga co najmniej dwóch obecnych drużyn.",
-    "summaryTeams": "Przygotowanie rundy {number} — drużyn w kojarzeniu: {present}, nieobecnych zawodników: {absent}."
+    "summaryTeams": "Przygotowanie rundy {number} — drużyn w kojarzeniu: {present}, nieobecnych zawodników: {absent}.",
+    "absentWholeTeam": "Oznacz całą drużynę jako nieobecną w tej rundzie"
   },
   "serverStatus": {
     "contacting": "Łączenie z serwerem…",

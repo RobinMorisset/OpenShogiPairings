@@ -65,9 +65,8 @@ rather than half-parsed; re-create the tournament.
   ranked by the configured criteria, followed by its players in board order.
   The team's name straddles the player columns; the matches won, the ranking
   criteria and the float markers belong to the team row, since those are team
-  quantities. The
-  round columns are shared: the team's cell names the team it met and how the
-  match went, the player's names their own opponent. A round a team sat out is
+  quantities. The round columns are shared: the team's cell names the team it
+  met and how the match went, the player's names their own opponent. A round a team sat out is
   re-scored (`0+` / `0=` / `0−`) from the team's own cell, which writes the
   value to every member at once — a team sits out together, and its score for
   that round is read from entries that have to agree.
@@ -84,7 +83,9 @@ rather than half-parsed; re-create the tournament.
   *teams* in a team tournament, since teams are what get paired — a forced match
   expands to its boards like any other. The "why this pairing?" probe and the
   "force this pairing" action follow, naming teams too. Marking players absent
-  stays per player, because a member can be absent without their team being.
+  stays per player, because a member can be absent without their team being —
+  but the list is grouped by team, with a box that marks a whole withdrawn one
+  absent in a single step.
 - **Team point adjustments**: a manual bonus or penalty, with its mandatory
   reason, applies to a *team* in a team tournament — the ranking is by team, so
   that is the level a delta can move. Unlike the roster controls it stays

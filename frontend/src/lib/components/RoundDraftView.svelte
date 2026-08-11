@@ -61,8 +61,9 @@
   // --- Teams ---------------------------------------------------------------
   //
   // In team mode the forcing controls name teams, because teams are what get
-  // paired. The *absence* controls stay per player: a member can be absent
-  // without their team being, and their board is then forfeited for them.
+  // paired. Absence stays a per-player fact — a member can be absent without
+  // their team being, and their board is then forfeited for them — but the
+  // list is grouped by team, with a box that ticks a whole withdrawn one.
   const teamMode = $derived(teams.length > 0);
   // Both are omitted from JSON when empty (they only exist in team mode), so a
   // missing list reads as "none", not as an error.
@@ -178,6 +179,62 @@
     onUpdate(update);
   }
 
+  /** The absence list grouped by team, so a team that has withdrawn can be
+   *  ticked in one go. Players in no team — which finalization rules out —
+   *  are kept in a trailing group rather than dropped from the list. */
+  const absenceGroups = $derived.by(() => {
+    const grouped = teams
+      .map((t) => ({
+        number: t.tournament_id ?? -1,
+        members: (teamMembers.get(t.tournament_id ?? -1) ?? [])
+          .map((id) => byId.get(id))
+          .filter((p) => p != null)
+          .sort(byNumber),
+      }))
+      .sort((a, b) => a.number - b.number);
+    const inATeam = new Set(grouped.flatMap((g) => g.members.map(tid)));
+    return {
+      grouped,
+      loose: allSorted.filter((p) => !inATeam.has(tid(p))),
+    };
+  });
+
+  /** Whether every member of a team is already marked absent — the team-level
+   *  checkbox's state, and what makes the team itself absent from the round. */
+  function teamAbsent(number: number): boolean {
+    const members = teamMembers.get(number) ?? [];
+    return members.length > 0 && members.every((m) => absentSet.has(m));
+  }
+
+  function teamPartlyAbsent(number: number): boolean {
+    return (teamMembers.get(number) ?? []).some((m) => absentSet.has(m)) && !teamAbsent(number);
+  }
+
+  /** Mark (or clear) a whole team's absence in one update — one request, so the
+   *  round never sees half a withdrawn team. */
+  function toggleTeamAbsent(number: number) {
+    const members = teamMembers.get(number) ?? [];
+    if (members.length === 0) return;
+    const willBeAbsent = !teamAbsent(number);
+    const update = base();
+    if (willBeAbsent) {
+      const memberSet = new Set(members);
+      update.absent = [...new Set([...update.absent, ...members])];
+      // Nothing absent can stay fixed into a pairing — at either level.
+      update.forced_boards = update.forced_boards.filter(
+        (b) => !memberSet.has(b.player1) && !memberSet.has(b.player2),
+      );
+      update.forced_byes = update.forced_byes.filter((x) => !memberSet.has(x));
+      update.forced_matches = update.forced_matches.filter(
+        (m) => m.team1 !== number && m.team2 !== number,
+      );
+      update.forced_team_byes = update.forced_team_byes.filter((x) => x !== number);
+    } else {
+      update.absent = update.absent.filter((x) => !members.includes(x));
+    }
+    onUpdate(update);
+  }
+
   // Transient selection for the "add forced pairing" controls. As soon as
   // both are picked, the pairing is forced immediately — no separate button.
   let pairA = $state<number | "">("");
@@ -272,6 +329,22 @@
   });
 </script>
 
+<!-- One player's absence checkbox, shared by the flat list and the per-team
+     groups so the two can't drift apart. -->
+{#snippet absentBox(p: Player)}
+  <label class="chk">
+    <input
+      type="checkbox"
+      checked={absentSet.has(tid(p))}
+      disabled={busy}
+      onchange={() => toggleAbsent(tid(p))}
+    />
+    {label(tid(p))}{#if cupSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.cupTag")}</span
+      >{:else if longSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.longTag")}</span
+      >{/if}
+  </label>
+{/snippet}
+
 <div class="draft">
   <p class="summary">
     {#if teamMode}
@@ -312,19 +385,43 @@
   <section>
     <h3>{$_("roundDraftView.absentThisRound")}</h3>
     <p class="muted small">{$_("roundDraftView.absentDefaultHint")}</p>
-    <div class="players-grid">
-      {#each allSorted as p (p.id)}
-        <label class="chk">
-          <input
-            type="checkbox"
-            checked={absentSet.has(tid(p))}
-            disabled={busy}
-            onchange={() => toggleAbsent(tid(p))}
-          />
-          {label(tid(p))}{#if cupSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.cupTag")}</span>{:else if longSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.longTag")}</span>{/if}
-        </label>
+    {#if teamMode}
+      <!-- Grouped by team: a team that has withdrawn is ticked in one go, and
+           its members' own boxes still work for a single absentee. -->
+      {#each absenceGroups.grouped as group (group.number)}
+        <div class="team-absence">
+          <label class="chk team-chk">
+            <input
+              type="checkbox"
+              checked={teamAbsent(group.number)}
+              indeterminate={teamPartlyAbsent(group.number)}
+              disabled={busy}
+              title={$_("roundDraftView.absentWholeTeam")}
+              onchange={() => toggleTeamAbsent(group.number)}
+            />
+            {teamLabel(group.number)}
+          </label>
+          <div class="players-grid">
+            {#each group.members as p (p.id)}
+              {@render absentBox(p)}
+            {/each}
+          </div>
+        </div>
       {/each}
-    </div>
+      {#if absenceGroups.loose.length > 0}
+        <div class="players-grid">
+          {#each absenceGroups.loose as p (p.id)}
+            {@render absentBox(p)}
+          {/each}
+        </div>
+      {/if}
+    {:else}
+      <div class="players-grid">
+        {#each allSorted as p (p.id)}
+          {@render absentBox(p)}
+        {/each}
+      </div>
+    {/if}
   </section>
 
   <section>
@@ -514,6 +611,18 @@
     align-items: center;
     gap: 0.4rem;
     font-size: 0.9rem;
+  }
+  /* A team and its members read as one block: the team's own box on top, its
+     players indented under it. */
+  .team-absence {
+    margin-top: 0.7rem;
+  }
+  .team-chk {
+    font-weight: 600;
+  }
+  .team-absence .players-grid {
+    margin-top: 0.15rem;
+    margin-left: 1.4rem;
   }
   .forced-list {
     list-style: none;

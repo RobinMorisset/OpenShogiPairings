@@ -283,7 +283,8 @@
     "needAtLeastTwoPresent": "Нужно не менее 2 присутствующих игроков.",
     "teamEllipsis": "Команда…",
     "needAtLeastTwoTeams": "Для тура нужно минимум две присутствующие команды.",
-    "summaryTeams": "Подготовка тура {number} — команд в жеребьёвке: {present}, отсутствующих игроков: {absent}."
+    "summaryTeams": "Подготовка тура {number} — команд в жеребьёвке: {present}, отсутствующих игроков: {absent}.",
+    "absentWholeTeam": "Отметить всю команду как отсутствующую в этом туре"
   },
   "serverStatus": {
     "contacting": "Подключение к серверу…",

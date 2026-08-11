@@ -283,7 +283,8 @@
     "needAtLeastTwoPresent": "Need at least 2 present players.",
     "teamEllipsis": "Team…",
     "needAtLeastTwoTeams": "A round needs at least two present teams.",
-    "summaryTeams": "Preparing round {number} — {present} teams in the pairing, {absent} absent player(s)."
+    "summaryTeams": "Preparing round {number} — {present} teams in the pairing, {absent} absent player(s).",
+    "absentWholeTeam": "Mark the whole team absent this round"
   },
   "serverStatus": {
     "contacting": "Contacting server…",
