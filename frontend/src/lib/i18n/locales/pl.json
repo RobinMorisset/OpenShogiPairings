@@ -14,6 +14,7 @@
     "restore": "Przywróć",
     "tabSettings": "Ustawienia",
     "tabPlayers": "Gracze ({count})",
+    "tabTeams": "Drużyny ({count})",
     "tabResults": "Tabela wyników",
     "tabCup": "Puchar",
     "tabRound": "Runda {number}",

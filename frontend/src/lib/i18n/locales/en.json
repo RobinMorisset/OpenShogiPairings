@@ -14,6 +14,7 @@
     "restore": "Restore",
     "tabSettings": "Settings",
     "tabPlayers": "Players ({count})",
+    "tabTeams": "Teams ({count})",
     "tabResults": "Standings",
     "tabCup": "Cup",
     "tabRound": "Round {number}",

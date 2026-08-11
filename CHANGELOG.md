@@ -51,7 +51,7 @@ rather than half-parsed; re-create the tournament.
   add/remove a member, set or reset the board order, and set an unrated member's
   pairing ELO. See the route table in the README.
 - **Team setup in the interface**: a "Team tournament" toggle and team size in
-  Settings, and a Teams panel on the Players tab — create, rename and delete
+  Settings, and a Teams tab next to Players — create, rename and delete
   teams, move players in and out, reorder the boards (or reset that order by
   rating), and give an unrated member a pairing ELO. A player joining a team
   takes the board their rating calls for, so a roster built one player at a

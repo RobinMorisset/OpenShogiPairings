@@ -14,6 +14,7 @@
     "restore": "Восстановить",
     "tabSettings": "Настройки",
     "tabPlayers": "Игроки ({count})",
+    "tabTeams": "Команды ({count})",
     "tabResults": "Таблица",
     "tabCup": "Плей-офф",
     "tabRound": "Тур {number}",

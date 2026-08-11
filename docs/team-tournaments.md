@@ -240,9 +240,9 @@ Registration is **players first, then grouping**: players are registered
 individually exactly as today (same form, same CSV import — an optional
 `Team` CSV column can come later), and teams are a grouping layered on top.
 
-### Teams panel (Players tab, team mode only)
+### Teams tab (next to Players, team mode only)
 
-Alongside the player list, a Teams panel:
+Its own tab, alongside the player list:
 
 - **create / rename / delete** a team (name required non-empty, unique
   case-insensitive);
@@ -600,7 +600,7 @@ version guard) instead of half-parsed.
   (the server freezes them) and the team tie-break order adopted when the mode
   is switched on, unless the referee has already reordered the criteria.
   Incompatible features surface as the server's validation errors.
-- **Players tab**: teams panel (creation, member assignment, board reorder,
+- **Teams tab**: rosters (creation, member assignment, board reorder,
   team average ELO, unassigned pool), pairing-ELO entry for unrated members
   (MacMahon only); finalization errors listed loudly. **Landed**; the panel
   goes read-only at finalization, matching the frozen rosters, and the

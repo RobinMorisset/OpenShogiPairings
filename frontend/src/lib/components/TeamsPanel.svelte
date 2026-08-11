@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The Teams panel of the Players tab, shown only in team mode.
+  // The Teams tab, next to Players and shown only in team mode.
   //
   // Registration is players-first: players are registered exactly as in an
   // individual tournament, and teams are a grouping laid over them. So this

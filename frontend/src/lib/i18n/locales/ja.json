@@ -14,6 +14,7 @@
     "restore": "復元",
     "tabSettings": "設定",
     "tabPlayers": "選手（{count}名）",
+    "tabTeams": "チーム（{count}組）",
     "tabResults": "順位表",
     "tabCup": "トーナメント",
     "tabRound": "第{number}回戦",

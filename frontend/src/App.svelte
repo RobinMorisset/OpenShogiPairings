@@ -161,6 +161,11 @@
   // seed order can't change. Sits next to Standings.
   const showCup = $derived(tournament?.cup != null);
 
+  // Team mode: teams are the unit of pairing, so registration grows a Teams tab
+  // (next to Players, where the rosters are built) and the rest of the app
+  // groups by match. Declared here because the tab list below reads it.
+  const teamMode = $derived(tournament?.settings.teams != null);
+
   // The tabs in the order they're rendered below, so the arrow-key shortcuts can
   // step through them. Kept in sync by construction with the markup order.
   const tabOrder = $derived(
@@ -168,6 +173,7 @@
       ? [
           "settings",
           "players",
+          ...(teamMode ? ["teams"] : []),
           ...(showResults ? ["results"] : []),
           ...(showCup ? ["cup"] : []),
           ...tournament.rounds.map((r) => `round-${r.number}`),
@@ -289,9 +295,6 @@
   // format, a bracket of `size` takes half as many players again (mirrors
   // `cup_field_size` in the backend).
   const cupEnabled = $derived(tournament?.settings.cup_enabled ?? false);
-  // Team mode: teams are the unit of pairing, so the Players tab grows a Teams
-  // panel and the rest of the app groups by match.
-  const teamMode = $derived(tournament?.settings.teams != null);
   const teamSize = $derived(tournament?.settings.teams?.size ?? 1);
   // MacMahon starting points in use — the one configuration where an unrated
   // team member needs a referee-assigned pairing ELO.
@@ -420,6 +423,7 @@
     const valid = new Set([
       "settings",
       "players",
+      ...(teamMode ? ["teams"] : []),
       ...(showResults ? ["results"] : []),
       ...(showCup ? ["cup"] : []),
       ...tournament.rounds.map((r) => `round-${r.number}`),
@@ -988,6 +992,17 @@
         >
           {$_("app.tabPlayers", { values: { count: tournament.players.length } })}
         </button>
+        {#if teamMode}
+          <button
+            type="button"
+            class="tab"
+            class:active={activeTab === "teams"}
+            data-testid="tab-teams"
+            onclick={() => (activeTab = "teams")}
+          >
+            {$_("app.tabTeams", { values: { count: (tournament.teams ?? []).length } })}
+          </button>
+        {/if}
         {#if showResults}
           <button
             type="button"
@@ -1131,28 +1146,6 @@
               {$_("playerRegistration.importCsv")}
             </button>
           </div>
-          {#if teamMode}
-            <div class="print-hide">
-              <TeamsPanel
-                teams={tournament.teams ?? []}
-                players={tournament.players}
-                size={teamSize}
-                finalized={tournament.registration_finalized}
-                {macmahonInUse}
-                onAdd={handleAddTeam}
-                onRename={handleRenameTeam}
-                onRemove={handleRemoveTeam}
-                onAddMember={handleAddTeamMember}
-                onRemoveMember={handleRemoveTeamMember}
-                onSetBoardOrder={handleSetTeamBoardOrder}
-                onSortByRating={handleSortTeamByRating}
-                onSetPairingRating={handleSetPairingRating}
-                onAddAdjustment={handleAddTeamAdjustment}
-                onRemoveAdjustment={handleRemoveTeamAdjustment}
-                {busy}
-              />
-            </div>
-          {/if}
           <div class="players">
             <PlayerList
               players={tournament.players}
@@ -1170,6 +1163,25 @@
               {busy}
             />
           </div>
+        {:else if activeTab === "teams"}
+          <TeamsPanel
+            teams={tournament.teams ?? []}
+            players={tournament.players}
+            size={teamSize}
+            finalized={tournament.registration_finalized}
+            {macmahonInUse}
+            onAdd={handleAddTeam}
+            onRename={handleRenameTeam}
+            onRemove={handleRemoveTeam}
+            onAddMember={handleAddTeamMember}
+            onRemoveMember={handleRemoveTeamMember}
+            onSetBoardOrder={handleSetTeamBoardOrder}
+            onSortByRating={handleSortTeamByRating}
+            onSetPairingRating={handleSetPairingRating}
+            onAddAdjustment={handleAddTeamAdjustment}
+            onRemoveAdjustment={handleRemoveTeamAdjustment}
+            {busy}
+          />
         {:else if activeTab === "results"}
           {#if teamMode && teamStandings.length > 0}
             <TeamStandingsView
