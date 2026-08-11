@@ -732,6 +732,107 @@ mod tests {
         assert_eq!(body["code"], "no_late_registration_in_team_mode");
     }
 
+    /// The draft route dispatches on the tournament's mode: a team round takes
+    /// forced *matches*, and the player-level lists are refused rather than
+    /// quietly dropped.
+    #[tokio::test]
+    async fn a_team_draft_takes_forced_matches_and_refuses_forced_boards() {
+        let state = AppState::default();
+        let id = create(&state, "Teams").await;
+        send(
+            router(state.clone()),
+            json_req(
+                "PUT",
+                &t(id, "/settings"),
+                json!({ "teams": { "size": 2 } }),
+            ),
+        )
+        .await;
+        let mut players = Vec::new();
+        for i in 0..8 {
+            let (_, body) = send(
+                router(state.clone()),
+                json_req(
+                    "POST",
+                    &t(id, "/players"),
+                    json!({ "last_name": format!("P{i}"), "rating": 2000 - i * 10 }),
+                ),
+            )
+            .await;
+            let list = body["tournament"]["players"].as_array().unwrap();
+            players.push(list.last().unwrap()["id"].as_str().unwrap().to_string());
+        }
+        for k in 0..4 {
+            let (_, body) = send(
+                router(state.clone()),
+                json_req("POST", &t(id, "/teams"), json!({ "name": format!("T{k}") })),
+            )
+            .await;
+            let team = body["tournament"]["teams"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()["id"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            for player in &players[k * 2..k * 2 + 2] {
+                send(
+                    router(state.clone()),
+                    json_req(
+                        "POST",
+                        &t(id, &format!("/teams/{team}/members")),
+                        json!({ "player_id": player }),
+                    ),
+                )
+                .await;
+            }
+        }
+        send(router(state.clone()), post_empty(&t(id, "/rounds/prepare"))).await;
+
+        // A player-level forced board is refused, naming why.
+        let (status, body) = send(
+            router(state.clone()),
+            json_req(
+                "PUT",
+                &t(id, "/draft"),
+                json!({ "forced_boards": [{ "player1": 1, "player2": 3 }] }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body["error"].as_str().unwrap().contains("paired by team"));
+
+        // A forced *match* is taken, and honoured when the round is confirmed.
+        let (status, body) = send(
+            router(state.clone()),
+            json_req(
+                "PUT",
+                &t(id, "/draft"),
+                json!({ "forced_matches": [{ "team1": 1, "team2": 4 }] }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body["tournament"]["draft"]["forced_matches"],
+            json!([{ "team1": 1, "team2": 4 }])
+        );
+        send(router(state.clone()), post_empty(&t(id, "/rounds"))).await;
+
+        let (_, body) = send(router(state.clone()), get(&t(id, ""))).await;
+        let boards = body["tournament"]["rounds"][0]["boards"]
+            .as_array()
+            .unwrap();
+        // Teams 1 and 4 are board 1 and board 2 of the forced match, so their
+        // two boards are the ones tagged `forced`.
+        let forced: Vec<&serde_json::Value> = boards
+            .iter()
+            .filter(|b| b["source"]["kind"] == "forced")
+            .collect();
+        assert_eq!(forced.len(), 2, "{boards:#?}");
+    }
+
     /// An individual tournament carries no team table at all, rather than an
     /// empty one that would read as "no teams yet".
     #[tokio::test]

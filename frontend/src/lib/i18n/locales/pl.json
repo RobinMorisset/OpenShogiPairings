@@ -271,7 +271,10 @@
     "startRound": "Rozpocznij rundę {number}",
     "useUndoHintPrefix": "Użyj",
     "useUndoHintSuffix": ", aby odrzucić ten szkic.",
-    "needAtLeastTwoPresent": "Potrzeba co najmniej 2 obecnych graczy."
+    "needAtLeastTwoPresent": "Potrzeba co najmniej 2 obecnych graczy.",
+    "teamEllipsis": "Drużyna…",
+    "needAtLeastTwoTeams": "Runda wymaga co najmniej dwóch obecnych drużyn.",
+    "summaryTeams": "Przygotowanie rundy {number} — drużyn w kojarzeniu: {present}, nieobecnych zawodników: {absent}."
   },
   "serverStatus": {
     "contacting": "Łączenie z serwerem…",

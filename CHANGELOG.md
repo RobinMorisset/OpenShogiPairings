@@ -71,6 +71,11 @@ rather than half-parsed; re-create the tournament.
   those boards already forfeited that way, instead of being refused. In an
   individual tournament an absent player never reaches a board, so the kind
   doesn't arise there and is rejected.
+- **Customizing a team round**: the draft's forced pairings and forced byes name
+  *teams* in a team tournament, since teams are what get paired — a forced match
+  expands to its boards like any other. The "why this pairing?" probe and the
+  "force this pairing" action follow, naming teams too. Marking players absent
+  stays per player, because a member can be absent without their team being.
 
 - **Hybrid cup: a qualification-round format** (Settings → Hybrid cup), used by
   the German Championship. The top half of the bracket is pre-qualified and

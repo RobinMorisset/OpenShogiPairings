@@ -271,7 +271,10 @@
     "startRound": "Démarrer la ronde {number}",
     "useUndoHintPrefix": "Utilisez",
     "useUndoHintSuffix": " pour abandonner ce brouillon.",
-    "needAtLeastTwoPresent": "Il faut au moins 2 joueurs présents."
+    "needAtLeastTwoPresent": "Il faut au moins 2 joueurs présents.",
+    "teamEllipsis": "Équipe…",
+    "needAtLeastTwoTeams": "Une ronde demande au moins deux équipes présentes.",
+    "summaryTeams": "Préparation de la ronde {number} — {present} équipes dans l'appariement, {absent} joueur(s) absent(s)."
   },
   "serverStatus": {
     "contacting": "Connexion au serveur…",

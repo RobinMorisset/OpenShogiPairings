@@ -1,13 +1,12 @@
 # Team tournaments — design
 
-Status: **implemented**, bar two pieces. A team tournament can be configured,
-rostered, finalized, paired, played and read end to end, through the interface —
-including a member absent for a reason, recorded as such rather than as a
-no-show.
+Status: **implemented**, bar one piece. A team tournament can be configured,
+rostered, finalized, paired, played, customized and read end to end, through the
+interface — including a member absent for a reason, recorded as such rather than
+as a no-show.
 
-Still to come: team-level draft operations (forced matches, forced byes, the
-counterfactual probe), and team point adjustments (per-player ones are refused
-in team mode meanwhile).
+Still to come: team point adjustments (per-player ones are refused in team mode
+meanwhile).
 
 A team tournament is the format that traditionally precedes European shogi
 championships (e.g. WOSC): teams of N players (usually N = 3) are the unit of
@@ -375,12 +374,17 @@ pairings and byes are rejected by validation:
   (illness, travel) is recorded without the unjustified-no-show stigma.
   **Landed.**
 - **Forced pairings**: force team A vs team B (expands to N boards).
-- **Forced byes**: force a team bye.
-- `MIN_PRESENT_PLAYERS` becomes "at least 2 teams present".
+  **Landed**, as `RoundDraft::forced_matches`.
+- **Forced byes**: force a team bye. **Landed**, as
+  `RoundDraft::forced_team_byes`.
+- `MIN_PRESENT_PLAYERS` becomes "at least 2 teams present". **Landed**, as
+  `MIN_TEAMS_PER_ROUND`.
 
 `force_pairing`, the probe/counterfactual API, and pairing explanations all
 operate on `TeamId`s in team mode; the explanation machinery is engine-level
-and carries over with the unit abstraction.
+and carries over with the unit abstraction. **Landed**: both take a `UnitKey`,
+whose meaning follows the mode exactly as the ledgers' keys do, so there is one
+route and one wire shape rather than a parallel team API.
 
 ## Results
 

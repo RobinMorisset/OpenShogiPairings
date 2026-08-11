@@ -8,9 +8,9 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{
-    Board, Counterfactual, CounterfactualMode, CupBracketView, CupPodium, Forfeit, Handicap,
-    NewPlayer, RoundExplanation, SitoutValue, Standing, TeamStanding, Tournament, TournamentId,
-    TournamentSettings, Winner,
+    Board, Counterfactual, CounterfactualMode, CupBracketView, CupPodium, ForcedMatch, Forfeit,
+    Handicap, NewPlayer, RoundExplanation, SitoutValue, Standing, TeamId, TeamStanding, Tournament,
+    TournamentId, TournamentSettings, UnitKey, Winner,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -430,6 +430,12 @@ fn backup_after(store: &TournamentStore, label: &str) {
 }
 
 /// Body of `PUT /draft`: the draft's customization.
+///
+/// The absent set is per player in either mode — in a team tournament a member
+/// can be absent without their team being — while the *forced* halves come in a
+/// pair each: boards and byes name players, matches and team byes name teams.
+/// Which pair applies follows the tournament's mode, and sending the other
+/// mode's is a domain error rather than a silently ignored field.
 #[derive(Debug, Deserialize)]
 struct DraftUpdate {
     #[serde(default)]
@@ -439,6 +445,12 @@ struct DraftUpdate {
     forced_boards: Vec<Board>,
     #[serde(default)]
     forced_byes: Vec<TournamentId>,
+    /// Forced team matches (team mode).
+    #[serde(default)]
+    forced_matches: Vec<ForcedMatch>,
+    /// Teams forced onto a bye (team mode).
+    #[serde(default)]
+    forced_team_byes: Vec<TeamId>,
 }
 
 /// Edit the current draft (absent set, forced pairings, forced byes).
@@ -449,8 +461,33 @@ async fn update_draft(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
     store.mutate(expected, |t| {
-        t.update_draft(req.absent, req.forced_boards, req.forced_byes)
+        if t.settings.team_mode() {
+            // The core rejects the player-level halves in team mode, so hand it
+            // those too rather than dropping them here: a client that sent them
+            // should be told, not quietly obeyed in part.
+            if !req.forced_boards.is_empty() || !req.forced_byes.is_empty() {
+                return t
+                    .update_draft(
+                        req.absent.clone(),
+                        req.forced_boards.clone(),
+                        req.forced_byes.clone(),
+                    )
+                    .map(|_| ());
+            }
+            t.update_team_draft(
+                req.absent.clone(),
+                req.forced_matches.clone(),
+                req.forced_team_byes.clone(),
+            )
             .map(|_| ())
+        } else {
+            t.update_draft(
+                req.absent.clone(),
+                req.forced_boards.clone(),
+                req.forced_byes.clone(),
+            )
+            .map(|_| ())
+        }
     })?;
     view(&store)
 }
@@ -493,8 +530,10 @@ async fn round_explanation(
 struct CounterfactualRequest {
     #[serde(default = "default_counterfactual_mode")]
     mode: CounterfactualMode,
-    a: TournamentId,
-    b: TournamentId,
+    /// The two units to probe: player numbers in an individual tournament, team
+    /// numbers in a team one — whichever the engine paired. `0` means the bye.
+    a: UnitKey,
+    b: UnitKey,
 }
 
 fn default_counterfactual_mode() -> CounterfactualMode {
@@ -522,8 +561,9 @@ async fn round_counterfactual(
 /// Body of the force-pairing endpoint: the two players to pair.
 #[derive(Debug, Deserialize)]
 struct ForcePairingRequest {
-    a: TournamentId,
-    b: TournamentId,
+    /// As for the probe: player numbers, or team numbers in team mode.
+    a: UnitKey,
+    b: UnitKey,
 }
 
 /// Force the pairing `a`–`b` onto the current round (re-pairs it with that board

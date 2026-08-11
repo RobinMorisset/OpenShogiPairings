@@ -21,10 +21,9 @@ Known limitations and future work, roughly ordered by area.
   [docs/team-tournaments.md](docs/team-tournaments.md): teams as the pairing
   unit, boards as the atom, derived match outcomes. Landed end to end — a team
   tournament can be configured, rostered, paired, played and read, interface
-  included, with a member's absence recorded as justified or not. What is left
-  is team-level draft operations (forced matches, forced byes, the
-  counterfactual probe) and team point adjustments (per-player ones are refused
-  in team mode meanwhile).
+  included, with a member's absence recorded as justified or not and the draft
+  customizable at team level. What is left is team point adjustments
+  (per-player ones are refused in team mode meanwhile).
 
 ## Multi-referee server
 

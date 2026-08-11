@@ -271,7 +271,10 @@
     "startRound": "Пачаць тур {number}",
     "useUndoHintPrefix": "Скарыстайцеся",
     "useUndoHintSuffix": ", каб адкінуць гэты чарнавік.",
-    "needAtLeastTwoPresent": "Патрэбна не менш за 2 прысутных гульцоў."
+    "needAtLeastTwoPresent": "Патрэбна не менш за 2 прысутных гульцоў.",
+    "teamEllipsis": "Каманда…",
+    "needAtLeastTwoTeams": "Для тура патрэбны прынамсі дзве прысутныя каманды.",
+    "summaryTeams": "Падрыхтоўка тура {number} — камандаў у жараб'ёўцы: {present}, адсутных гульцоў: {absent}."
   },
   "serverStatus": {
     "contacting": "Злучэнне з серверам…",

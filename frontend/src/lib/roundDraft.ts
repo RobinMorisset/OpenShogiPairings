@@ -20,6 +20,10 @@ import type { Player } from "./types";
  */
 export const MIN_PRESENT_PLAYERS = 2;
 
+/** Mirrors `MIN_TEAMS_PER_ROUND`: a team round is measured in teams, so that is
+ *  what its floor counts. */
+export const MIN_PRESENT_TEAMS = 2;
+
 /**
  * Everyone a confirmed round would include: registered players not marked
  * absent in the draft. Mirrors the `present` set in `confirm_round`

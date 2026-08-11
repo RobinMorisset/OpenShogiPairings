@@ -268,7 +268,6 @@ fn domain_payload(err: &TournamentError) -> Option<(&'static str, BTreeMap<Strin
         | TournamentError::JustifiedAbsenceOutsideTeamMode
         // Deliberately English: unfinished scaffolding (the UI offers no team
         // probe yet), not a state the product is meant to have.
-        | TournamentError::TeamProbeNotAvailable
         // TODO: `InvalidDraft` carries a free-form English string built at ~8
         // call sites; it needs to become a structured enum before it can be
         // translated. Referee-visible, so worth doing.
@@ -448,7 +447,6 @@ mod tests {
             TournamentError::PlayerLevelDraftInTeamMode,
             TournamentError::PlayerAdjustmentInTeamMode,
             TournamentError::JustifiedAbsenceOutsideTeamMode,
-            TournamentError::TeamProbeNotAvailable,
             TournamentError::DrawnOnForfeitedBoard { round: 1, board: 0 },
         ]
     }

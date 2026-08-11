@@ -568,11 +568,17 @@ export function prepareRound(cupSize?: number): Promise<TournamentResponse> {
 
 /** The draft customization sent to the server. */
 export interface DraftUpdate {
+  /** Absent *players*, in either mode — in a team tournament a member can be
+   *  absent without their team being, and their board is forfeited for them. */
   absent: number[];
   forced_boards: { player1: number; player2: number }[];
   /** Players forced onto a bye. The engine still byes one more of its own if
    *  what's left over is odd, so any number of these is consistent. */
   forced_byes: number[];
+  /** Forced team matches — team mode, where teams are what get paired. */
+  forced_matches: { team1: number; team2: number }[];
+  /** Teams forced onto a bye, likewise. */
+  forced_team_byes: number[];
 }
 
 /** Edit the current draft (absent set, forced pairings, forced byes). */

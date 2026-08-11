@@ -271,7 +271,10 @@
     "startRound": "Начать тур {number}",
     "useUndoHintPrefix": "Нажмите",
     "useUndoHintSuffix": ", чтобы удалить этот черновик.",
-    "needAtLeastTwoPresent": "Нужно не менее 2 присутствующих игроков."
+    "needAtLeastTwoPresent": "Нужно не менее 2 присутствующих игроков.",
+    "teamEllipsis": "Команда…",
+    "needAtLeastTwoTeams": "Для тура нужно минимум две присутствующие команды.",
+    "summaryTeams": "Подготовка тура {number} — команд в жеребьёвке: {present}, отсутствующих игроков: {absent}."
   },
   "serverStatus": {
     "contacting": "Подключение к серверу…",

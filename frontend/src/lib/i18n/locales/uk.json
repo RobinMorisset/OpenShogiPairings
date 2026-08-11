@@ -271,7 +271,10 @@
     "startRound": "Стартувати тур {number}",
     "useUndoHintPrefix": "Натисніть",
     "useUndoHintSuffix": ", щоб відкинути цю чернетку.",
-    "needAtLeastTwoPresent": "Потрібно щонайменше 2 присутні гравці."
+    "needAtLeastTwoPresent": "Потрібно щонайменше 2 присутні гравці.",
+    "teamEllipsis": "Команда…",
+    "needAtLeastTwoTeams": "Для туру потрібно щонайменше дві присутні команди.",
+    "summaryTeams": "Підготовка туру {number} — команд у жеребкуванні: {present}, відсутніх гравців: {absent}."
   },
   "serverStatus": {
     "contacting": "З'єднання із сервером…",

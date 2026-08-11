@@ -1144,6 +1144,7 @@
             players={tournament.players}
             cupPlayers={draftCupPlayers}
             longGamePlayers={busyLongPlayers}
+            teams={teamMode ? (tournament.teams ?? []) : []}
             onUpdate={handleUpdateDraft}
             onConfirm={handleConfirmRound}
             {busy}

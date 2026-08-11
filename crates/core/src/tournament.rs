@@ -20,15 +20,17 @@ use crate::pairing::{
 };
 use crate::player::{NewPlayer, Player, PointAdjustment};
 use crate::round::{
-    Board, Forfeit, Handicap, HandicapGame, Outcome, PairingSource, Round, RoundDraft, Sitout,
-    SitoutKind, SitoutValue, Winner,
+    Board, ForcedMatch, Forfeit, Handicap, HandicapGame, Outcome, PairingSource, Round, RoundDraft,
+    Sitout, SitoutKind, SitoutValue, Winner,
 };
 use crate::scoring::compute_scores;
 use crate::settings::{TeamModeConflict, TournamentSettings, TEAM_SIZES};
 use crate::standings::{compute_standings, Standing};
 use crate::team::Team;
-use crate::team_scoring::{compute_team_standings, matches_in_round, swiss_bye_team, TeamStanding};
-use crate::units::{TournamentId, UnitKey};
+use crate::team_scoring::{
+    compute_team_standings, matches_in_round, swiss_bye_team, TeamSlots, TeamStanding,
+};
+use crate::units::{TeamId, TournamentId, UnitKey};
 use typed_index_collections::TiVec;
 
 /// On-disk / on-the-wire format version for a serialized [`Tournament`].
@@ -306,11 +308,6 @@ pub enum TournamentError {
     /// an unjustified no-show.
     #[error("a justified absence on a board only exists in a team tournament")]
     JustifiedAbsenceOutsideTeamMode,
-    /// A counterfactual probe (or a forced re-pairing) was asked for in team
-    /// mode. Both are keyed by player number, which names no unit the team
-    /// engine paired; a team-level API for them is still to come.
-    #[error("probing and forcing a pairing are not available in team mode yet")]
-    TeamProbeNotAvailable,
 }
 
 impl Tournament {
@@ -910,6 +907,8 @@ impl Tournament {
             absent: default_absent,
             forced_boards: Vec::new(),
             forced_byes: Vec::new(),
+            forced_matches: Vec::new(),
+            forced_team_byes: Vec::new(),
         });
         Ok(self.draft.as_ref().expect("just set the draft"))
     }
@@ -943,6 +942,13 @@ impl Tournament {
             }
         }
 
+        // Player-level forcing has no meaning when teams are what get paired.
+        // The absent set is still per player there — a member can be absent
+        // without their team being — so only the forced halves are rejected.
+        if self.settings.team_mode() && !(forced_boards.is_empty() && forced_byes.is_empty()) {
+            return Err(TournamentError::PlayerLevelDraftInTeamMode);
+        }
+
         let draft = self.draft.as_mut().expect("draft present");
         draft.absent = absent;
         draft.forced_boards = forced_boards
@@ -950,6 +956,62 @@ impl Tournament {
             .map(|b| Board::pending(b.player1, b.player2, 0, PairingSource::Forced))
             .collect();
         draft.forced_byes = forced_byes;
+        draft.forced_matches = Vec::new();
+        draft.forced_team_byes = Vec::new();
+        Ok(self.draft.as_ref().expect("draft present"))
+    }
+
+    /// Replace the current draft's customization in **team mode**: the absent
+    /// players (still per player — a member can be absent without their team
+    /// being), plus the matches and byes the referee has fixed by hand.
+    ///
+    /// The team twin of [`Self::update_draft`], because a forced pairing names
+    /// two *teams* here. Structural consistency is validated when the round is
+    /// confirmed; this only checks that every referenced team and player exists.
+    pub fn update_team_draft(
+        &mut self,
+        absent: Vec<TournamentId>,
+        forced_matches: Vec<ForcedMatch>,
+        forced_team_byes: Vec<TeamId>,
+    ) -> Result<&RoundDraft, TournamentError> {
+        if !self.settings.team_mode() {
+            return Err(TournamentError::NotATeamTournament);
+        }
+        if self.draft.is_none() {
+            return Err(TournamentError::NoDraft);
+        }
+        let known_players: HashSet<TournamentId> = self
+            .players
+            .iter()
+            .filter_map(|p| p.tournament_id)
+            .collect();
+        for id in &absent {
+            if !known_players.contains(id) {
+                return Err(TournamentError::InvalidDraft(format!(
+                    "references unknown player {id}"
+                )));
+            }
+        }
+        let known_teams: HashSet<TeamId> =
+            self.teams.iter().filter_map(|t| t.tournament_id).collect();
+        let referenced = forced_matches
+            .iter()
+            .flat_map(|m| [m.team1, m.team2])
+            .chain(forced_team_byes.iter().copied());
+        for id in referenced {
+            if !known_teams.contains(&id) {
+                return Err(TournamentError::InvalidDraft(format!(
+                    "references unknown team {id}"
+                )));
+            }
+        }
+
+        let draft = self.draft.as_mut().expect("draft present");
+        draft.absent = absent;
+        draft.forced_boards = Vec::new();
+        draft.forced_byes = Vec::new();
+        draft.forced_matches = forced_matches;
+        draft.forced_team_byes = forced_team_byes;
         Ok(self.draft.as_ref().expect("draft present"))
     }
 
@@ -1309,22 +1371,24 @@ impl Tournament {
     /// asks "why aren't A and B paired?"; [`CounterfactualMode::Forbid`] asks
     /// "why did you pair A and B?".
     ///
-    /// If either player isn't an engine-paired Swiss player of that round (they
-    /// were forced, are a cup player, or sat out), the result is `scoped_out`
-    /// with the reason and no diff — the engine didn't choose their board.
+    /// If either unit isn't an engine-paired one for that round (it was forced,
+    /// is a cup player, or sat out), the result is `scoped_out` with the reason
+    /// and no diff — the engine didn't choose its board.
+    ///
+    /// `a` and `b` are [`UnitKey`]s: player numbers in an individual tournament,
+    /// team numbers in a team one, because the engine paired whichever of those
+    /// the tournament is run on. [`UnitKey::PHANTOM`] means the bye.
     pub fn explain_counterfactual(
         &self,
         round_number: u32,
-        a: TournamentId,
-        b: TournamentId,
+        a: UnitKey,
+        b: UnitKey,
         mode: CounterfactualMode,
     ) -> Result<Counterfactual, TournamentError> {
-        // The probe is keyed by player number, which has no team reading — a team
-        // probe has to name teams. Refused until the team draft API lands, rather
-        // than answered about the wrong unit.
         if self.settings.team_mode() {
-            return Err(TournamentError::TeamProbeNotAvailable);
+            return self.explain_team_counterfactual(round_number, a, b, mode);
         }
+        let (a, b) = (TournamentId::from(a), TournamentId::from(b));
         let idx = self
             .rounds
             .iter()
@@ -1387,6 +1451,99 @@ impl Tournament {
         ))
     }
 
+    /// The team reading of [`Self::explain_counterfactual`]: the probe names two
+    /// *teams*, and the diff is over the round's team matches.
+    fn explain_team_counterfactual(
+        &self,
+        round_number: u32,
+        a: UnitKey,
+        b: UnitKey,
+        mode: CounterfactualMode,
+    ) -> Result<Counterfactual, TournamentError> {
+        let idx = self
+            .rounds
+            .iter()
+            .position(|r| r.number == round_number)
+            .ok_or(TournamentError::RoundNotFound(round_number))?;
+        let round = &self.rounds[idx];
+        let completed = &self.rounds[..idx];
+        let slots = self.team_slots();
+        let matches = matches_in_round(round, &slots);
+        let swiss_boards: Vec<(UnitKey, UnitKey)> = matches
+            .iter()
+            .filter(|m| {
+                m.boards
+                    .first()
+                    .is_some_and(|&i| matches!(round.boards[i].source, PairingSource::Swiss))
+            })
+            .map(|m| (UnitKey::from(m.team1), UnitKey::from(m.team2)))
+            .collect();
+        let swiss_bye = swiss_bye_team(round, &slots).map(UnitKey::from);
+
+        // Both probed teams must be engine-paired: in a Swiss match, or on the
+        // engine's own bye. A forced match or bye wasn't the engine's choice, so
+        // there is nothing to explain about it.
+        let scoped_out = |reason: ScopeReason| {
+            Ok(Counterfactual {
+                scoped_out: Some(reason),
+                cost_delta: Vec::new(),
+                cycles: Vec::new(),
+                changed: Vec::new(),
+            })
+        };
+        for key in [a, b] {
+            if key == UnitKey::PHANTOM {
+                if swiss_bye.is_none() {
+                    return scoped_out(ScopeReason::Absent);
+                }
+                continue;
+            }
+            if swiss_bye != Some(key) && !swiss_boards.iter().any(|&(x, y)| x == key || y == key) {
+                return scoped_out(self.team_scope_reason(round, &slots, TeamId::from(key)));
+            }
+        }
+
+        let solve = match mode {
+            CounterfactualMode::Force => counterfactual_force,
+            CounterfactualMode::Forbid => counterfactual_forbid,
+        };
+        let units = self.team_pairing_units(completed, &slots);
+        Ok(solve(
+            round.number,
+            &self.settings,
+            &units,
+            &swiss_boards,
+            swiss_bye,
+            a,
+            b,
+        ))
+    }
+
+    /// Why a team is out of the engine's hands for `round`: the referee fixed
+    /// its match or its bye, or it sat the round out entirely.
+    fn team_scope_reason(&self, round: &Round, slots: &TeamSlots, team: TeamId) -> ScopeReason {
+        let members = slots.members_of(team);
+        // A whole-team sit-out: a forced bye was the referee's, anything else
+        // (an absence, or the engine's own bye, handled by the caller) is not.
+        if let Some(sitout) = members.first().and_then(|&m| round.sitout(m)) {
+            return match sitout.kind {
+                SitoutKind::ForcedBye => ScopeReason::Forced,
+                _ => ScopeReason::Absent,
+            };
+        }
+        let forced = members.iter().any(|&m| {
+            round
+                .boards
+                .iter()
+                .any(|b| (b.player1 == m || b.player2 == m) && b.source == PairingSource::Forced)
+        });
+        if forced {
+            ScopeReason::Forced
+        } else {
+            ScopeReason::Absent
+        }
+    }
+
     /// Actually force the pairing `a`–`b` onto the current (last, in-progress)
     /// round: re-pair the round with `a`–`b` added as a referee-forced board,
     /// keeping the round's existing forced boards and absentees. Closes the loop
@@ -1400,11 +1557,7 @@ impl Tournament {
     /// pairing would discard them). The pair is validated by the re-pairing path
     /// exactly like any referee-forced board/bye (must be a present Swiss
     /// player, neither a cup player nor already forced elsewhere).
-    pub fn force_pairing(
-        &mut self,
-        a: TournamentId,
-        b: TournamentId,
-    ) -> Result<&Round, TournamentError> {
+    pub fn force_pairing(&mut self, a: UnitKey, b: UnitKey) -> Result<&Round, TournamentError> {
         let round = self.rounds.last().ok_or(TournamentError::NoCurrentRound)?;
         if round.completed {
             return Err(TournamentError::RoundHasResults);
@@ -1412,6 +1565,10 @@ impl Tournament {
         if round.boards.iter().any(|bd| bd.is_decided()) {
             return Err(TournamentError::RoundHasResults);
         }
+        if self.settings.team_mode() {
+            return self.force_team_pairing(a, b);
+        }
+        let (a, b) = (TournamentId::from(a), TournamentId::from(b));
 
         // Rebuild the draft the round came from: its absentees, its existing
         // forced boards, plus the newly forced pair (or bye). The engine
@@ -1441,6 +1598,70 @@ impl Tournament {
             absent: round.absentees().collect(),
             forced_boards,
             forced_byes,
+            forced_matches: Vec::new(),
+            forced_team_byes: Vec::new(),
+        };
+
+        // Drop the round and re-confirm from the reconstructed draft. Earlier
+        // rounds stay completed, so the standings entering this round are intact.
+        self.rounds.pop();
+        self.draft = Some(draft);
+        self.confirm_round()
+    }
+
+    /// The team reading of [`Self::force_pairing`]: fix a *match* (or a team's
+    /// bye) onto the current round and re-pair everything else around it.
+    ///
+    /// Rebuilds the draft the round came from — its absentees and the matches
+    /// the referee had already fixed — with the new one added, exactly as the
+    /// individual path does. The round is validated by the re-pairing itself.
+    fn force_team_pairing(&mut self, a: UnitKey, b: UnitKey) -> Result<&Round, TournamentError> {
+        let round = self.rounds.last().expect("checked by the caller");
+        let slots = self.team_slots();
+
+        // The matches the referee had already fixed carry over; the engine's own
+        // choices go back up for grabs.
+        let mut forced_matches: Vec<ForcedMatch> = matches_in_round(round, &slots)
+            .iter()
+            .filter(|m| {
+                m.boards
+                    .first()
+                    .is_some_and(|&i| round.boards[i].source == PairingSource::Forced)
+            })
+            .map(|m| ForcedMatch {
+                team1: m.team1,
+                team2: m.team2,
+            })
+            .collect();
+        // ...and so do the byes the referee fixed; the engine's own does not.
+        let mut forced_team_byes: Vec<TeamId> = round
+            .forced_byes()
+            .filter_map(|p| slots.team_of(p))
+            .collect();
+        forced_team_byes.sort_unstable();
+        forced_team_byes.dedup();
+
+        match (a == UnitKey::PHANTOM, b == UnitKey::PHANTOM) {
+            // Forcing a team onto the bye. Re-asking for a bye it already has is
+            // a no-op, not a double entry.
+            (true, false) | (false, true) => {
+                let team = TeamId::from(if a == UnitKey::PHANTOM { b } else { a });
+                if !forced_team_byes.contains(&team) {
+                    forced_team_byes.push(team);
+                }
+            }
+            _ => forced_matches.push(ForcedMatch {
+                team1: TeamId::from(a),
+                team2: TeamId::from(b),
+            }),
+        }
+        let draft = RoundDraft {
+            number: round.number,
+            absent: round.absentees().collect(),
+            forced_boards: Vec::new(),
+            forced_byes: Vec::new(),
+            forced_matches,
+            forced_team_byes,
         };
 
         // Drop the round and re-confirm from the reconstructed draft. Earlier
@@ -2695,7 +2916,7 @@ mod tests {
             "a and b start unpaired"
         );
 
-        let round = t.force_pairing(a, b).unwrap();
+        let round = t.force_pairing(UnitKey::from(a), UnitKey::from(b)).unwrap();
         assert_eq!(
             round.number, 1,
             "the same round is re-paired, not a new one"
@@ -2728,7 +2949,10 @@ mod tests {
         let r1 = t.rounds.last().unwrap();
         let a = r1.boards[0].player1;
         let b = r1.boards[1].player1;
-        assert_eq!(t.force_pairing(a, b), Err(TournamentError::RoundHasResults));
+        assert_eq!(
+            t.force_pairing(UnitKey::from(a), UnitKey::from(b)),
+            Err(TournamentError::RoundHasResults)
+        );
         let _ = ids;
     }
 
@@ -2746,7 +2970,9 @@ mod tests {
         let bye = r1.swiss_bye().expect("odd count byes someone");
         let playing = r1.boards[0].player1;
 
-        let round = t.force_pairing(playing, PHANTOM).unwrap();
+        let round = t
+            .force_pairing(UnitKey::from(playing), UnitKey::from(PHANTOM))
+            .unwrap();
         assert_eq!(round.number, 1, "the same round is re-paired");
         assert_eq!(
             round.byes().collect::<Vec<_>>(),
@@ -2776,7 +3002,12 @@ mod tests {
         let bye = r1.swiss_bye().expect("odd count byes someone");
 
         let cf = t
-            .explain_counterfactual(1, bye, PHANTOM, CounterfactualMode::Forbid)
+            .explain_counterfactual(
+                1,
+                UnitKey::from(bye),
+                UnitKey::from(PHANTOM),
+                CounterfactualMode::Forbid,
+            )
             .unwrap();
         assert!(cf.scoped_out.is_none(), "the bye is in scope for the probe");
     }

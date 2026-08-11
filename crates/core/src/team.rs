@@ -379,8 +379,61 @@ impl Tournament {
             });
         }
 
+        // The referee's fixed matches and byes: every team named must be present,
+        // and no team may be spoken for twice — a team cannot play two matches,
+        // nor play and bye. Checked before anything is built, so a bad draft
+        // names its own problem instead of producing a nonsense round.
+        let present_set: HashSet<UnitKey> = present.iter().copied().collect();
+        let mut placed: HashSet<UnitKey> = HashSet::new();
+        let mut forced_pairs: Vec<(UnitKey, UnitKey)> = Vec::new();
+        for m in &draft.forced_matches {
+            if m.team1 == m.team2 {
+                return Err(TournamentError::InvalidDraft(
+                    "a team cannot be forced to play itself".into(),
+                ));
+            }
+            for team in [m.team1, m.team2] {
+                let key = UnitKey::from(team);
+                if !present_set.contains(&key) {
+                    return Err(TournamentError::InvalidDraft(format!(
+                        "forced match names team {team}, which is absent this round"
+                    )));
+                }
+                if !placed.insert(key) {
+                    return Err(TournamentError::InvalidDraft(format!(
+                        "team {team} is in two forced matches, or also forced onto a bye"
+                    )));
+                }
+            }
+            forced_pairs.push((UnitKey::from(m.team1), UnitKey::from(m.team2)));
+        }
+        let mut forced_bye_keys: Vec<UnitKey> = Vec::new();
+        for &team in &draft.forced_team_byes {
+            let key = UnitKey::from(team);
+            if !present_set.contains(&key) {
+                return Err(TournamentError::InvalidDraft(format!(
+                    "forced bye names team {team}, which is absent this round"
+                )));
+            }
+            if !placed.insert(key) {
+                return Err(TournamentError::InvalidDraft(format!(
+                    "team {team} is forced twice, or also in a forced match"
+                )));
+            }
+            forced_bye_keys.push(key);
+        }
+        // No parity check: whatever the forced byes leave over, the engine byes
+        // one more team if the count is odd — exactly as in individual mode.
+
         let units = self.team_pairing_units(&self.rounds, &slots);
-        let paired = pair_round_weighted(draft.number, &self.settings, &units, &present, &[], &[]);
+        let paired = pair_round_weighted(
+            draft.number,
+            &self.settings,
+            &units,
+            &present,
+            &forced_pairs,
+            &forced_bye_keys,
+        );
 
         // Each matched pair becomes `size` boards, all carrying the team-level
         // float: it is a fact of the *team* pairing, and the float history
@@ -418,15 +471,21 @@ impl Tournament {
 
         // A team bye is one sit-out per member, so per-player scoring and the
         // grid see ordinary `0+` cells; at team level it derives as a match win.
+        // The referee's byes and the engine's own differ only in their kind —
+        // and the kind is what bye-repeat avoidance and re-pairing read.
         let mut sitouts: Vec<Sitout> = Vec::new();
-        if let Some(bye) = paired.swiss_bye {
+        for (key, kind) in forced_bye_keys
+            .iter()
+            .map(|&k| (k, SitoutKind::ForcedBye))
+            .chain(paired.swiss_bye.map(|k| (k, SitoutKind::Bye)))
+        {
             sitouts.extend(
                 slots
-                    .members_of(TeamId::from(bye))
+                    .members_of(TeamId::from(key))
                     .iter()
                     .map(|&player| Sitout {
                         player,
-                        kind: SitoutKind::Bye,
+                        kind,
                         value: SitoutValue::Full,
                     }),
             );
@@ -531,7 +590,7 @@ impl Tournament {
 mod tests {
     use super::*;
     use crate::player::NewPlayer;
-    use crate::round::{AbsenceKind, Winner};
+    use crate::round::{AbsenceKind, ForcedMatch, Winner};
 
     fn player(rating: Option<u32>, pairing: Option<u32>) -> Player {
         let mut p = Player::from_new(NewPlayer {
@@ -1079,6 +1138,9 @@ mod tests {
         ));
     }
 
+    /// A forced pairing names two players, which is not a thing a team round
+    /// pairs — so it is refused as soon as the draft is submitted, not after
+    /// the referee has confirmed a round built around it.
     #[test]
     fn player_level_forcing_is_rejected_in_team_mode() {
         let (mut t, ids) = team_tournament(2, 4);
@@ -1086,16 +1148,247 @@ mod tests {
         t.finalize_registration().unwrap();
         t.prepare_round().unwrap();
         let (a, b) = (tid(&t, ids[0]), tid(&t, ids[2]));
-        t.update_draft(
+        assert!(matches!(
+            t.update_draft(
+                Vec::new(),
+                vec![Board::pending(a, b, 0, crate::round::PairingSource::Swiss)],
+                Vec::new(),
+            ),
+            Err(TournamentError::PlayerLevelDraftInTeamMode)
+        ));
+        // ...and the team-level draft is refused on an individual tournament,
+        // for the mirror-image reason.
+        let mut individual = Tournament::new("Solo").unwrap();
+        for name in ["A", "B"] {
+            individual
+                .add_player(NewPlayer {
+                    last_name: name.into(),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        individual.finalize_registration().unwrap();
+        individual.prepare_round().unwrap();
+        assert!(matches!(
+            individual.update_team_draft(Vec::new(), Vec::new(), Vec::new()),
+            Err(TournamentError::NotATeamTournament)
+        ));
+    }
+
+    // --- Team-level draft operations --------------------------------------
+
+    /// The team number of the team a player plays for.
+    fn team_number(t: &Tournament, player: Uuid) -> TeamId {
+        t.team_of(player).unwrap().tournament_id.unwrap()
+    }
+
+    #[test]
+    fn a_forced_match_is_honoured_and_the_rest_paired_around_it() {
+        // Four teams of two. Left alone, the engine folds 1-3 / 2-4 (all level
+        // on points, so the fold decides); force 1 against 4 instead.
+        let (mut t, ids) = team_tournament(2, 8);
+        fill_teams(&mut t, &ids, 4, 2);
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        t.update_team_draft(
             Vec::new(),
-            vec![Board::pending(a, b, 0, crate::round::PairingSource::Swiss)],
+            vec![ForcedMatch {
+                team1: TeamId(1),
+                team2: TeamId(4),
+            }],
+            Vec::new(),
+        )
+        .unwrap();
+        t.confirm_round().unwrap();
+
+        let round = t.rounds.last().unwrap().clone();
+        let matches = t.team_matches(&round);
+        let pairs: HashSet<(TeamId, TeamId)> = matches
+            .iter()
+            .map(|m| (m.team1.min(m.team2), m.team1.max(m.team2)))
+            .collect();
+        assert!(pairs.contains(&(TeamId(1), TeamId(4))), "{pairs:?}");
+        assert_eq!(pairs.len(), 2);
+        // The forced match's boards say so, and the engine's don't.
+        let forced: Vec<&TeamMatch> = matches
+            .iter()
+            .filter(|m| round.boards[m.boards[0]].source == crate::round::PairingSource::Forced)
+            .collect();
+        assert_eq!(forced.len(), 1);
+        assert_eq!(
+            (
+                forced[0].team1.min(forced[0].team2),
+                forced[0].team1.max(forced[0].team2)
+            ),
+            (TeamId(1), TeamId(4))
+        );
+    }
+
+    #[test]
+    fn a_forced_team_bye_sits_that_team_out_as_a_unit() {
+        // Five teams: one byes anyway, but the referee picks which.
+        let (mut t, ids) = team_tournament(2, 10);
+        fill_teams(&mut t, &ids, 5, 2);
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        t.update_team_draft(Vec::new(), Vec::new(), vec![TeamId(1)])
+            .unwrap();
+        t.confirm_round().unwrap();
+
+        let round = t.rounds.last().unwrap();
+        assert_eq!(round.sitouts.len(), 2, "one sit-out per member");
+        let slots = t.team_slots();
+        assert!(
+            round
+                .sitouts
+                .iter()
+                .all(|s| slots.team_of(s.player) == Some(TeamId(1))
+                    && s.kind == SitoutKind::ForcedBye)
+        );
+        assert_eq!(round.boards.len(), 4, "the other four teams play");
+    }
+
+    #[test]
+    fn a_forced_draft_that_cannot_hold_is_refused_naming_the_problem() {
+        let (mut t, ids) = team_tournament(2, 8);
+        fill_teams(&mut t, &ids, 4, 2);
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+
+        // A team in two forced matches cannot play both.
+        t.update_team_draft(
+            Vec::new(),
+            vec![
+                ForcedMatch {
+                    team1: TeamId(1),
+                    team2: TeamId(2),
+                },
+                ForcedMatch {
+                    team1: TeamId(1),
+                    team2: TeamId(3),
+                },
+            ],
             Vec::new(),
         )
         .unwrap();
         assert!(matches!(
             t.confirm_round(),
-            Err(TournamentError::PlayerLevelDraftInTeamMode)
+            Err(TournamentError::InvalidDraft(_))
         ));
+
+        // ...nor play and bye.
+        t.update_team_draft(
+            Vec::new(),
+            vec![ForcedMatch {
+                team1: TeamId(1),
+                team2: TeamId(2),
+            }],
+            vec![TeamId(1)],
+        )
+        .unwrap();
+        assert!(matches!(
+            t.confirm_round(),
+            Err(TournamentError::InvalidDraft(_))
+        ));
+
+        // ...nor play itself.
+        t.update_team_draft(
+            Vec::new(),
+            vec![ForcedMatch {
+                team1: TeamId(1),
+                team2: TeamId(1),
+            }],
+            Vec::new(),
+        )
+        .unwrap();
+        assert!(matches!(
+            t.confirm_round(),
+            Err(TournamentError::InvalidDraft(_))
+        ));
+
+        // ...and an absent team cannot be forced to do either.
+        let away: Vec<TournamentId> = ids[..2].iter().map(|&id| tid(&t, id)).collect();
+        let absent_team = team_number(&t, ids[0]);
+        t.update_team_draft(
+            away,
+            vec![ForcedMatch {
+                team1: absent_team,
+                team2: TeamId(2),
+            }],
+            Vec::new(),
+        )
+        .unwrap();
+        assert!(matches!(
+            t.confirm_round(),
+            Err(TournamentError::InvalidDraft(_))
+        ));
+    }
+
+    /// The counterfactual, at team level: probing a match the engine did not
+    /// make reports what it would cost, keyed by team number.
+    #[test]
+    fn the_counterfactual_probes_teams_in_team_mode() {
+        let (mut t, ids) = team_tournament(2, 8);
+        fill_teams(&mut t, &ids, 4, 2);
+        t.finalize_registration().unwrap();
+        start_round(&mut t, Vec::new());
+
+        let round = t.rounds[0].clone();
+        let paired: HashSet<(TeamId, TeamId)> = t
+            .team_matches(&round)
+            .iter()
+            .map(|m| (m.team1.min(m.team2), m.team1.max(m.team2)))
+            .collect();
+        // Some pair the engine did *not* make.
+        let (a, b) = (1..=4u32)
+            .flat_map(|x| (x + 1..=4).map(move |y| (TeamId(x), TeamId(y))))
+            .find(|pair| !paired.contains(pair))
+            .expect("four teams cannot all be paired in one round");
+
+        let cf = t
+            .explain_counterfactual(
+                1,
+                UnitKey::from(a),
+                UnitKey::from(b),
+                crate::pairing::CounterfactualMode::Force,
+            )
+            .unwrap();
+        assert!(cf.scoped_out.is_none());
+        // Forcing it changes at least the two matches it disturbs.
+        assert!(!cf.changed.is_empty());
+        // ...and applying it really does pair them.
+        t.force_pairing(UnitKey::from(a), UnitKey::from(b)).unwrap();
+        let round = t.rounds.last().unwrap().clone();
+        let now: HashSet<(TeamId, TeamId)> = t
+            .team_matches(&round)
+            .iter()
+            .map(|m| (m.team1.min(m.team2), m.team1.max(m.team2)))
+            .collect();
+        assert!(now.contains(&(a, b)), "{now:?}");
+    }
+
+    /// Forcing a team onto the bye is the same operation with the phantom on
+    /// one side — the team analogue of forcing a player to sit out.
+    #[test]
+    fn forcing_a_team_onto_the_bye_re_pairs_around_it() {
+        let (mut t, ids) = team_tournament(2, 10);
+        fill_teams(&mut t, &ids, 5, 2);
+        t.finalize_registration().unwrap();
+        start_round(&mut t, Vec::new());
+
+        let slots = t.team_slots();
+        let byed = slots.team_of(t.rounds[0].sitouts[0].player).unwrap();
+        let other_team = (1..=5u32).map(TeamId).find(|&x| x != byed).unwrap();
+
+        t.force_pairing(UnitKey::from(other_team), UnitKey::PHANTOM)
+            .unwrap();
+        let round = t.rounds.last().unwrap();
+        let slots = t.team_slots();
+        assert!(round
+            .sitouts
+            .iter()
+            .all(|s| slots.team_of(s.player) == Some(other_team)));
+        assert_eq!(round.sitouts.len(), 2);
     }
 
     /// The whole point of pairing teams: two teams never meet twice, even though

@@ -98,7 +98,26 @@
   // they are shown that way: a header per match, then its boards in board order.
   // The grouping is derived from the rosters (see `teams.ts`), exactly as the
   // server derives it — nothing about it is stored.
-  const matches = $derived(teams.length > 0 ? teamMatches(round, teams, players) : []);
+  const teamMode = $derived(teams.length > 0);
+  const matches = $derived(teamMode ? teamMatches(round, teams, players) : []);
+  /** Player number → their team, for the probe's unit lookups. */
+  const teamOfPlayer = $derived.by(() => {
+    const m = new Map<number, Team>();
+    const tidOf = new Map(players.filter((p) => p.tournament_id != null).map((p) => [p.id, p.tournament_id!]));
+    for (const team of teams) {
+      for (const member of team.members) {
+        const t = tidOf.get(member);
+        if (t != null) m.set(t, team);
+      }
+    }
+    return m;
+  });
+  /** The name of a probed unit: a player in an individual tournament, a team in
+   *  a team one — whichever the engine paired. */
+  function unitName(key: number): string {
+    if (!teamMode) return name(key);
+    return teams.find((t) => t.tournament_id === key)?.name ?? `#${key}`;
+  }
   /** The board table's rows: each match's header followed by its boards, or —
    *  in an individual tournament — simply every board in order. */
   const boardGroups = $derived(
@@ -366,16 +385,33 @@
 
   // The engine-paired players of this round (Swiss boards + the bye), the only
   // ones a counterfactual can reason about, sorted by name for the pickers.
+  //
+  // In team mode these are *teams*, because teams are what the engine paired —
+  // the probe speaks the same unit the ledgers do (see `UnitKey`).
+  const swissByeUnit = $derived(
+    teamMode && swissBye != null
+      ? (teamOfPlayer.get(swissBye)?.tournament_id ?? null)
+      : swissBye,
+  );
   const swissPlayers = $derived.by(() => {
     const ids = new Set<number>();
-    for (const b of round.boards) {
-      if (!b.source || b.source.kind === "swiss") {
-        ids.add(b.player1);
-        ids.add(b.player2);
+    if (teamMode) {
+      for (const m of matches) {
+        if (round.boards[m.boards[0]]?.source?.kind !== "forced") {
+          if (m.team1.tournament_id != null) ids.add(m.team1.tournament_id);
+          if (m.team2.tournament_id != null) ids.add(m.team2.tournament_id);
+        }
+      }
+    } else {
+      for (const b of round.boards) {
+        if (!b.source || b.source.kind === "swiss") {
+          ids.add(b.player1);
+          ids.add(b.player2);
+        }
       }
     }
-    if (swissBye != null) ids.add(swissBye);
-    return [...ids].sort((x, y) => name(x).localeCompare(name(y)));
+    if (swissByeUnit != null) ids.add(swissByeUnit);
+    return [...ids].sort((x, y) => unitName(x).localeCompare(unitName(y)));
   });
 
   let probeOpen = $state(false);
@@ -419,13 +455,24 @@
   // forbidding the bye itself (i.e. forcing them to play).
   const opponentOf = $derived.by(() => {
     const m = new Map<number, number>();
-    for (const b of round.boards) {
-      if (!b.source || b.source.kind === "swiss") {
-        m.set(b.player1, b.player2);
-        m.set(b.player2, b.player1);
+    if (teamMode) {
+      for (const match of matches) {
+        if (round.boards[match.boards[0]]?.source?.kind === "forced") continue;
+        const [a, b] = [match.team1.tournament_id, match.team2.tournament_id];
+        if (a != null && b != null) {
+          m.set(a, b);
+          m.set(b, a);
+        }
+      }
+    } else {
+      for (const b of round.boards) {
+        if (!b.source || b.source.kind === "swiss") {
+          m.set(b.player1, b.player2);
+          m.set(b.player2, b.player1);
+        }
       }
     }
-    if (swissBye != null) m.set(swissBye, PHANTOM);
+    if (swissByeUnit != null) m.set(swissByeUnit, PHANTOM);
     return m;
   });
 
@@ -485,7 +532,9 @@
   }
 
   function probeName(id: number): string {
-    return id === PHANTOM ? $_("roundView.probe.bye") : name(id);
+    // The ledgers speak the same unit the engine paired, so a probe result
+    // names teams in team mode and players otherwise.
+    return id === PHANTOM ? $_("roundView.probe.bye") : unitName(id);
   }
 
   // A changed board as readable text: "X vs Y" or "X takes the bye".
@@ -887,6 +936,9 @@
             {/if}
           </tr>
         {/each}
+        {/each}
+        <!-- The byes come after every match, not inside one: a sit-out belongs
+             to no match, so it must not repeat per group. -->
         {#each byeSitouts as sitout (sitout.player)}
           {@const isCup = typeof sitout.kind !== "string"}
           <tr class="bye-row">
@@ -918,7 +970,6 @@
               {/if}
             {/if}
           </tr>
-        {/each}
         {/each}
       </tbody>
     </table>
@@ -973,7 +1024,7 @@
             <select bind:value={probeA} disabled={probeBusy}>
               <option value="">{$_("roundView.probe.pick")}</option>
               {#each swissPlayers as id (id)}
-                <option value={id}>{name(id)}</option>
+                <option value={id}>{unitName(id)}</option>
               {/each}
             </select>
             {#if probeMode === "force"}
@@ -981,9 +1032,9 @@
               <select bind:value={probeB} disabled={probeBusy}>
                 <option value="">{$_("roundView.probe.pick")}</option>
                 {#each swissPlayers as id (id)}
-                  <option value={id}>{name(id)}</option>
+                  <option value={id}>{unitName(id)}</option>
                 {/each}
-                {#if swissBye != null}
+                {#if swissByeUnit != null}
                   <option value={PHANTOM}>{$_("roundView.probe.bye")}</option>
                 {/if}
               </select>

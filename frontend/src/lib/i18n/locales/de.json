@@ -271,7 +271,10 @@
     "startRound": "Runde {number} starten",
     "useUndoHintPrefix": "Verwenden Sie",
     "useUndoHintSuffix": ", um diesen Entwurf zu verwerfen.",
-    "needAtLeastTwoPresent": "Mindestens 2 anwesende Spieler nötig."
+    "needAtLeastTwoPresent": "Mindestens 2 anwesende Spieler nötig.",
+    "teamEllipsis": "Mannschaft…",
+    "needAtLeastTwoTeams": "Eine Runde braucht mindestens zwei anwesende Mannschaften.",
+    "summaryTeams": "Runde {number} wird vorbereitet — {present} Mannschaften in der Auslosung, {absent} abwesende(r) Spieler."
   },
   "serverStatus": {
     "contacting": "Verbindung zum Server…",

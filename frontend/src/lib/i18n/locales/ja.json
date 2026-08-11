@@ -271,7 +271,10 @@
     "startRound": "第{number}回戦を開始",
     "useUndoHintPrefix": "この準備中の回戦を破棄するには",
     "useUndoHintSuffix": "を使ってください。",
-    "needAtLeastTwoPresent": "出場者が2名以上必要です。"
+    "needAtLeastTwoPresent": "出場者が2名以上必要です。",
+    "teamEllipsis": "チーム…",
+    "needAtLeastTwoTeams": "1ラウンドには少なくとも2チームの参加が必要です。",
+    "summaryTeams": "第 {number} ラウンドの準備 — 組み合わせ対象 {present} チーム、欠席 {absent} 人。"
   },
   "serverStatus": {
     "contacting": "サーバーに接続中…",

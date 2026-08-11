@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::units::{HalfPoints, TournamentId};
+use crate::units::{HalfPoints, TeamId, TournamentId};
 
 /// Which player won a board. Colour (sente/gote) is chosen at random per game
 /// and isn't tracked, so the result is simply which of the two players won.
@@ -664,6 +664,18 @@ impl Round {
     }
 }
 
+/// A team match the referee has fixed by hand, for a team round's draft — the
+/// team-level counterpart of a forced [`Board`].
+///
+/// The two teams are named by number, and the match expands to its `size`
+/// boards when the round is confirmed, exactly as an engine-chosen one does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct ForcedMatch {
+    pub team1: TeamId,
+    pub team2: TeamId,
+}
+
 /// A round being set up but not yet started (the `RoundDraft` state).
 ///
 /// The referee customizes it — mark players absent, force specific pairings,
@@ -689,6 +701,15 @@ pub struct RoundDraft {
     /// engine still adds its own bye if what's left over is odd.
     #[serde(default)]
     pub forced_byes: Vec<TournamentId>,
+    /// Team matches the referee has fixed by hand — **team mode only**, where
+    /// teams are what get paired, so a forced pairing names two teams rather
+    /// than two players. Empty (and absent from JSON) otherwise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forced_matches: Vec<ForcedMatch>,
+    /// Teams forced to take a bye — team mode only, for the same reason. The
+    /// engine still byes one more team if what's left over is odd.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forced_team_byes: Vec<TeamId>,
 }
 
 #[cfg(test)]
