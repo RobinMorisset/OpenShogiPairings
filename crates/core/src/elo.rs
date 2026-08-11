@@ -37,13 +37,13 @@ pub(crate) const S: f64 = 173.717_792_761_565_8;
 /// `[1, 1200]` strength range. The referee can override it
 /// ([`TournamentSettings::elo_unrated_prior_center`]); this is the fallback used
 /// where no settings are in hand (e.g. a player missing from an estimate map).
-pub const UNRATED_PRIOR_MEAN: f64 = 600.0;
+pub(crate) const UNRATED_PRIOR_MEAN: f64 = 600.0;
 
 /// Default K for the unrated-player prior. Its width follows the same
 /// `σ₀ = √(K · s)` law as a rated player's, so referees tune one familiar
 /// quantity; `705` reproduces the historical `σ ≈ 350` (the std of a uniform on
 /// `[1, 1200]` is `1199/√12 ≈ 346`, rounded to 350: `350² / s ≈ 705`).
-pub const UNRATED_PRIOR_DEFAULT_K: f64 = 705.0;
+pub(crate) const UNRATED_PRIOR_DEFAULT_K: f64 = 705.0;
 
 /// A rated player with at least this many FESA games is treated as reliably
 /// rated; fewer (or a rating not from the FESA list) makes it *provisional*, and

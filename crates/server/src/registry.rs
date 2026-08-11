@@ -19,7 +19,7 @@ use crate::state::{AppState, TournamentSummary};
 
 /// `GET /api/tournaments`: list every known tournament. Public — needed to
 /// render the picker before anyone has logged in anywhere.
-pub fn public_routes() -> Router<AppState> {
+pub(crate) fn public_routes() -> Router<AppState> {
     Router::new().route("/api/tournaments", get(list_tournaments))
 }
 
@@ -28,7 +28,7 @@ pub fn public_routes() -> Router<AppState> {
 /// expected to wrap these with [`crate::auth::require_admin_auth`] (see
 /// `lib.rs`) — minting a tournament, by either route, is gated by the admin
 /// password if one is configured.
-pub fn admin_routes() -> Router<AppState> {
+pub(crate) fn admin_routes() -> Router<AppState> {
     Router::new()
         .route("/api/tournaments", post(create_tournament))
         .route("/api/tournaments/import", post(import_tournament))

@@ -91,6 +91,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-log",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

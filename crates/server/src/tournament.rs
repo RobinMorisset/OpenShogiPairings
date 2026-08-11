@@ -20,7 +20,7 @@ use crate::error::ApiError;
 use crate::live::ExpectedVersion;
 use crate::ratings;
 use crate::scope::TournamentCtx;
-use crate::state::{AppState, TournamentStore};
+use crate::state::{AppState, TournamentInstance, TournamentStore};
 use crate::{auth, live};
 
 /// Build the router nested at `/api/tournaments/{id}`.
@@ -67,7 +67,7 @@ use crate::{auth, live};
 /// - `POST   /teams/{team_id}/sort-by-rating`  reset that order by rating
 /// - `POST   /teams/{team_id}/adjustments`     add a manual point bonus/malus
 /// - `DELETE /teams/{team_id}/adjustments/{adjustment_id}` remove one
-/// - `GET    /backups`         list automatic backups, newest first
+/// - `GET    /backups`         where the automatic backups live, and the list
 /// - `POST   /backups/{backup_id}/restore` restore a backup as the current tournament
 /// - `POST   /login`  exchange this tournament's password for a session token
 /// - `GET    /events` SSE stream of this tournament's change version
@@ -75,7 +75,7 @@ use crate::{auth, live};
 /// Every endpoint (except login/events/the text exports) returns a
 /// [`TournamentView`] (the tournament plus whether an undo is available), so
 /// clients can refresh their view and the undo button from a single response.
-pub fn scope(state: AppState) -> Router<AppState> {
+pub(crate) fn scope(state: AppState) -> Router<AppState> {
     let public = Router::new()
         .route("/login", post(auth::tournament_login))
         .route("/events", get(live::events));
@@ -219,7 +219,7 @@ struct TournamentView {
     /// strength, an unrated player, or a cup board).
     suggested_handicaps: Vec<Vec<Option<Handicap>>>,
     /// The winner that counts for standings/pairing per board (see
-    /// [`osp_core::round::Board::effective_winner`]), indexed like
+    /// [`osp_core::Board::effective_winner`]), indexed like
     /// `tournament.rounds[i].boards[j]`. Computed here — using the tournament's
     /// `handicap_wiel_rule` setting — so the frontend never has to re-derive it.
     /// `None` while a board is undecided.
@@ -304,13 +304,32 @@ async fn undo(
     view(&store)
 }
 
+/// The automatic backups of one tournament: where they are kept, and what is
+/// in there. The directory travels with the list because the referee has to be
+/// able to find these files outside the app — to copy them off the machine, or
+/// to hand one to someone else — and a rotating store they can't locate is one
+/// they can't rely on.
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub(crate) struct BackupList {
+    /// Absolute path of the directory holding this tournament's backups, as
+    /// the server sees it. `None` when no backups directory could be resolved
+    /// at all — nothing is being backed up, which the client says outright
+    /// rather than showing an empty list that looks merely new.
+    directory: Option<String>,
+    /// The backups themselves, newest first.
+    backups: Vec<backup::BackupInfo>,
+}
+
 /// List automatic backups for the tournament, newest first (see [`backup`]).
 async fn list_backups(
     TournamentCtx(instance): TournamentCtx,
-) -> Result<Json<Vec<backup::BackupInfo>>, ApiError> {
-    let store = instance.read();
-    let tournament = store.current().ok_or(ApiError::NoTournament)?;
-    Ok(Json(backup::list(tournament.id)))
+) -> Result<Json<BackupList>, ApiError> {
+    let dir = instance.backups_dir.as_deref();
+    Ok(Json(BackupList {
+        directory: dir.map(|d| d.display().to_string()),
+        backups: backup::list(dir),
+    }))
 }
 
 /// The backup's own id from the path. Named (not positional/tuple) so this
@@ -331,8 +350,10 @@ async fn restore_backup(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
     store.ensure_current_version(expected)?;
-    let tournament_id = store.current().ok_or(ApiError::NoTournament)?.id;
-    let restored = backup::load(tournament_id, &params.backup_id)
+    // The backup replaces a tournament, it doesn't conjure one: a store with
+    // nothing in it (a concurrent delete) must 404 rather than be revived.
+    store.current().ok_or(ApiError::NoTournament)?;
+    let restored = backup::load(instance.backups_dir.as_deref(), &params.backup_id)
         .ok_or_else(|| ApiError::NotFound(format!("no backup {}", params.backup_id)))?;
     store.set_current(restored);
     view(&store)
@@ -385,7 +406,7 @@ async fn cancel_round(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
     store.mutate(expected, |t| t.cancel_last_round())?;
-    backup_after(&store, "round cancelled");
+    backup_after(&instance, &store, "round cancelled");
     view(&store)
 }
 
@@ -413,7 +434,7 @@ async fn prepare_round(
         .and_then(|t| t.draft.as_ref())
         .map(|d| format!("round {} drafting", d.number))
         .unwrap_or_else(|| "round drafting".to_string());
-    backup_after(&store, &label);
+    backup_after(&instance, &store, &label);
     view(&store)
 }
 
@@ -426,17 +447,22 @@ fn round_label(store: &TournamentStore, noun: &str, verb: &str) -> String {
     }
 }
 
-/// Take a backup of the current tournament, if any. Best-effort and silent on
-/// failure (logged inside [`backup::take`]) — a backup problem must never
-/// surface as an API error.
-fn backup_after(store: &TournamentStore, label: &str) {
+/// Take a backup of the current tournament, if any, into the instance's own
+/// backups directory. Best-effort and silent on failure (logged inside
+/// [`backup::take`]) — a backup problem must never surface as an API error.
+///
+/// Takes the instance *and* the store guard the caller already holds, rather
+/// than re-locking: every call site is mid-mutation with the write guard in
+/// hand, and reaching back through the instance for the store here would
+/// deadlock.
+fn backup_after(instance: &TournamentInstance, store: &TournamentStore, label: &str) {
     // A store tombstoned by a concurrent delete must not re-create its backups
     // directory after `remove` cleared it.
     if store.is_deleted() {
         return;
     }
     if let Some(tournament) = store.current() {
-        backup::take(tournament, label);
+        backup::take(instance.backups_dir.as_deref(), tournament, label);
     }
 }
 
@@ -511,7 +537,7 @@ async fn confirm_round(
     let mut store = instance.write();
     store.mutate(expected, |t| t.confirm_round().map(|_| ()))?;
     let label = round_label(&store, "round", "started");
-    backup_after(&store, &label);
+    backup_after(&instance, &store, &label);
     Ok((StatusCode::CREATED, view(&store)?))
 }
 
@@ -592,7 +618,7 @@ async fn force_pairing(
     let mut store = instance.write();
     store.mutate(expected, |t| t.force_pairing(req.a, req.b).map(|_| ()))?;
     let label = round_label(&store, "round", "re-paired");
-    backup_after(&store, &label);
+    backup_after(&instance, &store, &label);
     view(&store)
 }
 
@@ -629,7 +655,11 @@ async fn set_board_result(
             .map(|_| ())
     })?;
     if !was_completed && round_completed(&store, params.round_number) {
-        backup_after(&store, &format!("round {} completed", params.round_number));
+        backup_after(
+            &instance,
+            &store,
+            &format!("round {} completed", params.round_number),
+        );
     }
     view(&store)
 }
@@ -688,7 +718,11 @@ async fn set_board_no_show(
             .map(|_| ())
     })?;
     if !was_completed && round_completed(&store, params.round_number) {
-        backup_after(&store, &format!("round {} completed", params.round_number));
+        backup_after(
+            &instance,
+            &store,
+            &format!("round {} completed", params.round_number),
+        );
     }
     view(&store)
 }
@@ -777,7 +811,11 @@ async fn set_board_long(
             .map(|_| ())
     })?;
     if !was_completed && round_completed(&store, params.round_number) {
-        backup_after(&store, &format!("round {} completed", params.round_number));
+        backup_after(
+            &instance,
+            &store,
+            &format!("round {} completed", params.round_number),
+        );
     }
     view(&store)
 }

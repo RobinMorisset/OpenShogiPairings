@@ -45,7 +45,7 @@
 //!    (unrated = 1), descending; the Nth player of the top half should meet the
 //!    Nth of the bottom half, penalized by the *squared* deviation from that ideal.
 //!
-//! Priority lives in exactly one place — the order of [`Rule::ORDER`] — and the
+//! Priority lives in exactly one place — the order of [`active_rules`] — and the
 //! separation between tiers is proven by construction (see [`scale_ladder`]), so
 //! adding or reordering rules stays sound with no magic numbers to retune.
 //!
@@ -64,8 +64,9 @@
 //!
 //! The choice among tied pairings is made deterministically and as a pure function
 //! of tournament *state*: the matching's vertices are ordered by tournament number
-//! (see [`PairingModel::seed_key`]), so the same field pairs identically no matter
-//! how its players were registered, imported, or reloaded, and within that
+//! (see the `free.sort_unstable()` in [`pair_round_weighted`]), so the same field
+//! pairs identically no matter how it was registered, imported, or reloaded, and
+//! within that
 //! canonical order the blossom solver returns one fixed optimum. No lower-priority
 //! "seniority" preference is layered on top — a tie means the rules do not care,
 //! and the seed order only fixes *a* stable, reproducible representative.

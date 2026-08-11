@@ -45,13 +45,26 @@ fn load_from_disk() -> Option<CachedRatings> {
     serde_json::from_slice(&bytes).ok()
 }
 
+/// Write the freshly-fetched list to the on-disk cache. Best-effort — the list
+/// is already in memory, so a failure costs a re-download at the next start, not
+/// this session — but it is logged: a cache that silently never writes looks
+/// exactly like one that is working, until the referee is offline at a
+/// tournament and the ratings aren't there.
 fn save_to_disk(cached: &CachedRatings) {
     let Some(path) = cache_path() else { return };
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            tracing::warn!("ratings: could not create {}: {e}", parent.display());
+            return;
+        }
     }
-    if let Ok(json) = serde_json::to_vec_pretty(cached) {
-        let _ = std::fs::write(&path, json);
+    match serde_json::to_vec_pretty(cached) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                tracing::warn!("ratings: could not cache to {}: {e}", path.display());
+            }
+        }
+        Err(e) => tracing::warn!("ratings: could not serialize the cached list: {e}"),
     }
 }
 
@@ -149,14 +162,14 @@ pub(crate) fn cached_ratings(state: &AppState) -> Vec<RatedPlayer> {
 }
 
 /// `GET /api/ratings` — cached FESA list (fetched once if nothing is cached yet).
-pub async fn ratings_handler(
+pub(crate) async fn ratings_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<RatedPlayer>>, ApiError> {
     get_ratings(&state).await.map(Json)
 }
 
 /// `POST /api/ratings/refresh` — re-download the list from FESA now.
-pub async fn refresh_handler(
+pub(crate) async fn refresh_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<RatedPlayer>>, ApiError> {
     refresh_from_fesa(&state).await.map(Json)

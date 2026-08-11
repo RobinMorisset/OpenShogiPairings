@@ -17,6 +17,17 @@ rather than half-parsed; re-create the tournament.
 
 ### Added
 
+- **The tournament's city, country, dates and time control** (Settings →
+  *Place, dates and time control*), reported in the header of the American Grid
+  export the way the
+  [FESA tournament-system guide](https://fesashogi.eu/tournament-system-user-guide/)
+  asks: `[name, city, country, first to last]`, followed by the tournament's
+  last day on its own line and by `[Time control: …]`. Each part is written only
+  when it was entered, so an export from a tournament that sets none of them is
+  unchanged. A live preview under the fields shows the header as it will be
+  sent. The dates are entered as a pair (a one-day event repeats the day) and
+  validated — an impossible date or a range ending before it starts is rejected
+  rather than exported.
 - **Team tournaments, first half** (see
   [`docs/team-tournaments.md`](docs/team-tournaments.md)): a tournament can be
   set to team mode with a team size (2–9, default 3), players grouped into named
@@ -103,6 +114,48 @@ rather than half-parsed; re-create the tournament.
   bracket" option, unchanged and still the default.
 - `osp-sim --cup-format direct|qualifier`, so simulations can run either cup
   format (see [`docs/simulation-cli.md`](docs/simulation-cli.md)).
+- **Configurable data and backup directories.** `OSP_DATA_DIR` (tournaments)
+  and the new `OSP_BACKUP_DIR` (automatic backups) now apply to the **desktop
+  app** as well as the standalone server, which previously hardcoded both under
+  the per-user data directory — so the files can live on a synced folder, a
+  second drive, or beside a portable install. Unset keeps exactly the old
+  locations. Both are logged at startup.
+- **The Backups button says where the backups are kept** — the absolute
+  directory, in its tooltip and at the top of the panel (selectable there, to
+  paste into a file manager). A rotating store of recovery copies is only as
+  useful as the referee's ability to find the files; it also makes the new
+  `OSP_BACKUP_DIR` visibly take effect. `GET /backups` grew the directory
+  alongside the list to carry it.
+
+### Changed
+
+- **The desktop app keeps a log file**, where it previously logged only in
+  development builds — so a packaged app had no way to report that it could not
+  save. It lives beside the app's other data (`~/Library/Logs/…` on macOS,
+  `%APPDATA%\org.openshogipairings.desktop\logs\` on Windows) as a single file
+  the app itself caps at 40 KB, and it stays near-empty: the release build logs
+  only warnings and errors, plus the startup lines saying which data and backup
+  directories are in use. Nothing is sent anywhere — it is a file to look at (or
+  attach to a bug report) when something has gone wrong.
+- **A filesystem failure the server used to ignore now says so.** Rotating an
+  old backup, deleting a tournament's files, caching the FESA rating list and
+  creating the data directory all discarded their errors, so a full disk or a
+  read-only directory produced silence and a job quietly not done. Each is still
+  best-effort — none of them interrupts what the referee is doing — but each now
+  leaves a line in the log. A file that was already absent when deleting it
+  stays silent, since that is the outcome that was wanted.
+- **The Results tab shows the round in progress**, instead of waiting for it to
+  be completed. Its column (marked `R3*`) appears as soon as the round is
+  paired, with each board's cell filling in the moment its result is recorded;
+  a game still being played shows `5?` rather than a win or a loss. The wins,
+  points and tie-break columns — and the ranking itself — still count completed
+  rounds only, so the table re-sorts in one step at the end of the round rather
+  than shuffling under the referee mid-round.
+- **A cross-table cell's tooltip names the opponent with their rating** —
+  `Doe Jane (1800)` — where it used to read `vs Doe Jane`. The "vs" said
+  nothing the cell didn't already, and the rating answers what the hover is
+  usually for: how strong was that opponent. An unrated opponent keeps the bare
+  name.
 
 ### Fixed
 

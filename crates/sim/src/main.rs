@@ -5,6 +5,16 @@
 //! differ on game mismatch (are there fewer foregone-conclusion games?) and on
 //! who tends to win / how faithfully the final ranking tracks true strength. See
 //! `docs/simulation-cli.md` for the design.
+//!
+//! Public items link to the private helpers that explain them (see the note in
+//! `osp_core`'s crate docs); rustdoc renders those unlinked unless it is run with
+//! `--document-private-items`, so that warning is off here too.
+//!
+//! `unreachable_pub` and `unnameable_types` are turned on for the reason given
+//! in `osp_core`'s crate docs: between them they pin down what is really part
+//! of the API.
+#![allow(rustdoc::private_intra_doc_links)]
+#![warn(unnameable_types, unreachable_pub)]
 
 mod fesa;
 mod stats;
@@ -567,7 +577,7 @@ struct VariantReport {
     /// Mean Spearman(ELO-estimate order, true-strength order) over runs.
     fidelity_estimate: f64,
     /// Fraction of runs whose winner is the truly-strongest player (top-1 fidelity):
-    /// mean over runs of 1[final_order[0] == true_order[0]].
+    /// mean over runs of `1[final_order[0] == true_order[0]]`.
     hit_rate: f64,
     /// Per-player top-1 probability (with CI) and top-3 rate for the Open (overall
     /// standings), sorted best first.

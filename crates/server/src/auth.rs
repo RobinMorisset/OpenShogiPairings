@@ -101,7 +101,7 @@ impl AuthConfig {
 
 /// `POST /api/tournaments/{id}/login` request body.
 #[derive(Deserialize)]
-pub struct LoginRequest {
+pub(crate) struct LoginRequest {
     password: String,
 }
 
@@ -144,7 +144,7 @@ fn has_valid_bearer(auth: &AuthConfig, req: &Request) -> bool {
 ///   off for it, same as embedded/no-auth mode.
 /// - Wrong password → 401 after a short delay.
 /// - Right password → 200 `{ token }`.
-pub async fn tournament_login(
+pub(crate) async fn tournament_login(
     TournamentCtx(instance): TournamentCtx,
     Json(body): Json<LoginRequest>,
 ) -> Response {
@@ -161,7 +161,7 @@ pub async fn tournament_login(
 /// `Authorization: Bearer <token>` header for *that* tournament and answers
 /// 401 without one. 404s first if the id in the path doesn't resolve to any
 /// tournament at all (via [`TournamentCtx`]'s own rejection).
-pub async fn require_tournament_auth(
+pub(crate) async fn require_tournament_auth(
     TournamentCtx(instance): TournamentCtx,
     req: Request,
     next: Next,
@@ -180,7 +180,7 @@ pub async fn require_tournament_auth(
 ///   (local/embedded/dev, or a hosted server that deliberately runs open).
 /// - Wrong password → 401 after a short delay.
 /// - Right password → 200 `{ token }`.
-pub async fn admin_login(
+pub(crate) async fn admin_login(
     State(state): State<AppState>,
     Json(body): Json<LoginRequest>,
 ) -> Response {
@@ -195,7 +195,7 @@ pub async fn admin_login(
 ///
 /// A no-op when no admin password is configured; otherwise requires a valid
 /// `Authorization: Bearer <token>` obtained from [`admin_login`].
-pub async fn require_admin_auth(
+pub(crate) async fn require_admin_auth(
     State(state): State<AppState>,
     req: Request,
     next: Next,

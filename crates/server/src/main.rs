@@ -54,6 +54,7 @@ async fn main() {
             .filter(|p| !p.is_empty()),
         static_dir: std::env::var_os("OSP_STATIC_DIR").map(Into::into),
         data_dir: std::env::var_os("OSP_DATA_DIR").map(Into::into),
+        backup_dir: std::env::var_os("OSP_BACKUP_DIR").map(Into::into),
     };
 
     match &config.admin_password {
@@ -68,6 +69,20 @@ async fn main() {
     }
     if let Some(dir) = &config.data_dir {
         tracing::info!("persisting tournaments under {}", dir.display());
+    }
+    // Say where the backups go either way: unset means the per-user data
+    // directory, which is worth printing rather than leaving the referee to
+    // guess where their recovery copies landed.
+    match config
+        .backup_dir
+        .clone()
+        .or_else(osp_server::backup_default_root)
+    {
+        Some(dir) => tracing::info!("writing automatic backups under {}", dir.display()),
+        None => tracing::warn!(
+            "no backups directory could be resolved — automatic backups are DISABLED; set \
+             OSP_BACKUP_DIR to enable them"
+        ),
     }
 
     osp_server::serve_with_config(listener, config)

@@ -6,6 +6,25 @@
 //! graph, and later an ILP/CP-SAT backend) will live here too so that it can be
 //! reused unchanged by the HTTP server, a future CLI client, and the Tauri
 //! desktop app.
+//!
+//! These docs are written to be read *in the source* as much as in rustdoc, so a
+//! public item freely links to the private one that explains it (the rule table
+//! behind a pairing, the estimator behind a setting). rustdoc renders those as
+//! plain text and warns; `cargo doc --document-private-items` renders them as
+//! links. The warning is silenced below because the links are deliberate — a link
+//! to something that doesn't exist at all still warns, which is the case worth
+//! hearing about.
+//!
+//! Two allow-by-default lints are turned on, bracketing one question from either
+//! side: what is really part of this crate's API? `unreachable_pub` catches `pub`
+//! that reaches nothing — the item is crate-visible either way, so the marker
+//! only misleads about the answer, which is the `pub use` list below.
+//! `unnameable_types` catches the reverse, a type a caller can reach through a
+//! public signature but cannot write down. Both had drifted, in both directions
+//! at once; with CI denying warnings the markers and the exports now stay in
+//! step.
+#![allow(rustdoc::private_intra_doc_links)]
+#![warn(unnameable_types, unreachable_pub)]
 
 mod american_grid;
 mod csv_import;
@@ -32,7 +51,7 @@ pub use american_grid::to_grid as american_grid;
 pub use csv_import::{parse_players_csv, CsvImportError};
 pub use cup::{
     cup_field_size, knockout_champion, reconstruct_cup_from_final, BracketMatch, Cup,
-    CupBracketView, CupFormat, CupPodium, CUP_SIZES,
+    CupBracketView, CupFormat, CupMatch, CupPairings, CupPodium, CUP_SIZES,
 };
 pub use elo::{estimate_elos, PROVISIONAL_GAMES_THRESHOLD};
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
@@ -44,14 +63,14 @@ pub use pairing::{
 pub use player::{Grade, GradeKind, NewPlayer, Player, PointAdjustment};
 pub use result_import::ResultImportError;
 pub use round::{
-    AbsenceKind, Board, CupStage, ForcedMatch, Forfeit, Handicap, HandicapGame, PairingSource,
-    Round, RoundDraft, Sitout, SitoutKind, SitoutValue, Winner,
+    AbsenceKind, Board, CupStage, ForcedMatch, Forfeit, Handicap, HandicapGame, Outcome,
+    PairingSource, Round, RoundDraft, Sitout, SitoutKind, SitoutValue, Winner,
 };
 pub use settings::{
-    ClubProtection, EloEstimator, EloPriorShape, FloaterStyle, HandicapDisplay, HandicapPolicy,
-    MacMahon, MacMahonSource, MacMahonThreshold, PairingMode, Ratio, RatioAtLeastOne,
-    TeamModeConflict, TeamSettings, ThresholdCriterion, Tiebreak, TournamentSettings, UnratedK,
-    TEAM_SIZES,
+    ClubProtection, DateError, EloEstimator, EloPriorShape, FloaterStyle, HandicapDisplay,
+    HandicapPolicy, IsoDate, MacMahon, MacMahonSource, MacMahonThreshold, PairingMode,
+    PlayerCategory, Ratio, RatioAtLeastOne, TeamModeConflict, TeamSettings, ThresholdCriterion,
+    Tiebreak, TournamentDates, TournamentSettings, UnratedK, TEAM_SIZES,
 };
 pub use standings::{compute_standings, Standing};
 pub use team::{average_pairing_rating, pairing_rating, Team};

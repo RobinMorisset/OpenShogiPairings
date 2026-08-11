@@ -2,9 +2,9 @@
 
 /**
  * A player's dense tournament number — the 1-based key the scoring tables are
- * indexed by (assigned at finalization). Distinct from a [`Uuid`] (the stable
- * identity) and from any score quantity, so a raw number can't be mistaken for
- * one of those.
+ * indexed by (assigned at finalization). Distinct from a [`Uuid`](uuid::Uuid)
+ * (the stable identity) and from any score quantity, so a raw number can't be
+ * mistaken for one of those.
  *
  * This is the type the per-number score tables ([`crate::scoring::Scores`], and
  * the opponent/defeated lists) are keyed by. The [`From<usize>`] / [`Into`]

@@ -60,7 +60,8 @@ pub const MIN_PLAYERS_PER_ROUND: usize = 2;
 
 /// Minimum number of present teams required to start a team round — the team
 /// reading of [`MIN_PLAYERS_PER_ROUND`], since teams are what get paired.
-pub const MIN_TEAMS_PER_ROUND: usize = 2;
+/// Crate-internal: only `team.rs`'s own guard reads it.
+pub(crate) const MIN_TEAMS_PER_ROUND: usize = 2;
 
 /// A tournament: a name and its registered players.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -563,9 +564,9 @@ impl Tournament {
     /// When the cup is enabled in the settings, `cup_size` must be a supported
     /// bracket size (8/16/32/64); the top eligible players (by tournament number)
     /// are frozen into the cup in seed order. How many that takes depends on the
-    /// configured [`CupFormat`]: `cup_size` for a direct bracket, half as many
-    /// again for the qualifier format, whose qualification round feeds half the
-    /// bracket (see [`cup_field_size`]). The cup is validated *before* any
+    /// configured [`CupFormat`](crate::CupFormat): `cup_size` for a direct
+    /// bracket, half as many again for the qualifier format, whose qualification
+    /// round feeds half the bracket (see [`cup_field_size`]). The cup is validated *before* any
     /// mutation, so a rejected cup leaves registration open for the referee to fix.
     pub fn finalize_registration_with(
         &mut self,

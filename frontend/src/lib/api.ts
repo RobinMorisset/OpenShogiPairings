@@ -1,5 +1,5 @@
 import type {
-  BackupInfo,
+  BackupList,
   Counterfactual,
   CounterfactualMode,
   Handicap,
@@ -834,9 +834,11 @@ export function removePointAdjustment(
   );
 }
 
-/** List automatic server-side backups for the current tournament, newest first. */
-export function fetchBackups(): Promise<BackupInfo[]> {
-  return request<BackupInfo[]>(scopedPath("/backups"));
+/** The current tournament's automatic server-side backups: the directory the
+ *  server keeps them in (so the referee can reach the files themselves), and
+ *  the backups it holds, newest first. */
+export function fetchBackups(): Promise<BackupList> {
+  return request<BackupList>(scopedPath("/backups"));
 }
 
 /** Restore a backup as the current tournament (like loading a file, but from

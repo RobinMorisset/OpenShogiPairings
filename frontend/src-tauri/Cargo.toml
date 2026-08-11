@@ -36,6 +36,13 @@ strip = true
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
+# Not called from this crate: it is here to *guarantee* `tracing/log`, which is
+# what carries the embedded server's `tracing::warn!` (a failed save, a backup
+# that won't rotate) into the `log` facade tauri-plugin-log writes to disk. The
+# feature happens to be enabled by another crate in the graph today; depending on
+# that would mean an unrelated dependency bump could silently take the desktop
+# app's only error channel away.
+tracing = { version = "0.1", features = ["log"] }
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"

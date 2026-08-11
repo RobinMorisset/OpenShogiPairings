@@ -22,10 +22,10 @@ permissions:
   contents: read
 
 jobs:
-  # Rust: formatting, lint, and the full workspace test suite. `--locked` makes a
-  # stale root Cargo.lock fail here (the lockfile-drift the pre-commit hook guards
-  # against locally). The excluded desktop crate (frontend/src-tauri) is not built
-  # here — it's covered by the release workflow.
+  # Rust: formatting, lint, docs, and the full workspace test suite. `--locked`
+  # makes a stale root Cargo.lock fail here (the lockfile-drift the pre-commit hook
+  # guards against locally). The excluded desktop crate (frontend/src-tauri) is not
+  # built here — it's covered by the release workflow.
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -40,6 +40,14 @@ jobs:
         run: cargo fmt --all --check
       - name: Lint (clippy, warnings denied)
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Rustdoc warnings don't fail a build on their own, so a link that stopped
+      # resolving is invisible until someone follows it. `--document-private-items`
+      # because much of the explanation lives on private items, and rustdoc only
+      # checks links in what it documents. Same command as the pre-push hook.
+      - name: Docs (rustdoc, warnings denied)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps --document-private-items --locked
       - name: Test
         run: cargo test --workspace --locked
 
@@ -65,6 +73,23 @@ jobs:
         run: npm test
       - name: i18n locale keys in sync
         run: node scripts/check-i18n-keys.mjs
+
+  # Security advisories against both lockfiles — the workspace's and the desktop
+  # app's, which is outside the workspace and carries a tree (Tauri, the webview
+  # stack) the root lock never sees. `cargo audit` alone reads lockfiles, which
+  # are feature-blind and so report crates that are never compiled; the script
+  # re-derives that from the resolved graph on every run instead of carrying an
+  # ignore list. See its docstring. Same command the pre-push hook runs.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: Advisories (both lockfiles)
+        run: python3 scripts/check-advisories.py
 
   # Coverage of the shipped library crates (osp-core, integer-blossom, osp-server),
   # measured with cargo-llvm-cov. Binary entry points (server/src/main.rs) are

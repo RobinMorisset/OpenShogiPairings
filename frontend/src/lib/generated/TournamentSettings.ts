@@ -5,6 +5,7 @@ import type { PairingMode } from "./PairingMode";
 import type { PlayerCategory } from "./PlayerCategory";
 import type { TeamSettings } from "./TeamSettings";
 import type { Tiebreak } from "./Tiebreak";
+import type { TournamentDates } from "./TournamentDates";
 
 /**
  * Configuration that isn't tied to a single player or round.
@@ -28,6 +29,34 @@ import type { Tiebreak } from "./Tiebreak";
  * what catches the whole-schema drift.
  */
 export type TournamentSettings = { 
+/**
+ * The town the tournament is held in, as the American Grid header names it
+ * (`[13. Kurpfalz New Year's Open, Ludwigshafen, Germany, …]`). Trimmed,
+ * with a blank entry normalized to `None` — which simply leaves it out of
+ * that line. Descriptive only.
+ */
+city?: string | null, 
+/**
+ * The country the tournament is held in, alongside [`Self::city`] in the
+ * American Grid header. Trimmed, blank normalized to `None`. Descriptive
+ * only.
+ */
+country?: string | null, 
+/**
+ * The days the tournament runs (see [`TournamentDates`]). Purely
+ * descriptive: the only thing that reads it is the American Grid header,
+ * which the FESA rating program wants stamped with the event's dates. `None`
+ * (the default) leaves them out of the header.
+ */
+dates?: TournamentDates | null, 
+/**
+ * The time control, as free text for the header to print verbatim — e.g.
+ * `30min + 30sec`, which is the form the FESA guide shows, but a tournament
+ * with sudden death, an increment or a per-round change needs to say so in
+ * its own words. Trimmed, with a blank entry normalized to `None`.
+ * Descriptive only, like [`Self::dates`].
+ */
+time_control?: string | null, 
 /**
  * How the tournament is paired: Swiss/MacMahon over static ratings (with the
  * floater/airtight/club/MacMahon knobs) or ELO mode over a live estimate (see

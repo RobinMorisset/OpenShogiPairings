@@ -59,7 +59,8 @@ tournament. For how it's built, see [Architecture](#architecture) below.
 - **FESA rating list integration**: registration autocompletes name, ELO, and
   grade from the federation's list, refreshable on demand; the tournament
   cross-table can be exported as an **American Grid** for the federation's
-  ELO update.
+  ELO update, headed by the tournament's name, place, dates and time control
+  (all but the name entered in the settings).
 - **Manual point adjustments** (a bonus or penalty with a mandatory reason),
   for corrections outside the normal scoring.
 - **Two-round "long games"** (niche): for tournaments that give the top boards
@@ -176,6 +177,24 @@ A login exchanges the password for a per-boot random bearer token
 `OSP_DATA_DIR` is set, tournaments (and their passwords) persist to disk and
 reload on boot; otherwise the registry is in-memory only.
 
+### Where the files live
+
+Two directories, configured independently by environment variable — the desktop
+app reads the same two, so one name means one thing everywhere:
+
+| Variable | Holds | Default (desktop app) | Default (`osp-server`) |
+| --- | --- | --- | --- |
+| `OSP_DATA_DIR` | One `{id}.json` (+ `{id}.auth.json`) per tournament. | `<data dir>/openshogipairings/tournaments` | *(unset = in-memory only)* |
+| `OSP_BACKUP_DIR` | One directory of rotating automatic backups per tournament. | `<data dir>/openshogipairings/backups` | same |
+
+`<data dir>` is the per-user data directory (`~/Library/Application Support` on
+macOS, `%APPDATA%` on Windows, `$XDG_DATA_HOME` on Linux). They are separate
+knobs on purpose: the backups are the recovery copy, so putting the live
+tournaments on a synced folder while the backups stay on the local disk (or the
+reverse) is a reasonable thing to want. Both are logged at startup, and the
+backups path is also shown in the app — in the Backups button's tooltip and at
+the top of its panel.
+
 ### Live multi-referee sync and conflict detection
 
 Several referees can edit the same tournament from different machines at
@@ -276,12 +295,15 @@ else removing the most recent round) to replay it or undo a mistake.
 Finalizing registration assigns each player a tournament number (by ELO,
 unrated last; later additions get the next free number). The Standings tab is
 a ranked table: a row per player (ordered by the referee-chosen criteria) with
-one column per completed round (`opponent-number` + `+`/`−`, or `0+` for a bye
-/ `0-` for an absence), a win count, and one column per selected ranking
+one column per round that has started (`opponent-number` + `+`/`−`, or `0+` for
+a bye / `0-` for an absence), a win count, and one column per selected ranking
 criterion — Points plus fourteen tie-break metrics (SOS / SODOS / SOSOS, the
 Buchholz cuts, and the cumulative score, each in a MacMahon-inclusive and a
 wins-only flavour; direct confrontation; and the estimated ELO in the ELO
-pairing modes), reorderable in Settings.
+pairing modes), reorderable in Settings. The round in progress gets its column
+(marked `R3*`) as soon as it is paired, each cell filling in as its result is
+recorded and showing `5?` until then; the scored columns and the ranking count
+completed rounds only, so the table re-sorts in one step once the round ends.
 
 Mutations go through a `TournamentStore` that keeps the current tournament plus a
 stack of prior snapshots (the undo history); create/load/restore reset it.
@@ -320,7 +342,7 @@ that tournament's bearer token if it has a password (except `/login` and
 | `GET /` | Fetch the tournament (`TournamentView`; 404 if unknown). |
 | `DELETE /` | Delete the tournament. |
 | `POST /undo` | Revert the last change (server-side undo history). |
-| `GET /american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
+| `GET /american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: a header carrying the tournament's name, place, dates and time control, then one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
 | `PUT /settings` | Replace the whole `TournamentSettings`. Its shape is nested: `pairing` is a tagged union — either `{ "kind": "swiss", "floater_style": "classic"｜"median", "macmahon": { "thresholds": [ { "criterion": { "kind": "elo", "value": 1200 }, "drops_after_round"?: 3 }, { "criterion": { "kind": "grade", "grade": { "kind": "dan"｜"kyu", "level": 1 } } } ], "source": { "kind": "static" } }, "airtight_groups"?: 2, "club_protection": { "kind": "on", "rounds"?: 3, "exempt_clubs"?: ["Paris"] } }` or `{ "kind": "elo", "estimator": { … } }` for the experimental pure-ELO pairing mode. Alongside `pairing`, the top level carries `cup_enabled`, `cup_format` (`"direct"`｜`"qualifier"` — see the hybrid-cup section above; only consulted when `cup_enabled`), `long_boards_enabled`, `handicap_policy` (`{ "kind": "none" }｜{ "kind": "enabled", "display": …, "wiel_rule"?: false }`), `half_point_absences`, `tiebreaks` (an ordered array, e.g. `["points","sos_m",…]`), and `categories` (referee-defined player categories, an array of `{ "id", "name" }`; blank-named entries are dropped on normalization). Notes: a threshold's `criterion` mixes ELO and grade freely (each counted independently) and `drops_after_round` makes it a degressive threshold; `airtight_groups`, if set, forbids pairing across MacMahon groups during rounds `1..=n`; `club_protection` is `{ "kind": "off" }` or `{ "kind": "on", … }`; `macmahon.source` is `{ "kind": "static" }` or `{ "kind": "from_estimate", "estimator": { … } }` (estimate-based MacMahon). The `estimator` knobs are described in [`docs/elo-pairing-mode.md`](docs/elo-pairing-mode.md). |
 | `POST /cancel-round` | Cancel the last round — discards the open draft if one is being prepared, otherwise removes the most recent round (undoable). |
 | `POST /rounds/prepare` | Begin drafting the next round. For round 1, finalizes registration first, in the same undo step — that is the only way to finalize. Body optional: `{ "cup_size": 8｜16｜32｜64 }` when the hybrid cup is enabled — `cup_size` is the *bracket* size; it seeds the top eligible players into it, taking `cup_size` of them under `cup_format: "direct"` and `1.5 × cup_size` under `"qualifier"` (400 if fewer are marked eligible). Ignored from round 2 on (already finalized). A round completes automatically once every board has a result, so there is no separate "complete round" call. |
@@ -355,7 +377,7 @@ that tournament's bearer token if it has a password (except `/login` and
 | `POST /teams/{team_id}/sort-by-rating` | Reset the board order to descending pairing rating (unrated last). |
 | `POST /teams/{team_id}/adjustments` | Apply a manual point bonus/penalty to a team: `{ "delta", "reason" }` (reason mandatory). Unlike the roster routes this stays available after finalization — adjustments are team-level in team mode, and the per-player ones are refused there. |
 | `DELETE /teams/{team_id}/adjustments/{adjustment_id}` | Remove a team adjustment. |
-| `GET /backups` | List automatic backups, newest first (taken at every round-lifecycle transition). |
+| `GET /backups` | The automatic backups (taken at every round-lifecycle transition): `{ "directory", "backups": [...] }`, newest first. `directory` is the absolute path they are written to — shown in the Backups button's tooltip and the panel, so the files can be found outside the app — or `null` when no backups directory could be resolved and nothing is being backed up. |
 | `POST /backups/{backup_id}/restore` | Restore a backup as the current tournament; resets undo history. |
 
 The FESA rating list is fixed-width, Latin-1 text (parsed in
@@ -479,8 +501,36 @@ git config core.hooksPath scripts/git-hooks
   --all-targets -- -D warnings`, `svelte-check`, and an i18n locale-key check
   (`scripts/check-i18n-keys.mjs`, catching keys that exist in some locales but
   not all). Fast; keeps the tree clean commit by commit.
-- `pre-push` — the full test suite: `cargo test --workspace` and the frontend
-  tests (`npm test`). Slower, so it only runs before sharing work.
+- `pre-push` — the full test suite (`cargo test --workspace` and the frontend
+  tests, `npm test`), a rustdoc pass with warnings denied (`cargo doc --workspace
+  --no-deps --document-private-items`, catching doc links that stopped
+  resolving — rustdoc never fails a build over one), plus the
+  dependency-advisory check
+  (`scripts/check-advisories.py`, the same one CI runs). Slower, so it only runs
+  before sharing work. The advisory check needs
+  [`cargo-audit`](https://github.com/rustsec/rustsec) (`cargo install
+  cargo-audit`); without it the hook says so and skips rather than blocking the
+  push, and CI catches what you miss.
+
+### Dependency advisories
+
+`scripts/check-advisories.py` audits **both** lockfiles — the workspace's and
+`frontend/src-tauri`'s, which is outside the workspace and carries the whole
+Tauri tree — and triages the results against the resolved dependency graph:
+
+```sh
+python3 scripts/check-advisories.py
+```
+
+`cargo audit` on its own reads a lockfile, and a lockfile is feature-blind: it
+records a package's *optional* dependencies whether or not anything enables them,
+so it reports crates that are never compiled into anything shipped. Rather than
+carrying an ignore list — a claim about the dependency graph on the day it was
+written, which keeps holding silently after it stops being true — the script asks
+cargo which packages are actually in the graph and keeps only the advisories
+whose package (name *and* version) is really there. Everything it dismisses is
+printed on every run, so the reasoning stays visible; anything that fails to run
+is an error, never a pass.
 
 ### Coverage
 

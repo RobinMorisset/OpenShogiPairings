@@ -57,7 +57,9 @@
   }: Props = $props();
 
   // Round number → its index into `tournament.rounds` (and so into
-  // `effectiveWinners`), since that array isn't filtered to completed rounds.
+  // `effectiveWinners`), so a cell can find its board's server-computed winner
+  // from the round it belongs to rather than from its column position — which a
+  // long game's result, shown one column along, doesn't share.
   const roundIndexByNumber = $derived(
     new Map(tournament.rounds.map((r, i) => [r.number, i])),
   );
@@ -147,8 +149,23 @@
     return m;
   });
 
-  // One column per completed round.
-  const completedRounds = $derived(tournament.rounds.filter((r) => r.completed));
+  // One column per round that has *started* — every confirmed round, not only
+  // the completed ones (a draft isn't a round yet, so `tournament.rounds` is
+  // exactly that). The round in progress gets its column as soon as it is
+  // paired, filling in cell by cell as results are recorded: pending boards
+  // show `3?` rather than a win or a loss.
+  //
+  // The numbers beside them do *not* follow along. The server scores from the
+  // completed rounds alone (`compute_scores`), so wins, points, every tie-break
+  // and the row order all stay put until the referee completes the round, at
+  // which point the table re-sorts in one step. That is the point of the split:
+  // the live column answers "what has come in so far?" without the ranking
+  // churning under the referee's eyes mid-round.
+  const shownRounds = $derived(tournament.rounds);
+  const completedCount = $derived(tournament.rounds.filter((r) => r.completed).length);
+  // The round in progress, if any — its column is marked and footnoted, since
+  // its results aren't in the ranking yet.
+  const liveRound = $derived(tournament.rounds.find((r) => !r.completed) ?? null);
 
   // Rows follow the server's ranked order, joined to each player's details.
   const byId = $derived(new Map(tournament.players.map((p) => [p.id, p])));
@@ -187,6 +204,18 @@
     return p ? `${p.last_name} ${p.first_name}`.trim() : "—";
   };
 
+  /** How a cross-table cell names the opponent it faced: `Doe Jane (1800)`, or
+   * the bare name for an unrated player (an empty `()` would read as a missing
+   * value rather than an absent rating). The rating rides along because it is
+   * the question a referee hovers a cell to answer — was that a win against a
+   * strong player? — and the cross-table number alone doesn't say. */
+  const opponentLabel = (id: number): string => {
+    const p = byTid.get(id);
+    if (!p) return "—";
+    const name = `${p.last_name} ${p.first_name}`.trim();
+    return p.rating != null ? `${name} (${p.rating})` : name;
+  };
+
   // Show a MacMahon column (between Wins and Points) when the starting score
   // matters — either someone has MacMahon starting points, or a manual
   // bonus/penalty adjusts a starting score. Its cell hosts the adjustment
@@ -217,10 +246,10 @@
   // row alone; a player's own identity and results stay on theirs.
   const teamMode = $derived(teamStandings.length > 0);
 
-  /** The matches of each completed round, derived from the rosters exactly as
-   *  the round view derives them (see `teams.ts`). */
+  /** The matches of each round with a column, derived from the rosters exactly
+   *  as the round view derives them (see `teams.ts`). */
   const matchesByRound = $derived(
-    completedRounds.map((round) =>
+    shownRounds.map((round) =>
       teamMode ? teamMatches(round, tournament.teams ?? [], tournament.players) : [],
     ),
   );
@@ -273,9 +302,6 @@
         kind: "team-played";
         opponent: string;
         opponentName: string;
-        /** The opponents' average pairing rating — what a team's strength is
-         *  read from, and null unless every one of its members is rated. */
-        opponentElo: number | null;
         won: boolean;
         level: boolean;
         wins: number;
@@ -291,7 +317,7 @@
     | { kind: "not-in-round" };
 
   function teamCell(team: TeamStanding, i: number): TeamCell {
-    const round = completedRounds[i];
+    const round = shownRounds[i];
     const match = matchesByRound[i].find(
       (m) => m.team1.id === team.team_id || m.team2.id === team.team_id,
     );
@@ -307,7 +333,12 @@
     const isFirst = match.team1.id === team.team_id;
     const other = isFirst ? match.team2 : match.team1;
     const opponent = String(other.tournament_id ?? "?");
-    const opponentName = other.name;
+    // A team reads as an opponent the way a player does (`opponentLabel`): its
+    // name, and the average rating when every member of it has one.
+    const elo = teamAverageRating(
+      other.members.map((id) => byId.get(id)).filter((p): p is Player => p != null),
+    );
+    const opponentName = elo != null ? `${other.name} (${elo})` : other.name;
     const roundIdx = roundIndexByNumber.get(round.number);
     const score = matchScore(round, match, (roundIdx != null && effectiveWinners[roundIdx]) || []);
     if (!score.decided) return { kind: "team-pending", opponent, opponentName };
@@ -320,9 +351,6 @@
       kind: "team-played",
       opponent,
       opponentName,
-      opponentElo: teamAverageRating(
-        other.members.map((id) => byId.get(id)).filter((p): p is Player => p != null),
-      ),
       won: wins > losses,
       level: wins === losses,
       wins,
@@ -372,12 +400,7 @@
 
   function teamCellTitle(cell: TeamCell & { kind: "team-played" }): string {
     return $_("resultsView.teamMatchTitle", {
-      values: {
-        name: cell.opponentName,
-        elo: cell.opponentElo ?? "—",
-        wins: cell.wins,
-        losses: cell.losses,
-      },
+      values: { name: cell.opponentName, wins: cell.wins, losses: cell.losses },
     });
   }
 
@@ -424,7 +447,7 @@
   type PlayedCell = {
     kind: "played";
     opponent: string;
-    /** The opponent's full name, for the cell tooltip. */
+    /** The opponent, named for the cell tooltip (see `opponentLabel`). */
     opponentName: string;
     /** This player actually won the game — drives the +/− sign and colour. */
     actualWon: boolean;
@@ -473,19 +496,19 @@
     const pid = tid(player);
     const onLong = (round: Round) =>
       round.boards.find((b) => b.long && (b.player1 === pid || b.player2 === pid));
-    const here = onLong(completedRounds[i]);
+    const here = onLong(shownRounds[i]);
     if (here) {
       const opp = here.player1 === pid ? here.player2 : here.player1;
-      return { kind: "long-pending", opponentName: nameOfTid(opp) };
+      return { kind: "long-pending", opponentName: opponentLabel(opp) };
     }
     if (i > 0) {
-      const prev = completedRounds[i - 1];
+      const prev = shownRounds[i - 1];
       const idx = prev.boards.findIndex(
         (b) => b.long && (b.player1 === pid || b.player2 === pid),
       );
       if (idx >= 0) return cellForBoard(player, prev, prev.boards[idx], idx);
     }
-    return cellFor(player, completedRounds[i]);
+    return cellFor(player, shownRounds[i]);
   }
 
   function cellFor(player: Player, round: Round): Cell {
@@ -505,7 +528,7 @@
     const side: Winner = isP1 ? "player1" : "player2";
     const opponentTid = isP1 ? board.player2 : board.player1;
     const opponent = String(opponentTid);
-    const opponentName = nameOfTid(opponentTid);
+    const opponentName = opponentLabel(opponentTid);
     const forfeit = forfeitOf(board);
     if (forfeit) {
       // This side missed the board for a single absence on their side, or when
@@ -830,8 +853,16 @@
         {/if}
         <th>{$_("resultsView.nationality")}</th>
         <th>{$_("resultsView.club")}</th>
-        {#each completedRounds as round (round.number)}
-          <th class="num">{$_("resultsView.roundColumn", { values: { number: round.number } })}</th>
+        {#each shownRounds as round (round.number)}
+          {#if round.completed}
+            <th class="num">{$_("resultsView.roundColumn", { values: { number: round.number } })}</th>
+          {:else}
+            <th
+              class="num live-round"
+              data-tip={$_("resultsView.roundInProgressTitle", { values: { number: round.number } })}
+              >{$_("resultsView.roundColumnLive", { values: { number: round.number } })}</th
+            >
+          {/if}
         {/each}
         <th class="num">{$_("resultsView.victories")}</th>
         {#if showMacmahon}
@@ -851,7 +882,7 @@
             <!-- The team's name stands where its players' names are, straddling
                  everything that describes a player rather than a result. -->
             <td class="team-name" colspan={identityColumns}>{team.name}</td>
-            {#each completedRounds as round, i (round.number)}
+            {#each shownRounds as round, i (round.number)}
               {@const cell = teamCell(team, i)}
               <td class="num result">
                 {#if cell.kind === "team-played"}
@@ -860,12 +891,7 @@
                     data-tip={teamCellTitle(cell)}>{teamLabel(cell)}</span
                   >
                 {:else if cell.kind === "team-pending"}
-                  <span
-                    class="pending"
-                    data-tip={$_("resultsView.opponentTitle", {
-                      values: { name: cell.opponentName },
-                    })}>{cell.opponent}?</span
-                  >
+                  <span class="pending" data-tip={cell.opponentName}>{cell.opponent}?</span>
                 {:else if cell.kind === "team-sitout"}
                   {@const tone = isBye(cell.sitout) && cell.sitout.value === "full" ? "win" : "absent"}
                   {#if onSetTeamSitoutValue}
@@ -946,7 +972,7 @@
           {/if}
           <td>{player.nationality ?? "—"}</td>
           <td>{player.club ?? "—"}</td>
-          {#each completedRounds as round, i (round.number)}
+          {#each shownRounds as round, i (round.number)}
             {@const cell = longAwareCell(player, i)}
             <td class="num result">
               {#if cell.kind === "sitout"}
@@ -1006,22 +1032,20 @@
                   >0+</span
                 >
               {:else if cell.kind === "pending"}
-                <span
-                  class="pending"
-                  data-tip={$_("resultsView.opponentTitle", { values: { name: cell.opponentName } })}
-                  >{cell.opponent}?</span
-                >
+                <!-- The opponent alone, unprefixed: the cell already says this
+                     is a game against them, so a "vs" in front of the name is
+                     a word the referee reads past on every single hover. -->
+                <span class="pending" data-tip={cell.opponentName}>{cell.opponent}?</span>
               {:else}
-                {@const opponentTitle = $_("resultsView.opponentTitle", { values: { name: cell.opponentName } })}
                 <span
                   class={cell.actualWon ? "win" : "loss"}
                   data-tip={cell.handicap && cell.effectiveWon !== cell.actualWon
-                    ? `${opponentTitle}\n${$_(
+                    ? `${cell.opponentName}\n${$_(
                         cell.effectiveWon
                           ? "resultsView.handicapGameWin"
                           : "resultsView.handicapGameLoss",
                       )}`
-                    : opponentTitle}>{playedLabel(cell)}</span
+                    : cell.opponentName}>{playedLabel(cell)}</span
                 >
               {/if}
             </td>
@@ -1064,7 +1088,16 @@
     </tbody>
   </table>
 
-  {#if completedRounds.length === 0}
+  <!-- The live column shows results the ranking hasn't taken in yet, so say so
+       rather than leaving the referee to wonder why a recorded win moved
+       nothing. It supersedes the "nothing completed yet" note, which says less
+       and would only ever appear alongside it (a round is in progress in both
+       cases); that note survives for the completed-but-empty table. -->
+  {#if liveRound}
+    <p class="muted note">
+      {$_("resultsView.roundInProgressNote", { values: { number: liveRound.number } })}
+    </p>
+  {:else if completedCount === 0}
     <p class="muted note">
       {$_("resultsView.noRoundsCompleted")}
     </p>
@@ -1194,6 +1227,11 @@
     color: var(--text-tertiary);
   }
   .pending {
+    color: var(--color-warning);
+  }
+  /* The in-progress round's header, in the same tone as the pending cells
+     below it: the column is live, and none of it counts yet. */
+  th.live-round {
     color: var(--color-warning);
   }
   .victories {
