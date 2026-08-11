@@ -140,7 +140,11 @@ files from fesashogi.eu, so it needs network and a few minutes):
 python scripts/fesa_fetch_all.py          # 1. fetch+convert every FESA season
 python scripts/fesa_filter_valid.py       # 2. move files osp-sim rejects to invalid/ (~2.7%)
 python scripts/fesa_extract_elo_pairs.py  # 3. pool the per-player sampling table
+python scripts/fesa_anomalies.py          # 4. (optional) refresh ANOMALIES.md
 ```
+
+Step 4 rewrites `test_files/fesa_results/ANOMALIES.md`: every corpus file the
+importer rejects or has to work around, grouped by defect, to report upstream.
 
 **Generate a size series** — fixed rounds and seed, so only N varies:
 
