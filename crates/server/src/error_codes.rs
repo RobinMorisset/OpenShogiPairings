@@ -48,6 +48,22 @@ pub const LOCALIZED_ERROR_CODES: &[&str] = &[
     // Point adjustments
     "empty_adjustment_reason",
     "zero_point_adjustment",
+    // Team tournaments
+    "team_mode_rejects_cup",
+    "team_mode_rejects_long_games",
+    "team_mode_rejects_elo_pairing",
+    "team_mode_rejects_grade_thresholds",
+    "team_mode_rejects_est_elo_tiebreak",
+    "invalid_team_size",
+    "team_settings_locked",
+    "empty_team_name",
+    "duplicate_team_name",
+    "team_is_full",
+    "players_without_team",
+    "incomplete_team",
+    "members_without_pairing_rating",
+    "not_enough_teams",
+    "no_late_registration_in_team_mode",
     // Saved files and settings
     "unsupported_format_version",
     "malformed_save",

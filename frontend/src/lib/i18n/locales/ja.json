@@ -416,7 +416,22 @@
     "zeroPointAdjustment": "0点の調整は意味がありません。",
     "unsupportedFormatVersion": "このファイルは大会フォーマット{found}を使っていますが、このバージョンでは読み込めません（対応するのは{supported}です）。",
     "malformedSave": "このファイルは大会データとして読み込めません: {details}",
-    "eloEstimateUnanchored": "レーティング推定の基準となる値がありません。レーティングのある選手を追加するか、レーティングを固定する（K倍率を0にする）か、レーティングなしの事前分布を平坦以外にしてください。"
+    "eloEstimateUnanchored": "レーティング推定の基準となる値がありません。レーティングのある選手を追加するか、レーティングを固定する（K倍率を0にする）か、レーティングなしの事前分布を平坦以外にしてください。",
+    "teamModeRejectsCup": "団体戦とトーナメント（勝ち抜き戦）は併用できません。どちらかをオフにしてください。",
+    "teamModeRejectsLongGames": "団体戦では長時間対局（2ラウンドにまたがる対局）は使えません。どちらかをオフにしてください。",
+    "teamModeRejectsEloPairing": "団体戦はELOモードでは組み合わせできません。スイス式かマクマホンを選んでください。",
+    "teamModeRejectsGradeThresholds": "団体戦では段級位によるマクマホンの区切りは使えません。チームには平均レーティングしかないため、ELOの区切りを使ってください。",
+    "teamModeRejectsEstEloTiebreak": "団体戦では推定ELOによる順位決定は使えません。順位決定方法から外してください。",
+    "invalidTeamSize": "チーム人数 {size} は指定できません。2〜9 の範囲で指定してください。",
+    "teamSettingsLocked": "参加登録の確定後は、団体戦の設定とチーム人数を変更できません。",
+    "emptyTeamName": "チーム名を入力してください。",
+    "duplicateTeamName": "{name} というチームはすでに存在します。",
+    "teamIsFull": "このチームはすでに {size} 人そろっています。",
+    "playersWithoutTeam": "{count} 人がまだどのチームにも所属していません。確定前に全員をチームに入れてください。",
+    "incompleteTeam": "チーム {name} は {need} 人中 {have} 人です。",
+    "membersWithoutPairingRating": "マクマホンの持ち点には、レーティングのないチームメンバー全員に組み合わせ用ELOが必要です（あと {count} 人）。",
+    "notEnoughTeams": "団体戦には少なくとも2チームが必要です（現在 {have} チーム）。",
+    "noLateRegistrationInTeamMode": "団体戦では追加登録できません。全員がチームに所属している必要があり、メンバー構成は確定済みです。"
   },
   "tiebreaks": {
     "points": {

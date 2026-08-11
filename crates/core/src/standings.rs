@@ -394,6 +394,7 @@ mod tests {
             last_name: format!("P{tid}"),
             first_name: String::new(),
             rating,
+            pairing_rating: None,
             grade: None,
             fesa_games: None,
             nationality: None,

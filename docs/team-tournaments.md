@@ -1,9 +1,13 @@
 # Team tournaments — design
 
-Status: **draft, under discussion**. Landed so far: the [preliminary board-outcome
-refactor](#preliminary-refactor-board-outcome-as-a-sum-type) and the [engine's unit
-abstraction](#engine-refactor-the-unit-abstraction) — both behaviour-preserving
-groundwork. Nothing team-specific is implemented yet.
+Status: **partly implemented**. Landed so far: the [preliminary board-outcome
+refactor](#preliminary-refactor-board-outcome-as-a-sum-type), the [engine's unit
+abstraction](#engine-refactor-the-unit-abstraction), and the [data
+model](#data-model) with [registration and
+finalization](#registration-and-finalization). A team tournament can therefore be
+configured, rostered and finalized, but **not yet paired** — `prepare_round`
+rejects team mode with an explicit "not implemented" error until the team pairing
+path lands. Scoring, standings, the server routes and the UI are still to come.
 
 A team tournament is the format that traditionally precedes European shogi
 championships (e.g. WOSC): teams of N players (usually N = 3) are the unit of
@@ -153,6 +157,12 @@ pub struct Team {
 `TournamentId`s are still assigned at finalization as today — boards, the
 grid, and per-player scoring all keep using them.
 
+**Landed.** `Team` lives in `crates/core/src/team.rs`, together with the roster
+operations on `Tournament` (create / rename / delete, add / remove member,
+reorder or auto-sort the board order) and `finalize_teams`. `tournament_id` is
+`Option<TeamId>`, assigned at finalization by descending average pairing rating
+with creation order breaking ties.
+
 ### Settings
 
 Team mode is **orthogonal to `PairingMode`**, like the cup — not a third mode
@@ -172,6 +182,12 @@ pub struct TeamSettings {
 
 Changing `size` (or toggling team mode) after finalization is rejected, like
 other structural settings.
+
+**Landed**, with the size validated against `TEAM_SIZES` (2..=9) and each
+incompatible feature reported as its own `TeamModeConflict` variant, so the
+error names the two settings that disagree (`team_mode_rejects_cup`,
+`…_long_games`, `…_elo_pairing`, `…_grade_thresholds`, `…_est_elo_tiebreak`) in
+all nine locales.
 
 ### Pairing-only rating for unrated players (MacMahon only)
 

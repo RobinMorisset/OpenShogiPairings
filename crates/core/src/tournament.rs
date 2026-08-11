@@ -24,8 +24,9 @@ use crate::round::{
     SitoutKind, SitoutValue, Winner,
 };
 use crate::scoring::compute_scores;
-use crate::settings::TournamentSettings;
+use crate::settings::{TeamModeConflict, TournamentSettings, TEAM_SIZES};
 use crate::standings::{compute_standings, Standing};
+use crate::team::Team;
 use crate::units::{TournamentId, UnitKey};
 use typed_index_collections::TiVec;
 
@@ -42,7 +43,8 @@ use typed_index_collections::TiVec;
 /// the separate `bye`, `cup_byes` and `absent` fields.
 /// v6: boards carry one `outcome` sum in place of the separate `result`,
 /// `drawn` and `no_show` fields.
-pub const TOURNAMENT_FORMAT_VERSION: u32 = 6;
+/// v7: team tournaments — a `teams` roster list and `settings.teams`.
+pub const TOURNAMENT_FORMAT_VERSION: u32 = 7;
 
 fn default_format_version() -> u32 {
     TOURNAMENT_FORMAT_VERSION
@@ -83,6 +85,11 @@ pub struct Tournament {
     /// finalization (see [`Cup`]); `None` when there is no cup.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cup: Option<Cup>,
+    /// The registered teams, in creation order — the only team state that is
+    /// *stored*, everything else about a team being replayed from the boards.
+    /// Empty (and absent from JSON) outside team mode.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub teams: Vec<Team>,
 }
 
 /// Errors that can arise while mutating a [`Tournament`].
@@ -205,6 +212,81 @@ pub enum TournamentError {
     /// No point adjustment with the given id exists for that player.
     #[error("no point adjustment {adjustment} for player {player}")]
     AdjustmentNotFound { player: Uuid, adjustment: Uuid },
+
+    // --- Team tournaments ---
+    /// Team mode was enabled alongside a feature it cannot support (or such a
+    /// feature was turned on while team mode was already active). Neither side is
+    /// silently disabled: the referee is told which two settings disagree and
+    /// picks.
+    #[error("team mode does not support {} — turn one of the two off", .0.describe())]
+    TeamModeConflict(TeamModeConflict),
+    /// The configured team size is outside [`TEAM_SIZES`].
+    #[error("invalid team size {size} (must be between 2 and 9)")]
+    InvalidTeamSize { size: u32 },
+    /// Team mode, or the team size, was changed after registration was
+    /// finalized — both reshape every roster and every future match.
+    #[error("team mode and team size are fixed once registration is finalized")]
+    TeamSettingsLocked,
+    /// A team operation was attempted on an individual tournament.
+    #[error("this is not a team tournament")]
+    NotATeamTournament,
+    /// No team with the given id exists in this tournament.
+    #[error("no team with id {0}")]
+    TeamNotFound(Uuid),
+    /// A team's name was empty or whitespace-only.
+    #[error("team name must not be empty")]
+    EmptyTeamName,
+    /// Another team already has that name (compared ignoring case).
+    #[error("a team named {0} already exists")]
+    DuplicateTeamName(String),
+    /// A player was assigned to a team while already a member of another — a
+    /// player belongs to exactly one team.
+    #[error("player {0} is already in another team")]
+    PlayerAlreadyInATeam(Uuid),
+    /// A player was assigned to a team that already has its full roster.
+    #[error("that team already has its {size} members")]
+    TeamIsFull { size: u32 },
+    /// A player was removed from, or reordered within, a team they aren't in.
+    #[error("player {player} is not a member of team {team}")]
+    NotATeamMember { team: Uuid, player: Uuid },
+    /// A board-order reorder didn't name exactly the team's current members.
+    #[error("a board order must list exactly the team's current members")]
+    InvalidBoardOrder,
+    /// Finalization found a player belonging to no team.
+    #[error("every player must be in a team before finalizing ({count} are not)")]
+    PlayersWithoutTeam { count: usize },
+    /// Finalization found a team whose roster isn't the configured size.
+    #[error("team {name} has {have} of {need} members")]
+    IncompleteTeam {
+        name: String,
+        have: usize,
+        need: u32,
+    },
+    /// Finalization found a team member with neither a rating nor a referee-set
+    /// pairing rating, while MacMahon starting points are in use — so that member
+    /// would contribute nothing to the team average the thresholds read.
+    #[error(
+        "MacMahon starting points need a pairing ELO for every unrated team \
+         member ({count} are missing one)"
+    )]
+    MembersWithoutPairingRating { count: usize },
+    /// Fewer than two teams at finalization.
+    #[error("need at least 2 teams (have {have})")]
+    NotEnoughTeams { have: usize },
+    /// A pairing rating was set outside the one configuration it means anything
+    /// in: team mode with MacMahon starting points.
+    #[error("a pairing ELO is only meaningful in team mode with MacMahon starting points")]
+    PairingRatingNotApplicable,
+    /// Registration of any kind after finalization, in team mode (see
+    /// `docs/team-tournaments.md`: a late individual would be teamless, and a
+    /// late team would need teamless players first).
+    #[error("a team tournament cannot take late registrations")]
+    NoLateRegistrationInTeamMode,
+    /// Team-level pairing isn't implemented yet, so a team tournament can be
+    /// registered and finalized but not paired. Temporary — see the TODO in
+    /// [`Tournament::prepare_round`].
+    #[error("pairing a team tournament is not implemented yet")]
+    TeamPairingNotImplemented,
 }
 
 impl Tournament {
@@ -226,6 +308,7 @@ impl Tournament {
             draft: None,
             rounds: Vec::new(),
             cup: None,
+            teams: Vec::new(),
         })
     }
 
@@ -236,6 +319,13 @@ impl Tournament {
     pub fn add_player(&mut self, new: NewPlayer) -> Result<&Player, TournamentError> {
         if new.last_name.trim().is_empty() {
             return Err(TournamentError::EmptyPlayerName);
+        }
+        // Team mode takes no late registration at all: a player registered now
+        // would be teamless, breaking the frozen "everyone is in exactly one
+        // team" invariant, and a whole new team would need its players registered
+        // teamless first. See `docs/team-tournaments.md`.
+        if self.registration_finalized && self.settings.team_mode() {
+            return Err(TournamentError::NoLateRegistrationInTeamMode);
         }
         let mut player = Player::from_new(new);
         // A player registered after finalization gets the next free number
@@ -319,6 +409,13 @@ impl Tournament {
         if self.players.len() == before {
             return Err(TournamentError::PlayerNotFound(id));
         }
+        // A removed player leaves their team too, so no roster can reference a
+        // player who is no longer registered. (Only reachable before
+        // finalization: after it, team rosters are frozen and every player has
+        // been paired.)
+        for team in &mut self.teams {
+            team.members.retain(|&m| m != id);
+        }
         Ok(())
     }
 
@@ -333,6 +430,25 @@ impl Tournament {
         settings: TournamentSettings,
     ) -> Result<&TournamentSettings, TournamentError> {
         let settings = settings.normalized();
+        // Team mode is structural: whether teams exist at all, and how many
+        // players a match takes, shape every roster and every board. Both are
+        // fixed at finalization, like the cup bracket.
+        if self.registration_finalized
+            && (settings.team_mode() != self.settings.team_mode()
+                || settings.team_size() != self.settings.team_size())
+        {
+            return Err(TournamentError::TeamSettingsLocked);
+        }
+        if let Some(teams) = &settings.teams {
+            if !TEAM_SIZES.contains(&teams.size) {
+                return Err(TournamentError::InvalidTeamSize { size: teams.size });
+            }
+        }
+        // Team mode and the features it can't support are rejected as a pair,
+        // naming the conflict — neither side is silently switched off.
+        if let Some(conflict) = settings.team_mode_conflict() {
+            return Err(TournamentError::TeamModeConflict(conflict));
+        }
         // Once the tournament has started, a settings change is the last gate
         // before the new config takes effect (there is no re-finalization), so the
         // ELO scale anchor is validated here too. Before finalization the field may
@@ -340,6 +456,14 @@ impl Tournament {
         // [`finalize_registration_with`], which validates against the final field.
         if self.registration_finalized {
             Self::validate_elo_scale_anchor(&settings, &self.players)?;
+        }
+        // A pairing ELO only means anything under MacMahon starting points; if
+        // this update turns those off, drop the values rather than leaving them
+        // stored where nothing reads them and no UI can reach them.
+        if !(settings.team_mode() && settings.macmahon_in_use()) {
+            for p in &mut self.players {
+                p.pairing_rating = None;
+            }
         }
         // Prune any player memberships in categories this update deleted, so a
         // stale id can never linger (and later collide with a re-created one).
@@ -433,6 +557,15 @@ impl Tournament {
         } else {
             None
         };
+
+        // In team mode: validate the rosters and number the teams. Placed after
+        // every other pre-validation so nothing can fail once it has started
+        // assigning numbers (team mode rejects the cup, so `cup_shape` is `None`
+        // here anyway — but the ordering is what keeps that a fact rather than a
+        // coincidence).
+        if self.settings.team_mode() {
+            self.finalize_teams()?;
+        }
 
         // Assign tournament numbers 1..N in the sorted-table order: highest ELO
         // first, unrated players last, ties broken by registration order.
@@ -666,6 +799,13 @@ impl Tournament {
     pub fn prepare_round(&mut self) -> Result<&RoundDraft, TournamentError> {
         if !self.registration_finalized {
             return Err(TournamentError::RegistrationNotFinalized);
+        }
+        // TODO(team-mode): remove once team pairing lands. Until then a team
+        // tournament can be registered and finalized but not paired — refusing
+        // loudly is the only honest answer, since the player-level engine would
+        // otherwise pair a team tournament as if the teams weren't there.
+        if self.settings.team_mode() {
+            return Err(TournamentError::TeamPairingNotImplemented);
         }
         if self.draft.is_some() {
             return Err(TournamentError::DraftAlreadyExists);

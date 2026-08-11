@@ -35,6 +35,21 @@ first_name: string,
  */
 rating?: number, 
 /**
+ * A referee-assigned rating used **only for pairing-time computations** —
+ * the team average, the fold order, team numbering — when a team member has
+ * no real rating. The established referee practice for team events, where
+ * ELO-based MacMahon starting points need every member to contribute to the
+ * average.
+ *
+ * Never exported and never shown as a rating: the player stays "unrated"
+ * everywhere user-facing, so the American grid's `N` flag and rating column
+ * remain honest. Only meaningful — and only settable — in team mode with
+ * MacMahon starting points in use. A player's *pairing rating* is
+ * [`rating`](Self::rating) falling back to this; see
+ * [`crate::team::pairing_rating`].
+ */
+pairing_rating?: number, 
+/**
  * Optional dan/kyu playing grade, independent of `rating` — used for
  * grade-based MacMahon thresholds (see
  * [`crate::settings::ThresholdCriterion`]).

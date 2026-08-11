@@ -416,7 +416,22 @@
     "zeroPointAdjustment": "Eine Punktanpassung von null hätte keine Wirkung.",
     "unsupportedFormatVersion": "Diese Datei verwendet das Turnierformat {found}, das diese Version nicht lesen kann (sie liest Format {supported}).",
     "malformedSave": "Diese Datei ist keine lesbare Turnierdatei: {details}",
-    "eloEstimateUnanchored": "Der ELO-Schätzung fehlt ein Anker für ihre Skala. Fügen Sie einen gewerteten Spieler hinzu, fixieren Sie die Wertungen (K-Multiplikator 0), oder wählen Sie einen nicht-flachen Prior für Ungewertete."
+    "eloEstimateUnanchored": "Der ELO-Schätzung fehlt ein Anker für ihre Skala. Fügen Sie einen gewerteten Spieler hinzu, fixieren Sie die Wertungen (K-Multiplikator 0), oder wählen Sie einen nicht-flachen Prior für Ungewertete.",
+    "teamModeRejectsCup": "Ein Mannschaftsturnier kann nicht zusätzlich einen K.-o.-Cup enthalten. Schalten Sie eines von beiden aus.",
+    "teamModeRejectsLongGames": "Ein Mannschaftsturnier kann keine langen Partien (über zwei Runden) verwenden. Schalten Sie eines von beiden aus.",
+    "teamModeRejectsEloPairing": "Ein Mannschaftsturnier kann nicht im ELO-Modus ausgelost werden. Wählen Sie Schweizer System oder MacMahon.",
+    "teamModeRejectsGradeThresholds": "Ein Mannschaftsturnier kann keine grad-basierten MacMahon-Schwellen verwenden — eine Mannschaft hat eine Durchschnittswertung, keinen Grad. Verwenden Sie ELO-Schwellen.",
+    "teamModeRejectsEstEloTiebreak": "Ein Mannschaftsturnier kann nicht nach geschätztem ELO entschieden werden. Entfernen Sie dieses Kriterium aus der Reihenfolge.",
+    "invalidTeamSize": "Eine Mannschaftsgröße von {size} ist nicht zulässig — sie muss zwischen 2 und 9 liegen.",
+    "teamSettingsLocked": "Mannschaftsmodus und Mannschaftsgröße lassen sich nach Abschluss der Anmeldung nicht mehr ändern.",
+    "emptyTeamName": "Eine Mannschaft braucht einen Namen.",
+    "duplicateTeamName": "Eine Mannschaft namens {name} existiert bereits.",
+    "teamIsFull": "Diese Mannschaft hat ihre {size} Mitglieder bereits.",
+    "playersWithoutTeam": "{count} Spieler sind noch in keiner Mannschaft. Vor dem Abschluss muss jeder Spieler einer angehören.",
+    "incompleteTeam": "Mannschaft {name} hat {have} von {need} Mitgliedern.",
+    "membersWithoutPairingRating": "MacMahon-Startpunkte brauchen für jedes ungewertete Mannschaftsmitglied ein Auslosungs-ELO — {count} fehlen noch.",
+    "notEnoughTeams": "Ein Mannschaftsturnier braucht mindestens 2 Mannschaften (vorhanden: {have}).",
+    "noLateRegistrationInTeamMode": "Ein Mannschaftsturnier nimmt keine Nachmeldungen an: jeder Spieler muss in einer Mannschaft sein, und die Aufstellungen sind fixiert."
   },
   "tiebreaks": {
     "points": {

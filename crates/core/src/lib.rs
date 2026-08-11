@@ -23,6 +23,7 @@ mod scoring;
 mod settings;
 pub mod sim;
 mod standings;
+mod team;
 mod tournament;
 mod units;
 
@@ -48,13 +49,15 @@ pub use round::{
 pub use settings::{
     ClubProtection, EloEstimator, EloPriorShape, FloaterStyle, HandicapDisplay, HandicapPolicy,
     MacMahon, MacMahonSource, MacMahonThreshold, PairingMode, Ratio, RatioAtLeastOne,
-    ThresholdCriterion, Tiebreak, TournamentSettings, UnratedK,
+    TeamModeConflict, TeamSettings, ThresholdCriterion, Tiebreak, TournamentSettings, UnratedK,
+    TEAM_SIZES,
 };
 pub use standings::{compute_standings, Standing};
+pub use team::{average_pairing_rating, pairing_rating, Team};
 pub use tournament::{
     Tournament, TournamentError, MIN_PLAYERS_PER_ROUND, TOURNAMENT_FORMAT_VERSION,
 };
-pub use units::{HalfPoints, TournamentId, UnitKey, Wins};
+pub use units::{HalfPoints, TeamId, TournamentId, UnitKey, Wins};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

@@ -645,6 +645,7 @@ mod tests {
             last_name: "P".into(),
             first_name: String::new(),
             rating,
+            pairing_rating: None,
             grade: None,
             fesa_games: None,
             nationality: None,

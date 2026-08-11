@@ -416,7 +416,22 @@
     "zeroPointAdjustment": "Korekta o zero punktów nie miałaby żadnego efektu.",
     "unsupportedFormatVersion": "Ten plik używa formatu turnieju {found}, którego ta wersja programu nie potrafi odczytać (obsługuje {supported}).",
     "malformedSave": "Ten plik nie jest czytelnym zapisem turnieju: {details}",
-    "eloEstimateUnanchored": "Estymacja ELO nie ma nic, co zakotwiczyłoby jej skalę. Dodaj gracza z rankingiem, zablokuj rankingi (mnożnik K równy 0) albo wybierz niepłaski rozkład a priori dla graczy bez rankingu."
+    "eloEstimateUnanchored": "Estymacja ELO nie ma nic, co zakotwiczyłoby jej skalę. Dodaj gracza z rankingiem, zablokuj rankingi (mnożnik K równy 0) albo wybierz niepłaski rozkład a priori dla graczy bez rankingu.",
+    "teamModeRejectsCup": "Turniej drużynowy nie może jednocześnie zawierać pucharu pucharowego. Wyłącz jedno z dwóch.",
+    "teamModeRejectsLongGames": "Turniej drużynowy nie może używać długich partii (na dwie rundy). Wyłącz jedno z dwóch.",
+    "teamModeRejectsEloPairing": "Turnieju drużynowego nie można kojarzyć w trybie ELO. Wybierz system szwajcarski lub MacMahona.",
+    "teamModeRejectsGradeThresholds": "Turniej drużynowy nie może używać progów MacMahona według stopnia — drużyna ma średni ranking, a nie stopień. Użyj progów ELO.",
+    "teamModeRejectsEstEloTiebreak": "Turnieju drużynowego nie można rozstrzygać szacowanym ELO. Usuń to kryterium z kolejności.",
+    "invalidTeamSize": "Rozmiar drużyny {size} jest niedozwolony — musi wynosić od 2 do 9.",
+    "teamSettingsLocked": "Trybu drużynowego i rozmiaru drużyny nie można zmienić po zamknięciu rejestracji.",
+    "emptyTeamName": "Drużyna musi mieć nazwę.",
+    "duplicateTeamName": "Drużyna o nazwie {name} już istnieje.",
+    "teamIsFull": "Ta drużyna ma już swoich {size} zawodników.",
+    "playersWithoutTeam": "{count} zawodników nie należy jeszcze do żadnej drużyny. Przed zamknięciem każdy musi być w drużynie.",
+    "incompleteTeam": "Drużyna {name} ma {have} z {need} zawodników.",
+    "membersWithoutPairingRating": "Punkty startowe MacMahona wymagają ELO do kojarzenia dla każdego nierankingowanego zawodnika — brakuje {count}.",
+    "notEnoughTeams": "Turniej drużynowy wymaga co najmniej 2 drużyn (jest {have}).",
+    "noLateRegistrationInTeamMode": "Turniej drużynowy nie przyjmuje zgłoszeń po terminie: każdy zawodnik musi być w drużynie, a składy są zamrożone."
   },
   "tiebreaks": {
     "points": {

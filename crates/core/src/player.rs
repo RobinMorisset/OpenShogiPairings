@@ -119,6 +119,21 @@ pub struct Player {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub rating: Option<u32>,
+    /// A referee-assigned rating used **only for pairing-time computations** —
+    /// the team average, the fold order, team numbering — when a team member has
+    /// no real rating. The established referee practice for team events, where
+    /// ELO-based MacMahon starting points need every member to contribute to the
+    /// average.
+    ///
+    /// Never exported and never shown as a rating: the player stays "unrated"
+    /// everywhere user-facing, so the American grid's `N` flag and rating column
+    /// remain honest. Only meaningful — and only settable — in team mode with
+    /// MacMahon starting points in use. A player's *pairing rating* is
+    /// [`rating`](Self::rating) falling back to this; see
+    /// [`crate::team::pairing_rating`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pairing_rating: Option<u32>,
     /// Optional dan/kyu playing grade, independent of `rating` — used for
     /// grade-based MacMahon thresholds (see
     /// [`crate::settings::ThresholdCriterion`]).
@@ -227,6 +242,9 @@ impl Player {
             last_name: new.last_name.trim().to_string(),
             first_name: new.first_name.unwrap_or_default().trim().to_string(),
             rating: new.rating,
+            // Team-mode only, and set by its own mutation (like `eligible`), so it
+            // is never part of the registration form's payload.
+            pairing_rating: None,
             grade: new.grade,
             // Only meaningful alongside a rating; drop it if the rating was cleared.
             fesa_games: new.rating.and(new.fesa_games),

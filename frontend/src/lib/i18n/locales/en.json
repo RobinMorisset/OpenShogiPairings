@@ -416,7 +416,22 @@
     "zeroPointAdjustment": "A point adjustment of zero would have no effect.",
     "unsupportedFormatVersion": "This file uses tournament format {found}, which this build cannot read (it reads {supported}).",
     "malformedSave": "This file is not a readable tournament save: {details}",
-    "eloEstimateUnanchored": "The ELO estimate has nothing to anchor its scale. Add a rated player, pin ratings (K multiplier 0), or choose a non-flat unrated prior."
+    "eloEstimateUnanchored": "The ELO estimate has nothing to anchor its scale. Add a rated player, pin ratings (K multiplier 0), or choose a non-flat unrated prior.",
+    "teamModeRejectsCup": "A team tournament can't also run the direct-elimination cup. Turn one of the two off.",
+    "teamModeRejectsLongGames": "A team tournament can't use long (two-round) games. Turn one of the two off.",
+    "teamModeRejectsEloPairing": "A team tournament can't be paired in ELO mode. Choose Swiss or MacMahon.",
+    "teamModeRejectsGradeThresholds": "A team tournament can't use grade-based MacMahon thresholds — a team has an average rating, not a grade. Use ELO thresholds.",
+    "teamModeRejectsEstEloTiebreak": "A team tournament can't rank on the estimated-ELO tie-break. Remove it from the tie-break order.",
+    "invalidTeamSize": "A team size of {size} isn't allowed — it must be between 2 and 9.",
+    "teamSettingsLocked": "Team mode and team size can't be changed once registration is finalized.",
+    "emptyTeamName": "A team needs a name.",
+    "duplicateTeamName": "A team named {name} already exists.",
+    "teamIsFull": "That team already has its {size} members.",
+    "playersWithoutTeam": "{count} players are not in a team yet. Every player must be in one before finalizing.",
+    "incompleteTeam": "Team {name} has {have} of {need} members.",
+    "membersWithoutPairingRating": "MacMahon starting points need a pairing ELO for every unrated team member — {count} are still missing one.",
+    "notEnoughTeams": "A team tournament needs at least 2 teams (there are {have}).",
+    "noLateRegistrationInTeamMode": "A team tournament can't take late registrations: every player has to be in a team, and the rosters are frozen."
   },
   "tiebreaks": {
     "points": {

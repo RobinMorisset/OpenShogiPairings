@@ -97,6 +97,7 @@ fn domain_status(err: &TournamentError) -> StatusCode {
         // The sit-out addressed by the route doesn't exist: that player
         // played a board that round, or wasn't in it.
         | TournamentError::PlayerNotSittingOut { .. }
+        | TournamentError::TeamNotFound(_)
         | TournamentError::AdjustmentNotFound { .. } => StatusCode::NOT_FOUND,
         _ => StatusCode::BAD_REQUEST,
     }
@@ -177,6 +178,38 @@ fn domain_payload(err: &TournamentError) -> Option<(&'static str, BTreeMap<Strin
             ],
         ),
 
+        // Team tournaments. The conflict code comes from the conflict itself, so a
+        // new `TeamModeConflict` variant cannot be added without one.
+        TournamentError::TeamModeConflict(conflict) => bare(conflict.code()),
+        TournamentError::InvalidTeamSize { size } => {
+            with("invalid_team_size", [("size", size.to_string())])
+        }
+        TournamentError::TeamSettingsLocked => bare("team_settings_locked"),
+        TournamentError::EmptyTeamName => bare("empty_team_name"),
+        TournamentError::DuplicateTeamName(name) => {
+            with("duplicate_team_name", [("name", name.clone())])
+        }
+        TournamentError::TeamIsFull { size } => with("team_is_full", [("size", size.to_string())]),
+        TournamentError::PlayersWithoutTeam { count } => {
+            with("players_without_team", [("count", count.to_string())])
+        }
+        TournamentError::IncompleteTeam { name, have, need } => with(
+            "incomplete_team",
+            [
+                ("name", name.clone()),
+                ("have", have.to_string()),
+                ("need", need.to_string()),
+            ],
+        ),
+        TournamentError::MembersWithoutPairingRating { count } => with(
+            "members_without_pairing_rating",
+            [("count", count.to_string())],
+        ),
+        TournamentError::NotEnoughTeams { have } => {
+            with("not_enough_teams", [("have", have.to_string())])
+        }
+        TournamentError::NoLateRegistrationInTeamMode => bare("no_late_registration_in_team_mode"),
+
         // Point adjustments.
         TournamentError::EmptyAdjustmentReason => bare("empty_adjustment_reason"),
         TournamentError::ZeroPointAdjustment => bare("zero_point_adjustment"),
@@ -210,6 +243,18 @@ fn domain_payload(err: &TournamentError) -> Option<(&'static str, BTreeMap<Strin
         | TournamentError::NoCurrentRound
         | TournamentError::NotCurrentRound
         | TournamentError::CupBracketInconsistent
+        // Team-mode operations the UI never offers where they don't apply: a
+        // roster edit on an individual tournament, a team id that isn't there, a
+        // reorder that doesn't name the team's own members.
+        | TournamentError::NotATeamTournament
+        | TournamentError::TeamNotFound(_)
+        | TournamentError::PlayerAlreadyInATeam(_)
+        | TournamentError::NotATeamMember { .. }
+        | TournamentError::InvalidBoardOrder
+        | TournamentError::PairingRatingNotApplicable
+        // Deliberately English: unfinished scaffolding, not a state the product
+        // is meant to have. Remove it with the guard it reports.
+        | TournamentError::TeamPairingNotImplemented
         // TODO: `InvalidDraft` carries a free-form English string built at ~8
         // call sites; it needs to become a structured enum before it can be
         // translated. Referee-visible, so worth doing.
@@ -303,7 +348,7 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use osp_core::TournamentId;
+    use osp_core::{TeamModeConflict, TournamentId};
     use uuid::Uuid;
 
     /// One instance of every [`TournamentError`] variant.
@@ -357,6 +402,36 @@ mod tests {
                 player: uuid,
                 adjustment: uuid,
             },
+            TournamentError::TeamModeConflict(TeamModeConflict::Cup),
+            TournamentError::TeamModeConflict(TeamModeConflict::LongGames),
+            TournamentError::TeamModeConflict(TeamModeConflict::EloPairing),
+            TournamentError::TeamModeConflict(TeamModeConflict::GradeThresholds),
+            TournamentError::TeamModeConflict(TeamModeConflict::EstEloTiebreak),
+            TournamentError::InvalidTeamSize { size: 12 },
+            TournamentError::TeamSettingsLocked,
+            TournamentError::NotATeamTournament,
+            TournamentError::TeamNotFound(uuid),
+            TournamentError::EmptyTeamName,
+            TournamentError::DuplicateTeamName("Paris".to_string()),
+            TournamentError::PlayerAlreadyInATeam(uuid),
+            TournamentError::TeamIsFull { size: 3 },
+            TournamentError::NotATeamMember {
+                team: uuid,
+                player: uuid,
+            },
+            TournamentError::InvalidBoardOrder,
+            TournamentError::PlayersWithoutTeam { count: 2 },
+            TournamentError::IncompleteTeam {
+                name: "Paris".to_string(),
+                have: 2,
+                need: 3,
+            },
+            TournamentError::MembersWithoutPairingRating { count: 1 },
+            TournamentError::NotEnoughTeams { have: 1 },
+            TournamentError::PairingRatingNotApplicable,
+            TournamentError::NoLateRegistrationInTeamMode,
+            TournamentError::TeamPairingNotImplemented,
+            TournamentError::DrawnOnForfeitedBoard { round: 1, board: 0 },
         ]
     }
 

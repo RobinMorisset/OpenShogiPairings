@@ -10,11 +10,24 @@ will be explicitly mentioned in the changelog for that version though.
 ## [Unreleased]
 
 **Save files from earlier versions no longer load** (the save format version is
-now 6): a board records what happened on it as a single value instead of three
-separate flags. A stale file is rejected with a clear message rather than
-half-parsed; re-create the tournament.
+now 7): a board records what happened on it as a single value instead of three
+separate flags, and tournaments can carry teams. A stale file is rejected with a
+clear message rather than half-parsed; re-create the tournament.
 
 ### Added
+
+- **Team tournaments, first half** (see
+  [`docs/team-tournaments.md`](docs/team-tournaments.md)): a tournament can be
+  set to team mode with a team size (2–9, default 3), players grouped into named
+  teams with an explicit board order, and an unrated member given a "pairing
+  ELO" used only for pairing-time computations and never exported. Finalizing
+  validates the rosters loudly — every player in exactly one team, every team
+  full, at least two teams — and numbers the teams by descending average rating.
+  Team mode and the features it cannot support (the cup, long games, ELO
+  pairing, grade-based MacMahon thresholds, the estimated-ELO tie-break) are
+  rejected as a conflicting pair, naming both, rather than either being silently
+  disabled. **Pairing a team tournament is not implemented yet**, and is refused
+  with an explicit error.
 
 - **Hybrid cup: a qualification-round format** (Settings → Hybrid cup), used by
   the German Championship. The top half of the bracket is pre-qualified and

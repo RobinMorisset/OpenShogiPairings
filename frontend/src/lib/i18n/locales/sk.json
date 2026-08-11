@@ -416,7 +416,22 @@
     "zeroPointAdjustment": "Bodová úprava s hodnotou nula by nemala žiadny účinok.",
     "unsupportedFormatVersion": "Tento súbor používa turnajový formát {found}, ktorý toto zostavenie nevie prečítať (číta {supported}).",
     "malformedSave": "Tento súbor nie je čitateľný uložený turnaj: {details}",
-    "eloEstimateUnanchored": "Odhad ELO nemá čím ukotviť svoju škálu. Pridajte ratingovaného hráča, zafixujte ratingy (násobiteľ K na 0) alebo zvoľte neploché apriórne rozdelenie pre hráčov bez ratingu."
+    "eloEstimateUnanchored": "Odhad ELO nemá čím ukotviť svoju škálu. Pridajte ratingovaného hráča, zafixujte ratingy (násobiteľ K na 0) alebo zvoľte neploché apriórne rozdelenie pre hráčov bez ratingu.",
+    "teamModeRejectsCup": "Družstvový turnaj nemôže zároveň obsahovať vyraďovací pohár. Vypnite jedno z dvoch.",
+    "teamModeRejectsLongGames": "Družstvový turnaj nemôže používať dlhé partie (na dve kolá). Vypnite jedno z dvoch.",
+    "teamModeRejectsEloPairing": "Družstvový turnaj sa nedá žrebovať v režime ELO. Zvoľte švajčiarsky systém alebo MacMahona.",
+    "teamModeRejectsGradeThresholds": "Družstvový turnaj nemôže používať prahy MacMahona podľa stupňa — družstvo má priemerný rating, nie stupeň. Použite prahy ELO.",
+    "teamModeRejectsEstEloTiebreak": "Družstvový turnaj sa nedá rozhodovať odhadovaným ELO. Odstráňte toto kritérium z poradia.",
+    "invalidTeamSize": "Veľkosť družstva {size} nie je povolená — musí byť od 2 do 9.",
+    "teamSettingsLocked": "Družstvový režim a veľkosť družstva sa po uzavretí registrácie nedajú zmeniť.",
+    "emptyTeamName": "Družstvo musí mať názov.",
+    "duplicateTeamName": "Družstvo s názvom {name} už existuje.",
+    "teamIsFull": "Toto družstvo už má svojich {size} členov.",
+    "playersWithoutTeam": "{count} hráčov ešte nie je v družstve. Pred uzavretím musí byť každý v družstve.",
+    "incompleteTeam": "Družstvo {name} má {have} z {need} členov.",
+    "membersWithoutPairingRating": "Štartovacie body MacMahona vyžadujú žrebovacie ELO pre každého člena bez ratingu — chýba ich {count}.",
+    "notEnoughTeams": "Družstvový turnaj potrebuje aspoň 2 družstvá (teraz {have}).",
+    "noLateRegistrationInTeamMode": "Družstvový turnaj neprijíma dodatočné prihlášky: každý hráč musí byť v družstve a zostavy sú zmrazené."
   },
   "tiebreaks": {
     "points": {

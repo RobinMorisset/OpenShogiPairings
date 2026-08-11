@@ -416,7 +416,22 @@
     "zeroPointAdjustment": "Un ajustement de zéro point n'aurait aucun effet.",
     "unsupportedFormatVersion": "Ce fichier utilise le format de tournoi {found}, que cette version ne sait pas lire (elle lit le format {supported}).",
     "malformedSave": "Ce fichier n'est pas une sauvegarde de tournoi lisible : {details}",
-    "eloEstimateUnanchored": "L'estimation ELO n'a rien pour ancrer son échelle. Ajoutez un joueur classé, figez les classements (multiplicateur K à 0), ou choisissez un prior non plat pour les non classés."
+    "eloEstimateUnanchored": "L'estimation ELO n'a rien pour ancrer son échelle. Ajoutez un joueur classé, figez les classements (multiplicateur K à 0), ou choisissez un prior non plat pour les non classés.",
+    "teamModeRejectsCup": "Un tournoi par équipes ne peut pas aussi comporter une coupe à élimination directe. Désactivez l'un des deux.",
+    "teamModeRejectsLongGames": "Un tournoi par équipes ne peut pas utiliser les parties longues (sur deux rondes). Désactivez l'un des deux.",
+    "teamModeRejectsEloPairing": "Un tournoi par équipes ne peut pas être apparié en mode ELO. Choisissez Suisse ou MacMahon.",
+    "teamModeRejectsGradeThresholds": "Un tournoi par équipes ne peut pas utiliser de seuils MacMahon par grade — une équipe a un classement moyen, pas un grade. Utilisez des seuils ELO.",
+    "teamModeRejectsEstEloTiebreak": "Un tournoi par équipes ne peut pas être départagé par l'ELO estimé. Retirez ce critère de l'ordre des départages.",
+    "invalidTeamSize": "Une taille d'équipe de {size} n'est pas autorisée — elle doit être comprise entre 2 et 9.",
+    "teamSettingsLocked": "Le mode par équipes et la taille des équipes ne peuvent plus changer une fois les inscriptions clôturées.",
+    "emptyTeamName": "Une équipe doit avoir un nom.",
+    "duplicateTeamName": "Une équipe nommée {name} existe déjà.",
+    "teamIsFull": "Cette équipe a déjà ses {size} membres.",
+    "playersWithoutTeam": "{count} joueurs ne sont pas encore dans une équipe. Chaque joueur doit en avoir une avant la clôture.",
+    "incompleteTeam": "L'équipe {name} a {have} membres sur {need}.",
+    "membersWithoutPairingRating": "Les points de départ MacMahon exigent un ELO d'appariement pour chaque membre non classé — il en manque {count}.",
+    "notEnoughTeams": "Un tournoi par équipes demande au moins 2 équipes (il y en a {have}).",
+    "noLateRegistrationInTeamMode": "Un tournoi par équipes n'accepte pas d'inscription tardive : chaque joueur doit être dans une équipe, et les compositions sont figées."
   },
   "tiebreaks": {
     "points": {
