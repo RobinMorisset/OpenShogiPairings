@@ -40,6 +40,25 @@ with (not needed with `--results`):
 | `--strength <FILE>` | JSON object mapping tournament number → ELO |
 | `--jitter <F>` | not a source, but adds rating-dependent noise: `0` = truth is the rating, `1` = sample from the estimator's own prior, `>1` = stress-test |
 
+## Rating reliability (established vs provisional)
+
+A player counts as **established** once their FESA list entry shows ≥ 18 games;
+below that their rating is treated as less trustworthy — the oracle widens their
+true-strength prior by `--oracle-provisional`, and any variant using the ELO
+estimator (pure-ELO pairing, estimate-based MacMahon, the `fidelity(est)` column)
+leans on their rating less.
+
+A `--results` table carries **no game-count column**, so without one of these
+every player imports as provisional and that signal is uniformly wrong:
+
+| Flag | Game counts from |
+|------|------------------|
+| `--games-fesa-before <YYYY-MM-DD>` | the FESA list in force on that date — pass the **tournament's own start date** and it resolves the last permanent list (published 1 Jan / 1 Jul) dated on or before it, so the counts are what the players went *into* the event with |
+| `--games-fesa-list <URL\|PATH>` | a specific list, when you want a transient one (those have no computable date) or a local copy |
+
+Both match players by accent-folded name and fill only the game counts —
+strengths are untouched. Unmatched players keep `None`, i.e. stay provisional.
+
 ## Other options
 
 | Flag | Meaning | Default |

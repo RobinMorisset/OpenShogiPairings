@@ -1,10 +1,10 @@
 //! Enriching base players from a FESA rating list.
 //!
 //! A result table carries no game counts, so every player would import as
-//! provisional. Given the tournament date, resolve the first list that postdates
-//! it (FESA publishes one every 1 Jan and 1 Jul), fetch it, and match players by
-//! name to recover each one's FESA game count — the established/provisional
-//! reliability signal — without touching strengths.
+//! provisional. Given the tournament date, resolve the list that was in force
+//! when it was played (FESA publishes one every 1 Jan and 1 Jul), fetch it, and
+//! match players by name to recover each one's FESA game count — the
+//! established/provisional reliability signal — without touching strengths.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -38,63 +38,30 @@ pub fn parse_ymd(s: &str) -> Result<Ymd, String> {
     Ok((year, month, day))
 }
 
-/// FESA's stable "latest list" endpoint — always resolves to the most recent
-/// published list (a permanent one, or a more-recent transient one). Mirrors
-/// `crates/server/src/ratings.rs`'s `FESA_URL`.
-const FESA_LATEST_URL: &str = "https://fesashogi.eu/old/ratinglists/latest.txt";
-
-/// The FESA rating-list **URL** to fetch for a tournament dated `after`, given the
-/// current date `today`.
+/// The last permanent FESA list date (1 Jan or 1 Jul) on or before `date` — the
+/// list in force on that day.
 ///
-/// FESA publishes a **permanent** list twice a year, on 1 January and 1 July, at a
-/// dated URL. We target the first permanent list strictly after the tournament,
-/// since it already reflects the results. If that list isn't published yet (its
-/// date is still in the future), we fall back to the server's stable `latest.txt`
-/// endpoint — the most recent list available, whether that is a permanent list or
-/// a more-recent transient one. (A transient list has an irregular, uncomputable
-/// date, so it can only be reached through that endpoint.)
-pub fn list_url_for(after: Ymd, today: Ymd) -> String {
-    let scheduled = next_permanent_list(after);
-    if scheduled <= today {
-        list_url(scheduled)
-    } else {
-        FESA_LATEST_URL.to_string()
-    }
-}
-
-/// The first permanent FESA list date (1 Jan or 1 Jul) strictly after `after`.
-fn next_permanent_list(after: Ymd) -> Ymd {
-    let (y, _, _) = after;
-    // Two permanent lists a year; the window [y, y+1] always contains the next one.
-    [(y, 1, 1), (y, 7, 1), (y + 1, 1, 1), (y + 1, 7, 1)]
+/// FESA publishes a **permanent** list twice a year, on 1 January and 1 July, at
+/// a dated URL. A list dated the first day of a tournament is the one its
+/// referee paired from, so it counts as in force; the *next* list is the one to
+/// avoid, since it already reflects the results.
+///
+/// (FESA also publishes irregular transient lists, reachable only through its
+/// stable `latest.txt` endpoint. They have no computable date, so they cannot be
+/// resolved from a tournament's date — pass `--games-fesa-list` to use one.)
+fn permanent_list_in_force(date: Ymd) -> Ymd {
+    let (y, _, _) = date;
+    // Two permanent lists a year; the window [y-1, y] always contains the last
+    // one on or before a date in year y.
+    [(y, 7, 1), (y, 1, 1), (y - 1, 7, 1), (y - 1, 1, 1)]
         .into_iter()
-        .find(|&d| d > after)
-        .expect("y+1 candidates always exceed a date in year y")
+        .find(|&d| d <= date)
+        .expect("y-1 candidates always precede a date in year y")
 }
 
-/// Today's date as `(year, month, day)` in UTC, from the system clock.
-pub fn today_ymd() -> Ymd {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    civil_from_days((secs / 86_400) as i64)
-}
-
-/// Convert a day count since the Unix epoch to `(year, month, day)` (proleptic
-/// Gregorian). Howard Hinnant's `civil_from_days`.
-fn civil_from_days(days: i64) -> Ymd {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097; // [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
-    let year = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
-    let mp = (5 * doy + 2) / 153; // [0, 11]
-    let day = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
-    let month = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
-    let year = if month <= 2 { year + 1 } else { year };
-    (year as i32, month as u32, day as u32)
+/// The FESA rating-list URL for the list in force on `date`.
+pub fn list_url_in_force(date: Ymd) -> String {
+    list_url(permanent_list_in_force(date))
 }
 
 /// The FESA URL for a dated rating list.
@@ -157,13 +124,13 @@ pub fn match_games(rated: &[RatedPlayer], base: &Tournament) -> (HashMap<Uuid, u
     (map, matched)
 }
 
-/// Game counts from the first list after a tournament date. Returns the map, the
+/// Game counts from the list in force on a tournament date. Returns the map, the
 /// resolved list URL (for reporting), and the match count.
-pub fn games_after(
+pub fn games_before(
     date: &str,
     base: &Tournament,
 ) -> Result<(HashMap<Uuid, u32>, String, usize), String> {
-    let url = list_url_for(parse_ymd(date)?, today_ymd());
+    let url = list_url_in_force(parse_ymd(date)?);
     let rated = parse_rating_list(&fetch_url(&url)?);
     let (map, matched) = match_games(&rated, base);
     Ok((map, url, matched))
@@ -207,42 +174,32 @@ mod tests {
     use osp_core::NewPlayer;
 
     #[test]
-    fn next_permanent_list_picks_the_first_jan_or_jul_after() {
-        assert_eq!(next_permanent_list((2025, 11, 15)), (2026, 1, 1));
-        assert_eq!(next_permanent_list((2026, 3, 10)), (2026, 7, 1));
-        assert_eq!(next_permanent_list((2026, 6, 30)), (2026, 7, 1));
-        // A date exactly on a list date resolves to the *next* one (strictly after).
-        assert_eq!(next_permanent_list((2026, 1, 1)), (2026, 7, 1));
-        assert_eq!(next_permanent_list((2026, 7, 1)), (2027, 1, 1));
-        // WOSC 2024 (August) → the following January list.
-        assert_eq!(next_permanent_list((2024, 8, 4)), (2025, 1, 1));
+    fn permanent_list_in_force_picks_the_last_jan_or_jul_on_or_before() {
+        assert_eq!(permanent_list_in_force((2025, 11, 15)), (2025, 7, 1));
+        assert_eq!(permanent_list_in_force((2026, 3, 10)), (2026, 1, 1));
+        assert_eq!(permanent_list_in_force((2026, 6, 30)), (2026, 1, 1));
+        // A tournament starting on a list date paired from that list, so it is
+        // the one in force — not the previous one.
+        assert_eq!(permanent_list_in_force((2026, 1, 1)), (2026, 1, 1));
+        assert_eq!(permanent_list_in_force((2026, 7, 1)), (2026, 7, 1));
+        // WOSC 2024 (August) → the July list it was paired from, not the January
+        // one that follows it and already carries its results.
+        assert_eq!(permanent_list_in_force((2024, 8, 4)), (2024, 7, 1));
+        // January, before that year's first list: the previous July's.
+        assert_eq!(permanent_list_in_force((2024, 1, 1)), (2024, 1, 1));
+        assert_eq!(permanent_list_in_force((2023, 12, 31)), (2023, 7, 1));
     }
 
     #[test]
-    fn list_url_for_uses_the_dated_list_when_published_else_latest() {
-        // Published: the dated URL of the first permanent list after the tournament.
+    fn list_url_in_force_is_the_dated_url_of_that_list() {
         assert_eq!(
-            list_url_for((2024, 8, 4), (2025, 3, 1)),
+            list_url_in_force((2024, 8, 4)),
+            "https://fesashogi.eu/old/ratinglists/2024-07-01.txt"
+        );
+        assert_eq!(
+            list_url_in_force((2025, 2, 1)),
             "https://fesashogi.eu/old/ratinglists/2025-01-01.txt"
         );
-        // The next permanent list is still in the future → the stable latest.txt.
-        assert_eq!(list_url_for((2024, 8, 4), (2024, 9, 15)), FESA_LATEST_URL);
-        // Mid-year, before 1 Jul: the next permanent (Jul) list isn't out yet, so
-        // latest.txt — which also covers any transient list published in between.
-        assert_eq!(list_url_for((2025, 2, 1), (2025, 6, 20)), FESA_LATEST_URL);
-        // Once the July list is out, back to its dated URL.
-        assert_eq!(
-            list_url_for((2025, 2, 1), (2025, 7, 5)),
-            "https://fesashogi.eu/old/ratinglists/2025-07-01.txt"
-        );
-    }
-
-    #[test]
-    fn civil_from_days_matches_known_dates() {
-        assert_eq!(civil_from_days(0), (1970, 1, 1)); // the Unix epoch
-        assert_eq!(civil_from_days(18_993), (2022, 1, 1));
-        assert_eq!(civil_from_days(19_723), (2024, 1, 1)); // 2024 is a leap year
-        assert_eq!(civil_from_days(19_905), (2024, 7, 1));
     }
 
     #[test]

@@ -65,6 +65,31 @@ ELO.
 Players with no entry fall back to their registration rating. The override never
 changes the pairing ratings.
 
+### Rating reliability (established vs provisional)
+
+Separate from *how strong* a player is: how much their rating can be trusted. A
+player is **established** once their FESA entry shows at least
+[`PROVISIONAL_GAMES_THRESHOLD`](../crates/core/src/elo.rs) (18) games. A
+provisional one gets a wider true-strength prior from the oracle
+(`--oracle-provisional`, § The strength oracle) and is leaned on less by the ELO
+estimator — so it moves pure-ELO pairing, estimate-based MacMahon, and the
+`fidelity(est)` metric.
+
+A result table has no game-count column, so every player would import as
+provisional and the distinction would be lost. Restore it with either of:
+
+- `--games-fesa-before YYYY-MM-DD` — pass the **tournament's own start date**.
+  FESA publishes a permanent list on 1 Jan and 1 Jul; this resolves the last one
+  dated on or before that day — the list its referee paired from — so the counts
+  are the ones the players carried *into* the event rather than ones that already
+  reflect its results. A list dated the first day of the event counts as in force.
+- `--games-fesa-list URL|PATH` — a specific list instead. FESA also publishes
+  irregular *transient* lists whose dates cannot be computed from the tournament
+  date; this is the only way to reach one, and it also takes a local file.
+
+Both match by accent-folded name and write only `fesa_games`; strengths and
+pairing ratings are untouched, and an unmatched player simply stays provisional.
+
 ### Other flags
 
 | flag | meaning |
@@ -73,6 +98,8 @@ changes the pairing ratings.
 | `--runs N` | simulated tournaments per variant (default 1000) |
 | `--rounds N` | rounds per run (default: the base's round count) |
 | `--seed S` | master seed; run *i* uses `seed + i`, shared across variants (§ Common random numbers) |
+| `--games-fesa-before YYYY-MM-DD` | fill each player's FESA game count from the list in force on that date (§ Rating reliability) |
+| `--games-fesa-list URL｜PATH` | the same, from a specific list |
 | `--jitter J` | scale on the true-strength spread (§ The strength oracle); default 0 |
 | `--oracle-provisional M` | how much wider the true-strength prior is for a provisional player (default 2.0) |
 | `--oracle-unrated-center C` | center (mean ELO) of an unrated player's true-strength prior (default 600) |

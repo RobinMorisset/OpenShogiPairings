@@ -96,17 +96,19 @@ struct Args {
     #[arg(long, value_name = "FILE")]
     strength: Option<PathBuf>,
 
-    /// Fill each player's FESA game count from the first rating list after this
-    /// date (YYYY-MM-DD), matched by name (fetched from fesashogi.eu). A result
-    /// table carries no game counts, so without this every player is treated as
-    /// provisional; this restores the established/provisional distinction (the
-    /// reliability signal) while leaving strengths untouched. Ideally a list just
-    /// before the event, so the counts reflect ratings going *into* it.
+    /// Fill each player's FESA game count from the rating list in force on this
+    /// date (YYYY-MM-DD) — pass the tournament's own start date. That is the last
+    /// permanent list (FESA publishes on 1 Jan and 1 Jul) dated on or before it,
+    /// fetched from fesashogi.eu and matched by name; the counts are therefore
+    /// the ones the players went *into* the event with. A result table carries no
+    /// game counts, so without this every player is treated as provisional; this
+    /// restores the established/provisional distinction (the reliability signal)
+    /// while leaving strengths untouched.
     #[arg(long, value_name = "YYYY-MM-DD", conflicts_with = "games_fesa_list")]
-    games_fesa_after: Option<String>,
+    games_fesa_before: Option<String>,
 
     /// Fill each player's FESA game count from a specific rating list (https URL or
-    /// local file path), matched by name. See `--games-fesa-after`.
+    /// local file path), matched by name. See `--games-fesa-before`.
     #[arg(long, value_name = "URL|PATH")]
     games_fesa_list: Option<String>,
 
@@ -263,11 +265,12 @@ fn run(args: Args) -> Result<(), String> {
             "fesa game counts from {source} — matched {matched}/{} players",
             base.players.len()
         );
-    } else if let Some(date) = &args.games_fesa_after {
-        let (games, url, matched) = fesa::games_after(date, &base)?;
+    } else if let Some(date) = &args.games_fesa_before {
+        let (games, url, matched) = fesa::games_before(date, &base)?;
         apply_games(&mut base, &games);
         eprintln!(
-            "fesa game counts from list {url} — matched {matched}/{} players",
+            "fesa game counts from the list in force on {date} ({url}) — matched \
+             {matched}/{} players",
             base.players.len()
         );
     }
