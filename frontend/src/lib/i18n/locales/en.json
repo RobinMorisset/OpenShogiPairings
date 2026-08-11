@@ -204,6 +204,8 @@
     "nationality": "Nat.",
     "club": "Club",
     "roundColumn": "R{number}",
+    "roundColumnLive": "R{number}*",
+    "roundInProgressTitle": "Round {number} is still in progress — its results appear here as they are recorded, but the wins, points and tie-break columns only count completed rounds.",
     "victories": "Wins",
     "macmahon": "MM",
     "macmahonTitle": "MacMahon starting points (before wins)",
@@ -228,7 +230,8 @@
     "handicapGameLoss": "Wiel rule: the handicap giver counts as the winner, so this surprise win doesn't count in the standings.",
     "tiebreakNoOpponents": "No opponents counted yet",
     "tiebreakDropped": "(dropped {dropped})",
-    "noRoundsCompleted": "No rounds completed yet — results appear here as rounds are completed."
+    "noRoundsCompleted": "No rounds completed yet — results appear here as rounds are completed.",
+    "roundInProgressNote": "Round {number} is in progress: its column fills in as results are recorded, and the ranking is recomputed once the round is completed."
   },
   "pairingSource": {
     "swiss": "Swiss",

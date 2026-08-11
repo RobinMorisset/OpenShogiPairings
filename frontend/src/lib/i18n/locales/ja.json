@@ -204,6 +204,8 @@
     "nationality": "国籍",
     "club": "所属",
     "roundColumn": "{number}回戦",
+    "roundColumnLive": "{number}回戦*",
+    "roundInProgressTitle": "{number}回戦はまだ進行中です。結果は記録され次第ここに表示されますが、勝数・点数・順位決定法の列は終了した回戦のみを数えます。",
     "victories": "勝数",
     "macmahon": "MM",
     "macmahonTitle": "マクマホンの初期点（勝数を含まない）",
@@ -228,7 +230,8 @@
     "handicapGameLoss": "Wielルール: 上手が勝ちとして扱われるため、この下手の勝ちは順位に反映されません。",
     "tiebreakNoOpponents": "対象となる対戦相手がまだいません",
     "tiebreakDropped": "（除外: {dropped}）",
-    "noRoundsCompleted": "終了した回戦はまだありません。回戦が終わるごとにここに表示されます。"
+    "noRoundsCompleted": "終了した回戦はまだありません。回戦が終わるごとにここに表示されます。",
+    "roundInProgressNote": "{number}回戦が進行中です。結果が記録されるごとにこの列が埋まり、回戦が終了すると順位が再計算されます。"
   },
   "pairingSource": {
     "swiss": "スイス式",

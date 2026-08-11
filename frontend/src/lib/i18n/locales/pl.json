@@ -204,6 +204,8 @@
     "nationality": "Nar.",
     "club": "Klub",
     "roundColumn": "R{number}",
+    "roundColumnLive": "R{number}*",
+    "roundInProgressTitle": "Runda {number} wciąż trwa — jej wyniki pojawiają się tutaj na bieżąco, ale kolumny zwycięstw, punktów i punktacji pomocniczej liczą tylko ukończone rundy.",
     "victories": "Zwycięstwa",
     "macmahon": "MM",
     "macmahonTitle": "Punkty startowe MacMahon (przed zwycięstwami)",
@@ -228,7 +230,8 @@
     "handicapGameLoss": "Reguła „Wiel”: za zwycięzcę uznaje się dającego forę, więc ta niespodziewana wygrana nie liczy się w tabeli wyników.",
     "tiebreakNoOpponents": "Nie policzono jeszcze żadnych przeciwników",
     "tiebreakDropped": "(pominięto: {dropped})",
-    "noRoundsCompleted": "Nie ukończono jeszcze żadnej rundy — wyniki pojawią się tutaj w miarę kończenia kolejnych rund."
+    "noRoundsCompleted": "Nie ukończono jeszcze żadnej rundy — wyniki pojawią się tutaj w miarę kończenia kolejnych rund.",
+    "roundInProgressNote": "Runda {number} trwa: jej kolumna wypełnia się w miarę wpisywania wyników, a klasyfikacja jest przeliczana po ukończeniu rundy."
   },
   "pairingSource": {
     "swiss": "Szwajcarski",

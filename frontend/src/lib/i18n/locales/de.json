@@ -204,6 +204,8 @@
     "nationality": "Nat.",
     "club": "Verein",
     "roundColumn": "R{number}",
+    "roundColumnLive": "R{number}*",
+    "roundInProgressTitle": "Runde {number} läuft noch — ihre Ergebnisse erscheinen hier, sobald sie eingetragen werden, aber die Spalten Siege, Punkte und Feinwertung zählen nur abgeschlossene Runden.",
     "victories": "Siege",
     "macmahon": "MM",
     "macmahonTitle": "MacMahon-Startpunkte (vor den Siegen)",
@@ -228,7 +230,8 @@
     "handicapGameLoss": "Wiel-Regel: Der Vorgeber gilt als Sieger, daher zählt dieser überraschende Sieg nicht für die Rangliste.",
     "tiebreakNoOpponents": "Noch keine Gegner gewertet",
     "tiebreakDropped": "(gestrichen: {dropped})",
-    "noRoundsCompleted": "Noch keine Runde abgeschlossen — die Ergebnisse erscheinen hier, sobald Runden abgeschlossen werden."
+    "noRoundsCompleted": "Noch keine Runde abgeschlossen — die Ergebnisse erscheinen hier, sobald Runden abgeschlossen werden.",
+    "roundInProgressNote": "Runde {number} läuft: Ihre Spalte füllt sich mit den eingetragenen Ergebnissen, und die Rangliste wird neu berechnet, sobald die Runde abgeschlossen ist."
   },
   "pairingSource": {
     "swiss": "Schweizer System",

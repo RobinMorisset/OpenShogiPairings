@@ -276,12 +276,15 @@ else removing the most recent round) to replay it or undo a mistake.
 Finalizing registration assigns each player a tournament number (by ELO,
 unrated last; later additions get the next free number). The Standings tab is
 a ranked table: a row per player (ordered by the referee-chosen criteria) with
-one column per completed round (`opponent-number` + `+`/`−`, or `0+` for a bye
-/ `0-` for an absence), a win count, and one column per selected ranking
+one column per round that has started (`opponent-number` + `+`/`−`, or `0+` for
+a bye / `0-` for an absence), a win count, and one column per selected ranking
 criterion — Points plus fourteen tie-break metrics (SOS / SODOS / SOSOS, the
 Buchholz cuts, and the cumulative score, each in a MacMahon-inclusive and a
 wins-only flavour; direct confrontation; and the estimated ELO in the ELO
-pairing modes), reorderable in Settings.
+pairing modes), reorderable in Settings. The round in progress gets its column
+(marked `R3*`) as soon as it is paired, each cell filling in as its result is
+recorded and showing `5?` until then; the scored columns and the ranking count
+completed rounds only, so the table re-sorts in one step once the round ends.
 
 Mutations go through a `TournamentStore` that keeps the current tournament plus a
 stack of prior snapshots (the undo history); create/load/restore reset it.

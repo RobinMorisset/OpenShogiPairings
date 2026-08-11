@@ -27,6 +27,16 @@ that field has no default. Re-create such a tournament rather than loading it.
 - `osp-sim --cup-format direct|qualifier`, so simulations can run either cup
   format (see [`docs/simulation-cli.md`](docs/simulation-cli.md)).
 
+### Changed
+
+- **The Results tab shows the round in progress**, instead of waiting for it to
+  be completed. Its column (marked `R3*`) appears as soon as the round is
+  paired, with each board's cell filling in the moment its result is recorded;
+  a game still being played shows `5?` rather than a win or a loss. The wins,
+  points and tie-break columns — and the ranking itself — still count completed
+  rounds only, so the table re-sorts in one step at the end of the round rather
+  than shuffling under the referee mid-round.
+
 ## [1.3.0] - 2026-08-05
 
 Backwards compatible with v1.1.0 and v1.2.0

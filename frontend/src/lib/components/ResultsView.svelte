@@ -46,7 +46,9 @@
   }: Props = $props();
 
   // Round number → its index into `tournament.rounds` (and so into
-  // `effectiveWinners`), since that array isn't filtered to completed rounds.
+  // `effectiveWinners`), so a cell can find its board's server-computed winner
+  // from the round it belongs to rather than from its column position — which a
+  // long game's result, shown one column along, doesn't share.
   const roundIndexByNumber = $derived(
     new Map(tournament.rounds.map((r, i) => [r.number, i])),
   );
@@ -136,8 +138,23 @@
     return m;
   });
 
-  // One column per completed round.
-  const completedRounds = $derived(tournament.rounds.filter((r) => r.completed));
+  // One column per round that has *started* — every confirmed round, not only
+  // the completed ones (a draft isn't a round yet, so `tournament.rounds` is
+  // exactly that). The round in progress gets its column as soon as it is
+  // paired, filling in cell by cell as results are recorded: pending boards
+  // show `3?` rather than a win or a loss.
+  //
+  // The numbers beside them do *not* follow along. The server scores from the
+  // completed rounds alone (`compute_scores`), so wins, points, every tie-break
+  // and the row order all stay put until the referee completes the round, at
+  // which point the table re-sorts in one step. That is the point of the split:
+  // the live column answers "what has come in so far?" without the ranking
+  // churning under the referee's eyes mid-round.
+  const shownRounds = $derived(tournament.rounds);
+  const completedCount = $derived(tournament.rounds.filter((r) => r.completed).length);
+  // The round in progress, if any — its column is marked and footnoted, since
+  // its results aren't in the ranking yet.
+  const liveRound = $derived(tournament.rounds.find((r) => !r.completed) ?? null);
 
   // Rows follow the server's ranked order, joined to each player's details.
   const byId = $derived(new Map(tournament.players.map((p) => [p.id, p])));
@@ -281,19 +298,19 @@
     const pid = tid(player);
     const onLong = (round: Round) =>
       round.boards.find((b) => b.long && (b.player1 === pid || b.player2 === pid));
-    const here = onLong(completedRounds[i]);
+    const here = onLong(shownRounds[i]);
     if (here) {
       const opp = here.player1 === pid ? here.player2 : here.player1;
       return { kind: "long-pending", opponentName: nameOfTid(opp) };
     }
     if (i > 0) {
-      const prev = completedRounds[i - 1];
+      const prev = shownRounds[i - 1];
       const idx = prev.boards.findIndex(
         (b) => b.long && (b.player1 === pid || b.player2 === pid),
       );
       if (idx >= 0) return cellForBoard(player, prev, prev.boards[idx], idx);
     }
-    return cellFor(player, completedRounds[i]);
+    return cellFor(player, shownRounds[i]);
   }
 
   function cellFor(player: Player, round: Round): Cell {
@@ -620,8 +637,16 @@
         {/if}
         <th>{$_("resultsView.nationality")}</th>
         <th>{$_("resultsView.club")}</th>
-        {#each completedRounds as round (round.number)}
-          <th class="num">{$_("resultsView.roundColumn", { values: { number: round.number } })}</th>
+        {#each shownRounds as round (round.number)}
+          {#if round.completed}
+            <th class="num">{$_("resultsView.roundColumn", { values: { number: round.number } })}</th>
+          {:else}
+            <th
+              class="num live-round"
+              data-tip={$_("resultsView.roundInProgressTitle", { values: { number: round.number } })}
+              >{$_("resultsView.roundColumnLive", { values: { number: round.number } })}</th
+            >
+          {/if}
         {/each}
         <th class="num">{$_("resultsView.victories")}</th>
         {#if showMacmahon}
@@ -644,7 +669,7 @@
           {/if}
           <td>{player.nationality ?? "—"}</td>
           <td>{player.club ?? "—"}</td>
-          {#each completedRounds as round, i (round.number)}
+          {#each shownRounds as round, i (round.number)}
             {@const cell = longAwareCell(player, i)}
             <td class="num result">
               {#if cell.kind === "sitout"}
@@ -746,7 +771,16 @@
     </tbody>
   </table>
 
-  {#if completedRounds.length === 0}
+  <!-- The live column shows results the ranking hasn't taken in yet, so say so
+       rather than leaving the referee to wonder why a recorded win moved
+       nothing. It supersedes the "nothing completed yet" note, which says less
+       and would only ever appear alongside it (a round is in progress in both
+       cases); that note survives for the completed-but-empty table. -->
+  {#if liveRound}
+    <p class="muted note">
+      {$_("resultsView.roundInProgressNote", { values: { number: liveRound.number } })}
+    </p>
+  {:else if completedCount === 0}
     <p class="muted note">
       {$_("resultsView.noRoundsCompleted")}
     </p>
@@ -858,6 +892,11 @@
     color: var(--text-tertiary);
   }
   .pending {
+    color: var(--color-warning);
+  }
+  /* The in-progress round's header, in the same tone as the pending cells
+     below it: the column is live, and none of it counts yet. */
+  th.live-round {
     color: var(--color-warning);
   }
   .victories {

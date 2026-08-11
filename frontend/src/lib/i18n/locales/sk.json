@@ -204,6 +204,8 @@
     "nationality": "Nár.",
     "club": "Klub",
     "roundColumn": "K{number}",
+    "roundColumnLive": "K{number}*",
+    "roundInProgressTitle": "Kolo {number} ešte prebieha — jeho výsledky sa tu objavujú, ako sa zapisujú, ale stĺpce výhier, bodov a pomocného hodnotenia počítajú iba dokončené kolá.",
     "victories": "Výhry",
     "macmahon": "MM",
     "macmahonTitle": "Štartovné body MacMahon (pred výhrami)",
@@ -228,7 +230,8 @@
     "handicapGameLoss": "Pravidlo Wiel: za víťaza sa počíta ten, kto dal hendikep, takže toto prekvapivé víťazstvo sa do tabuľky nezaráta.",
     "tiebreakNoOpponents": "Zatiaľ sa nezapočítali žiadni súperi",
     "tiebreakDropped": "(vynechané: {dropped})",
-    "noRoundsCompleted": "Zatiaľ nebolo dokončené žiadne kolo — výsledky sa tu objavia, ako budú kolá pribúdať."
+    "noRoundsCompleted": "Zatiaľ nebolo dokončené žiadne kolo — výsledky sa tu objavia, ako budú kolá pribúdať.",
+    "roundInProgressNote": "Kolo {number} prebieha: jeho stĺpec sa dopĺňa, ako pribúdajú výsledky, a poradie sa prepočíta po dokončení kola."
   },
   "pairingSource": {
     "swiss": "Švajčiarsky systém",
