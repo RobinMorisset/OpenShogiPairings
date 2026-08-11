@@ -48,7 +48,8 @@ use typed_index_collections::TiVec;
 /// `drawn` and `no_show` fields.
 /// v7: team tournaments — a `teams` roster list and `settings.teams`.
 /// v8: a board's forfeit records *why* each missing side missed it.
-pub const TOURNAMENT_FORMAT_VERSION: u32 = 8;
+/// v9: teams carry manual point `adjustments`.
+pub const TOURNAMENT_FORMAT_VERSION: u32 = 9;
 
 fn default_format_version() -> u32 {
     TOURNAMENT_FORMAT_VERSION

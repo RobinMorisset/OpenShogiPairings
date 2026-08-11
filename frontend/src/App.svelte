@@ -5,6 +5,7 @@
     addPlayer,
     addPointAdjustment,
     addTeam,
+    addTeamAdjustment,
     addTeamMember,
     ApiError,
     cancelRound,
@@ -23,6 +24,7 @@
     removePlayer,
     removePointAdjustment,
     removeTeam,
+    removeTeamAdjustment,
     removeTeamMember,
     renameTeam,
     restoreBackup,
@@ -607,6 +609,18 @@
     });
   }
 
+  function handleAddTeamAdjustment(teamId: string, delta: number, reason: string) {
+    run(async () => {
+      apply(await addTeamAdjustment(teamId, delta, reason));
+    });
+  }
+
+  function handleRemoveTeamAdjustment(teamId: string, adjustmentId: string) {
+    run(async () => {
+      apply(await removeTeamAdjustment(teamId, adjustmentId));
+    });
+  }
+
   function handleSetPairingRating(playerId: string, rating: number | null) {
     run(async () => {
       apply(await setPairingRating(playerId, rating));
@@ -1098,6 +1112,8 @@
                 onSetBoardOrder={handleSetTeamBoardOrder}
                 onSortByRating={handleSortTeamByRating}
                 onSetPairingRating={handleSetPairingRating}
+                onAddAdjustment={handleAddTeamAdjustment}
+                onRemoveAdjustment={handleRemoveTeamAdjustment}
                 {busy}
               />
             </div>

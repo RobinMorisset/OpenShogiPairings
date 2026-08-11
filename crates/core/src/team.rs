@@ -18,7 +18,7 @@ use typed_index_collections::TiVec;
 use uuid::Uuid;
 
 use crate::pairing::{pair_round_weighted, PairingUnit};
-use crate::player::Player;
+use crate::player::{Player, PointAdjustment};
 use crate::round::{
     AbsenceKind, Board, Forfeit, Outcome, Round, Sitout, SitoutKind, SitoutValue, Winner,
 };
@@ -53,6 +53,16 @@ pub struct Team {
     /// [`TeamSettings::size`]: crate::settings::TeamSettings::size
     #[serde(default)]
     pub members: Vec<Uuid>,
+    /// Manual point bonuses/maluses the referee has applied to this **team**
+    /// (a fair-play bonus, a penalty, a correction).
+    ///
+    /// Adjustments are team-level in team mode because the ranking is: a delta
+    /// on one member would move nothing a referee can see, which is why the
+    /// per-player ones are refused there. Folded into the team's points
+    /// alongside its MacMahon starting points, so they shape both the standings
+    /// and the score-gap pairing weight from the moment they are added.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adjustments: Vec<PointAdjustment>,
 }
 
 impl Team {
@@ -63,6 +73,7 @@ impl Team {
             tournament_id: None,
             name,
             members: Vec::new(),
+            adjustments: Vec::new(),
         }
     }
 
@@ -520,6 +531,58 @@ impl Tournament {
         Ok(self.rounds.last().expect("just pushed a round"))
     }
 
+    /// Apply a manual point bonus (positive `delta`) or malus (negative) to a
+    /// team, with a mandatory reason.
+    ///
+    /// Unlike the roster operations this stays available after finalization —
+    /// that is when a referee actually needs it — and takes effect immediately,
+    /// on both the standings and the score-gap weight of every later pairing.
+    pub fn add_team_adjustment(
+        &mut self,
+        team: Uuid,
+        delta: i32,
+        reason: String,
+    ) -> Result<&Team, TournamentError> {
+        if !self.settings.team_mode() {
+            return Err(TournamentError::NotATeamTournament);
+        }
+        let reason = reason.trim().to_string();
+        if reason.is_empty() {
+            return Err(TournamentError::EmptyAdjustmentReason);
+        }
+        if delta == 0 {
+            return Err(TournamentError::ZeroPointAdjustment);
+        }
+        let t = self.team_mut(team)?;
+        t.adjustments.push(PointAdjustment {
+            id: Uuid::new_v4(),
+            delta,
+            reason,
+        });
+        Ok(t)
+    }
+
+    /// Remove a previously applied team adjustment.
+    pub fn remove_team_adjustment(
+        &mut self,
+        team: Uuid,
+        adjustment: Uuid,
+    ) -> Result<&Team, TournamentError> {
+        if !self.settings.team_mode() {
+            return Err(TournamentError::NotATeamTournament);
+        }
+        let t = self.team_mut(team)?;
+        let before = t.adjustments.len();
+        t.adjustments.retain(|a| a.id != adjustment);
+        if t.adjustments.len() == before {
+            return Err(TournamentError::AdjustmentNotFound {
+                player: team,
+                adjustment,
+            });
+        }
+        Ok(t)
+    }
+
     /// Mutable access to a team by id.
     fn team_mut(&mut self, team: Uuid) -> Result<&mut Team, TournamentError> {
         self.teams
@@ -632,6 +695,7 @@ mod tests {
     // --- Rosters on a tournament -----------------------------------------
 
     use crate::settings::{MacMahonThreshold, TeamSettings, Tiebreak, TournamentSettings};
+    use crate::units::HalfPoints;
 
     /// A team tournament of `size`, with `n` players rated 2000, 1990, … so the
     /// ordering assertions have something to bite on.
@@ -1171,6 +1235,84 @@ mod tests {
         individual.prepare_round().unwrap();
         assert!(matches!(
             individual.update_team_draft(Vec::new(), Vec::new(), Vec::new()),
+            Err(TournamentError::NotATeamTournament)
+        ));
+    }
+
+    // --- Adjustments -------------------------------------------------------
+
+    /// A team bonus moves the team's points, which is the whole point of it
+    /// being team-level: the ranking is by team, so a per-player delta (refused
+    /// in team mode) would move nothing a referee can see.
+    #[test]
+    fn a_team_adjustment_moves_the_teams_points() {
+        let (mut t, ids) = team_tournament(2, 4);
+        let teams = fill_teams(&mut t, &ids, 2, 2);
+        t.finalize_registration().unwrap();
+
+        let before = t.team_standings().unwrap();
+        assert!(before.iter().all(|s| s.points == 0));
+
+        // Available *after* finalization — that is when a referee needs it.
+        t.add_team_adjustment(teams[0], 1, "fair play".into())
+            .unwrap();
+        let after = t.team_standings().unwrap();
+        let bonused = after.iter().find(|s| s.team_id == teams[0]).unwrap();
+        assert_eq!(bonused.points, HalfPoints::from_whole(1));
+        // The MacMahon start is untouched: the delta is a separate term.
+        assert_eq!(bonused.macmahon, HalfPoints::ZERO);
+        // ...and it lifts the team above the others in the ranking.
+        assert_eq!(after[0].team_id, teams[0]);
+
+        // A malus cannot push a team below zero.
+        t.add_team_adjustment(teams[0], -5, "penalty".into())
+            .unwrap();
+        let after = t.team_standings().unwrap();
+        assert_eq!(
+            after.iter().find(|s| s.team_id == teams[0]).unwrap().points,
+            HalfPoints::ZERO
+        );
+    }
+
+    #[test]
+    fn a_team_adjustment_needs_a_reason_and_a_non_zero_delta() {
+        let (mut t, ids) = team_tournament(2, 4);
+        let teams = fill_teams(&mut t, &ids, 2, 2);
+        assert!(matches!(
+            t.add_team_adjustment(teams[0], 1, "  ".into()),
+            Err(TournamentError::EmptyAdjustmentReason)
+        ));
+        assert!(matches!(
+            t.add_team_adjustment(teams[0], 0, "nothing".into()),
+            Err(TournamentError::ZeroPointAdjustment)
+        ));
+    }
+
+    #[test]
+    fn a_team_adjustment_can_be_taken_back() {
+        let (mut t, ids) = team_tournament(2, 4);
+        let teams = fill_teams(&mut t, &ids, 2, 2);
+        let id = t
+            .add_team_adjustment(teams[0], 2, "bonus".into())
+            .unwrap()
+            .adjustments
+            .last()
+            .unwrap()
+            .id;
+        t.remove_team_adjustment(teams[0], id).unwrap();
+        assert!(t.teams[0].adjustments.is_empty());
+        // Removing it twice is a named error, not a silent no-op.
+        assert!(matches!(
+            t.remove_team_adjustment(teams[0], id),
+            Err(TournamentError::AdjustmentNotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn team_adjustments_are_rejected_outside_team_mode() {
+        let mut t = Tournament::new("Solo").unwrap();
+        assert!(matches!(
+            t.add_team_adjustment(Uuid::new_v4(), 1, "x".into()),
             Err(TournamentError::NotATeamTournament)
         ));
     }

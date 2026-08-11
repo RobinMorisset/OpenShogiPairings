@@ -352,6 +352,8 @@ that tournament's bearer token if it has a password (except `/login` and
 | `DELETE /teams/{team_id}/members/{player_id}` | Take a player out of a team. |
 | `PUT /teams/{team_id}/board-order` | Set the board order (index 0 = board 1): `{ "order": [player_id, …] }`, which must be a permutation of the team's current members. |
 | `POST /teams/{team_id}/sort-by-rating` | Reset the board order to descending pairing rating (unrated last). |
+| `POST /teams/{team_id}/adjustments` | Apply a manual point bonus/penalty to a team: `{ "delta", "reason" }` (reason mandatory). Unlike the roster routes this stays available after finalization — adjustments are team-level in team mode, and the per-player ones are refused there. |
+| `DELETE /teams/{team_id}/adjustments/{adjustment_id}` | Remove a team adjustment. |
 | `GET /backups` | List automatic backups, newest first (taken at every round-lifecycle transition). |
 | `POST /backups/{backup_id}/restore` | Restore a backup as the current tournament; resets undo history. |
 

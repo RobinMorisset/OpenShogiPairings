@@ -1,12 +1,14 @@
 # Team tournaments — design
 
-Status: **implemented**, bar one piece. A team tournament can be configured,
-rostered, finalized, paired, played, customized and read end to end, through the
+Status: **implemented**. A team tournament can be configured, rostered,
+finalized, paired, played, customized, adjusted and read end to end, through the
 interface — including a member absent for a reason, recorded as such rather than
 as a no-show.
 
-Still to come: team point adjustments (per-player ones are refused in team mode
-meanwhile).
+What is deliberately *not* here is listed under [Scope of v1](#scope-of-v1):
+the cup, long games, ELO pairing, grade thresholds and the estimated-ELO
+tie-break are rejected in team mode, player categories are hidden, substitutes
+are unplanned, and the simulator refuses a team tournament outright.
 
 A team tournament is the format that traditionally precedes European shogi
 championships (e.g. WOSC): teams of N players (usually N = 3) are the unit of
@@ -224,6 +226,12 @@ and its validation — exist only when MacMahon starting points are in use:
 Manual point adjustments apply to **teams** in team mode (they affect team
 points, hence pairing and standings). Per-player adjustments are disabled in
 team mode — a player-level delta has no team meaning.
+
+**Landed.** `Team::adjustments` mirrors `Player::adjustments`, folded into the
+team's points alongside its MacMahon start (floored at zero, as for a player).
+Unlike every other team operation the mutations stay available *after*
+finalization — a fair-play bonus or a penalty is decided during the tournament,
+which is exactly when the rosters are frozen.
 
 ## Registration and finalization
 

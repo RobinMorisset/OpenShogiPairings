@@ -516,7 +516,12 @@
     "pairingEloPlaceholder": "組合せELO",
     "pairingEloTitle": "レーティングのないメンバー用の組み合わせELO。チーム平均と盤順にのみ使われ、出力されません。他の場所では引き続き「レーティングなし」と扱われます",
     "unassigned": "チーム未所属（{count}）",
-    "allAssigned": "全員がチームに所属しています。"
+    "allAssigned": "全員がチームに所属しています。",
+    "adjustmentTitle": "このチームへの手動の加点・減点",
+    "removeAdjustment": "この調整を削除",
+    "adjustmentPointsPlaceholder": "点数",
+    "adjustmentReasonPlaceholder": "理由（必須）",
+    "addAdjustment": "追加"
   },
   "teamStandings": {
     "title": "団体順位",

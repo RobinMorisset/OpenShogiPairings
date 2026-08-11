@@ -65,6 +65,8 @@ use crate::{auth, live};
 /// - `DELETE /teams/{team_id}/members/{player_id}` take a player out of a team
 /// - `PUT    /teams/{team_id}/board-order`     reorder a team's boards
 /// - `POST   /teams/{team_id}/sort-by-rating`  reset that order by rating
+/// - `POST   /teams/{team_id}/adjustments`     add a manual point bonus/malus
+/// - `DELETE /teams/{team_id}/adjustments/{adjustment_id}` remove one
 /// - `GET    /backups`         list automatic backups, newest first
 /// - `POST   /backups/{backup_id}/restore` restore a backup as the current tournament
 /// - `POST   /login`  exchange this tournament's password for a session token
@@ -147,6 +149,11 @@ pub fn scope(state: AppState) -> Router<AppState> {
         )
         .route("/teams/{team_id}/board-order", put(set_team_board_order))
         .route("/teams/{team_id}/sort-by-rating", post(sort_team_by_rating))
+        .route("/teams/{team_id}/adjustments", post(add_team_adjustment))
+        .route(
+            "/teams/{team_id}/adjustments/{adjustment_id}",
+            axum::routing::delete(remove_team_adjustment),
+        )
         .route("/backups", get(list_backups))
         .route("/backups/{backup_id}/restore", post(restore_backup))
         // `route_layer` (not `layer`): needed so the `{id}` path param is
@@ -1084,6 +1091,51 @@ async fn sort_team_by_rating(
     let mut store = instance.write();
     store.mutate(expected, |t| {
         t.sort_team_by_rating(params.team_id).map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// A team and one of its adjustments, for the removal path.
+#[derive(Deserialize)]
+struct TeamAdjustmentParams {
+    team_id: Uuid,
+    adjustment_id: Uuid,
+}
+
+/// Body of the team-adjustment endpoint: the delta and its mandatory reason.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TeamAdjustmentRequest {
+    delta: i32,
+    reason: String,
+}
+
+/// Apply a manual point bonus/malus to a team. Available after finalization —
+/// that is when a referee needs it.
+async fn add_team_adjustment(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<TeamParams>,
+    Json(req): Json<TeamAdjustmentRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| {
+        t.add_team_adjustment(params.team_id, req.delta, req.reason.clone())
+            .map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// Remove a previously applied team adjustment.
+async fn remove_team_adjustment(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<TeamAdjustmentParams>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| {
+        t.remove_team_adjustment(params.team_id, params.adjustment_id)
+            .map(|_| ())
     })?;
     view(&store)
 }

@@ -516,7 +516,12 @@
     "pairingEloPlaceholder": "Жеребьёвочный ELO",
     "pairingEloTitle": "Жеребьёвочный ELO для участника без рейтинга: используется только для среднего по команде и порядка досок, не экспортируется — везде остальное игрок остаётся без рейтинга",
     "unassigned": "Без команды ({count})",
-    "allAssigned": "Все игроки распределены по командам."
+    "allAssigned": "Все игроки распределены по командам.",
+    "adjustmentTitle": "Ручное начисление/снятие очков команде",
+    "removeAdjustment": "Убрать эту корректировку",
+    "adjustmentPointsPlaceholder": "Очки",
+    "adjustmentReasonPlaceholder": "Причина (обязательно)",
+    "addAdjustment": "Добавить"
   },
   "teamStandings": {
     "title": "Командный зачёт",

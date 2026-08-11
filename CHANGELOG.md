@@ -10,7 +10,7 @@ will be explicitly mentioned in the changelog for that version though.
 ## [Unreleased]
 
 **Save files from earlier versions no longer load** (the save format version is
-now 8): a board records what happened on it as a single value instead of three
+now 9): a board records what happened on it as a single value instead of three
 separate flags — and, when it was forfeited, why each missing side missed it —
 and tournaments can carry teams. A stale file is rejected with a clear message
 rather than half-parsed; re-create the tournament.
@@ -76,6 +76,11 @@ rather than half-parsed; re-create the tournament.
   expands to its boards like any other. The "why this pairing?" probe and the
   "force this pairing" action follow, naming teams too. Marking players absent
   stays per player, because a member can be absent without their team being.
+- **Team point adjustments**: a manual bonus or penalty, with its mandatory
+  reason, applies to a *team* in a team tournament — the ranking is by team, so
+  that is the level a delta can move. Unlike the roster controls it stays
+  available once registration is finalized, which is when a referee actually
+  awards one. Per-player adjustments remain refused in team mode.
 
 - **Hybrid cup: a qualification-round format** (Settings → Hybrid cup), used by
   the German Championship. The top half of the bracket is pre-qualified and

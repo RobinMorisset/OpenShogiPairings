@@ -516,7 +516,12 @@
     "pairingEloPlaceholder": "Auslosungs-ELO",
     "pairingEloTitle": "Auslosungs-ELO für ein ungewertetes Mitglied: nur für den Mannschaftsdurchschnitt und die Brettreihenfolge, nie exportiert — der Spieler bleibt überall sonst ungewertet",
     "unassigned": "Ohne Mannschaft ({count})",
-    "allAssigned": "Alle Spieler sind in einer Mannschaft."
+    "allAssigned": "Alle Spieler sind in einer Mannschaft.",
+    "adjustmentTitle": "Manueller Punktbonus/-abzug für diese Mannschaft",
+    "removeAdjustment": "Diese Korrektur entfernen",
+    "adjustmentPointsPlaceholder": "Punkte",
+    "adjustmentReasonPlaceholder": "Grund (erforderlich)",
+    "addAdjustment": "Hinzufügen"
   },
   "teamStandings": {
     "title": "Mannschaftswertung",

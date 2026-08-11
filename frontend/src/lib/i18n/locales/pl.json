@@ -516,7 +516,12 @@
     "pairingEloPlaceholder": "ELO do kojarzenia",
     "pairingEloTitle": "ELO do kojarzenia dla zawodnika bez rankingu: służy wyłącznie do średniej drużyny i kolejności szachownic, nigdy nie jest eksportowane — wszędzie indziej zawodnik pozostaje bez rankingu",
     "unassigned": "Bez drużyny ({count})",
-    "allAssigned": "Wszyscy zawodnicy są w drużynach."
+    "allAssigned": "Wszyscy zawodnicy są w drużynach.",
+    "adjustmentTitle": "Ręczna premia/kara punktowa dla tej drużyny",
+    "removeAdjustment": "Usuń tę korektę",
+    "adjustmentPointsPlaceholder": "Punkty",
+    "adjustmentReasonPlaceholder": "Powód (wymagany)",
+    "addAdjustment": "Dodaj"
   },
   "teamStandings": {
     "title": "Klasyfikacja drużynowa",

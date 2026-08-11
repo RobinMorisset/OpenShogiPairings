@@ -32,6 +32,11 @@
     onSetBoardOrder: (teamId: string, order: string[]) => void;
     onSortByRating: (teamId: string) => void;
     onSetPairingRating: (playerId: string, rating: number | null) => void;
+    /** Apply a manual point bonus/malus to a team. Unlike everything else here
+     *  this stays available after finalization — a fair-play bonus or a penalty
+     *  is decided mid-tournament, not while the rosters are being built. */
+    onAddAdjustment: (teamId: string, delta: number, reason: string) => void;
+    onRemoveAdjustment: (teamId: string, adjustmentId: string) => void;
     busy?: boolean;
   }
 
@@ -49,6 +54,8 @@
     onSetBoardOrder,
     onSortByRating,
     onSetPairingRating,
+    onAddAdjustment,
+    onRemoveAdjustment,
     busy = false,
   }: Props = $props();
 
@@ -111,6 +118,33 @@
   /** Whether this member still needs a pairing ELO before finalization. */
   function needsPairingRating(p: Player): boolean {
     return macmahonInUse && pairingRating(p) == null;
+  }
+
+  // Which team's adjustments panel is open, and the working values for its
+  // "add" form.
+  let adjustingId: string | null = $state(null);
+  let adjustmentDelta = $state("");
+  let adjustmentReason = $state("");
+
+  function toggleAdjustments(teamId: string) {
+    adjustingId = adjustingId === teamId ? null : teamId;
+    adjustmentDelta = "";
+    adjustmentReason = "";
+  }
+
+  function adjustmentTotal(team: Team): number {
+    return (team.adjustments ?? []).reduce((sum, a) => sum + a.delta, 0);
+  }
+
+  function submitAdjustment(teamId: string) {
+    const delta = Number(adjustmentDelta);
+    const reason = adjustmentReason.trim();
+    // The server enforces both too; refusing here keeps the referee from
+    // sending a request that can only come back as an error.
+    if (!Number.isFinite(delta) || delta === 0 || reason === "") return;
+    onAddAdjustment(teamId, delta, reason);
+    adjustmentDelta = "";
+    adjustmentReason = "";
   }
 </script>
 
@@ -175,6 +209,22 @@
           <span class="avg" title={$_("teams.averageTitle")}>
             {average ?? "—"}
           </span>
+          {#if adjustmentTotal(team) !== 0}
+            <span class="adj-badge">
+              {adjustmentTotal(team) > 0 ? "+" : ""}{adjustmentTotal(team)}
+            </span>
+          {/if}
+          <!-- Not gated on `finalized`: a bonus or penalty is decided during the
+               tournament, which is exactly when the rosters are frozen. -->
+          <button
+            type="button"
+            class="small"
+            disabled={busy}
+            title={$_("teams.adjustmentTitle")}
+            onclick={() => toggleAdjustments(team.id)}
+          >
+            ±
+          </button>
           {#if !finalized}
             <button
               type="button"
@@ -196,6 +246,53 @@
             </button>
           {/if}
         </div>
+
+        {#if adjustingId === team.id}
+          <div class="adjustments">
+            {#if (team.adjustments ?? []).length > 0}
+              <ul class="adjustments-list">
+                {#each team.adjustments ?? [] as adj (adj.id)}
+                  <li>
+                    <span class:bonus={adj.delta > 0} class:malus={adj.delta < 0}>
+                      {adj.delta > 0 ? "+" : ""}{adj.delta}
+                    </span>
+                    <span class="reason">{adj.reason}</span>
+                    <button
+                      type="button"
+                      class="small danger"
+                      title={$_("teams.removeAdjustment")}
+                      disabled={busy}
+                      onclick={() => onRemoveAdjustment(team.id, adj.id)}>✕</button
+                    >
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            <div class="adjustment-form">
+              <input
+                class="adj-delta"
+                type="number"
+                placeholder={$_("teams.adjustmentPointsPlaceholder")}
+                bind:value={adjustmentDelta}
+                disabled={busy}
+              />
+              <input
+                class="adj-reason"
+                type="text"
+                placeholder={$_("teams.adjustmentReasonPlaceholder")}
+                bind:value={adjustmentReason}
+                disabled={busy}
+                onkeydown={(e) => e.key === "Enter" && submitAdjustment(team.id)}
+              />
+              <button
+                type="button"
+                class="small"
+                disabled={busy}
+                onclick={() => submitAdjustment(team.id)}>{$_("teams.addAdjustment")}</button
+              >
+            </div>
+          </div>
+        {/if}
 
         <ol class="members">
           {#each roster as member, index (member.id)}
@@ -376,6 +473,45 @@
   }
   .pairing-elo {
     width: 5rem;
+  }
+  .adj-badge {
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+  }
+  .adjustments {
+    margin-top: 0.4rem;
+    padding: 0.35rem 0.5rem;
+    border-left: 2px solid var(--border);
+  }
+  .adjustments-list {
+    list-style: none;
+    margin: 0 0 0.35rem;
+    padding: 0;
+  }
+  .adjustments-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .bonus {
+    color: var(--win, green);
+  }
+  .malus {
+    color: var(--loss, crimson);
+  }
+  .reason {
+    flex: 1;
+  }
+  .adjustment-form {
+    display: flex;
+    gap: 0.3rem;
+  }
+  .adj-delta {
+    width: 4rem;
+  }
+  .adj-reason {
+    flex: 1;
+    min-width: 4rem;
   }
   .pairing-elo.missing {
     border-color: var(--warning, #c90);

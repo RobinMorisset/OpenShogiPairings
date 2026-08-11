@@ -362,9 +362,17 @@ pub(crate) fn compute_team_scores(
         // rating, not a grade), so there is no grade to pass.
         let macmahon =
             HalfPoints::from_whole(settings.macmahon_points_at(mm_rating, None, rounds_played));
+        // Manual bonuses/maluses fold in alongside the MacMahon start, before
+        // any round is replayed, so they shape both the standings and the
+        // score-gap pairing weight from here on. They are whole-point deltas;
+        // the signed floor at zero needs raw units, so this one computation
+        // drops into halves. A team's effective score can't go below zero.
+        let adjustment: i32 = team.adjustments.iter().map(|a| a.delta).sum();
+        let points =
+            HalfPoints::from_halves((macmahon.halves() as i32 + adjustment * 2).max(0) as u32);
         real_teams.push(number);
         by_id[number] = TeamScore {
-            points: macmahon,
+            points,
             macmahon,
             opponents: Vec::with_capacity(rounds_played as usize),
             defeated: Vec::with_capacity(rounds_played as usize),

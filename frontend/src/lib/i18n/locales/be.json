@@ -516,7 +516,12 @@
     "pairingEloPlaceholder": "Жараб'ёўкавы ELO",
     "pairingEloTitle": "Жараб'ёўкавы ELO для ўдзельніка без рэйтынгу: выкарыстоўваецца толькі для сярэдняга па камандзе і парадку дошак, не экспартуецца — у астатнім гулец застаецца без рэйтынгу",
     "unassigned": "Без каманды ({count})",
-    "allAssigned": "Усе гульцы размеркаваны па камандах."
+    "allAssigned": "Усе гульцы размеркаваны па камандах.",
+    "adjustmentTitle": "Ручное налічэнне/зняцце ачкоў камандзе",
+    "removeAdjustment": "Прыбраць гэтую карэкціроўку",
+    "adjustmentPointsPlaceholder": "Ачкі",
+    "adjustmentReasonPlaceholder": "Прычына (абавязкова)",
+    "addAdjustment": "Дадаць"
   },
   "teamStandings": {
     "title": "Камандны залік",

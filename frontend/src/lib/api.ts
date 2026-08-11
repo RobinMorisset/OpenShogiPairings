@@ -538,6 +538,30 @@ export function sortTeamByRating(teamId: string): Promise<TournamentResponse> {
   );
 }
 
+/** Apply a manual point bonus (positive `delta`) or malus to a team. Unlike the
+ *  roster calls this stays available after finalization. */
+export function addTeamAdjustment(
+  teamId: string,
+  delta: number,
+  reason: string,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath(`/teams/${teamId}/adjustments`), {
+    method: "POST",
+    body: JSON.stringify({ delta, reason }),
+  });
+}
+
+/** Remove a previously applied team adjustment. */
+export function removeTeamAdjustment(
+  teamId: string,
+  adjustmentId: string,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    scopedPath(`/teams/${teamId}/adjustments/${adjustmentId}`),
+    { method: "DELETE" },
+  );
+}
+
 /** Set (or clear, with `null`) a player's referee-assigned pairing ELO. */
 export function setPairingRating(
   playerId: string,
