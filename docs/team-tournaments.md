@@ -2,12 +2,16 @@
 
 Status: **partly implemented**. Landed so far: the [preliminary board-outcome
 refactor](#preliminary-refactor-board-outcome-as-a-sum-type), the [engine's unit
-abstraction](#engine-refactor-the-unit-abstraction), and the [data
+abstraction](#engine-refactor-the-unit-abstraction), the [data
 model](#data-model) with [registration and
-finalization](#registration-and-finalization). A team tournament can therefore be
-configured, rostered and finalized, but **not yet paired** — `prepare_round`
-rejects team mode with an explicit "not implemented" error until the team pairing
-path lands. Scoring, standings, the server routes and the UI are still to come.
+finalization](#registration-and-finalization), and [team
+pairing](#from-matched-teams-to-boards) with the team score replay behind it. A
+team tournament can therefore be configured, rostered, finalized and played.
+
+Still to come: the justified/unjustified absence distinction (so a partly absent
+team is refused for now), team-level draft operations (forced matches, forced
+byes, the counterfactual probe), team standings and tie-breaks, team point
+adjustments, the server routes, and the whole UI.
 
 A team tournament is the format that traditionally precedes European shogi
 championships (e.g. WOSC): teams of N players (usually N = 3) are the unit of
@@ -346,7 +350,9 @@ assertion should cross-check bounds against the actual instance.
 
 ### From matched teams to boards
 
-`confirm_round_inner`, team path:
+**Landed.** `confirm_team_round` is the team path; `team_units`,
+`compute_team_scores`, the board↔match grouping and the match-outcome derivation
+live in `crates/core/src/team_scoring.rs`. The steps below are what it does:
 
 1. Compute team scores; run the engine over present teams.
 2. Each matched team pair expands to N `Board`s: roster[k] of A vs roster[k]
@@ -364,12 +370,16 @@ In team mode, `RoundDraft` semantics shift to teams; player-level forced
 pairings and byes are rejected by validation:
 
 - **Team absence**: a team all of whose members are marked absent is excluded
-  from pairing entirely; each member gets an `Absent` sitout.
+  from pairing entirely; each member gets an `Absent` sitout. **Landed.**
 - **Individual absence**: marking fewer than N members of a team absent does
   *not* exclude the team — it is paired normally, and each absent member's
   board is created pre-marked with a justified absence (see below), which the
   opponent wins by forfeit. This is how a player who leaves the tournament
   (illness, travel) is recorded without the unjustified-no-show stigma.
+  **Not yet**: it needs the `AbsenceKind` enrichment below, so until that lands
+  a partly absent team is rejected (`PartialTeamAbsence`) rather than treated
+  as one thing or the other. The referee can pair the round and record the
+  forfeit on the board in the meantime.
 - **Forced pairings**: force team A vs team B (expands to N boards).
 - **Forced byes**: force a team bye.
 - `MIN_PRESENT_PLAYERS` becomes "at least 2 teams present".

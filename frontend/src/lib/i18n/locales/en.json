@@ -431,7 +431,9 @@
     "incompleteTeam": "Team {name} has {have} of {need} members.",
     "membersWithoutPairingRating": "MacMahon starting points need a pairing ELO for every unrated team member — {count} are still missing one.",
     "notEnoughTeams": "A team tournament needs at least 2 teams (there are {have}).",
-    "noLateRegistrationInTeamMode": "A team tournament can't take late registrations: every player has to be in a team, and the rosters are frozen."
+    "noLateRegistrationInTeamMode": "A team tournament can't take late registrations: every player has to be in a team, and the rosters are frozen.",
+    "notEnoughPresentTeams": "A round needs at least {needed} present teams — only {have} are present.",
+    "partialTeamAbsence": "Only some of team {name}'s players are marked absent. Mark the whole team absent, or pair the round and record the forfeit on the board."
   },
   "tiebreaks": {
     "points": {

@@ -10,13 +10,19 @@
 //! replay from the boards, the same way the cup replays its bracket, so editing
 //! a past board result re-derives every team outcome that depends on it.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use typed_index_collections::TiVec;
 use uuid::Uuid;
 
+use crate::pairing::{pair_round_weighted, PairingUnit};
 use crate::player::Player;
-use crate::tournament::{Tournament, TournamentError};
-use crate::units::TeamId;
+use crate::round::{Board, Round, Sitout, SitoutKind, SitoutValue};
+use crate::team_scoring::{match_boards, matches_in_round, team_units, TeamMatch, TeamSlots};
+use crate::tournament::{Tournament, TournamentError, MIN_TEAMS_PER_ROUND};
+use crate::units::{TeamId, TournamentId, UnitKey};
 
 /// A registered team. Stored on [`Tournament`](crate::Tournament); present (and
 /// non-empty) only in team mode.
@@ -315,6 +321,144 @@ impl Tournament {
         Ok(p)
     }
 
+    /// The board↔team lookup for this tournament's frozen rosters — what every
+    /// team-level derivation (matches, scores, pairing) starts from.
+    pub(crate) fn team_slots(&self) -> TeamSlots {
+        TeamSlots::new(&self.teams, &self.players)
+    }
+
+    /// The pairing engine's input in team mode: one unit per team, replayed from
+    /// `completed`. The team twin of [`Tournament::pairing_units`].
+    pub(crate) fn team_pairing_units(
+        &self,
+        completed: &[Round],
+        slots: &TeamSlots,
+    ) -> TiVec<UnitKey, PairingUnit> {
+        team_units(&self.teams, &self.players, &self.settings, completed, slots)
+    }
+
+    /// The team matches of a round, each with its boards — the grouping the round
+    /// view renders and the standings replay.
+    pub fn team_matches(&self, round: &Round) -> Vec<TeamMatch> {
+        matches_in_round(round, &self.team_slots())
+    }
+
+    /// Confirm a team round: pair the present *teams*, then expand each matched
+    /// pair into its `size` boards (roster[k] against roster[k]) and each bye
+    /// into one sit-out per member.
+    ///
+    /// The team path is much shorter than the individual one because team mode
+    /// rejects both features that complicate it: there is no cup bracket to
+    /// splice in and no long board to carry over.
+    pub(crate) fn confirm_team_round(&mut self) -> Result<&Round, TournamentError> {
+        let draft = self.draft.clone().ok_or(TournamentError::NoDraft)?;
+        let slots = self.team_slots();
+        let absent: HashSet<TournamentId> = draft.absent.iter().copied().collect();
+
+        // A team sits out as a whole or not at all. Marking *some* of its members
+        // absent is a different thing — the team still plays, and the missing
+        // member's board is forfeited — which needs the absence-kind distinction
+        // that has not landed yet, so it is refused rather than silently treated
+        // as one or the other.
+        for team in self.teams.iter() {
+            let Some(number) = team.tournament_id else {
+                continue;
+            };
+            let members = slots.members_of(number);
+            let away = members.iter().filter(|t| absent.contains(t)).count();
+            if away > 0 && away < members.len() {
+                return Err(TournamentError::PartialTeamAbsence {
+                    name: team.name.clone(),
+                });
+            }
+        }
+        // Player-level forcing has no meaning when teams are what get paired.
+        if !draft.forced_boards.is_empty() || !draft.forced_byes.is_empty() {
+            return Err(TournamentError::PlayerLevelDraftInTeamMode);
+        }
+
+        let present: Vec<UnitKey> = self
+            .teams
+            .iter()
+            .filter_map(|t| t.tournament_id)
+            .filter(|&number| {
+                let members = slots.members_of(number);
+                !members.is_empty() && !members.iter().all(|t| absent.contains(t))
+            })
+            .map(UnitKey::from)
+            .collect();
+        if present.len() < MIN_TEAMS_PER_ROUND {
+            return Err(TournamentError::NotEnoughPresentTeams {
+                needed: MIN_TEAMS_PER_ROUND,
+                have: present.len(),
+            });
+        }
+
+        let units = self.team_pairing_units(&self.rounds, &slots);
+        let paired = pair_round_weighted(draft.number, &self.settings, &units, &present, &[], &[]);
+
+        // Each matched pair becomes `size` boards, all carrying the team-level
+        // float: it is a fact of the *team* pairing, and the float history
+        // replays from it.
+        let mut boards: Vec<Board> = Vec::new();
+        for p in &paired.pairs {
+            boards.extend(match_boards(
+                TeamId::from(p.a),
+                TeamId::from(p.b),
+                p.points_diff,
+                p.source,
+                &slots,
+            ));
+        }
+        // Display order: by team match (best-ranked team first), then board
+        // number within the match — which the expansion above already produced,
+        // since the engine hands back pairs in a stable order.
+
+        // A team bye is one sit-out per member, so per-player scoring and the
+        // grid see ordinary `0+` cells; at team level it derives as a match win.
+        let mut sitouts: Vec<Sitout> = Vec::new();
+        if let Some(bye) = paired.swiss_bye {
+            sitouts.extend(
+                slots
+                    .members_of(TeamId::from(bye))
+                    .iter()
+                    .map(|&player| Sitout {
+                        player,
+                        kind: SitoutKind::Bye,
+                        value: SitoutValue::Full,
+                    }),
+            );
+        }
+        let absent_value = if self.settings.half_point_absences {
+            SitoutValue::Half
+        } else {
+            SitoutValue::Zero
+        };
+        let playing: HashSet<TournamentId> =
+            boards.iter().flat_map(|b| [b.player1, b.player2]).collect();
+        let already: HashSet<TournamentId> = sitouts.iter().map(|s| s.player).collect();
+        sitouts.extend(
+            draft
+                .absent
+                .iter()
+                .filter(|id| !playing.contains(id) && !already.contains(id))
+                .map(|&player| Sitout {
+                    player,
+                    kind: SitoutKind::Absent,
+                    value: absent_value,
+                }),
+        );
+
+        self.rounds.push(Round {
+            number: draft.number,
+            boards,
+            sitouts,
+            completed: false,
+        });
+        self.draft = None;
+        Ok(self.rounds.last().expect("just pushed a round"))
+    }
+
     /// Mutable access to a team by id.
     fn team_mut(&mut self, team: Uuid) -> Result<&mut Team, TournamentError> {
         self.teams
@@ -385,6 +529,7 @@ impl Tournament {
 mod tests {
     use super::*;
     use crate::player::NewPlayer;
+    use crate::round::Winner;
 
     fn player(rating: Option<u32>, pairing: Option<u32>) -> Player {
         let mut p = Player::from_new(NewPlayer {
@@ -737,17 +882,167 @@ mod tests {
         ));
     }
 
-    /// Until team pairing lands, a finalized team tournament refuses to pair
-    /// rather than silently pairing its players as individuals.
+    // --- Pairing ----------------------------------------------------------
+
+    /// Start a round on a finalized tournament, with the given players absent.
+    fn start_round(t: &mut Tournament, absent: Vec<TournamentId>) {
+        t.prepare_round().unwrap();
+        t.update_draft(absent, Vec::new(), Vec::new()).unwrap();
+        t.confirm_round().unwrap();
+    }
+
+    /// A player's tournament number.
+    fn tid(t: &Tournament, id: Uuid) -> TournamentId {
+        t.players
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .tournament_id
+            .unwrap()
+    }
+
     #[test]
-    fn preparing_a_round_is_refused_in_team_mode_for_now() {
+    fn a_team_match_becomes_one_board_per_position() {
+        // Two teams of three: one match, three boards, board k against board k.
+        let (mut t, ids) = team_tournament(3, 6);
+        let teams = fill_teams(&mut t, &ids, 2, 3);
+        t.finalize_registration().unwrap();
+        start_round(&mut t, Vec::new());
+
+        let round = &t.rounds[0];
+        assert_eq!(round.boards.len(), 3);
+        assert!(round.sitouts.is_empty());
+        let slots = t.team_slots();
+        for (k, board) in round.boards.iter().enumerate() {
+            // Both sides sit on the same board number, in different teams.
+            let (team1, b1) = slots.slot_of(board.player1).unwrap();
+            let (team2, b2) = slots.slot_of(board.player2).unwrap();
+            assert_eq!((b1, b2), (k as u32, k as u32));
+            assert_ne!(team1, team2);
+        }
+        // One match, holding all three boards.
+        let matches = t.team_matches(&t.rounds[0]);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].boards, vec![0, 1, 2]);
+        assert_eq!(t.team_members(teams[0]).len(), 3);
+    }
+
+    #[test]
+    fn an_odd_field_gives_one_team_the_bye_as_member_sitouts() {
+        // Three teams of two: one match plus a bye team, whose two members each
+        // get an ordinary full-point sit-out.
+        let (mut t, ids) = team_tournament(2, 6);
+        fill_teams(&mut t, &ids, 3, 2);
+        t.finalize_registration().unwrap();
+        start_round(&mut t, Vec::new());
+
+        let round = &t.rounds[0];
+        assert_eq!(round.boards.len(), 2);
+        assert_eq!(round.sitouts.len(), 2);
+        assert!(round
+            .sitouts
+            .iter()
+            .all(|s| s.kind == SitoutKind::Bye && s.value == SitoutValue::Full));
+        // Both sit-outs belong to the same team — a team byes as a unit.
+        let slots = t.team_slots();
+        let teams: HashSet<TeamId> = round
+            .sitouts
+            .iter()
+            .map(|s| slots.team_of(s.player).unwrap())
+            .collect();
+        assert_eq!(teams.len(), 1);
+    }
+
+    #[test]
+    fn an_absent_team_is_left_out_of_the_pairing() {
+        let (mut t, ids) = team_tournament(2, 6);
+        fill_teams(&mut t, &ids, 3, 2);
+        t.finalize_registration().unwrap();
+        // Mark the whole third team absent: the other two play, nobody byes.
+        let away: Vec<TournamentId> = ids[4..].iter().map(|&id| tid(&t, id)).collect();
+        start_round(&mut t, away.clone());
+
+        let round = &t.rounds[0];
+        assert_eq!(round.boards.len(), 2);
+        assert_eq!(round.sitouts.len(), 2);
+        assert!(round.sitouts.iter().all(|s| s.kind == SitoutKind::Absent));
+        assert!(round.sitouts.iter().all(|s| away.contains(&s.player)));
+    }
+
+    /// A half-absent team is refused rather than guessed at: the team would
+    /// still play, with the missing member's board forfeited, and telling a
+    /// justified absence from a no-show isn't implemented yet.
+    #[test]
+    fn a_partly_absent_team_is_rejected() {
         let (mut t, ids) = team_tournament(2, 4);
         fill_teams(&mut t, &ids, 2, 2);
         t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        t.update_draft(vec![tid(&t, ids[0])], Vec::new(), Vec::new())
+            .unwrap();
         assert!(matches!(
-            t.prepare_round(),
-            Err(TournamentError::TeamPairingNotImplemented)
+            t.confirm_round(),
+            Err(TournamentError::PartialTeamAbsence { .. })
         ));
+    }
+
+    #[test]
+    fn a_team_round_needs_two_present_teams() {
+        let (mut t, ids) = team_tournament(2, 4);
+        fill_teams(&mut t, &ids, 2, 2);
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        let away: Vec<TournamentId> = ids[2..].iter().map(|&id| tid(&t, id)).collect();
+        t.update_draft(away, Vec::new(), Vec::new()).unwrap();
+        assert!(matches!(
+            t.confirm_round(),
+            Err(TournamentError::NotEnoughPresentTeams { needed: 2, have: 1 })
+        ));
+    }
+
+    #[test]
+    fn player_level_forcing_is_rejected_in_team_mode() {
+        let (mut t, ids) = team_tournament(2, 4);
+        fill_teams(&mut t, &ids, 2, 2);
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        let (a, b) = (tid(&t, ids[0]), tid(&t, ids[2]));
+        t.update_draft(
+            Vec::new(),
+            vec![Board::pending(a, b, 0, crate::round::PairingSource::Swiss)],
+            Vec::new(),
+        )
+        .unwrap();
+        assert!(matches!(
+            t.confirm_round(),
+            Err(TournamentError::PlayerLevelDraftInTeamMode)
+        ));
+    }
+
+    /// The whole point of pairing teams: two teams never meet twice, even though
+    /// their players are what the boards name.
+    #[test]
+    fn teams_do_not_meet_twice() {
+        let (mut t, ids) = team_tournament(2, 8);
+        fill_teams(&mut t, &ids, 4, 2);
+        t.finalize_registration().unwrap();
+
+        let mut met: HashSet<(TeamId, TeamId)> = HashSet::new();
+        for _ in 0..3 {
+            start_round(&mut t, Vec::new());
+            let round = t.rounds.last().unwrap().clone();
+            for m in t.team_matches(&round) {
+                let key = (m.team1.min(m.team2), m.team1.max(m.team2));
+                assert!(met.insert(key), "a rematch: {key:?}");
+            }
+            // Decide every board so the round completes and the next can start.
+            for i in 0..t.rounds.last().unwrap().boards.len() {
+                let number = t.rounds.last().unwrap().number;
+                t.toggle_board_winner(number, i, Winner::Player1).unwrap();
+            }
+        }
+        // A round-robin of four teams over three rounds: every pair met once.
+        assert_eq!(met.len(), 6);
     }
 
     #[test]

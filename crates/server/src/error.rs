@@ -209,6 +209,16 @@ fn domain_payload(err: &TournamentError) -> Option<(&'static str, BTreeMap<Strin
             with("not_enough_teams", [("have", have.to_string())])
         }
         TournamentError::NoLateRegistrationInTeamMode => bare("no_late_registration_in_team_mode"),
+        TournamentError::NotEnoughPresentTeams { needed, have } => with(
+            "not_enough_present_teams",
+            [
+                ("needed", needed.to_string()),
+                ("have", have.to_string()),
+            ],
+        ),
+        TournamentError::PartialTeamAbsence { name } => {
+            with("partial_team_absence", [("name", name.clone())])
+        }
 
         // Point adjustments.
         TournamentError::EmptyAdjustmentReason => bare("empty_adjustment_reason"),
@@ -252,9 +262,12 @@ fn domain_payload(err: &TournamentError) -> Option<(&'static str, BTreeMap<Strin
         | TournamentError::NotATeamMember { .. }
         | TournamentError::InvalidBoardOrder
         | TournamentError::PairingRatingNotApplicable
-        // Deliberately English: unfinished scaffolding, not a state the product
-        // is meant to have. Remove it with the guard it reports.
-        | TournamentError::TeamPairingNotImplemented
+        // The team draft UI only offers whole-team absences and team-level
+        // forcing, so these two mean a client sent something it never renders.
+        | TournamentError::PlayerLevelDraftInTeamMode
+        // Deliberately English: unfinished scaffolding (the UI offers no team
+        // probe yet), not a state the product is meant to have.
+        | TournamentError::TeamProbeNotAvailable
         // TODO: `InvalidDraft` carries a free-form English string built at ~8
         // call sites; it needs to become a structured enum before it can be
         // translated. Referee-visible, so worth doing.
@@ -430,7 +443,12 @@ mod tests {
             TournamentError::NotEnoughTeams { have: 1 },
             TournamentError::PairingRatingNotApplicable,
             TournamentError::NoLateRegistrationInTeamMode,
-            TournamentError::TeamPairingNotImplemented,
+            TournamentError::NotEnoughPresentTeams { needed: 2, have: 1 },
+            TournamentError::PartialTeamAbsence {
+                name: "Paris".to_string(),
+            },
+            TournamentError::PlayerLevelDraftInTeamMode,
+            TournamentError::TeamProbeNotAvailable,
             TournamentError::DrawnOnForfeitedBoard { round: 1, board: 0 },
         ]
     }

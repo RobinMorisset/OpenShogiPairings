@@ -20,10 +20,12 @@ Known limitations and future work, roughly ordered by area.
 - **Team tournaments** — design settled in
   [docs/team-tournaments.md](docs/team-tournaments.md): teams as the pairing
   unit, boards as the atom, derived match outcomes. Landed so far: the
-  board-outcome sum type, the engine's unit abstraction, and the team data
-  model (settings, rosters, finalization). A team tournament can be configured
-  and finalized but not yet paired — `prepare_round` rejects it explicitly.
-  Next: team pairing, then scoring/standings, the server routes and the UI.
+  board-outcome sum type, the engine's unit abstraction, the team data model
+  (settings, rosters, finalization) and team pairing with its score replay — a
+  team tournament can be configured, rostered, finalized and played. Next: the
+  justified/unjustified absence distinction (a partly absent team is refused
+  until then), team-level draft operations, standings and tie-breaks, team
+  point adjustments, the server routes and the UI.
 
 ## Multi-referee server
 

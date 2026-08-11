@@ -431,7 +431,9 @@
     "incompleteTeam": "Drużyna {name} ma {have} z {need} zawodników.",
     "membersWithoutPairingRating": "Punkty startowe MacMahona wymagają ELO do kojarzenia dla każdego nierankingowanego zawodnika — brakuje {count}.",
     "notEnoughTeams": "Turniej drużynowy wymaga co najmniej 2 drużyn (jest {have}).",
-    "noLateRegistrationInTeamMode": "Turniej drużynowy nie przyjmuje zgłoszeń po terminie: każdy zawodnik musi być w drużynie, a składy są zamrożone."
+    "noLateRegistrationInTeamMode": "Turniej drużynowy nie przyjmuje zgłoszeń po terminie: każdy zawodnik musi być w drużynie, a składy są zamrożone.",
+    "notEnoughPresentTeams": "Runda wymaga co najmniej {needed} obecnych drużyn — obecnych jest tylko {have}.",
+    "partialTeamAbsence": "Tylko część zawodników drużyny {name} jest oznaczona jako nieobecna. Oznacz całą drużynę jako nieobecną albo skojarz rundę i zapisz walkower na szachownicy."
   },
   "tiebreaks": {
     "points": {

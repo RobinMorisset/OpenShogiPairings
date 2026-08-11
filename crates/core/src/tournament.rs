@@ -27,6 +27,7 @@ use crate::scoring::compute_scores;
 use crate::settings::{TeamModeConflict, TournamentSettings, TEAM_SIZES};
 use crate::standings::{compute_standings, Standing};
 use crate::team::Team;
+use crate::team_scoring::{matches_in_round, swiss_bye_team};
 use crate::units::{TournamentId, UnitKey};
 use typed_index_collections::TiVec;
 
@@ -52,6 +53,10 @@ fn default_format_version() -> u32 {
 
 /// Minimum number of players required to start a round.
 pub const MIN_PLAYERS_PER_ROUND: usize = 2;
+
+/// Minimum number of present teams required to start a team round — the team
+/// reading of [`MIN_PLAYERS_PER_ROUND`], since teams are what get paired.
+pub const MIN_TEAMS_PER_ROUND: usize = 2;
 
 /// A tournament: a name and its registered players.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -282,11 +287,26 @@ pub enum TournamentError {
     /// late team would need teamless players first).
     #[error("a team tournament cannot take late registrations")]
     NoLateRegistrationInTeamMode,
-    /// Team-level pairing isn't implemented yet, so a team tournament can be
-    /// registered and finalized but not paired. Temporary — see the TODO in
-    /// [`Tournament::prepare_round`].
-    #[error("pairing a team tournament is not implemented yet")]
-    TeamPairingNotImplemented,
+    /// Too few present teams to start a team round.
+    #[error("need at least {needed} present teams (have {have})")]
+    NotEnoughPresentTeams { needed: usize, have: usize },
+    /// Some — but not all — of a team's members were marked absent. The team
+    /// would still play, with the missing member's board forfeited, which needs
+    /// the justified/unjustified absence distinction that isn't implemented yet.
+    #[error(
+        "team {name} has only some of its members marked absent; mark the whole \
+         team absent, or pair the round and record the forfeit on the board"
+    )]
+    PartialTeamAbsence { name: String },
+    /// A player-level forced pairing or forced bye was submitted for a team
+    /// round, where teams are what get paired.
+    #[error("a team round is paired by team, so it takes no player-level forced pairing or bye")]
+    PlayerLevelDraftInTeamMode,
+    /// A counterfactual probe (or a forced re-pairing) was asked for in team
+    /// mode. Both are keyed by player number, which names no unit the team
+    /// engine paired; a team-level API for them is still to come.
+    #[error("probing and forcing a pairing are not available in team mode yet")]
+    TeamProbeNotAvailable,
 }
 
 impl Tournament {
@@ -800,13 +820,6 @@ impl Tournament {
         if !self.registration_finalized {
             return Err(TournamentError::RegistrationNotFinalized);
         }
-        // TODO(team-mode): remove once team pairing lands. Until then a team
-        // tournament can be registered and finalized but not paired — refusing
-        // loudly is the only honest answer, since the player-level engine would
-        // otherwise pair a team tournament as if the teams weren't there.
-        if self.settings.team_mode() {
-            return Err(TournamentError::TeamPairingNotImplemented);
-        }
         if self.draft.is_some() {
             return Err(TournamentError::DraftAlreadyExists);
         }
@@ -930,6 +943,9 @@ impl Tournament {
         &mut self,
         order_boards_for_display: bool,
     ) -> Result<&Round, TournamentError> {
+        if self.settings.team_mode() {
+            return self.confirm_team_round();
+        }
         let draft = self.draft.clone().ok_or(TournamentError::NoDraft)?;
 
         let absent: HashSet<TournamentId> = draft.absent.iter().copied().collect();
@@ -1216,6 +1232,28 @@ impl Tournament {
             .ok_or(TournamentError::RoundNotFound(round_number))?;
         let round = &self.rounds[idx];
         let completed = &self.rounds[..idx];
+        // In team mode the engine paired *teams*, so the explanation is scored
+        // against the team units and its ledgers name team numbers.
+        if self.settings.team_mode() {
+            let slots = self.team_slots();
+            let units = self.team_pairing_units(completed, &slots);
+            let swiss_boards: Vec<(UnitKey, UnitKey)> = matches_in_round(round, &slots)
+                .iter()
+                .filter(|m| {
+                    m.boards
+                        .first()
+                        .is_some_and(|&i| matches!(round.boards[i].source, PairingSource::Swiss))
+                })
+                .map(|m| (UnitKey::from(m.team1), UnitKey::from(m.team2)))
+                .collect();
+            return Ok(explain_pairing(
+                round.number,
+                &self.settings,
+                &units,
+                &swiss_boards,
+                swiss_bye_team(round, &slots).map(UnitKey::from),
+            ));
+        }
         let swiss_boards: Vec<(UnitKey, UnitKey)> = round
             .boards
             .iter()
@@ -1248,6 +1286,12 @@ impl Tournament {
         b: TournamentId,
         mode: CounterfactualMode,
     ) -> Result<Counterfactual, TournamentError> {
+        // The probe is keyed by player number, which has no team reading — a team
+        // probe has to name teams. Refused until the team draft API lands, rather
+        // than answered about the wrong unit.
+        if self.settings.team_mode() {
+            return Err(TournamentError::TeamProbeNotAvailable);
+        }
         let idx = self
             .rounds
             .iter()

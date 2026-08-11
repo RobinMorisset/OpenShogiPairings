@@ -431,7 +431,9 @@
     "incompleteTeam": "Mannschaft {name} hat {have} von {need} Mitgliedern.",
     "membersWithoutPairingRating": "MacMahon-Startpunkte brauchen für jedes ungewertete Mannschaftsmitglied ein Auslosungs-ELO — {count} fehlen noch.",
     "notEnoughTeams": "Ein Mannschaftsturnier braucht mindestens 2 Mannschaften (vorhanden: {have}).",
-    "noLateRegistrationInTeamMode": "Ein Mannschaftsturnier nimmt keine Nachmeldungen an: jeder Spieler muss in einer Mannschaft sein, und die Aufstellungen sind fixiert."
+    "noLateRegistrationInTeamMode": "Ein Mannschaftsturnier nimmt keine Nachmeldungen an: jeder Spieler muss in einer Mannschaft sein, und die Aufstellungen sind fixiert.",
+    "notEnoughPresentTeams": "Eine Runde braucht mindestens {needed} anwesende Mannschaften — es sind nur {have} anwesend.",
+    "partialTeamAbsence": "Nur ein Teil der Spieler von Mannschaft {name} ist als abwesend markiert. Markieren Sie die ganze Mannschaft als abwesend, oder losen Sie die Runde aus und tragen Sie den kampflosen Sieg am Brett ein."
   },
   "tiebreaks": {
     "points": {

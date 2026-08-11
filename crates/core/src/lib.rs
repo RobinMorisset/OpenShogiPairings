@@ -24,6 +24,7 @@ mod settings;
 pub mod sim;
 mod standings;
 mod team;
+mod team_scoring;
 mod tournament;
 mod units;
 
@@ -54,6 +55,7 @@ pub use settings::{
 };
 pub use standings::{compute_standings, Standing};
 pub use team::{average_pairing_rating, pairing_rating, Team};
+pub use team_scoring::TeamMatch;
 pub use tournament::{
     Tournament, TournamentError, MIN_PLAYERS_PER_ROUND, TOURNAMENT_FORMAT_VERSION,
 };

@@ -431,7 +431,9 @@
     "incompleteTeam": "チーム {name} は {need} 人中 {have} 人です。",
     "membersWithoutPairingRating": "マクマホンの持ち点には、レーティングのないチームメンバー全員に組み合わせ用ELOが必要です（あと {count} 人）。",
     "notEnoughTeams": "団体戦には少なくとも2チームが必要です（現在 {have} チーム）。",
-    "noLateRegistrationInTeamMode": "団体戦では追加登録できません。全員がチームに所属している必要があり、メンバー構成は確定済みです。"
+    "noLateRegistrationInTeamMode": "団体戦では追加登録できません。全員がチームに所属している必要があり、メンバー構成は確定済みです。",
+    "notEnoughPresentTeams": "1ラウンドには少なくとも {needed} チームの参加が必要ですが、{have} チームしかいません。",
+    "partialTeamAbsence": "チーム {name} の一部の選手だけが欠席になっています。チーム全体を欠席にするか、組み合わせを行ってから各対局に不戦勝を記録してください。"
   },
   "tiebreaks": {
     "points": {

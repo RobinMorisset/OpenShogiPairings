@@ -431,7 +431,9 @@
     "incompleteTeam": "L'équipe {name} a {have} membres sur {need}.",
     "membersWithoutPairingRating": "Les points de départ MacMahon exigent un ELO d'appariement pour chaque membre non classé — il en manque {count}.",
     "notEnoughTeams": "Un tournoi par équipes demande au moins 2 équipes (il y en a {have}).",
-    "noLateRegistrationInTeamMode": "Un tournoi par équipes n'accepte pas d'inscription tardive : chaque joueur doit être dans une équipe, et les compositions sont figées."
+    "noLateRegistrationInTeamMode": "Un tournoi par équipes n'accepte pas d'inscription tardive : chaque joueur doit être dans une équipe, et les compositions sont figées.",
+    "notEnoughPresentTeams": "Une ronde demande au moins {needed} équipes présentes — il n'y en a que {have}.",
+    "partialTeamAbsence": "Seule une partie des joueurs de l'équipe {name} est marquée absente. Marquez toute l'équipe absente, ou appariez la ronde et enregistrez le forfait sur l'échiquier."
   },
   "tiebreaks": {
     "points": {

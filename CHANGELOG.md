@@ -26,8 +26,17 @@ clear message rather than half-parsed; re-create the tournament.
   Team mode and the features it cannot support (the cup, long games, ELO
   pairing, grade-based MacMahon thresholds, the estimated-ELO tie-break) are
   rejected as a conflicting pair, naming both, rather than either being silently
-  disabled. **Pairing a team tournament is not implemented yet**, and is refused
-  with an explicit error.
+  disabled.
+- **Team pairing**: a team round pairs the *teams* — same Swiss/MacMahon rules,
+  applied to team points, team averages and the teams already met — and expands
+  each match into one ordinary board per position, board k against board k. A
+  team bye is one full-point sit-out per member; an absent team is left out of
+  the pairing as a whole. Everything above the boards is derived, never stored:
+  the match a board belongs to, the match result (more board wins takes the
+  point, level splits it), and each team's running score. Club protection now
+  counts the same-club *games* a match would create, so a mixed-club team is
+  handled without any notion of a "team club". Simulating a team tournament is
+  refused explicitly — its metrics are all defined over individual standings.
 
 - **Hybrid cup: a qualification-round format** (Settings → Hybrid cup), used by
   the German Championship. The top half of the bracket is pre-qualified and

@@ -64,6 +64,8 @@ pub const LOCALIZED_ERROR_CODES: &[&str] = &[
     "members_without_pairing_rating",
     "not_enough_teams",
     "no_late_registration_in_team_mode",
+    "not_enough_present_teams",
+    "partial_team_absence",
     // Saved files and settings
     "unsupported_format_version",
     "malformed_save",
