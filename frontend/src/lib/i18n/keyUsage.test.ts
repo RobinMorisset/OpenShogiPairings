@@ -81,6 +81,14 @@ const DYNAMIC_SITES: { site: string; keys: string[] }[] = [
     ),
   },
   {
+    // The cup is rejected in team mode, so that reason has no team wording and
+    // falls back to the shared one — see `scopedOutText`.
+    site: "RoundView.svelte probe, team mode — one per ScopeReason but `cup`",
+    keys: unionMembers(SCOPE_REASON_SRC, "ScopeReason")
+      .filter((r) => r !== "cup")
+      .map((r) => `roundView.probe.scopedOutTeam.${r}`),
+  },
+  {
     site: "ResultsView.svelte sit-out cell — one per SitoutValue (generated from Rust)",
     keys: unionMembers(SITOUT_VALUE_SRC, "SitoutValue").map(
       (v) => `resultsView.sitoutWorth.${v}`,

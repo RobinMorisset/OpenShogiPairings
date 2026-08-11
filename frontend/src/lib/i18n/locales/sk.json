@@ -188,6 +188,13 @@
         "forced": "Tento stôl určil rozhodca, nevybral ho algoritmus.",
         "cup": "Tento stôl pochádza z pohárového pavúka, nie zo švajčiarskeho algoritmu.",
         "absent": "Tento hráč toto kolo vynechal, takže ho algoritmus nepároval."
+      },
+      "pickTeam": "Vyberte družstvo…",
+      "hintForceTeams": "Vyberte dve družstvá a uvidíte, čo by stálo ich vzájomné spárovanie.",
+      "hintForbidTeams": "Vyberte dve spárované družstvá a uvidíte, prečo ich algoritmus dal k sebe.",
+      "scopedOutTeam": {
+        "forced": "Tento zápas určil rozhodca, nevybral ho algoritmus.",
+        "absent": "Toto družstvo toto kolo vynechalo, takže ho algoritmus nepároval."
       }
     },
     "markJustifiedTitle": "Označiť {name} ako ospravedlnene neprítomného (0−)",

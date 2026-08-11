@@ -188,6 +188,13 @@
         "forced": "Ten stolik został ustalony przez sędziego, a nie wybrany przez algorytm.",
         "cup": "Ten stolik pochodzi z drabinki pucharowej, a nie z algorytmu szwajcarskiego.",
         "absent": "Ten gracz był w tej rundzie nieobecny, więc algorytm go nie kojarzył."
+      },
+      "pickTeam": "Wybierz drużynę…",
+      "hintForceTeams": "Wybierz dwie drużyny, aby zobaczyć, ile kosztowałoby skojarzenie ich ze sobą.",
+      "hintForbidTeams": "Wybierz dwie skojarzone drużyny, aby zobaczyć, dlaczego algorytm dobrał je w parę.",
+      "scopedOutTeam": {
+        "forced": "Ten mecz został ustalony przez sędziego, a nie wybrany przez algorytm.",
+        "absent": "Ta drużyna była w tej rundzie nieobecna, więc algorytm jej nie kojarzył."
       }
     },
     "markJustifiedTitle": "Oznacz {name} jako nieobecnego z ważnego powodu (0−)",

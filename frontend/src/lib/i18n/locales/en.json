@@ -188,6 +188,13 @@
         "forced": "That board was fixed by the referee, not chosen by the engine.",
         "cup": "That board comes from the cup bracket, not the Swiss engine.",
         "absent": "That player sat this round out, so the engine didn't pair them."
+      },
+      "pickTeam": "Choose a team…",
+      "hintForceTeams": "Pick two teams to see what pairing them together would cost.",
+      "hintForbidTeams": "Pick two paired teams to see why the engine paired them.",
+      "scopedOutTeam": {
+        "forced": "That match was fixed by the referee, not chosen by the engine.",
+        "absent": "That team sat this round out, so the engine didn't pair it."
       }
     },
     "markJustifiedTitle": "Mark {name} absent for a reason instead (0−)",

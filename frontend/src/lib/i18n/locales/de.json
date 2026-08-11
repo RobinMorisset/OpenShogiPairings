@@ -188,6 +188,13 @@
         "forced": "Dieses Brett wurde vom Schiedsrichter festgelegt, nicht von der Engine gewählt.",
         "cup": "Dieses Brett stammt aus dem Pokal-Turnierbaum, nicht aus der Engine des Schweizer Systems.",
         "absent": "Dieser Spieler hat diese Runde ausgesetzt, daher hat die Engine ihn nicht gepaart."
+      },
+      "pickTeam": "Mannschaft wählen…",
+      "hintForceTeams": "Wählen Sie zwei Mannschaften, um zu sehen, was es kosten würde, sie zu paaren.",
+      "hintForbidTeams": "Wählen Sie zwei gepaarte Mannschaften, um zu sehen, warum die Engine sie zusammengebracht hat.",
+      "scopedOutTeam": {
+        "forced": "Dieser Wettkampf wurde vom Schiedsrichter festgelegt, nicht von der Engine gewählt.",
+        "absent": "Diese Mannschaft hat diese Runde ausgesetzt, daher hat die Engine sie nicht gepaart."
       }
     },
     "markJustifiedTitle": "{name} stattdessen als entschuldigt abwesend markieren (0−)",

@@ -12,11 +12,12 @@
     type Round,
     type RoundExplanation,
     type RuleId,
+    type ScopeReason,
     type Team,
     type Winner,
   } from "../types";
   import { sourceBadge } from "../pairingSource";
-  import { matchScore, teamMatches } from "../teams";
+  import { matchScore, teamMatches, type TeamMatch } from "../teams";
   import { drawnOf, forfeitOf, handicapGiverId, winnerOf } from "../boardOutcome";
   import { absenceKind, absent, cycledForfeit, isDecided } from "../noShow";
   import { printPage } from "../platform";
@@ -118,6 +119,22 @@
     if (!teamMode) return name(key);
     return teams.find((t) => t.tournament_id === key)?.name ?? `#${key}`;
   }
+
+  // The probe picks apart what the engine paired, so it says "team" throughout
+  // in a team tournament — the pickers list teams, and it is a team that was
+  // absent or a match the referee fixed.
+  const probePickLabel = $derived(
+    $_(teamMode ? "roundView.probe.pickTeam" : "roundView.probe.pick"),
+  );
+
+  /** Why a probed unit lies outside what the engine decided. `cup` cannot arise
+   *  in team mode (the cup is rejected there), so only the two reachable
+   *  reasons have a team wording. */
+  function scopedOutText(reason: ScopeReason): string {
+    const group = teamMode && reason !== "cup" ? "scopedOutTeam" : "scopedOut";
+    return $_(`roundView.probe.${group}.${reason}`);
+  }
+
   /** The board table's rows: each match's header followed by its boards, or —
    *  in an individual tournament — simply every board in order. */
   const boardGroups = $derived(
@@ -221,8 +238,21 @@
     return map;
   });
 
+  // A ledger is keyed by the two *units* the engine paired. In an individual
+  // tournament those are the players on the board; in a team one they are
+  // teams, and a single ledger covers the whole match — so it is flagged on the
+  // match header rather than repeated on each of its boards, which would read
+  // as several separate compromises.
   function boardLedger(board: Board): BoardLedger | undefined {
+    if (teamMode) return undefined;
     return ledgerByPair.get(pairKey(board.player1, board.player2));
+  }
+
+  function matchLedger(match: TeamMatch): BoardLedger | undefined {
+    const a = match.team1.tournament_id;
+    const b = match.team2.tournament_id;
+    if (a == null || b == null) return undefined;
+    return ledgerByPair.get(pairKey(a, b));
   }
 
   // Fold deviation fires on nearly every board, so it carries no signal — a
@@ -264,13 +294,14 @@
   const hasReport = $derived((explanation?.report.length ?? 0) > 0);
   let reportOpen = $state(false);
 
-  // A board ledger as readable text: "A vs B" or "X (bye)".
+  // A ledger as readable text: "A vs B" or "X (bye)". It names whatever the
+  // engine paired — players in an individual tournament, teams in a team one.
   function ledgerLabel(b: BoardLedger): string {
     if (!b.player2) {
-      return $_("roundView.explanation.byeBoard", { values: { name: name(b.player1) } });
+      return $_("roundView.explanation.byeBoard", { values: { name: unitName(b.player1) } });
     }
     return $_("roundView.explanation.board", {
-      values: { a: name(b.player1), b: name(b.player2) },
+      values: { a: unitName(b.player1), b: unitName(b.player2) },
     });
   }
 
@@ -783,6 +814,7 @@
         {#each boardGroups as group (group.match?.team1.id ?? "all")}
           {#if group.match}
             {@const score = matchScore(round, group.match, effectiveWinners)}
+            {@const ledger = matchLedger(group.match)}
             <tr class="match-head">
               <td colspan={columnCount}>
                 <span class="match-team">{group.match.team1.name}</span>
@@ -790,6 +822,9 @@
                   {score.wins1}–{score.wins2}
                 </span>
                 <span class="match-team">{group.match.team2.name}</span>
+                {#if isNoteworthy(ledger)}
+                  <span class="compromise print-hide" title={ledgerTooltip(ledger!)}>⚠</span>
+                {/if}
               </td>
             </tr>
           {/if}
@@ -1017,12 +1052,12 @@
           </div>
           <p class="probe-hint">
             {probeMode === "force"
-              ? $_("roundView.probe.hintForce")
-              : $_("roundView.probe.hintForbid")}
+              ? $_(teamMode ? "roundView.probe.hintForceTeams" : "roundView.probe.hintForce")
+              : $_(teamMode ? "roundView.probe.hintForbidTeams" : "roundView.probe.hintForbid")}
           </p>
           <div class="probe-controls">
             <select bind:value={probeA} disabled={probeBusy}>
-              <option value="">{$_("roundView.probe.pick")}</option>
+              <option value="">{probePickLabel}</option>
               {#each swissPlayers as id (id)}
                 <option value={id}>{unitName(id)}</option>
               {/each}
@@ -1030,7 +1065,7 @@
             {#if probeMode === "force"}
               <span class="probe-vs">{$_("roundView.probe.and")}</span>
               <select bind:value={probeB} disabled={probeBusy}>
-                <option value="">{$_("roundView.probe.pick")}</option>
+                <option value="">{probePickLabel}</option>
                 {#each swissPlayers as id (id)}
                   <option value={id}>{unitName(id)}</option>
                 {/each}
@@ -1060,7 +1095,7 @@
           {:else if probeResult}
             {#if probeResult.scoped_out}
               <p class="probe-status">
-                {$_(`roundView.probe.scopedOut.${probeResult.scoped_out}`)}
+                {scopedOutText(probeResult.scoped_out)}
               </p>
             {:else if probeResult.changed.length === 0}
               <p class="probe-status">{$_("roundView.probe.noChange")}</p>

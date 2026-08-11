@@ -188,6 +188,13 @@
         "forced": "Cette table a été fixée par l'arbitre, pas choisie par le moteur.",
         "cup": "Cette table vient du tableau de la coupe, pas du moteur suisse.",
         "absent": "Ce joueur était absent cette ronde, le moteur ne l'a pas apparié."
+      },
+      "pickTeam": "Choisir une équipe…",
+      "hintForceTeams": "Choisissez deux équipes pour voir ce que coûterait de les apparier.",
+      "hintForbidTeams": "Choisissez deux équipes appariées pour voir pourquoi le moteur les a réunies.",
+      "scopedOutTeam": {
+        "forced": "Cette rencontre a été fixée par l'arbitre, pas choisie par le moteur.",
+        "absent": "Cette équipe était absente cette ronde, le moteur ne l'a pas appariée."
       }
     },
     "markJustifiedTitle": "Marquer plutôt {name} absent pour un motif valable (0−)",
