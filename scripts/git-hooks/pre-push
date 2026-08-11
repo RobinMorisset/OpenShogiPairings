@@ -26,7 +26,13 @@ echo "== dependency advisories (both lockfiles) =="
 # build. Skipping when a tool is missing rather than failing: not having
 # cargo-audit installed is not a reason to block someone's push, and CI is the
 # backstop either way — but say so, loudly enough to be worth fixing.
-if ! command -v cargo-audit >/dev/null 2>&1; then
+# Probe the *subcommand*, not the binary: cargo finds subcommands in
+# $CARGO_HOME/bin as well as on PATH, so `cargo audit` runs fine on a machine
+# where `command -v cargo-audit` finds nothing — which is every push from a shell
+# that never sourced ~/.cargo/env (a GUI or editor terminal, typically, when cargo
+# itself comes from somewhere else like homebrew's rustup). Testing for the file
+# skipped the check on exactly the setup that could run it. Costs ~0.04s.
+if ! cargo audit --version >/dev/null 2>&1; then
   echo "   skipped: cargo-audit is not installed (cargo install cargo-audit)."
   echo "   CI still runs it, so a push without it can come back red."
 elif command -v python3 >/dev/null 2>&1; then
