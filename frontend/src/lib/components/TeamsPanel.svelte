@@ -84,6 +84,9 @@
     if (!trimmed) return;
     onAdd(trimmed);
     newName = "";
+    // The team's id only exists once the server has created it, so remember
+    // what was asked for and pick the card up by name when it arrives.
+    pendingTeamName = trimmed;
   }
 
   function startRename(team: Team) {
@@ -91,10 +94,29 @@
     renameText = team.name;
   }
 
+  /** Drop the edit and keep the name as it was. */
+  function cancelRename() {
+    renaming = null;
+    renameText = "";
+  }
+
   function commitRename(team: Team) {
+    // Escape clears `renaming` first, so this is a blur that follows a cancel:
+    // the edit is already abandoned and must not be written back.
+    if (renaming !== team.id) return;
+    renaming = null;
     const trimmed = renameText.trim();
     if (trimmed && trimmed !== team.name) onRename(team.id, trimmed);
-    renaming = null;
+  }
+
+  function renameKeydown(event: KeyboardEvent, team: Team) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitRename(team);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cancelRename();
+    }
   }
 
   // --- The member picker -------------------------------------------------
@@ -155,6 +177,20 @@
   const pickerInputs: Record<string, HTMLInputElement | undefined> = {};
   let newTeamInput: HTMLInputElement | undefined = $state();
   let refocusTeam: string | null = $state(null);
+  /** A team just asked for, waiting on the server to create it. */
+  let pendingTeamName: string | null = $state(null);
+
+  // A new team's first job is being filled, so focus its picker as soon as the
+  // card exists. Matched by name — the id is the server's to mint — the same
+  // way the server itself compares them, so it also lands on nothing if the
+  // name was refused as a duplicate.
+  $effect(() => {
+    if (!pendingTeamName || busy) return;
+    const wanted = pendingTeamName.trim().toLowerCase();
+    const created = teams.find((t) => t.name.trim().toLowerCase() === wanted);
+    pendingTeamName = null;
+    if (created) pickerInputs[created.id]?.focus();
+  });
 
   // Adding a member disables the input while the request is in flight, which
   // drops focus (and blurs the picker shut). Put it back when the request
@@ -362,10 +398,8 @@
               bind:value={renameText}
               disabled={busy}
               onblur={() => commitRename(team)}
-              onkeydown={(e) => {
-                if (e.key === "Enter") commitRename(team);
-                if (e.key === "Escape") renaming = null;
-              }}
+              onkeydown={(e) => renameKeydown(e, team)}
+              use:autofocus
             />
           {:else}
             <button
