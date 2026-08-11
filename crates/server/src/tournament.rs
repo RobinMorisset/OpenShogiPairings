@@ -38,7 +38,6 @@ use crate::{auth, live};
 /// - `GET    /american-grid` export the cross-table for ELO (text)
 /// - `PUT    /american-grid` import a cross-table, rebuilding the tournament (text)
 /// - `PUT    /settings`      update tournament settings (MacMahon, …)
-/// - `POST   /finalize-registration`  finalize registration
 /// - `POST   /cancel-round`           cancel the last round (or draft)
 /// - `POST   /rounds/prepare`         begin drafting the next round
 /// - `PUT    /draft`                  edit the draft
@@ -80,7 +79,6 @@ pub fn scope(state: AppState) -> Router<AppState> {
             get(american_grid).put(import_american_grid),
         )
         .route("/settings", put(update_settings))
-        .route("/finalize-registration", post(finalize_registration))
         .route("/cancel-round", post(cancel_round))
         .route("/rounds/prepare", post(prepare_round))
         .route("/draft", put(update_draft))
@@ -354,25 +352,13 @@ async fn update_settings(
     view(&store)
 }
 
-/// Body of the finalize endpoint: the chosen cup size, if the cup is enabled.
+/// Body of the round-preparation endpoint: the chosen cup size, if the cup is
+/// enabled (only meaningful for round 1, which finalizes registration).
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FinalizeRequest {
     #[serde(default)]
     cup_size: Option<u32>,
-}
-
-/// Finalize registration (prerequisite for starting the first round). When the
-/// cup is enabled the body carries the chosen size; otherwise the body is empty.
-async fn finalize_registration(
-    TournamentCtx(instance): TournamentCtx,
-    ExpectedVersion(expected): ExpectedVersion,
-    body: Option<Json<FinalizeRequest>>,
-) -> Result<Json<TournamentView>, ApiError> {
-    let cup_size = body.and_then(|Json(b)| b.cup_size);
-    let mut store = instance.write();
-    store.mutate(expected, |t| t.finalize_registration_with(cup_size))?;
-    backup_after(&store, "registration finalized");
-    view(&store)
 }
 
 /// Cancel the last round (or the open draft), stepping the tournament back one

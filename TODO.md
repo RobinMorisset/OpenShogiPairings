@@ -54,8 +54,6 @@ Known limitations and future work, roughly ordered by area.
 - **More complete american grid exporter** There should be fields in the settings with the dates
   and time control of the tournament, so they can be reported in the header of the american grid;
 
-- Check whether the API route for **registration finalization** is still useful or dead code
-
 - **Reorganize the settings tab**. Some combinations make little sense (e.g. pure-ELO mode with any kind of cup)
 
 - **Fix Estimated ELO column in standings** Currently it does not seem to get updated. It should be computed if used or shown.

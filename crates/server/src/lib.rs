@@ -528,11 +528,6 @@ mod tests {
             )
             .await;
         }
-        send(
-            router(state.clone()),
-            post_empty(&t(id, "/finalize-registration")),
-        )
-        .await;
         send(router(state.clone()), post_empty(&t(id, "/rounds/prepare"))).await;
 
         let (status, body) = send(router(state.clone()), post_empty(&t(id, "/rounds"))).await;
@@ -633,11 +628,6 @@ mod tests {
             )
             .await;
         }
-        send(
-            router(state.clone()),
-            post_empty(&t(id, "/finalize-registration")),
-        )
-        .await;
         start_round(&state, id).await;
 
         // Click player 1 → they win.
@@ -669,6 +659,36 @@ mod tests {
         assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
+    /// A misspelled body field must be rejected, not ignored: silently dropping
+    /// a typo'd `cup_size` would finalize round 1 with no cup bracket at all,
+    /// and the referee would only notice rounds later.
+    #[tokio::test]
+    async fn prepare_round_rejects_an_unknown_body_field() {
+        let state = AppState::default();
+        let id = create(&state, "Cup").await;
+        for name in ["Alice", "Bob"] {
+            send(
+                router(state.clone()),
+                json_req("POST", &t(id, "/players"), json!({ "last_name": name })),
+            )
+            .await;
+        }
+        // Axum's own body rejection, so the response is plain text, not our
+        // JSON error envelope.
+        let (status, body) = send_text(
+            router(state.clone()),
+            json_req("POST", &t(id, "/rounds/prepare"), json!({ "cupsize": 8 })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body.contains("cupsize"), "unhelpful rejection: {body}");
+
+        // ...and nothing was mutated by the rejected call.
+        let (_, body) = send(router(state.clone()), get(&t(id, ""))).await;
+        assert_eq!(body["tournament"]["registration_finalized"], false);
+        assert!(body["tournament"]["draft"].is_null());
+    }
+
     #[tokio::test]
     async fn start_round_needs_two_players_is_400() {
         let state = AppState::default();
@@ -676,11 +696,6 @@ mod tests {
         send(
             router(state.clone()),
             json_req("POST", &t(id, "/players"), json!({ "last_name": "Solo" })),
-        )
-        .await;
-        send(
-            router(state.clone()),
-            post_empty(&t(id, "/finalize-registration")),
         )
         .await;
         send(router(state.clone()), post_empty(&t(id, "/rounds/prepare"))).await;
@@ -823,37 +838,31 @@ mod tests {
             .await;
         }
 
-        // Transition 1: finalize registration.
-        send(
-            router(state.clone()),
-            post_empty(&t(id, "/finalize-registration")),
-        )
-        .await;
+        // Transitions 1 and 2: prepare (which also finalizes registration, as a
+        // single step), then start, round 1.
+        send(router(state.clone()), post_empty(&t(id, "/rounds/prepare"))).await;
+        send(router(state.clone()), post_empty(&t(id, "/rounds"))).await;
 
         // A plain player edit is *not* a round-state-machine transition, so it
         // must not show up as an extra backup.
-        send(
+        let (status, _) = send(
             router(state.clone()),
             json_req("POST", &t(id, "/players"), json!({ "last_name": "Carol" })),
         )
         .await;
-
-        // Transitions 2 and 3: prepare, then start, round 1.
-        send(router(state.clone()), post_empty(&t(id, "/rounds/prepare"))).await;
-        send(router(state.clone()), post_empty(&t(id, "/rounds"))).await;
+        assert_eq!(status, StatusCode::CREATED);
 
         let (status, backups) = send(router(state.clone()), get(&t(id, "/backups"))).await;
         assert_eq!(status, StatusCode::OK);
         let backups = backups.as_array().unwrap();
-        assert_eq!(backups.len(), 3);
+        assert_eq!(backups.len(), 2);
         // Newest first.
         assert_eq!(backups[0]["label"], "round 1 started");
         assert_eq!(backups[1]["label"], "round 1 drafting");
-        assert_eq!(backups[2]["label"], "registration finalized");
 
-        // Restore the "registration finalized" backup: back to 2 players, no
-        // rounds, but still finalized — and the later edit/rounds are gone.
-        let backup_id = backups[2]["id"].as_str().unwrap();
+        // Restore the "round 1 drafting" backup: back to 2 players and no
+        // started round, but already finalized — the later edit is gone too.
+        let backup_id = backups[1]["id"].as_str().unwrap();
         let (status, body) = send(
             router(state.clone()),
             post_empty(&t(id, &format!("/backups/{backup_id}/restore"))),
