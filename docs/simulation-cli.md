@@ -49,11 +49,11 @@ osp_core::sim   pure: strength oracle, result model, single-run driver, metrics
   it reconstructs the rounds *and* supplies every player's **true strength**
   directly — pre-ELO + points gained for a rated player, or the assigned `*`
   rating for a pre-unrated one — so it needs no separate `--strength` flag and
-  covers 100% of players with no name-matching gaps. Round-cell annotations
-  (`(-r )`, `(+b )`, handicap marks, …) are stripped; because the round model
-  holds one bye per round, extra `0+` walkover wins are demoted to absences — a
-  tail-only rounding in the *observed* standings that leaves the games and the
-  simulation untouched.
+  covers 100% of players with no name-matching gaps. A round-cell handicap mark
+  (`30+(-6p)`, `(+b )`, …) is imported onto the board, the sign giving the
+  conceding side; because the round model holds one bye per round, extra `0+`
+  walkover wins are demoted to absences — a tail-only rounding in the *observed*
+  standings that leaves the games and the simulation untouched.
 
 ### True-strength overrides (when not using `--results`)
 

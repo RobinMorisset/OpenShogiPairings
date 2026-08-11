@@ -1426,6 +1426,28 @@ impl Tournament {
         Ok(board)
     }
 
+    /// Set a board's handicap with an **explicit** giver, for an importer that
+    /// reads the conceding side from its source rather than deriving it from
+    /// ratings — the two can disagree (a cross-table records an unrated player
+    /// conceding odds, say), and the source is the authority on what was played.
+    pub(crate) fn set_board_handicap_from_source(
+        &mut self,
+        round_number: u32,
+        board_index: usize,
+        handicap: Handicap,
+        giver: Winner,
+    ) -> Result<(), TournamentError> {
+        if matches!(
+            self.board(round_number, board_index)?.source,
+            PairingSource::Cup { .. }
+        ) {
+            return Err(TournamentError::HandicapNotAllowedForCup);
+        }
+        self.board_mut(round_number, board_index)?.handicap =
+            Some(HandicapGame { handicap, giver });
+        Ok(())
+    }
+
     /// The suggested handicap for a board, from the two players' current
     /// ratings — always `None` for cup boards, whatever their ratings.
     /// Display-only: never affects pairing and is never auto-filled.

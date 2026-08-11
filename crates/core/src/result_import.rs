@@ -13,10 +13,21 @@
 //! # Cells
 //!
 //! Each round cell is a bye (`0+`), an absence (`0-` / `0#`), a half-point
-//! bye/absence (`0=`), or a game `<opp><+/-/=>`. Opponents are referenced by the
-//! `Nr` (final rank) column. A `=` records only that a draw occurred (the
-//! win/loss of the replay is not encoded), so an imported draw is given an
-//! arbitrary decisive winner.
+//! bye/absence (`0=`), or a game `<opp><+/-/=>` with an optional `(<±><code>)`
+//! handicap. Opponents are referenced by the `Nr` (final rank) column. A `=`
+//! records only that a draw occurred (the win/loss of the replay is not
+//! encoded), so an imported draw is given an arbitrary decisive winner.
+//!
+//! A handicap's sign says whether *this* player conceded the odds (`-`) or
+//! received them (`+`), so the two rows of a game must mirror each other. The
+//! conceding side is taken from the cell rather than re-derived from the
+//! ratings: a cross-table records games where the *lower*-rated player gave the
+//! odds (often against a pre-unrated opponent), which a rating-based guess would
+//! get backwards.
+//!
+//! A handicap mark on a *non-playing* cell is a published-table quirk (a player
+//! handicapped in every game, the mark carried onto their bye row too): it is
+//! validated and then dropped, since no board exists to carry it.
 //!
 //! Each non-playing cell is imported with the score it states — a `0+` as a bye,
 //! a `0=` as a half-scoring absence, a `0-` as an absence worth nothing — so the
@@ -36,7 +47,7 @@
 use std::collections::HashMap;
 
 use crate::player::NewPlayer;
-use crate::round::{Board, PairingSource, SitoutValue, Winner};
+use crate::round::{Board, Handicap, PairingSource, SitoutValue, Winner};
 use crate::tournament::{Tournament, TournamentError};
 use crate::units::TournamentId;
 
@@ -67,6 +78,10 @@ pub enum ResultImportError {
     /// Both sides of a game recorded the same win/loss (or disagreed on a draw).
     #[error("round {round}: {a} and {b} recorded inconsistent results")]
     InconsistentResult { round: u32, a: u32, b: u32 },
+    /// The two sides of a game disagree about the handicap: different odds, the
+    /// same conceding sign on both, or only one side annotated at all.
+    #[error("round {round}: {a} and {b} recorded inconsistent handicaps")]
+    InconsistentHandicap { round: u32, a: u32, b: u32 },
     /// The tournament machinery rejected the reconstructed state.
     #[error(transparent)]
     Tournament(#[from] TournamentError),
@@ -153,8 +168,8 @@ fn rebuild_round(
     // cell states the score outright, so nothing is left to the tournament's
     // `half_point_absences` default.
     let mut sitout_values: Vec<(TournamentId, SitoutValue)> = Vec::new();
-    // (a, b, outcome-from-a's-view) for each game, collected once.
-    let mut results: Vec<(u32, u32, Outcome)> = Vec::new();
+    // (a, b, outcome-from-a's-view, handicap-from-a's-view) per game, once.
+    let mut results: Vec<(u32, u32, Outcome, Option<CellHandicap>)> = Vec::new();
 
     for row in rows {
         let id = id_of[&row.number];
@@ -174,7 +189,11 @@ fn rebuild_round(
                 absent.push(id);
                 sitout_values.push((id, SitoutValue::Zero));
             }
-            Cell::Game { opponent, outcome } => {
+            Cell::Game {
+                opponent,
+                outcome,
+                handicap,
+            } => {
                 let opp = *by_number
                     .get(opponent)
                     .ok_or(ResultImportError::UnknownOpponent {
@@ -188,6 +207,7 @@ fn rebuild_round(
                     let Cell::Game {
                         opponent: back,
                         outcome: their,
+                        handicap: their_handicap,
                     } = &opp.cells[r]
                     else {
                         return Err(ResultImportError::Asymmetric {
@@ -210,13 +230,30 @@ fn rebuild_round(
                             b: *opponent,
                         });
                     }
+                    // Both rows describe the same game, so either both annotate
+                    // the handicap — same odds, opposite conceding signs — or
+                    // neither does.
+                    let mirrored = match (handicap, their_handicap) {
+                        (None, None) => true,
+                        (Some(mine), Some(theirs)) => {
+                            mine.handicap == theirs.handicap && mine.gave != theirs.gave
+                        }
+                        _ => false,
+                    };
+                    if !mirrored {
+                        return Err(ResultImportError::InconsistentHandicap {
+                            round: round_number,
+                            a: row.number,
+                            b: *opponent,
+                        });
+                    }
                     forced_boards.push(Board::pending(
                         id,
                         id_of[opponent],
                         0,
                         PairingSource::Forced,
                     ));
-                    results.push((row.number, *opponent, *outcome));
+                    results.push((row.number, *opponent, *outcome, *handicap));
                 }
             }
         }
@@ -233,7 +270,7 @@ fn rebuild_round(
         tournament.set_sitout_value(round_number, player, value)?;
     }
 
-    for (a_num, b_num, outcome) in results {
+    for (a_num, b_num, outcome, handicap) in results {
         let a = id_of[&a_num];
         let b = id_of[&b_num];
         // Locate the freshly created board (orientation preserved from forcing).
@@ -247,6 +284,15 @@ fn rebuild_round(
             .expect("forced board present");
         let a_is_player1 = round.boards[idx].player1 == a;
 
+        if let Some(h) = handicap {
+            // The cell says which side conceded, so set the giver from it rather
+            // than letting the ratings decide.
+            let giver = match (h.gave, a_is_player1) {
+                (true, true) | (false, false) => Winner::Player1,
+                (true, false) | (false, true) => Winner::Player2,
+            };
+            tournament.set_board_handicap_from_source(round_number, idx, h.handicap, giver)?;
+        }
         let winner = outcome.winner(a_is_player1);
         tournament.toggle_board_winner(round_number, idx, winner)?;
         if outcome == Outcome::Draw {
@@ -281,7 +327,19 @@ pub(crate) enum Cell {
     /// A half-point bye/absence (`0=`): the player scored ½ without playing.
     /// Reconstructed as an absence whose sit-out is worth [`SitoutValue::Half`].
     HalfBye,
-    Game { opponent: u32, outcome: Outcome },
+    Game {
+        opponent: u32,
+        outcome: Outcome,
+        handicap: Option<CellHandicap>,
+    },
+}
+
+/// The handicap read off one cell: the odds, and whether *this* player conceded
+/// them (`-` in the cell) rather than received them (`+`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CellHandicap {
+    pub(crate) handicap: Handicap,
+    pub(crate) gave: bool,
 }
 
 /// The result of a game from one player's point of view.
@@ -320,8 +378,8 @@ impl Outcome {
 }
 
 /// Parse a single round cell: `0+` bye, `0-`/`0#` absence, `0=` half-point
-/// bye/absence, or `<opp><+/-/=>`. A trailing floater mark is tolerated;
-/// anything else after the sign is rejected.
+/// bye/absence, or `<opp><+/-/=>` with an optional `(<±><code>)` handicap. A
+/// trailing floater mark is tolerated; anything else after the sign is rejected.
 pub(crate) fn parse_cell(cell: &str, line_no: usize) -> Result<Cell, ResultImportError> {
     let bad = || ResultImportError::BadCell {
         line: line_no,
@@ -336,13 +394,17 @@ pub(crate) fn parse_cell(cell: &str, line_no: usize) -> Result<Cell, ResultImpor
 
     let mut chars = rest.chars();
     let sign = chars.next().ok_or_else(bad)?;
-    // A cell carries nothing past its sign: parenthetical annotations are
-    // stripped upstream, so a leftover tail means the row was misparsed.
-    if !chars.as_str().is_empty() {
-        return Err(bad());
-    }
+    let tail = chars.as_str();
 
     if opponent == 0 {
+        // A bye/absence has no board, so odds cannot have been given — but a few
+        // published tables annotate one anyway (a player handicapped in every
+        // game, the mark carried onto their bye row too). The suffix is still
+        // validated, then dropped: there is nothing to attach it to. Such files
+        // are listed in the corpus anomaly report, see `scripts/fesa_anomalies.py`.
+        if !tail.is_empty() {
+            parse_handicap(tail, line_no, cell)?;
+        }
         return match sign {
             '+' => Ok(Cell::Bye),
             '-' | '#' => Ok(Cell::Absent),
@@ -357,7 +419,45 @@ pub(crate) fn parse_cell(cell: &str, line_no: usize) -> Result<Cell, ResultImpor
         '=' => Outcome::Draw,
         _ => return Err(bad()),
     };
-    Ok(Cell::Game { opponent, outcome })
+    let handicap = if tail.is_empty() {
+        None
+    } else {
+        Some(parse_handicap(tail, line_no, cell)?)
+    };
+    Ok(Cell::Game {
+        opponent,
+        outcome,
+        handicap,
+    })
+}
+
+/// Parse a `(<±><code>)` handicap suffix: the sign says whether this player
+/// conceded the odds (`-`) or received them (`+`).
+///
+/// Codes are matched case-insensitively — the same table may write `(-R)` and
+/// `(-r)` — and `m` is accepted as an older spelling of the sente handicap.
+fn parse_handicap(
+    suffix: &str,
+    line_no: usize,
+    cell: &str,
+) -> Result<CellHandicap, ResultImportError> {
+    let bad = || ResultImportError::BadCell {
+        line: line_no,
+        cell: cell.to_string(),
+    };
+    let inner = suffix
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .ok_or_else(bad)?;
+    let gave = match inner.chars().next() {
+        Some('-') => true,
+        Some('+') => false,
+        _ => return Err(bad()),
+    };
+    let code = inner[1..].to_ascii_lowercase();
+    let code = if code == "m" { "s".to_string() } else { code };
+    let handicap = Handicap::from_code(&code).ok_or_else(bad)?;
+    Ok(CellHandicap { handicap, gave })
 }
 
 #[cfg(test)]
@@ -378,7 +478,20 @@ mod tests {
     }
 
     fn game(opponent: u32, outcome: Outcome) -> Cell {
-        Cell::Game { opponent, outcome }
+        Cell::Game {
+            opponent,
+            outcome,
+            handicap: None,
+        }
+    }
+
+    /// A game cell carrying a handicap this player gave (`gave`) or received.
+    fn handicap_game(opponent: u32, outcome: Outcome, handicap: Handicap, gave: bool) -> Cell {
+        Cell::Game {
+            opponent,
+            outcome,
+            handicap: Some(CellHandicap { handicap, gave }),
+        }
     }
 
     /// The tournament number of the player with this last name.
@@ -419,17 +532,64 @@ mod tests {
     }
 
     #[test]
+    fn parses_handicap_annotations() {
+        // `-` concedes the odds, `+` receives them.
+        assert_eq!(
+            parse_cell("9+(-5p)", 1).unwrap(),
+            handicap_game(9, Outcome::Win, Handicap::FivePiece, true)
+        );
+        assert_eq!(
+            parse_cell("1-(+5p)", 1).unwrap(),
+            handicap_game(1, Outcome::Loss, Handicap::FivePiece, false)
+        );
+        // Codes are case-insensitive: the same corpus writes both.
+        assert_eq!(
+            parse_cell("4+(-R)", 1).unwrap(),
+            handicap_game(4, Outcome::Win, Handicap::Rook, true)
+        );
+        assert_eq!(
+            parse_cell("4+(-rl)", 1).unwrap(),
+            handicap_game(4, Outcome::Win, Handicap::RookLance, true)
+        );
+        // `m` is an older spelling of the sente handicap.
+        assert_eq!(
+            parse_cell("3+(+m)", 1).unwrap(),
+            handicap_game(3, Outcome::Win, Handicap::Sente, false)
+        );
+        // A bye annotated with odds (some tables do) keeps the bye and drops the
+        // mark — no board was played, so nothing can carry it.
+        assert_eq!(parse_cell("0+(+6p)", 1).unwrap(), Cell::Bye);
+        assert_eq!(
+            parse_cell("3+(+s)", 1).unwrap(),
+            handicap_game(3, Outcome::Win, Handicap::Sente, false)
+        );
+    }
+
+    #[test]
     fn rejects_malformed_cells() {
         // No digits before the sign.
         assert!(matches!(
             parse_cell("x+", 4),
             Err(ResultImportError::BadCell { cell, line: 4 }) if cell == "x+"
         ));
-        // Anything past the sign — an unstripped annotation, say — is rejected
-        // rather than silently ignored.
+        // A handicap suffix must be a parenthesised signed code.
         assert!(matches!(
-            parse_cell("2+(-r)", 1),
-            Err(ResultImportError::BadCell { cell, .. }) if cell == "2+(-r)"
+            parse_cell("2+-r", 1),
+            Err(ResultImportError::BadCell { cell, .. }) if cell == "2+-r"
+        ));
+        assert!(matches!(
+            parse_cell("2+(r)", 1),
+            Err(ResultImportError::BadCell { cell, .. }) if cell == "2+(r)"
+        ));
+        // An unknown code is rejected rather than dropped.
+        assert!(matches!(
+            parse_cell("2+(-z)", 1),
+            Err(ResultImportError::BadCell { cell, .. }) if cell == "2+(-z)"
+        ));
+        // A non-game cell's annotation is validated even though it is dropped.
+        assert!(matches!(
+            parse_cell("0+(-z)", 1),
+            Err(ResultImportError::BadCell { cell, .. }) if cell == "0+(-z)"
         ));
         assert!(matches!(
             parse_cell("0+x", 1),
@@ -456,7 +616,12 @@ mod tests {
         // R1: Alpha beats Beta, Gamma takes a bye, Delta is absent.
         // R2: Alpha beats Gamma, Beta draws Delta.
         let rows = vec![
-            row(1, "Alpha", 2000, &[game(2, Outcome::Win), game(3, Outcome::Win)]),
+            row(
+                1,
+                "Alpha",
+                2000,
+                &[game(2, Outcome::Win), game(3, Outcome::Win)],
+            ),
             row(
                 2,
                 "Beta",
@@ -599,7 +764,11 @@ mod tests {
         ];
         assert!(matches!(
             build_tournament(None, rows),
-            Err(ResultImportError::InconsistentResult { round: 1, a: 1, b: 2 })
+            Err(ResultImportError::InconsistentResult {
+                round: 1,
+                a: 1,
+                b: 2
+            })
         ));
     }
 
@@ -612,7 +781,11 @@ mod tests {
         ];
         assert!(matches!(
             build_tournament(None, rows),
-            Err(ResultImportError::Asymmetric { round: 1, a: 1, b: 2 })
+            Err(ResultImportError::Asymmetric {
+                round: 1,
+                a: 1,
+                b: 2
+            })
         ));
 
         // …and one where Beta names a third player instead of Alpha.
@@ -623,7 +796,111 @@ mod tests {
         ];
         assert!(matches!(
             build_tournament(None, rows),
-            Err(ResultImportError::Asymmetric { round: 1, a: 1, b: 2 })
+            Err(ResultImportError::Asymmetric {
+                round: 1,
+                a: 1,
+                b: 2
+            })
+        ));
+    }
+
+    #[test]
+    fn a_handicap_takes_its_giver_from_the_cell_not_the_ratings() {
+        // The *lower*-rated Beta concedes the odds — what the cells say, and the
+        // opposite of what a rating-derived giver would pick.
+        let rows = vec![
+            row(
+                1,
+                "Alpha",
+                2000,
+                &[handicap_game(2, Outcome::Win, Handicap::Rook, false)],
+            ),
+            row(
+                2,
+                "Beta",
+                1000,
+                &[handicap_game(1, Outcome::Loss, Handicap::Rook, true)],
+            ),
+        ];
+        let (t, _) = build_tournament(None, rows).unwrap();
+        let board = &t.rounds[0].boards[0];
+        let game = board.handicap.expect("handicap set");
+        assert_eq!(game.handicap, Handicap::Rook);
+        let beta_side = if board.player1 == tid(&t, "Beta") {
+            Winner::Player1
+        } else {
+            Winner::Player2
+        };
+        assert_eq!(game.giver, beta_side);
+    }
+
+    #[test]
+    fn rejects_handicaps_the_two_sides_disagree_on() {
+        // Only one side annotated.
+        let one_sided = vec![
+            row(
+                1,
+                "Alpha",
+                2000,
+                &[handicap_game(2, Outcome::Win, Handicap::Rook, true)],
+            ),
+            row(2, "Beta", 1000, &[game(1, Outcome::Loss)]),
+        ];
+        assert!(matches!(
+            build_tournament(None, one_sided),
+            Err(ResultImportError::InconsistentHandicap {
+                round: 1,
+                a: 1,
+                b: 2
+            })
+        ));
+
+        // Both claim to have conceded.
+        let both_gave = vec![
+            row(
+                1,
+                "Alpha",
+                2000,
+                &[handicap_game(2, Outcome::Win, Handicap::Rook, true)],
+            ),
+            row(
+                2,
+                "Beta",
+                1000,
+                &[handicap_game(1, Outcome::Loss, Handicap::Rook, true)],
+            ),
+        ];
+        assert!(matches!(
+            build_tournament(None, both_gave),
+            Err(ResultImportError::InconsistentHandicap {
+                round: 1,
+                a: 1,
+                b: 2
+            })
+        ));
+
+        // Different odds on each side.
+        let mismatched = vec![
+            row(
+                1,
+                "Alpha",
+                2000,
+                &[handicap_game(2, Outcome::Win, Handicap::Rook, true)],
+            ),
+            row(
+                2,
+                "Beta",
+                1000,
+                &[handicap_game(1, Outcome::Loss, Handicap::Bishop, false)],
+            ),
+        ];
+        assert!(matches!(
+            build_tournament(None, mismatched),
+            Err(ResultImportError::InconsistentHandicap {
+                round: 1,
+                a: 1,
+                b: 2
+            })
         ));
     }
 }

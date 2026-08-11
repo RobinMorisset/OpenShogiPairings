@@ -9,7 +9,7 @@
 //! Format (see `crates/core/tests/fixtures/results_WOSC_2024.txt`): a title line,
 //! a column header, then one fixed-width row per player —
 //! `Nr  Last  First  Nat  Grade  ELO  <round cells…>  Pts  +/-` — and finally a
-//! "Promoting …" section that is ignored. Two wrinkles the parser handles:
+//! "Promoting …" section that is ignored. Three wrinkles the parser handles:
 //!
 //! - A player **unrated** before the tournament has no grade and no `+/-`; their
 //!   ELO cell carries a `*` suffix and *is* their assigned post-tournament rating
@@ -20,6 +20,12 @@
 //!   exports, is *detected* per file rather than hardcoded — while everything to
 //!   its right is tokenised and classified by shape, which is drift-proof (and
 //!   copes with an optional `MMS` column some tables carry before `Pts`).
+//! - A round cell can carry a parenthesised **handicap** (`30+(-6p)`, `16-(+R)`,
+//!   sometimes with an internal space as in `(-r )`, which would otherwise split
+//!   the cell into two tokens). It is kept glued to its cell and read as real
+//!   odds — see [`normalize_cell_annotations`] and
+//!   [`crate::result_import::parse_cell`]. A parenthetical that stands *alone*
+//!   annotates no cell (an `(elder)` in a name, say) and is dropped.
 
 use std::collections::HashMap;
 
@@ -172,13 +178,12 @@ fn parse_results_row(
     if last_name.is_empty() {
         return Err(bad("empty last name"));
     }
-    // Strip FESA round-cell annotations — parenthetical forfeit/bye/handicap
-    // marks like `(-r )`, `(+b )`, `(-rl)`, `(-4p)` that trail a cell (e.g.
-    // `30+(-r )`). They carry no cross-table information (the cell's own sign
-    // already records the result), and some contain an internal space, which
-    // would otherwise split one cell across two whitespace tokens.
+    // Normalize the parenthetical marks: a handicap glued to its cell (e.g.
+    // `30+(-r )`) keeps its group, minus any internal space that would otherwise
+    // split the cell across two whitespace tokens; a free-standing parenthetical
+    // (a "(elder)" in a name, say) is dropped.
     let remainder: String = chars[name_start + width..].iter().collect();
-    let remainder = strip_cell_annotations(&remainder);
+    let remainder = normalize_cell_annotations(&remainder);
     let tokens: Vec<&str> = remainder.split_whitespace().collect();
 
     // ELO sits immediately left of the round cells (each of which ends in a
@@ -272,20 +277,48 @@ fn parse_grade(level: &str, unit: &str) -> Option<Grade> {
     }
 }
 
-/// Remove parenthetical round-cell annotations (`(-r )`, `(+b )`, `(-rl)`,
-/// `(-4p)`, …) from a row's remainder. Each spans from a `(` to the next `)`
-/// inclusive; an unclosed `(` drops to the end of the string. Everything outside
-/// the parentheses — cells, ELO, Pts, `+/-` — is preserved verbatim, so cells
-/// still separate on their existing whitespace.
-fn strip_cell_annotations(s: &str) -> String {
+/// Normalize the parenthetical groups in a row's remainder.
+///
+/// A group **glued** to the token before it is a round-cell annotation — the
+/// handicap marks `(-r )`, `(+b )`, `(-rl)`, `(-4p)`, … that trail a cell like
+/// `30+(-r )`. It is kept (so [`parse_cell`] can read the odds and which side
+/// conceded them) with any internal whitespace removed, which would otherwise
+/// split one cell across two whitespace tokens.
+///
+/// A group that stands on its own — `(elder)` in a name, `(U18)` in a title —
+/// annotates no cell, so it is dropped as before rather than left to shift the
+/// column tokenisation. An unclosed `(` runs to the end of the string.
+/// Everything outside the parentheses is preserved verbatim.
+fn normalize_cell_annotations(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
+    let mut group = String::new();
     let mut depth: u32 = 0;
+    // Whether the `(` that opened the current group was glued to a preceding
+    // non-space character, i.e. attached to a cell rather than standing alone.
+    let mut attached = false;
     for c in s.chars() {
         match c {
+            '(' if depth == 0 => {
+                depth = 1;
+                attached = out.chars().next_back().is_some_and(|p| p != ' ');
+                group.clear();
+                group.push('(');
+            }
             '(' => depth += 1,
-            ')' if depth > 0 => depth -= 1,
-            _ if depth == 0 => out.push(c),
-            _ => {}
+            ')' if depth > 0 => {
+                depth -= 1;
+                group.push(')');
+                if depth == 0 && attached {
+                    out.push_str(&group);
+                }
+            }
+            // Inside a group: collect it (dropping spaces) until it closes.
+            _ if depth > 0 => {
+                if c != ' ' {
+                    group.push(c);
+                }
+            }
+            _ => out.push(c),
         }
     }
     out
@@ -311,9 +344,15 @@ fn is_delta_token(t: &str) -> bool {
 }
 
 /// A round cell: digits then a result sign (`+`, `-`, `=`, `#`), tolerating a
-/// trailing floater mark. Distinguishes cells from Pts (no sign) and the signed
-/// `+/-` delta (sign at the front, not the back).
+/// trailing handicap annotation and floater mark. Distinguishes cells from Pts
+/// (no sign) and the signed `+/-` delta (sign at the front, not the back).
 fn is_cell_token(t: &str) -> bool {
+    // The annotation is only shape-checked here; `parse_cell` validates it.
+    let t = match t.split_once('(') {
+        Some((cell, annotation)) if annotation.ends_with(')') => cell,
+        Some(_) => return false, // an unclosed group is not a cell
+        None => t,
+    };
     let t = t.trim_end_matches(['^', 'v']);
     match t.chars().last() {
         Some('+' | '-' | '=' | '#') => {}
@@ -328,6 +367,7 @@ mod tests {
     use super::*;
     use crate::decode_latin1;
     use crate::result_import::Cell;
+    use crate::round::{Handicap, Winner};
 
     fn load(fixture: &str) -> (Tournament, HashMap<TournamentId, f64>) {
         let path = format!("{}/tests/fixtures/{fixture}", env!("CARGO_MANIFEST_DIR"));
@@ -485,16 +525,100 @@ mod tests {
     }
 
     #[test]
-    fn strips_parenthetical_round_cell_annotations() {
-        // Attached annotation removed, cell kept; internal space collapses so the
-        // cell stays a single whitespace token.
-        assert_eq!(strip_cell_annotations("30+(-r ) 32+"), "30+ 32+");
-        assert_eq!(strip_cell_annotations("34+(-rl) 26+(+b )"), "34+ 26+");
-        assert_eq!(strip_cell_annotations("48-(+4p)"), "48-");
+    fn normalizes_parenthetical_round_cell_annotations() {
+        // An annotation glued to its cell is kept, with its internal space
+        // removed so the cell stays a single whitespace token.
+        assert_eq!(normalize_cell_annotations("30+(-r ) 32+"), "30+(-r) 32+");
+        assert_eq!(
+            normalize_cell_annotations("34+(-rl) 26+(+b )"),
+            "34+(-rl) 26+(+b)"
+        );
+        assert_eq!(normalize_cell_annotations("48-(+4p)"), "48-(+4p)");
         // No annotation: untouched.
-        assert_eq!(strip_cell_annotations("14- 32+ 8-"), "14- 32+ 8-");
-        // Unclosed paren drops to the end rather than panicking.
-        assert_eq!(strip_cell_annotations("10+(-r"), "10+");
+        assert_eq!(normalize_cell_annotations("14- 32+ 8-"), "14- 32+ 8-");
+        // A free-standing group annotates no cell (a name suffix, say) and is
+        // dropped, so it can't shift the column tokenisation.
+        assert_eq!(
+            normalize_cell_annotations("Mykhaylo (elder) UA 691 13-"),
+            "Mykhaylo  UA 691 13-"
+        );
+        // Unclosed parens run to the end rather than panicking — dropped when
+        // free-standing, and never emitted when attached (they close nothing).
+        assert_eq!(normalize_cell_annotations("10+ (-r"), "10+ ");
+        assert_eq!(normalize_cell_annotations("10+(-r"), "10+");
+    }
+
+    #[test]
+    fn handicap_games_carry_their_odds_and_conceding_side() {
+        // Two handicap games. Alpha (rated) concedes 5 pieces to Delta and wins;
+        // Gamma — the *lower*-rated side — concedes sente to Beta, which a
+        // rating-derived giver would get backwards.
+        let mut text = String::from("Handicap Open : 2026\nNr Name Nat Grade ELO R1 Pts +/-\n");
+        let row = |nr: u32, last: &str, first: &str, elo: &str, c1: &str, pts: u32| {
+            format!("{nr:>2} {last:<12}{first} PL {elo} {c1} {pts} +0\n")
+        };
+        text.push_str(&row(1, "Alpha", "Ann", "1939", "4+(-5p)", 1));
+        text.push_str(&row(2, "Beta", "Bob", "1633", "3+(+m)", 1));
+        text.push_str(&row(3, "Gamma", "Cid", "691*", "2-(-m)", 0));
+        text.push_str(&row(4, "Delta", "Dan", "1296", "1-(+5p)", 0));
+
+        let (t, _) = import_fesa_results(&text).unwrap();
+        let tid = |last: &str| {
+            t.players
+                .iter()
+                .find(|p| p.last_name == last)
+                .unwrap()
+                .tournament_id
+                .unwrap()
+        };
+        let board = |a: &str, b: &str| {
+            let (x, y) = (tid(a), tid(b));
+            t.rounds[0]
+                .boards
+                .iter()
+                .find(|bd| {
+                    (bd.player1 == x && bd.player2 == y) || (bd.player1 == y && bd.player2 == x)
+                })
+                .expect("board exists")
+        };
+        let giver_side = |bd: &crate::Board, last: &str| {
+            if bd.player1 == tid(last) {
+                Winner::Player1
+            } else {
+                Winner::Player2
+            }
+        };
+
+        let ad = board("Alpha", "Delta");
+        let game = ad.handicap.expect("handicap set");
+        assert_eq!(game.handicap, Handicap::FivePiece);
+        assert_eq!(game.giver, giver_side(ad, "Alpha"));
+
+        // `m` is the older spelling of the sente handicap, and the conceding side
+        // is the one the cell marks `-` — here the *weaker*, pre-unrated player.
+        let bg = board("Beta", "Gamma");
+        let game = bg.handicap.expect("handicap set");
+        assert_eq!(game.handicap, Handicap::Sente);
+        assert_eq!(game.giver, giver_side(bg, "Gamma"));
+        assert_eq!(find(&t, "Gamma", "Cid").rating, None); // unrated, yet the giver
+    }
+
+    #[test]
+    fn rejects_a_handicap_only_one_side_records() {
+        let mut text = String::from("Half-marked : 2026\nNr Name Nat Grade ELO R1 Pts +/-\n");
+        let row = |nr: u32, last: &str, first: &str, c1: &str, pts: u32| {
+            format!("{nr:>2} {last:<12}{first} PL 1500 {c1} {pts} +0\n")
+        };
+        text.push_str(&row(1, "Alpha", "Ann", "2+(-r)", 1));
+        text.push_str(&row(2, "Beta", "Bob", "1-", 0));
+        assert!(matches!(
+            import_fesa_results(&text),
+            Err(ResultImportError::InconsistentHandicap {
+                round: 1,
+                a: 1,
+                b: 2
+            })
+        ));
     }
 
     #[test]
