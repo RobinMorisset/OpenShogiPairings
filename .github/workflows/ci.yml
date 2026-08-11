@@ -66,6 +66,23 @@ jobs:
       - name: i18n locale keys in sync
         run: node scripts/check-i18n-keys.mjs
 
+  # Security advisories against both lockfiles — the workspace's and the desktop
+  # app's, which is outside the workspace and carries a tree (Tauri, the webview
+  # stack) the root lock never sees. `cargo audit` alone reads lockfiles, which
+  # are feature-blind and so report crates that are never compiled; the script
+  # re-derives that from the resolved graph on every run instead of carrying an
+  # ignore list. See its docstring. Same command the pre-push hook runs.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: Advisories (both lockfiles)
+        run: python3 scripts/check-advisories.py
+
   # Coverage of the shipped library crates (osp-core, integer-blossom, osp-server),
   # measured with cargo-llvm-cov. Binary entry points (server/src/main.rs) are
   # excluded — they are 0%-by-nature glue that would understate real coverage — and

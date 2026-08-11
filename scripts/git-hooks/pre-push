@@ -1,5 +1,6 @@
 #!/bin/sh
-# Slower gate that only needs to run before sharing work: the full test suite.
+# Slower gate that only needs to run before sharing work: the full test suite and
+# the dependency-advisory check.
 set -e
 
 echo "== cargo test --workspace =="
@@ -7,3 +8,20 @@ cargo test --workspace
 
 echo "== npm test (frontend) =="
 (cd frontend && npm test)
+
+echo "== dependency advisories (both lockfiles) =="
+# Byte-for-byte the command CI runs, so an advisory can't first surface as a red
+# build. Skipping when a tool is missing rather than failing: not having
+# cargo-audit installed is not a reason to block someone's push, and CI is the
+# backstop either way — but say so, loudly enough to be worth fixing.
+if ! command -v cargo-audit >/dev/null 2>&1; then
+  echo "   skipped: cargo-audit is not installed (cargo install cargo-audit)."
+  echo "   CI still runs it, so a push without it can come back red."
+elif command -v python3 >/dev/null 2>&1; then
+  python3 scripts/check-advisories.py
+elif command -v python >/dev/null 2>&1; then
+  # Windows (Git Bash) often has `python` and no `python3`.
+  python scripts/check-advisories.py
+else
+  echo "   skipped: no python interpreter found (the check is a python script)."
+fi

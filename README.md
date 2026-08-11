@@ -483,8 +483,33 @@ git config core.hooksPath scripts/git-hooks
   --all-targets -- -D warnings`, `svelte-check`, and an i18n locale-key check
   (`scripts/check-i18n-keys.mjs`, catching keys that exist in some locales but
   not all). Fast; keeps the tree clean commit by commit.
-- `pre-push` — the full test suite: `cargo test --workspace` and the frontend
-  tests (`npm test`). Slower, so it only runs before sharing work.
+- `pre-push` — the full test suite (`cargo test --workspace` and the frontend
+  tests, `npm test`) plus the dependency-advisory check
+  (`scripts/check-advisories.py`, the same one CI runs). Slower, so it only runs
+  before sharing work. The advisory check needs
+  [`cargo-audit`](https://github.com/rustsec/rustsec) (`cargo install
+  cargo-audit`); without it the hook says so and skips rather than blocking the
+  push, and CI catches what you miss.
+
+### Dependency advisories
+
+`scripts/check-advisories.py` audits **both** lockfiles — the workspace's and
+`frontend/src-tauri`'s, which is outside the workspace and carries the whole
+Tauri tree — and triages the results against the resolved dependency graph:
+
+```sh
+python3 scripts/check-advisories.py
+```
+
+`cargo audit` on its own reads a lockfile, and a lockfile is feature-blind: it
+records a package's *optional* dependencies whether or not anything enables them,
+so it reports crates that are never compiled into anything shipped. Rather than
+carrying an ignore list — a claim about the dependency graph on the day it was
+written, which keeps holding silently after it stops being true — the script asks
+cargo which packages are actually in the graph and keeps only the advisories
+whose package (name *and* version) is really there. Everything it dismisses is
+printed on every run, so the reasoning stays visible; anything that fails to run
+is an error, never a pass.
 
 ### Coverage
 
