@@ -46,9 +46,9 @@ pub use round::{
     SitoutKind, SitoutValue, Winner,
 };
 pub use settings::{
-    ClubProtection, EloEstimator, EloPriorShape, FloaterStyle, HandicapDisplay, HandicapPolicy,
-    MacMahon, MacMahonSource, MacMahonThreshold, PairingMode, Ratio, RatioAtLeastOne,
-    ThresholdCriterion, Tiebreak, TournamentSettings, UnratedK,
+    ClubProtection, DateError, EloEstimator, EloPriorShape, FloaterStyle, HandicapDisplay,
+    HandicapPolicy, IsoDate, MacMahon, MacMahonSource, MacMahonThreshold, PairingMode, Ratio,
+    RatioAtLeastOne, ThresholdCriterion, Tiebreak, TournamentDates, TournamentSettings, UnratedK,
 };
 pub use standings::{compute_standings, Standing};
 pub use tournament::{

@@ -1,15 +1,29 @@
 //! American Grid (cross-table) export.
 //!
-//! The text format the European federation ingests for ELO updates. A single
-//! `[tournament name]` header line, then one row per player ordered by final
-//! rank, each row documenting who the player faced and the result in every
-//! completed round:
+//! The text format the European federation ingests for ELO updates. A header of
+//! one to three bracketed lines, then one row per player ordered by final rank,
+//! each row documenting who the player faced and the result in every completed
+//! round:
 //!
 //! ```text
-//! [Paris Open]
+//! [Paris Open, Paris, France, 2026-07-04 to 2026-07-05]
+//! [2026-07-05]
+//! [Time control: 30min + 30sec]
 //! Nr Name          Nat Elo  1   2    Pts
 //! 1  [Goix] [Théo] FR  1775 [2+ 3+]  2
 //! ```
+//!
+//! The header follows the FESA tournament-system guide: the tournament name, its
+//! city, its country and its date range on one line, then the tournament's last
+//! day on its own line, then the time control. Everything but the name comes from
+//! the settings ([`city`], [`country`], [`dates`], [`time_control`]) and is only
+//! written when the referee filled it in — with none of them, the header is the
+//! bare `[name]` line this export used to emit.
+//!
+//! [`city`]: crate::TournamentSettings::city
+//! [`country`]: crate::TournamentSettings::country
+//! [`dates`]: crate::TournamentSettings::dates
+//! [`time_control`]: crate::TournamentSettings::time_control
 //!
 //! Columns: final rank, a "new player" flag (`N` when the player has no rating),
 //! `[last] [first]`, nationality, rating, one cell per round, and total points.
@@ -90,7 +104,7 @@ pub fn to_grid(tournament: &Tournament, standings: &[Standing]) -> String {
         })
         .collect();
 
-    let mut out = format!("[{}]\n", tournament.name);
+    let mut out = header_lines(tournament);
     for row in &rows {
         let line = row
             .iter()
@@ -100,6 +114,34 @@ pub fn to_grid(tournament: &Tournament, standings: &[Standing]) -> String {
             .join(COLUMN_SEP);
         out.push_str(line.trim_end());
         out.push('\n');
+    }
+    out
+}
+
+/// The bracketed header lines that open the document (see the module docs): the
+/// `[name, city, country, dates]` line, then — each only when the referee entered
+/// it — the closing date and the time control. Whatever was left empty is simply
+/// absent from that first line, commas included, and a one-day event writes its
+/// single date rather than a `X to X` range.
+fn header_lines(tournament: &Tournament) -> String {
+    let settings = &tournament.settings;
+    let mut parts = vec![tournament.name.clone()];
+    parts.extend(settings.city.clone());
+    parts.extend(settings.country.clone());
+    if let Some(dates) = &settings.dates {
+        parts.push(if dates.single_day() {
+            dates.first.to_string()
+        } else {
+            format!("{} to {}", dates.first, dates.last)
+        });
+    }
+
+    let mut out = format!("[{}]\n", parts.join(", "));
+    if let Some(dates) = &settings.dates {
+        out.push_str(&format!("[{}]\n", dates.last));
+    }
+    if let Some(time_control) = &settings.time_control {
+        out.push_str(&format!("[Time control: {time_control}]\n"));
     }
     out
 }
@@ -371,6 +413,83 @@ mod tests {
         assert!(header.starts_with("Nr"));
         assert!(header.contains(" 1 ") || header.ends_with(" 1  Pts") || header.contains('1'));
         assert!(header.trim_end().ends_with("Pts"));
+    }
+
+    #[test]
+    fn header_carries_the_place_dates_and_time_control_when_set() {
+        use crate::settings::{IsoDate, TournamentDates};
+        let day = |s: &str| IsoDate::parse(s).unwrap();
+
+        let (mut t, ..) = one_board(|_| {});
+        t.settings.city = Some("Ludwigshafen".into());
+        t.settings.country = Some("Germany".into());
+        t.settings.dates =
+            Some(TournamentDates::new(day("2026-07-04"), day("2026-07-05")).unwrap());
+        t.settings.time_control = Some("30min + 30sec".into());
+        let grid = to_grid(&t, &t.standings());
+        let mut lines = grid.lines();
+        assert_eq!(
+            lines.next().unwrap(),
+            "[Test Cup, Ludwigshafen, Germany, 2026-07-04 to 2026-07-05]"
+        );
+        assert_eq!(lines.next().unwrap(), "[2026-07-05]"); // the last day, alone
+        assert_eq!(lines.next().unwrap(), "[Time control: 30min + 30sec]");
+        assert!(lines.next().unwrap().starts_with("Nr"));
+
+        // A one-day event writes the day itself, not a `X to X` range.
+        t.settings.dates =
+            Some(TournamentDates::new(day("2026-07-04"), day("2026-07-04")).unwrap());
+        let grid = to_grid(&t, &t.standings());
+        let mut lines = grid.lines();
+        assert_eq!(
+            lines.next().unwrap(),
+            "[Test Cup, Ludwigshafen, Germany, 2026-07-04]"
+        );
+        assert_eq!(lines.next().unwrap(), "[2026-07-04]");
+    }
+
+    #[test]
+    fn header_omits_what_the_referee_left_empty() {
+        use crate::settings::{IsoDate, TournamentDates};
+        let day = |s: &str| IsoDate::parse(s).unwrap();
+
+        // Nothing filled in: the bare name line this export has always written.
+        let (mut t, ..) = one_board(|_| {});
+        assert_eq!(
+            to_grid(&t, &t.standings()).lines().next().unwrap(),
+            "[Test Cup]"
+        );
+
+        // Time control only: the name line stays bare, and the time control
+        // follows it directly (there is no date line to hold its place).
+        t.settings.time_control = Some("40min sudden death".into());
+        let grid = to_grid(&t, &t.standings());
+        let mut lines = grid.lines();
+        assert_eq!(lines.next().unwrap(), "[Test Cup]");
+        assert_eq!(lines.next().unwrap(), "[Time control: 40min sudden death]");
+        assert!(lines.next().unwrap().starts_with("Nr"));
+
+        // Dates only: no time-control line at all.
+        t.settings.time_control = None;
+        t.settings.dates =
+            Some(TournamentDates::new(day("2026-07-04"), day("2026-07-05")).unwrap());
+        let grid = to_grid(&t, &t.standings());
+        let mut lines = grid.lines();
+        assert_eq!(
+            lines.next().unwrap(),
+            "[Test Cup, 2026-07-04 to 2026-07-05]"
+        );
+        assert_eq!(lines.next().unwrap(), "[2026-07-05]");
+        assert!(lines.next().unwrap().starts_with("Nr"));
+
+        // A country with no city (or the reverse) leaves no hole behind: only the
+        // parts present are joined, with no stray comma for the missing one.
+        t.settings.dates = None;
+        t.settings.country = Some("Germany".into());
+        assert_eq!(
+            to_grid(&t, &t.standings()).lines().next().unwrap(),
+            "[Test Cup, Germany]"
+        );
     }
 
     #[test]

@@ -15,6 +15,18 @@ that field has no default. Re-create such a tournament rather than loading it.
 
 ### Added
 
+- **The tournament's city, country, dates and time control** (Settings →
+  *Place, dates and time control*), reported in the header of the American Grid
+  export the way the
+  [FESA tournament-system guide](https://fesashogi.eu/tournament-system-user-guide/)
+  asks: `[name, city, country, first to last]`, followed by the tournament's
+  last day on its own line and by `[Time control: …]`. Each part is written only
+  when it was entered, so an export from a tournament that sets none of them is
+  unchanged. A live preview under the fields shows the header as it will be
+  sent. The dates are entered as a pair (a one-day event repeats the day) and
+  validated — an impossible date or a range ending before it starts is rejected
+  rather than exported.
+
 - **Hybrid cup: a qualification-round format** (Settings → Hybrid cup), used by
   the German Championship. The top half of the bracket is pre-qualified and
   plays an ordinary Swiss game in round 1, while the next players play a

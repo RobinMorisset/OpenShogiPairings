@@ -15,7 +15,7 @@ Known limitations and future work, roughly ordered by area.
   plain matching can't express, and by very large fields. Plan: `good_lp` + HiGHS
   first, then CP-SAT.
 
-- **Weak club protection** Intermediate between normal and exempt.
+- **Nationality protection** Same idea as club protection, just a hair weaker.
 
 - **Freeze the round explanation at confirmation.** `explain_round` rebuilds the
   `PairingModel` from `rounds[..idx]`, so correcting an earlier round's result, or
@@ -74,9 +74,6 @@ Known limitations and future work, roughly ordered by area.
   in) needs the HelloAsso participant id kept as an external key to dedup against.
   Do not import email addresses (see the non-goals in
   [docs/public-access.md](docs/public-access.md)).
-
-- **More complete american grid exporter** There should be fields in the settings with the dates
-  and time control of the tournament, so they can be reported in the header of the american grid;
 
 - **Reorganize the settings tab**. Some combinations make little sense (e.g. pure-ELO mode with any kind of cup)
 

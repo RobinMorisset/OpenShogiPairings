@@ -1,7 +1,9 @@
 //! Tournament-wide settings.
 
 use std::collections::HashSet;
+use std::fmt;
 use std::num::NonZeroU32;
+use std::ops::Range;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use ts_rs::TS;
@@ -9,6 +11,136 @@ use uuid::Uuid;
 
 use crate::cup::CupFormat;
 use crate::player::Grade;
+
+/// What can be wrong with the tournament's dates.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DateError {
+    /// Not an ISO `YYYY-MM-DD` calendar date.
+    #[error("invalid date {0:?}: expected an ISO calendar date, YYYY-MM-DD")]
+    Malformed(String),
+    /// The tournament would end before it starts.
+    #[error("the tournament's last day ({last}) precedes its first ({first})")]
+    Backwards { first: IsoDate, last: IsoDate },
+}
+
+/// A calendar date in ISO `YYYY-MM-DD` form — the shape the FESA rating program
+/// reads out of an American Grid header (see [`crate::american_grid`]).
+///
+/// Kept as a validated string rather than pulling in a date crate: nothing here
+/// does date *arithmetic*, only prints the date back out. The validation is real
+/// though — the layout *and* the calendar, so `2025-02-30` is rejected — and it
+/// runs in `Deserialize`, so a malformed date fails at the API boundary rather
+/// than surfacing inside an export a rating administrator has to read.
+///
+/// The derived `Ord` compares the strings, which for this fixed-width
+/// zero-padded form is chronological order; [`TournamentDates`] relies on that.
+///
+/// `Deserialize` is hand-written (rather than `#[serde(try_from = …)]`) for the
+/// same reason as [`Ratio`]'s: ts-rs' serde-compat pass emits a spurious warning
+/// for anything beyond `rename`/`default`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct IsoDate(String);
+
+impl IsoDate {
+    /// Parse an ISO `YYYY-MM-DD` calendar date, rejecting anything else.
+    pub fn parse(s: &str) -> Result<Self, DateError> {
+        let malformed = || DateError::Malformed(s.to_string());
+        // ASCII-only, so the byte offsets below are also char boundaries.
+        if !s.is_ascii() || s.len() != 10 || s.as_bytes()[4] != b'-' || s.as_bytes()[7] != b'-' {
+            return Err(malformed());
+        }
+        // Digits only: `str::parse` would otherwise accept `+1` and friends.
+        let digits = |r: Range<usize>| -> Option<u32> {
+            let part = &s[r];
+            part.bytes()
+                .all(|b| b.is_ascii_digit())
+                .then(|| part.parse().ok())
+                .flatten()
+        };
+        let (year, month, day) = (
+            digits(0..4).ok_or_else(malformed)?,
+            digits(5..7).ok_or_else(malformed)?,
+            digits(8..10).ok_or_else(malformed)?,
+        );
+        if !(1..=12).contains(&month) || day < 1 || day > days_in_month(year, month) {
+            return Err(malformed());
+        }
+        Ok(IsoDate(s.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The length of a month, Gregorian leap years included.
+fn days_in_month(year: u32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) => {
+            29
+        }
+        2 => 28,
+        _ => 0,
+    }
+}
+
+impl fmt::Display for IsoDate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for IsoDate {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        IsoDate::parse(&raw).map_err(serde::de::Error::custom)
+    }
+}
+
+/// The days the tournament runs: its first and its last (equal for a one-day
+/// event). Both are required together, because the American Grid header wants
+/// both the range *and* the closing date, and a range whose end precedes its
+/// start is rejected at construction — including when deserialized — rather than
+/// printed into an export.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct TournamentDates {
+    /// First day of play.
+    pub first: IsoDate,
+    /// Last day of play — the same as `first` for a one-day event.
+    pub last: IsoDate,
+}
+
+impl TournamentDates {
+    /// The dates of an event running `first..=last`.
+    pub fn new(first: IsoDate, last: IsoDate) -> Result<Self, DateError> {
+        if last < first {
+            return Err(DateError::Backwards { first, last });
+        }
+        Ok(TournamentDates { first, last })
+    }
+
+    /// Whether the whole event fits in a single day.
+    pub fn single_day(&self) -> bool {
+        self.first == self.last
+    }
+}
+
+impl<'de> Deserialize<'de> for TournamentDates {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Raw {
+            first: IsoDate,
+            last: IsoDate,
+        }
+        let Raw { first, last } = Raw::deserialize(d)?;
+        TournamentDates::new(first, last).map_err(serde::de::Error::custom)
+    }
+}
 
 /// An integer-percent multiplier (`100` = ×1.0), read as a float via
 /// [`Ratio::as_f64`]. The wire form stays a bare number; wrapping it means the
@@ -631,6 +763,30 @@ pub struct PlayerCategory {
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(deny_unknown_fields)]
 pub struct TournamentSettings {
+    /// The town the tournament is held in, as the American Grid header names it
+    /// (`[13. Kurpfalz New Year's Open, Ludwigshafen, Germany, …]`). Trimmed,
+    /// with a blank entry normalized to `None` — which simply leaves it out of
+    /// that line. Descriptive only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+    /// The country the tournament is held in, alongside [`Self::city`] in the
+    /// American Grid header. Trimmed, blank normalized to `None`. Descriptive
+    /// only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+    /// The days the tournament runs (see [`TournamentDates`]). Purely
+    /// descriptive: the only thing that reads it is the American Grid header,
+    /// which the FESA rating program wants stamped with the event's dates. `None`
+    /// (the default) leaves them out of the header.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dates: Option<TournamentDates>,
+    /// The time control, as free text for the header to print verbatim — e.g.
+    /// `30min + 30sec`, which is the form the FESA guide shows, but a tournament
+    /// with sudden death, an increment or a per-round change needs to say so in
+    /// its own words. Trimmed, with a blank entry normalized to `None`.
+    /// Descriptive only, like [`Self::dates`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_control: Option<String>,
     /// How the tournament is paired: Swiss/MacMahon over static ratings (with the
     /// floater/airtight/club/MacMahon knobs) or ELO mode over a live estimate (see
     /// [`PairingMode`]). Defaults to plain Swiss.
@@ -680,6 +836,10 @@ pub struct TournamentSettings {
 impl Default for TournamentSettings {
     fn default() -> Self {
         TournamentSettings {
+            city: None,
+            country: None,
+            dates: None,
+            time_control: None,
             pairing: PairingMode::default(),
             cup_enabled: false,
             cup_format: CupFormat::default(),
@@ -851,6 +1011,17 @@ impl TournamentSettings {
         // while rated players are actually estimated — see `est_elo_ranks`.
         if !self.est_elo_ranks() {
             self.tiebreaks.retain(|&tb| tb != Tiebreak::EstElo);
+        }
+
+        // The free-text header fields: trimmed, and a blank (or whitespace-only)
+        // entry means "not set" rather than a stray comma or an empty
+        // `[Time control: ]` line in the export.
+        for field in [&mut self.city, &mut self.country, &mut self.time_control] {
+            if field.as_ref().is_some_and(|s| s.trim().is_empty()) {
+                *field = None;
+            } else if let Some(s) = field {
+                *s = s.trim().to_string();
+            }
         }
 
         // Categories: trim each name, drop blank-named ones, and keep the first
@@ -1616,5 +1787,123 @@ mod tests {
             "source": { "kind": "static" } } } }"#;
         let s: TournamentSettings = serde_json::from_str(good).unwrap();
         assert_eq!(s.macmahon_thresholds().len(), 1);
+    }
+
+    #[test]
+    fn iso_date_accepts_real_calendar_dates_only() {
+        assert_eq!(IsoDate::parse("2026-07-04").unwrap().as_str(), "2026-07-04");
+        assert_eq!(IsoDate::parse("2024-02-29").unwrap().as_str(), "2024-02-29"); // leap year
+        for bad in [
+            "",
+            "2026-7-4",      // not zero-padded
+            "04/07/2026",    // not ISO
+            "2026-07-04 ",   // stray space
+            "2026-13-01",    // month out of range
+            "2026-00-10",    // month 0
+            "2026-02-30",    // no such day
+            "2025-02-29",    // 2025 isn't a leap year
+            "1900-02-29",    // nor is 1900 (century, not a multiple of 400)
+            "+026-07-04",    // `parse::<u32>` would accept the sign
+            "2026-07-04T12", // longer than a date
+        ] {
+            assert_eq!(
+                IsoDate::parse(bad),
+                Err(DateError::Malformed(bad.to_string())),
+                "should have been rejected: {bad:?}"
+            );
+        }
+        // 2000 is a leap year (multiple of 400).
+        assert!(IsoDate::parse("2000-02-29").is_ok());
+    }
+
+    #[test]
+    fn iso_dates_order_chronologically() {
+        assert!(IsoDate::parse("2026-01-31").unwrap() < IsoDate::parse("2026-02-01").unwrap());
+        assert!(IsoDate::parse("2025-12-31").unwrap() < IsoDate::parse("2026-01-01").unwrap());
+    }
+
+    #[test]
+    fn tournament_dates_reject_a_backwards_range() {
+        let first = IsoDate::parse("2026-07-05").unwrap();
+        let last = IsoDate::parse("2026-07-04").unwrap();
+        assert_eq!(
+            TournamentDates::new(first.clone(), last.clone()),
+            Err(DateError::Backwards { first, last })
+        );
+        // A one-day event (first == last) is fine, and knows it.
+        let day = IsoDate::parse("2026-07-04").unwrap();
+        let dates = TournamentDates::new(day.clone(), day).unwrap();
+        assert!(dates.single_day());
+    }
+
+    #[test]
+    fn dates_and_time_control_round_trip_and_fail_loudly() {
+        let json = r#"{ "city": "Ludwigshafen", "country": "Germany",
+                        "dates": { "first": "2026-07-04", "last": "2026-07-05" },
+                        "time_control": "30min + 30sec" }"#;
+        let s: TournamentSettings = serde_json::from_str(json).unwrap();
+        let dates = s.dates.clone().unwrap();
+        assert_eq!(dates.first.as_str(), "2026-07-04");
+        assert_eq!(dates.last.as_str(), "2026-07-05");
+        assert!(!dates.single_day());
+        assert_eq!(s.city.as_deref(), Some("Ludwigshafen"));
+        assert_eq!(s.country.as_deref(), Some("Germany"));
+        assert_eq!(s.time_control.as_deref(), Some("30min + 30sec"));
+        // Round-trips through JSON unchanged.
+        let back: TournamentSettings =
+            serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back, s);
+
+        // All of them are optional, and absent by default.
+        let none: TournamentSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(none.city, None);
+        assert_eq!(none.country, None);
+        assert_eq!(none.dates, None);
+        assert_eq!(none.time_control, None);
+
+        // A malformed date, a half-filled range and a backwards one are all hard
+        // errors rather than a silently dropped (or half-applied) header.
+        for (bad, expected) in [
+            (
+                r#"{ "dates": { "first": "04/07/2026", "last": "2026-07-05" } }"#,
+                "invalid date",
+            ),
+            (r#"{ "dates": { "first": "2026-07-04" } }"#, "missing field"),
+            (
+                r#"{ "dates": { "first": "2026-07-05", "last": "2026-07-04" } }"#,
+                "precedes its first",
+            ),
+        ] {
+            let err = serde_json::from_str::<TournamentSettings>(bad).unwrap_err();
+            assert!(
+                err.to_string().contains(expected),
+                "expected {expected:?} in the error, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn normalized_trims_the_header_text_and_drops_blank_entries() {
+        let trimmed = TournamentSettings {
+            city: Some(" Ludwigshafen ".into()),
+            country: Some("Germany\t".into()),
+            time_control: Some("  40min + 30sec  ".into()),
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(trimmed.city.as_deref(), Some("Ludwigshafen"));
+        assert_eq!(trimmed.country.as_deref(), Some("Germany"));
+        assert_eq!(trimmed.time_control.as_deref(), Some("40min + 30sec"));
+
+        let blank = TournamentSettings {
+            city: Some("".into()),
+            country: Some(" ".into()),
+            time_control: Some("   ".into()),
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(blank.city, None);
+        assert_eq!(blank.country, None);
+        assert_eq!(blank.time_control, None);
     }
 }

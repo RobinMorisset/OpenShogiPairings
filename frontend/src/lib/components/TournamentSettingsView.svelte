@@ -25,6 +25,8 @@
 
   interface Props {
     settings: TournamentSettings;
+    /** The tournament's name, shown in the American Grid header preview. */
+    tournamentName: string;
     /** Registration already finalized — edits here get a warning. */
     finalized: boolean;
     /** The registered players, used to suggest club names for exemptions. */
@@ -33,7 +35,14 @@
     busy?: boolean;
   }
 
-  let { settings, finalized, players, onUpdate, busy = false }: Props = $props();
+  let {
+    settings,
+    tournamentName,
+    finalized,
+    players,
+    onUpdate,
+    busy = false,
+  }: Props = $props();
 
   // Download the current settings as JSON (for the simulation CLI's --configs,
   // or to share a configuration). Fire-and-forget: a cancelled dialog is a no-op.
@@ -97,6 +106,16 @@
   function eqCategories(a: PlayerCategory[], b: PlayerCategory[]): boolean {
     return a.length === b.length && a.every((c, i) => c.id === b[i].id && c.name === b[i].name);
   }
+
+  // The event's identity, for the American Grid header (empty = not entered).
+  // The date inputs are `type="date"`, so their value is already the ISO
+  // `YYYY-MM-DD` the server accepts — and comparing two of them as strings is
+  // comparing them chronologically.
+  let city = $state("");
+  let country = $state("");
+  let firstDate = $state("");
+  let lastDate = $state("");
+  let timeControl = $state("");
 
   // Local editable rows, kept in *entry* order (not sorted) so the row a referee
   // is editing never jumps or shows a stale value. The inputs bind to these.
@@ -199,6 +218,11 @@
         : macmahonSource?.kind === "from_estimate"
           ? macmahonSource.estimator
           : null;
+    const sCity = settings.city ?? "";
+    const sCountry = settings.country ?? "";
+    const sFirstDate = settings.dates?.first ?? "";
+    const sLastDate = settings.dates?.last ?? "";
+    const sTimeControl = settings.time_control ?? "";
     const sThresholds = swiss?.macmahon.thresholds ?? [];
     const sAirtight = swiss?.airtight_groups ?? null;
     const cp = swiss?.club_protection;
@@ -227,6 +251,11 @@
     const sEloLooseUnr = est?.upward_looseness_unrated ?? 100;
     untrack(() => {
       const matches =
+        city.trim() === sCity &&
+        country.trim() === sCountry &&
+        firstDate === sFirstDate &&
+        lastDate === sLastDate &&
+        timeControl.trim() === sTimeControl &&
         eqThresholds(cleanThresholds(thresholds), sThresholds) &&
         (airtightRounds ?? null) === sAirtight &&
         clubEnabled === sEnabled &&
@@ -252,6 +281,11 @@
         eloLoosenessProvisionalPercent === sEloLooseProv &&
         eloLoosenessUnratedPercent === sEloLooseUnr;
       if (!matches) {
+        city = sCity;
+        country = sCountry;
+        firstDate = sFirstDate;
+        lastDate = sLastDate;
+        timeControl = sTimeControl;
         thresholds = sThresholds.map((t) => ({
           kind: t.criterion.kind,
           value: t.criterion.kind === "elo" ? t.criterion.value : 1500,
@@ -322,6 +356,13 @@
           },
         };
     onUpdate({
+      city: city.trim() || null,
+      country: country.trim() || null,
+      // The dates travel as a pair or not at all — the server rejects a
+      // half-filled range, and the edit handlers below keep the two inputs
+      // filled (and ordered) together so that can't be reached from here.
+      dates: firstDate && lastDate ? { first: firstDate, last: lastDate } : null,
+      time_control: timeControl.trim() || null,
       pairing,
       cup_enabled: cupEnabled,
       cup_format: cupFormat,
@@ -424,6 +465,40 @@
     if (from === to) return;
     const [item] = tiebreaks.splice(from, 1);
     tiebreaks.splice(to, 0, item);
+    persist();
+  }
+
+  function editCity(raw: string) {
+    city = raw;
+    persist();
+  }
+
+  function editCountry(raw: string) {
+    country = raw;
+    persist();
+  }
+
+  // The two dates are one setting: the header needs both the range and its
+  // closing date, so entering one fills the other in (visibly, in the input) —
+  // the one-day case — and clearing one clears the pair. A last day earlier than
+  // the first is likewise pulled back into order rather than sent for the server
+  // to reject.
+  function editFirstDate(raw: string) {
+    firstDate = raw;
+    if (!raw) lastDate = "";
+    else if (!lastDate || lastDate < raw) lastDate = raw;
+    persist();
+  }
+
+  function editLastDate(raw: string) {
+    lastDate = raw;
+    if (!raw) firstDate = "";
+    else if (!firstDate || firstDate > raw) firstDate = raw;
+    persist();
+  }
+
+  function editTimeControl(raw: string) {
+    timeControl = raw;
     persist();
   }
 
@@ -569,6 +644,23 @@
     persist();
   }
 
+  // The header the American Grid export will carry, shown live under the fields
+  // so the referee sees what FESA receives. Mirrors `header_lines` in
+  // `american_grid.rs`; keep the two in step.
+  const headerPreview = $derived.by(() => {
+    const range = !firstDate || !lastDate
+      ? null
+      : firstDate === lastDate
+        ? firstDate
+        : `${firstDate} to ${lastDate}`;
+    const parts = [tournamentName, city.trim(), country.trim(), range].filter(Boolean);
+    const lines = [`[${parts.join(", ")}]`];
+    if (range) lines.push(`[${lastDate}]`);
+    const tc = timeControl.trim();
+    if (tc) lines.push(`[Time control: ${tc}]`);
+    return lines.join("\n");
+  });
+
   // Normalized (sorted, de-duplicated) view of the local rows — drives the
   // previews so they always reflect what the server will store, updated live on
   // each edit rather than lagging a round-trip.
@@ -639,6 +731,64 @@
       ⚠ {$_("settings.finalizedWarning")}
     </p>
   {/if}
+
+  <div class="section">
+    <h3>{$_("settings.eventTitle")}</h3>
+    <p class="desc">{$_("settings.eventDesc")}</p>
+    <div class="event-fields">
+      <label class="event-row">
+        <span>{$_("settings.eventCity")}</span>
+        <input
+          type="text"
+          class="event-text"
+          value={city}
+          disabled={busy}
+          onchange={(e) => editCity(e.currentTarget.value)}
+        />
+      </label>
+      <label class="event-row">
+        <span>{$_("settings.eventCountry")}</span>
+        <input
+          type="text"
+          class="event-text"
+          value={country}
+          disabled={busy}
+          onchange={(e) => editCountry(e.currentTarget.value)}
+        />
+      </label>
+      <label class="event-row">
+        <span>{$_("settings.eventFirstDay")}</span>
+        <input
+          type="date"
+          value={firstDate}
+          disabled={busy}
+          onchange={(e) => editFirstDate(e.currentTarget.value)}
+        />
+      </label>
+      <label class="event-row">
+        <span>{$_("settings.eventLastDay")}</span>
+        <input
+          type="date"
+          value={lastDate}
+          disabled={busy}
+          onchange={(e) => editLastDate(e.currentTarget.value)}
+        />
+      </label>
+      <label class="event-row">
+        <span>{$_("settings.eventTimeControl")}</span>
+        <input
+          type="text"
+          class="event-text"
+          value={timeControl}
+          placeholder={$_("settings.eventTimeControlPlaceholder")}
+          disabled={busy}
+          onchange={(e) => editTimeControl(e.currentTarget.value)}
+        />
+      </label>
+    </div>
+    <p class="desc small-note">{$_("settings.eventHeaderPreview")}</p>
+    <pre class="header-preview">{headerPreview}</pre>
+  </div>
 
   <fieldset class="swiss-fieldset" disabled={swissDisabled}>
   <div class="section">
@@ -1318,14 +1468,54 @@
     border-top: 1px solid var(--border-divider);
     padding-top: 1rem;
   }
-  .settings > fieldset.swiss-fieldset > .section:first-child {
+  /* The event section opens the tab, so it has nothing above to be separated
+     from. (`:first-of-type` among the `div` children — the finalized warning is
+     a `p`, the Swiss knobs a `fieldset`.) */
+  .settings > div.section:first-of-type {
     margin-top: 0.5rem;
     border-top: none;
     padding-top: 0;
   }
+  .event-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+  .event-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .event-row > span {
+    min-width: 7rem;
+  }
+  .event-row input {
+    background: var(--bg-inset);
+    color: inherit;
+    border: 1px solid var(--border-soft);
+    border-radius: 0.4rem;
+    padding: 0.25rem 0.4rem;
+    font: inherit;
+  }
+  .event-text {
+    width: 14rem;
+  }
+  /* What the export's header will look like, updated as the fields are typed. */
+  .header-preview {
+    margin: 0.35rem 0 0;
+    padding: 0.5rem 0.6rem;
+    background: var(--bg-inset);
+    border: 1px solid var(--border-soft);
+    border-radius: 0.4rem;
+    font-size: 0.8rem;
+    overflow-x: auto;
+    white-space: pre;
+    color: var(--text-secondary);
+  }
   /* Groups the Swiss-only sections so they can be greyed out as one in ELO mode.
      Reset the browser's default fieldset chrome; the inner `.section`s keep their
-     own separators. It's the first thing in the tab, so no leading divider. */
+     own separators (including the first, which follows the event section). */
   fieldset.swiss-fieldset {
     border: none;
     margin: 0;

@@ -59,7 +59,8 @@ tournament. For how it's built, see [Architecture](#architecture) below.
 - **FESA rating list integration**: registration autocompletes name, ELO, and
   grade from the federation's list, refreshable on demand; the tournament
   cross-table can be exported as an **American Grid** for the federation's
-  ELO update.
+  ELO update, headed by the tournament's name, place, dates and time control
+  (all but the name entered in the settings).
 - **Manual point adjustments** (a bonus or penalty with a mandatory reason),
   for corrections outside the normal scoring.
 - **Two-round "long games"** (niche): for tournaments that give the top boards
@@ -341,7 +342,7 @@ that tournament's bearer token if it has a password (except `/login` and
 | `GET /` | Fetch the tournament (`TournamentView`; 404 if unknown). |
 | `DELETE /` | Delete the tournament. |
 | `POST /undo` | Revert the last change (server-side undo history). |
-| `GET /american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
+| `GET /american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: a header carrying the tournament's name, place, dates and time control, then one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
 | `PUT /settings` | Replace the whole `TournamentSettings`. Its shape is nested: `pairing` is a tagged union — either `{ "kind": "swiss", "floater_style": "classic"｜"median", "macmahon": { "thresholds": [ { "criterion": { "kind": "elo", "value": 1200 }, "drops_after_round"?: 3 }, { "criterion": { "kind": "grade", "grade": { "kind": "dan"｜"kyu", "level": 1 } } } ], "source": { "kind": "static" } }, "airtight_groups"?: 2, "club_protection": { "kind": "on", "rounds"?: 3, "exempt_clubs"?: ["Paris"] } }` or `{ "kind": "elo", "estimator": { … } }` for the experimental pure-ELO pairing mode. Alongside `pairing`, the top level carries `cup_enabled`, `cup_format` (`"direct"`｜`"qualifier"` — see the hybrid-cup section above; only consulted when `cup_enabled`), `long_boards_enabled`, `handicap_policy` (`{ "kind": "none" }｜{ "kind": "enabled", "display": …, "wiel_rule"?: false }`), `half_point_absences`, `tiebreaks` (an ordered array, e.g. `["points","sos_m",…]`), and `categories` (referee-defined player categories, an array of `{ "id", "name" }`; blank-named entries are dropped on normalization). Notes: a threshold's `criterion` mixes ELO and grade freely (each counted independently) and `drops_after_round` makes it a degressive threshold; `airtight_groups`, if set, forbids pairing across MacMahon groups during rounds `1..=n`; `club_protection` is `{ "kind": "off" }` or `{ "kind": "on", … }`; `macmahon.source` is `{ "kind": "static" }` or `{ "kind": "from_estimate", "estimator": { … } }` (estimate-based MacMahon). The `estimator` knobs are described in [`docs/elo-pairing-mode.md`](docs/elo-pairing-mode.md). |
 | `POST /cancel-round` | Cancel the last round — discards the open draft if one is being prepared, otherwise removes the most recent round (undoable). |
 | `POST /rounds/prepare` | Begin drafting the next round. For round 1, finalizes registration first, in the same undo step — that is the only way to finalize. Body optional: `{ "cup_size": 8｜16｜32｜64 }` when the hybrid cup is enabled — `cup_size` is the *bracket* size; it seeds the top eligible players into it, taking `cup_size` of them under `cup_format: "direct"` and `1.5 × cup_size` under `"qualifier"` (400 if fewer are marked eligible). Ignored from round 2 on (already finalized). A round completes automatically once every board has a result, so there is no separate "complete round" call. |

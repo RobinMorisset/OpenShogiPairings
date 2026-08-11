@@ -999,6 +999,7 @@
         {#if activeTab === "settings"}
           <TournamentSettingsView
             settings={tournament.settings}
+            tournamentName={tournament.name}
             finalized={tournament.registration_finalized}
             players={tournament.players}
             onUpdate={handleUpdateSettings}
