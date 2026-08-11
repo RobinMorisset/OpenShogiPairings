@@ -81,6 +81,10 @@ tournament. For how it's built, see [Architecture](#architecture) below.
 - **Club protection**, avoiding pairing players from the same club, optionally
   limited to the first N rounds and with specific clubs (e.g. the host club)
   exempted.
+- **Nationality protection**, the same knob one rule tier weaker: avoid pairing
+  players of the same nationality, again optionally limited to the first N
+  rounds and with nationalities (e.g. the host country) exempted. When only one
+  of the two can be honoured, the club clash is the one avoided.
 - **Airtight groups**: for the first N rounds, forbid pairing players with a
   different MacMahon point total, ahead of the usual score-gap penalty.
 - **Floater selection style** — classic Swiss (the strongest of the lower
@@ -225,7 +229,8 @@ scores (penalty ∝ gap²), avoid repeating a float in the same
 direction (decaying with time), select floaters (the weakest of the upper group
 drops, the first — classic Swiss — or median lower-group player rises), avoid
 club-mates (optional per tournament, and optionally only for the first N rounds
-or with some clubs exempt), and fold each score group (top-half Nth meets
+or with some clubs exempt), avoid compatriots (the same rule one tier weaker,
+also optional), and fold each score group (top-half Nth meets
 bottom-half Nth). The odd player's bye is modeled
 as a phantom vertex. The multipliers are *derived* from each rule's worst-case
 contribution, so the tiers are strictly disjoint by construction (lexicographic
@@ -268,7 +273,7 @@ Two experimental **ELO-based pairing modes**
 [`docs/elo-pairing-mode.md`](docs/elo-pairing-mode.md)) build on a live Bayesian
 (maximum-a-posteriori, Bradley–Terry) estimate of every player's strength from
 results so far. In **mixed mode**, MacMahon and the Swiss score-group rules
-(score gap, float repeat, club protection, airtight groups) are all kept, but
+(score gap, float repeat, club and nationality protection, airtight groups) are all kept, but
 the fold and floater-selection rules are replaced by minimizing the squared
 estimated-ELO gap — so a score group is still formed exactly as in Swiss, and
 only the ordering _within_ (and across) it follows current form instead of the
@@ -281,7 +286,8 @@ strength axis instead of jumping between integer score groups.
 ### The UI
 
 The web UI organizes a tournament into tabs: **Settings** (MacMahon groups,
-degressive schedule, club protection, floater style, pairing mode, hybrid cup),
+degressive schedule, club and nationality protection, floater style, pairing
+mode, hybrid cup),
 **Players**, **Standings** (per-round results plus Wins and total Points),
 and one tab per round. Points are each player's wins plus their MacMahon
 starting points (one per threshold they reach — an ELO rating or a dan/kyu
@@ -343,7 +349,7 @@ that tournament's bearer token if it has a password (except `/login` and
 | `DELETE /` | Delete the tournament. |
 | `POST /undo` | Revert the last change (server-side undo history). |
 | `GET /american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: a header carrying the tournament's name, place, dates and time control, then one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
-| `PUT /settings` | Replace the whole `TournamentSettings`. Its shape is nested: `pairing` is a tagged union — either `{ "kind": "swiss", "floater_style": "classic"｜"median", "macmahon": { "thresholds": [ { "criterion": { "kind": "elo", "value": 1200 }, "drops_after_round"?: 3 }, { "criterion": { "kind": "grade", "grade": { "kind": "dan"｜"kyu", "level": 1 } } } ], "source": { "kind": "static" } }, "airtight_groups"?: 2, "club_protection": { "kind": "on", "rounds"?: 3, "exempt_clubs"?: ["Paris"] } }` or `{ "kind": "elo", "estimator": { … } }` for the experimental pure-ELO pairing mode. Alongside `pairing`, the top level carries `cup_enabled`, `cup_format` (`"direct"`｜`"qualifier"` — see the hybrid-cup section above; only consulted when `cup_enabled`), `long_boards_enabled`, `handicap_policy` (`{ "kind": "none" }｜{ "kind": "enabled", "display": …, "wiel_rule"?: false }`), `half_point_absences`, `tiebreaks` (an ordered array, e.g. `["points","sos_m",…]`), and `categories` (referee-defined player categories, an array of `{ "id", "name" }`; blank-named entries are dropped on normalization). Notes: a threshold's `criterion` mixes ELO and grade freely (each counted independently) and `drops_after_round` makes it a degressive threshold; `airtight_groups`, if set, forbids pairing across MacMahon groups during rounds `1..=n`; `club_protection` is `{ "kind": "off" }` or `{ "kind": "on", … }`; `macmahon.source` is `{ "kind": "static" }` or `{ "kind": "from_estimate", "estimator": { … } }` (estimate-based MacMahon). The `estimator` knobs are described in [`docs/elo-pairing-mode.md`](docs/elo-pairing-mode.md). |
+| `PUT /settings` | Replace the whole `TournamentSettings`. Its shape is nested: `pairing` is a tagged union — either `{ "kind": "swiss", "floater_style": "classic"｜"median", "macmahon": { "thresholds": [ { "criterion": { "kind": "elo", "value": 1200 }, "drops_after_round"?: 3 }, { "criterion": { "kind": "grade", "grade": { "kind": "dan"｜"kyu", "level": 1 } } } ], "source": { "kind": "static" } }, "airtight_groups"?: 2, "club_protection": { "kind": "on", "rounds"?: 3, "exempt_clubs"?: ["Paris"] }, "nationality_protection": { "kind": "on", "rounds"?: 3, "exempt_nationalities"?: ["JP"] } }` or `{ "kind": "elo", "estimator": { … } }` for the experimental pure-ELO pairing mode. Alongside `pairing`, the top level carries `cup_enabled`, `cup_format` (`"direct"`｜`"qualifier"` — see the hybrid-cup section above; only consulted when `cup_enabled`), `long_boards_enabled`, `handicap_policy` (`{ "kind": "none" }｜{ "kind": "enabled", "display": …, "wiel_rule"?: false }`), `half_point_absences`, `tiebreaks` (an ordered array, e.g. `["points","sos_m",…]`), and `categories` (referee-defined player categories, an array of `{ "id", "name" }`; blank-named entries are dropped on normalization). Notes: a threshold's `criterion` mixes ELO and grade freely (each counted independently) and `drops_after_round` makes it a degressive threshold; `airtight_groups`, if set, forbids pairing across MacMahon groups during rounds `1..=n`; `club_protection` is `{ "kind": "off" }` or `{ "kind": "on", … }`, and `nationality_protection` is the same shape one rule tier weaker (its exempt list is `exempt_nationalities`); both default to off and are omitted from the response when off; `macmahon.source` is `{ "kind": "static" }` or `{ "kind": "from_estimate", "estimator": { … } }` (estimate-based MacMahon). The `estimator` knobs are described in [`docs/elo-pairing-mode.md`](docs/elo-pairing-mode.md). |
 | `POST /cancel-round` | Cancel the last round — discards the open draft if one is being prepared, otherwise removes the most recent round (undoable). |
 | `POST /rounds/prepare` | Begin drafting the next round. For round 1, finalizes registration first, in the same undo step — that is the only way to finalize. Body optional: `{ "cup_size": 8｜16｜32｜64 }` when the hybrid cup is enabled — `cup_size` is the *bracket* size; it seeds the top eligible players into it, taking `cup_size` of them under `cup_format: "direct"` and `1.5 × cup_size` under `"qualifier"` (400 if fewer are marked eligible). Ignored from round 2 on (already finalized). A round completes automatically once every board has a result, so there is no separate "complete round" call. |
 | `PUT /draft` | Edit the draft: `{ "absent", "forced_boards", "forced_byes" }` — or, in a team tournament, `{ "absent", "forced_matches": [{ "team1", "team2" }], "forced_team_byes" }`, since teams are what get paired there. The absent set is per player in either mode: a team member can be absent without their team being, and their board is then forfeited for them. Sending the other mode's forced lists is an error, not a silently ignored field. |

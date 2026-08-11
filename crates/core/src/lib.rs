@@ -68,9 +68,9 @@ pub use round::{
 };
 pub use settings::{
     ClubProtection, DateError, EloEstimator, EloPriorShape, FloaterStyle, HandicapDisplay,
-    HandicapPolicy, IsoDate, MacMahon, MacMahonSource, MacMahonThreshold, PairingMode,
-    PlayerCategory, Ratio, RatioAtLeastOne, TeamModeConflict, TeamSettings, ThresholdCriterion,
-    Tiebreak, TournamentDates, TournamentSettings, UnratedK, TEAM_SIZES,
+    HandicapPolicy, IsoDate, MacMahon, MacMahonSource, MacMahonThreshold, NationalityProtection,
+    PairingMode, PlayerCategory, Ratio, RatioAtLeastOne, TeamModeConflict, TeamSettings,
+    ThresholdCriterion, Tiebreak, TournamentDates, TournamentSettings, UnratedK, TEAM_SIZES,
 };
 pub use standings::{compute_standings, Standing};
 pub use team::{average_pairing_rating, pairing_rating, Team};

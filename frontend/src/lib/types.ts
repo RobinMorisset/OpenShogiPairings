@@ -16,6 +16,7 @@ export type { BracketMatch } from "./generated/BracketMatch";
 export type { CupBracketView } from "./generated/CupBracketView";
 export type { BoardLedger } from "./generated/BoardLedger";
 export type { ClubProtection } from "./generated/ClubProtection";
+export type { NationalityProtection } from "./generated/NationalityProtection";
 export type { HandicapDisplay } from "./generated/HandicapDisplay";
 export type { Counterfactual } from "./generated/Counterfactual";
 export type { CounterfactualMode } from "./generated/CounterfactualMode";

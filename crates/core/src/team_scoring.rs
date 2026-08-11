@@ -468,9 +468,9 @@ fn mean(values: &[u32]) -> Option<u32> {
 /// team, keyed by team number — the team twin of
 /// [`player_units`](crate::pairing::player_units).
 ///
-/// The clubs are the members' clubs *in board order*, which is what makes the
-/// club rule count the same-club games a match would really create: board k only
-/// ever meets board k.
+/// The clubs (and nationalities) are the members' *in board order*, which is
+/// what makes the club and nationality rules count the clashing games a match
+/// would really create: board k only ever meets board k.
 pub(crate) fn team_units(
     teams: &[Team],
     players: &[Player],
@@ -512,6 +512,14 @@ pub(crate) fn team_units(
                     p.club
                         .as_ref()
                         .map(|c| TournamentSettings::normalize_club(c))
+                })
+                .collect(),
+            nationalities: members
+                .iter()
+                .map(|p| {
+                    p.nationality
+                        .as_ref()
+                        .map(|n| TournamentSettings::normalize_nationality(n))
                 })
                 .collect(),
             // Neither the cup nor ELO pairing exists in team mode.

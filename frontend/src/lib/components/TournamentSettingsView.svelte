@@ -11,6 +11,7 @@
     HandicapPolicy,
     PairingMode,
     MacMahonThreshold,
+    NationalityProtection,
     Player,
     PlayerCategory,
     Tiebreak,
@@ -29,7 +30,8 @@
     tournamentName: string;
     /** Registration already finalized — edits here get a warning. */
     finalized: boolean;
-    /** The registered players, used to suggest club names for exemptions. */
+    /** The registered players, used to suggest club and nationality names for
+     *  exemptions. */
     players: Player[];
     onUpdate: (settings: TournamentSettings) => void;
     busy?: boolean;
@@ -70,13 +72,13 @@
     }
   }
 
-  // Distinct club names among the players (first spelling kept) with their
-  // player count, for the exempt datalist — sorted by decreasing count (ties
-  // broken alphabetically) so the clubs most worth exempting sort first.
-  const knownClubs = $derived.by(() => {
+  // Distinct values of one player field (first spelling kept) with their player
+  // count, for an exempt datalist — sorted by decreasing count (ties broken
+  // alphabetically) so the entries most worth exempting sort first.
+  function distinctValues(pick: (p: Player) => string | null | undefined) {
     const counts = new Map<string, { name: string; count: number }>();
     for (const p of players) {
-      const name = p.club?.trim();
+      const name = pick(p)?.trim();
       if (!name) continue;
       const key = name.toLowerCase();
       const existing = counts.get(key);
@@ -86,7 +88,10 @@
     return [...counts.values()].sort(
       (a, b) => b.count - a.count || a.name.localeCompare(b.name),
     );
-  });
+  }
+
+  const knownClubs = $derived.by(() => distinctValues((p) => p.club));
+  const knownNationalities = $derived.by(() => distinctValues((p) => p.nationality));
 
   function eqStr(a: string[], b: string[]): boolean {
     return a.length === b.length && a.every((v, i) => v === b[i]);
@@ -129,6 +134,10 @@
   let clubEnabled = $state(false);
   let clubRounds = $state<number | null>(null);
   let exemptClubs = $state<string[]>([]);
+  // Nationality protection: the same three controls, one rule tier weaker.
+  let nationalityEnabled = $state(false);
+  let nationalityRounds = $state<number | null>(null);
+  let exemptNationalities = $state<string[]>([]);
   let floaterStyle = $state<"classic" | "median">("classic");
   let cupEnabled = $state(false);
   let cupFormat = $state<CupFormat>("direct");
@@ -239,6 +248,10 @@
     const sEnabled = cp?.kind === "on";
     const sRounds = cp?.kind === "on" ? (cp.rounds ?? null) : null;
     const sExempt = cp?.kind === "on" ? (cp.exempt_clubs ?? []) : [];
+    const np = swiss?.nationality_protection;
+    const sNatEnabled = np?.kind === "on";
+    const sNatRounds = np?.kind === "on" ? (np.rounds ?? null) : null;
+    const sNatExempt = np?.kind === "on" ? (np.exempt_nationalities ?? []) : [];
     const sFloater = swiss?.floater_style ?? "classic";
     const sCup = settings.cup_enabled;
     const sCupFormat = settings.cup_format ?? "direct";
@@ -273,6 +286,9 @@
         clubEnabled === sEnabled &&
         (clubRounds ?? null) === sRounds &&
         eqStr(normExempt(exemptClubs), sExempt) &&
+        nationalityEnabled === sNatEnabled &&
+        (nationalityRounds ?? null) === sNatRounds &&
+        eqStr(normExempt(exemptNationalities), sNatExempt) &&
         floaterStyle === sFloater &&
         cupEnabled === sCup &&
         cupFormat === sCupFormat &&
@@ -311,6 +327,9 @@
         clubEnabled = sEnabled;
         clubRounds = sRounds;
         exemptClubs = [...sExempt];
+        nationalityEnabled = sNatEnabled;
+        nationalityRounds = sNatRounds;
+        exemptNationalities = [...sNatExempt];
         floaterStyle = sFloater;
         cupEnabled = sCup;
         cupFormat = sCupFormat;
@@ -366,6 +385,15 @@
                 exempt_clubs: exemptClubs.map((c) => c.trim()).filter((c) => c.length > 0),
               } satisfies ClubProtection)
             : ({ kind: "off" } satisfies ClubProtection),
+          nationality_protection: nationalityEnabled
+            ? ({
+                kind: "on",
+                rounds: nationalityRounds,
+                exempt_nationalities: exemptNationalities
+                  .map((c) => c.trim())
+                  .filter((c) => c.length > 0),
+              } satisfies NationalityProtection)
+            : ({ kind: "off" } satisfies NationalityProtection),
           macmahon: {
             thresholds: cleanThresholds(thresholds),
             source: macmahonFromElo ? { kind: "from_estimate", estimator } : { kind: "static" },
@@ -590,9 +618,14 @@
     persist();
   }
 
-  function editClubRounds(raw: string) {
+  /** A round-window input's value, floored at the first round. */
+  function roundLimit(raw: string): number {
     const n = Math.round(Number(raw));
-    clubRounds = Number.isFinite(n) && n >= 1 ? n : 1;
+    return Number.isFinite(n) && n >= 1 ? n : 1;
+  }
+
+  function editClubRounds(raw: string) {
+    clubRounds = roundLimit(raw);
     persist();
   }
 
@@ -608,6 +641,36 @@
 
   function editExempt(i: number, raw: string) {
     exemptClubs[i] = raw;
+    persist();
+  }
+
+  function setNationalityEnabled(v: boolean) {
+    nationalityEnabled = v;
+    persist();
+  }
+
+  function setNationalityRoundLimit(limited: boolean) {
+    nationalityRounds = limited ? (nationalityRounds ?? 1) : null;
+    persist();
+  }
+
+  function editNationalityRounds(raw: string) {
+    nationalityRounds = roundLimit(raw);
+    persist();
+  }
+
+  function addExemptNationality() {
+    exemptNationalities.push("");
+    persist();
+  }
+
+  function removeExemptNationality(i: number) {
+    exemptNationalities.splice(i, 1);
+    persist();
+  }
+
+  function editExemptNationality(i: number, raw: string) {
+    exemptNationalities[i] = raw;
     persist();
   }
 
@@ -1083,12 +1146,95 @@
         {#if knownClubs.length > 0}
           <datalist id="known-clubs">
             {#each knownClubs as club (club.name)}
-              <option
-                value={club.name}
-                label={`${club.name} (${club.count})`}
+              <!-- Label is the count *alone*: browsers already show the value
+                   (it is what selecting inserts) and add the label beside it
+                   only when the two differ, so repeating the name here shows it
+                   twice. Text content would be ignored outright — a `label`
+                   attribute supersedes it. -->
+              <option value={club.name} label={`(${club.count})`}></option>
+            {/each}
+          </datalist>
+        {/if}
+      </div>
+    {/if}
+  </div>
+
+  <div class="section">
+    <h3>{$_("settings.nationalityProtectionTitle")}</h3>
+    <p class="desc">
+      {$_("settings.nationalityProtectionDesc")}
+    </p>
+
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={nationalityEnabled}
+        disabled={busy}
+        onchange={(e) => setNationalityEnabled(e.currentTarget.checked)}
+      />
+      {$_("settings.nationalityProtectionCheckbox")}
+    </label>
+
+    {#if nationalityEnabled}
+      <div class="club-sub">
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={nationalityRounds != null}
+            disabled={busy}
+            onchange={(e) => setNationalityRoundLimit(e.currentTarget.checked)}
+          />
+          {$_("settings.onlyFirstRoundsPrefix")}
+          <input
+            type="number"
+            min="1"
+            step="1"
+            class="threshold narrow"
+            value={nationalityRounds ?? 1}
+            disabled={busy || nationalityRounds == null}
+            onchange={(e) => editNationalityRounds(e.currentTarget.value)}
+          />
+          {$_("settings.onlyFirstRoundsSuffix")}
+        </label>
+
+        <p class="desc exempt-desc">
+          {$_("settings.exemptNationalityDesc")}
+        </p>
+        <div class="thresholds">
+          {#each exemptNationalities as c, i (i)}
+            <div class="threshold-row">
+              <input
+                type="text"
+                class="club-input"
+                list="known-nationalities"
+                placeholder={$_("settings.nationalityPlaceholder")}
+                value={c}
+                disabled={busy}
+                onchange={(e) => editExemptNationality(i, e.currentTarget.value)}
+              />
+              <button
+                type="button"
+                class="remove"
+                disabled={busy}
+                title={$_("settings.removeExemption")}
+                onclick={() => removeExemptNationality(i)}>✕</button
               >
-                {club.name} ({club.count})
-              </option>
+            </div>
+          {/each}
+          {#if exemptNationalities.length === 0}
+            <p class="muted">{$_("settings.noNationalityExemptions")}</p>
+          {/if}
+          <button
+            type="button"
+            class="ghost small"
+            disabled={busy}
+            onclick={addExemptNationality}>{$_("settings.addExemptNationality")}</button
+          >
+        </div>
+        {#if knownNationalities.length > 0}
+          <datalist id="known-nationalities">
+            {#each knownNationalities as nat (nat.name)}
+              <option value={nat.name} label={`(${nat.count})`}></option>
             {/each}
           </datalist>
         {/if}

@@ -17,6 +17,16 @@ rather than half-parsed; re-create the tournament.
 
 ### Added
 
+- **Nationality protection** (Settings → *Nationality protection*), club
+  protection's weaker sibling: avoid pairing two players of the same
+  nationality, optionally only for the first N rounds and with nationalities
+  (e.g. the host country) exempted. Off by default, configured independently of
+  club protection, and one rule tier below it — so when only one of the two can
+  be honoured, the club clash is the one avoided and the nationality clash is
+  accepted, even at the cost of a worse fold. Nationalities are matched
+  case-insensitively and a player with none set is never protected; in a team
+  tournament it counts the compatriot *games* a match would create, exactly as
+  the club rule does. It appears in the round explanation as its own rule.
 - **The tournament's city, country, dates and time control** (Settings →
   *Place, dates and time control*), reported in the header of the American Grid
   export the way the

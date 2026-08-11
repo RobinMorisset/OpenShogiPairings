@@ -41,7 +41,11 @@
 //!    distance from that ideal in-group rank.
 //! 7. **Different clubs** — avoid pairing club-mates (ignored when a club is
 //!    unknown).
-//! 8. **Fold within a score group** — sort a group (equal points) by rating
+//! 8. **Different nationalities** (optional, off by default) — the same idea one
+//!    notch weaker: avoid pairing compatriots (ignored when a nationality is
+//!    unknown). Below the club rule, so when the two disagree — one pairing
+//!    shares a club, the other a nationality — the club clash is the one avoided.
+//! 9. **Fold within a score group** — sort a group (equal points) by rating
 //!    (unrated = 1), descending; the Nth player of the top half should meet the
 //!    Nth of the bottom half, penalized by the *squared* deviation from that ideal.
 //!
@@ -214,6 +218,10 @@ enum Rule {
     FloaterSelection,
     /// Avoid pairing club-mates (ignored when a club is unknown).
     Club,
+    /// (Optional, off by default) Avoid pairing compatriots (ignored when a
+    /// nationality is unknown) — club protection's weaker sibling, sitting
+    /// directly below it.
+    Nationality,
     /// Fold within a score group (top half meets bottom half), by squared deviation.
     Fold,
     /// (Pure ELO mode only) Choose *who* takes the bye — the weakest present
@@ -241,6 +249,7 @@ pub enum RuleId {
     FloatRepeat,
     FloaterSelection,
     Club,
+    Nationality,
     Fold,
     ByeSelection,
     EloGap,
@@ -251,7 +260,7 @@ pub enum RuleId {
 /// score/float/fold/club family for a bye-selection rule and a squared-ELO-gap
 /// rule, keeping only no-rematch above them.
 fn active_rules(settings: &TournamentSettings) -> &'static [Rule] {
-    const SWISS: [Rule; 9] = [
+    const SWISS: [Rule; 10] = [
         Rule::Rematch,
         Rule::CupPrequalified,
         Rule::ByeGroup,
@@ -260,6 +269,7 @@ fn active_rules(settings: &TournamentSettings) -> &'static [Rule] {
         Rule::FloatRepeat,
         Rule::FloaterSelection,
         Rule::Club,
+        Rule::Nationality,
         Rule::Fold,
     ];
     const ELO: [Rule; 4] = [
@@ -306,6 +316,11 @@ pub(crate) struct PairingUnit {
     /// compares aligned positions, since board `k` of one team only ever meets
     /// board `k` of the other.
     pub clubs: Vec<Option<String>>,
+    /// Normalized nationalities (see
+    /// [`TournamentSettings::normalize_nationality`]) in **board order**, read
+    /// by [`Rule::Nationality`] exactly as `clubs` is read by [`Rule::Club`] —
+    /// so the two vectors always have the same length (one entry per board).
+    pub nationalities: Vec<Option<String>>,
     /// Whether this unit is a **pre-qualified** cup entrant this round (see
     /// [`Rule::CupPrequalified`]). Always false outside the qualifier cup's
     /// qualification round, where the rule is filtered out of the set entirely,
@@ -337,6 +352,9 @@ struct Ctx<'a> {
     /// Clubs exempt from protection, in normalized form (see
     /// [`TournamentSettings::normalize_club`]).
     exempt_clubs: &'a HashSet<String>,
+    /// Nationalities exempt from protection, in normalized form (see
+    /// [`TournamentSettings::normalize_nationality`]).
+    exempt_nationalities: &'a HashSet<String>,
     /// Edges in a perfect matching over the vertices (= vertices / 2).
     edges: i128,
     /// Largest points gap between any two vertices (bounds the score rule).
@@ -392,6 +410,32 @@ fn floater_units(ctx: &Ctx, id: UnitKey, descending: bool) -> i128 {
     (f.rank as i128 - ideal as i128).abs()
 }
 
+/// Penalty units for one "shared affiliation" rule — [`Rule::Club`] over the
+/// units' clubs, [`Rule::Nationality`] over their nationalities: how many
+/// **aligned** board positions carry the same, non-exempt value on both sides.
+///
+/// Aligned, because board `k` of one unit only ever meets board `k` of the
+/// other: a shared club sitting on different boards never actually plays, and
+/// costs nothing. So within the rule's ladder tier the matching minimizes the
+/// clashing *games* of the round, not some team-level notion of a shared
+/// affiliation. A player holds one position, so this degenerates to the
+/// individual mode's 0/1. Both values are already normalized (case-folded), and
+/// an unknown value on either side is never a clash.
+#[inline]
+fn shared_affiliation_units(
+    a: &[Option<String>],
+    b: &[Option<String>],
+    exempt: &HashSet<String>,
+) -> i128 {
+    a.iter()
+        .zip(b)
+        .filter(|(x, y)| match (x, y) {
+            (Some(nx), Some(ny)) => nx == ny && !exempt.contains(nx),
+            _ => false,
+        })
+        .count() as i128
+}
+
 impl Rule {
     /// The serializable identity of this rule, for explanations.
     fn id(self) -> RuleId {
@@ -404,6 +448,7 @@ impl Rule {
             Rule::FloatRepeat => RuleId::FloatRepeat,
             Rule::FloaterSelection => RuleId::FloaterSelection,
             Rule::Club => RuleId::Club,
+            Rule::Nationality => RuleId::Nationality,
             Rule::Fold => RuleId::Fold,
             Rule::ByeSelection => RuleId::ByeSelection,
             Rule::EloGap => RuleId::EloGap,
@@ -437,13 +482,13 @@ impl Rule {
                 let gap = sa.macmahon.halves() as i128 - sb.macmahon.halves() as i128;
                 gap * gap
             }
-            // Rule 3: prefer equal scores; penalty is the square of the gap (so the
+            // Rule 4: prefer equal scores; penalty is the square of the gap (so the
             // gap's sign, and an `abs`, don't matter).
             Rule::ScoreGap => {
                 let gap = sa.points.halves() as i128 - sb.points.halves() as i128;
                 gap * gap
             }
-            // Rule 4: the lower-scored player floats up, the higher-scored down.
+            // Rule 5: the lower-scored player floats up, the higher-scored down.
             Rule::FloatRepeat => match sa.points.cmp(&sb.points) {
                 Ordering::Less => {
                     float_units(sa.last_ascended, ctx.round)
@@ -455,7 +500,7 @@ impl Rule {
                 }
                 Ordering::Equal => 0,
             },
-            // Rule 5: on a cross-group (float) edge, prefer the right floaters —
+            // Rule 6: on a cross-group (float) edge, prefer the right floaters —
             // classic Swiss wants the weakest of the upper group down and the
             // first of the lower group up; median Swiss wants the median of
             // each group instead. Same-group edges aren't floats, so no penalty.
@@ -466,29 +511,25 @@ impl Rule {
                 Ordering::Greater => floater_units(ctx, a, true) + floater_units(ctx, b, false),
                 Ordering::Less => floater_units(ctx, b, true) + floater_units(ctx, a, false),
             },
-            // Rule 6: avoid pairing club-mates — but only when protection is active
+            // Rule 7: avoid pairing club-mates — but only when protection is active
             // this round, ignoring unknown clubs and clubs on the exempt list. Club
-            // names are matched case-insensitively.
+            // names are matched case-insensitively. Only in the rule set when
+            // protection is active (inactive rules are filtered out upstream), so
+            // no `club_active` check.
             //
-            // The count is over **aligned board positions**: board k of one unit
-            // only ever meets board k of the other, so a same-club pair sitting on
-            // different boards never actually plays and costs nothing. Within the
-            // rule's ladder tier the matching therefore minimizes the same-club
-            // *games* of the round. A player has one position, so this degenerates
-            // to the individual mode's 0/1.
-            Rule::Club => {
-                // Only in the rule set when protection is active (inactive rules
-                // are filtered out upstream), so no `club_active` check.
-                sa.clubs
-                    .iter()
-                    .zip(&sb.clubs)
-                    .filter(|(ca, cb)| match (ca, cb) {
-                        (Some(na), Some(nb)) => na == nb && !ctx.exempt_clubs.contains(na),
-                        _ => false,
-                    })
-                    .count() as i128
-            }
-            // Rule 7: fold within a score group — squared deviation from the ideal
+            // Within the rule's ladder tier the matching minimizes the same-club
+            // *games* of the round — see [`shared_affiliation_units`] for why the
+            // count is over aligned board positions.
+            Rule::Club => shared_affiliation_units(&sa.clubs, &sb.clubs, ctx.exempt_clubs),
+            // Rule 8: the same, one tier weaker, over nationalities — so when the
+            // two rules disagree the club clash is the one the matching avoids.
+            // Also filtered out upstream when inactive.
+            Rule::Nationality => shared_affiliation_units(
+                &sa.nationalities,
+                &sb.nationalities,
+                ctx.exempt_nationalities,
+            ),
+            // Rule 9: fold within a score group — squared deviation from the ideal
             // fold. Squaring (rather than |·|) spreads an unavoidable deviation across
             // boards instead of dumping it all on one, so no single player faces an
             // opponent far from the fold's intent — and it matches the squared
@@ -539,7 +580,12 @@ impl Rule {
             Rule::FloaterSelection => floater_units(ctx, unit, true),
             // ELO mode: the weakest present player (lowest ELO rank) takes the bye.
             Rule::ByeSelection => ctx.elo_rank[unit],
-            Rule::AirtightGroups | Rule::ScoreGap | Rule::Club | Rule::Fold | Rule::EloGap => 0,
+            Rule::AirtightGroups
+            | Rule::ScoreGap
+            | Rule::Club
+            | Rule::Nationality
+            | Rule::Fold
+            | Rule::EloGap => 0,
         }
     }
 
@@ -556,9 +602,9 @@ impl Rule {
         if let Rule::ByeGroup = self {
             return ctx.max_gap * ctx.max_gap;
         }
-        // `AirtightGroups` and `Club` only reach here when active — `build` filters
-        // out the inactive ones (see its rule filter) — so no `active` factor is
-        // needed on their bounds.
+        // `AirtightGroups`, `Club` and `Nationality` only reach here when active —
+        // `build` filters out the inactive ones (see its rule filter) — so no
+        // `active` factor is needed on their bounds.
         let per_edge = match self {
             Rule::Rematch => 1,
             Rule::CupPrequalified => 1,
@@ -570,8 +616,9 @@ impl Rule {
             // One unit per aligned board position that could clash: 1 for players,
             // the team size in team mode. Reading it off the *instance* rather
             // than assuming 1 is what keeps the ladder's separation exact when a
-            // team edge can emit several units at once.
-            Rule::Club => ctx.max_boards,
+            // team edge can emit several units at once. Same bound for both
+            // affiliation rules — a unit has as many nationalities as clubs.
+            Rule::Club | Rule::Nationality => ctx.max_boards,
             // Two squared terms, each a rank deviation ≤ (group_size − 1)².
             Rule::Fold => 2 * (ctx.max_group - 1).max(0).pow(2),
             // The squared gap between the widest-separated free players.
@@ -745,6 +792,7 @@ struct PairingModel<'u> {
     /// Derived per-round data the rules read, also key-indexed. See [`Ctx`].
     fold: TiVec<UnitKey, Option<FoldInfo>>,
     exempt_clubs: HashSet<String>,
+    exempt_nationalities: HashSet<String>,
     elo_rank: TiVec<UnitKey, i128>,
     round: u32,
     floater_style: FloaterStyle,
@@ -784,6 +832,7 @@ impl<'u> PairingModel<'u> {
             mm_hi = mm_hi.max(s.macmahon.halves());
         }
         let exempt_clubs = settings.exempt_clubs_normalized();
+        let exempt_nationalities = settings.exempt_nationalities_normalized();
 
         // ELO mode: the ascending ELO rank of each free unit (0 = weakest, for the
         // bye-selection rule) and the widest gap (for the ladder bound). The
@@ -814,8 +863,15 @@ impl<'u> PairingModel<'u> {
             .map(|f| f.group_size)
             .max()
             .unwrap_or(0) as i128;
-        // The club rule's per-edge ceiling, read off the instance rather than
-        // assumed: one board per player, `size` boards per team.
+        // The affiliation rules' per-edge ceiling, read off the instance rather
+        // than assumed: one board per player, `size` boards per team. The club and
+        // nationality vectors are built together from the same members, so one
+        // count bounds both — an invariant worth stating rather than trusting.
+        debug_assert!(
+            free.iter()
+                .all(|&key| units[key].clubs.len() == units[key].nationalities.len()),
+            "a unit's clubs and nationalities must be one per board"
+        );
         let max_boards = free
             .iter()
             .map(|&key| units[key].clubs.len())
@@ -825,13 +881,14 @@ impl<'u> PairingModel<'u> {
         // edge and bye — and (having max-total 0) leave every other rule's
         // multiplier unchanged, so dropping them here is exact and spares the O(k²)
         // cost loop a per-edge branch and call each:
-        //   - `AirtightGroups` with its window closed, and `Club` with protection
-        //     off;
+        //   - `AirtightGroups` with its window closed, and `Club` / `Nationality`
+        //     with their protection off;
         //   - the bye-only rules (`ByeGroup`, `ByeSelection`) when no phantom is in
         //     play: on an even field there is no bye vertex for them to fire on, so
         //     they would only reserve a ladder tier (and eat overflow headroom) for
         //     nothing.
         let club_active = settings.club_protection_active(number);
+        let nationality_active = settings.nationality_protection_active(number);
         let airtight_active = settings.airtight_groups_active(number);
         let rules: Vec<Rule> = active_rules(settings)
             .iter()
@@ -839,6 +896,7 @@ impl<'u> PairingModel<'u> {
             .filter(|r| match r {
                 Rule::AirtightGroups => airtight_active,
                 Rule::Club => club_active,
+                Rule::Nationality => nationality_active,
                 Rule::CupPrequalified => free.iter().any(|&key| units[key].prequalified),
                 Rule::ByeGroup | Rule::ByeSelection => need_phantom,
                 _ => true,
@@ -849,6 +907,7 @@ impl<'u> PairingModel<'u> {
             units,
             fold,
             exempt_clubs,
+            exempt_nationalities,
             elo_rank,
             round: number,
             floater_style: settings.floater_style(),
@@ -885,6 +944,7 @@ impl<'u> PairingModel<'u> {
             round: self.round,
             floater_style: self.floater_style,
             exempt_clubs: &self.exempt_clubs,
+            exempt_nationalities: &self.exempt_nationalities,
             edges: self.edges,
             max_gap: self.max_gap,
             min_points: self.min_points,
@@ -1565,6 +1625,7 @@ pub(crate) fn pair_round_weighted(
                 Rule::FloatRepeat => fill!(Rule::FloatRepeat, m),
                 Rule::FloaterSelection => fill!(Rule::FloaterSelection, m),
                 Rule::Club => fill!(Rule::Club, m),
+                Rule::Nationality => fill!(Rule::Nationality, m),
                 Rule::Fold => fill!(Rule::Fold, m),
                 Rule::EloGap => fill!(Rule::EloGap, m),
                 // Bye-only rules: 0 on every real edge (they act on the bye edge).
@@ -1609,8 +1670,8 @@ pub(crate) fn pair_round_weighted(
 
 /// Build the engine's input for an **individual** tournament: one unit per
 /// player, keyed by their tournament number, from the replayed scores plus the
-/// registration data the rules read (rating, club) and the per-round cup and ELO
-/// context.
+/// registration data the rules read (rating, club, nationality) and the
+/// per-round cup and ELO context.
 ///
 /// Gap keys (number 0, and any number freed by a pre-play removal) hold a default
 /// unit, exactly as [`Scores`](crate::scoring::Scores) leaves gaps — the free set
@@ -1645,12 +1706,16 @@ pub(crate) fn player_units(
             last_ascended: s.last_ascended,
             last_descended: s.last_descended,
             rating: p.rating,
-            // One board, so the club rule's aligned-position count degenerates to
-            // the individual mode's 0/1.
+            // One board, so the affiliation rules' aligned-position count
+            // degenerates to the individual mode's 0/1.
             clubs: vec![p
                 .club
                 .as_ref()
                 .map(|c| TournamentSettings::normalize_club(c))],
+            nationalities: vec![p
+                .nationality
+                .as_ref()
+                .map(|n| TournamentSettings::normalize_nationality(n))],
             prequalified: false,
             elo: estimates
                 .as_ref()
@@ -1672,8 +1737,11 @@ pub(crate) fn player_units(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::player::PointAdjustment;
     use crate::round::{Board, Outcome, Sitout, SitoutKind, SitoutValue, Winner};
-    use crate::settings::{ClubProtection, MacMahonThreshold, RatioAtLeastOne};
+    use crate::settings::{
+        ClubProtection, MacMahonThreshold, NationalityProtection, RatioAtLeastOne,
+    };
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
@@ -1859,6 +1927,16 @@ mod tests {
     // --- Weighted pairing -------------------------------------------------
 
     fn player(tid: u32, rating: Option<u32>, club: Option<&str>) -> Player {
+        player_nat(tid, rating, club, None)
+    }
+
+    /// [`player`] plus a nationality, for the nationality-protection tests.
+    fn player_nat(
+        tid: u32,
+        rating: Option<u32>,
+        club: Option<&str>,
+        nationality: Option<&str>,
+    ) -> Player {
         Player {
             id: Uuid::new_v4(),
             tournament_id: Some(TournamentId(tid)),
@@ -1868,7 +1946,7 @@ mod tests {
             pairing_rating: None,
             grade: None,
             fesa_games: None,
-            nationality: None,
+            nationality: nationality.map(|n| n.to_string()),
             club: club.map(|c| c.to_string()),
             eligible: false,
             categories: Vec::new(),
@@ -2298,6 +2376,7 @@ mod tests {
         .into();
         let free = [UnitKey(1), UnitKey(2), UnitKey(3)];
         let exempt_clubs = HashSet::new();
+        let exempt_nationalities = HashSet::new();
         let empty_rank: TiVec<UnitKey, i128> = vec![0i128; units.len()].into();
         let fold = fold_ranks(&units, &free);
         let ctx = Ctx {
@@ -2306,6 +2385,7 @@ mod tests {
             round: 1,
             floater_style: FloaterStyle::Classic,
             exempt_clubs: &exempt_clubs,
+            exempt_nationalities: &exempt_nationalities,
             edges: 1,
             max_gap: 0,
             min_points: 0,
@@ -2432,6 +2512,224 @@ mod tests {
                 p[3].tournament_id.unwrap()
             )),
             "past the window, fold pairs Y-Y"
+        );
+    }
+
+    /// Round 1, one score group of four, rating order p0>p1>p2>p3 so the fold
+    /// ideal is p0-p2 and p1-p3 — which are compatriots (JP and FR). The
+    /// nationality twin of [`two_clubs_where_fold_pairs_mates`].
+    fn two_nationalities_where_fold_pairs_compatriots() -> Vec<Player> {
+        vec![
+            player_nat(1, Some(2000), None, Some("JP")),
+            player_nat(2, Some(1900), None, Some("FR")),
+            player_nat(3, Some(1800), None, Some("JP")),
+            player_nat(4, Some(1700), None, Some("FR")),
+        ]
+    }
+
+    #[test]
+    fn weighted_avoids_pairing_compatriots_when_protection_on() {
+        let p = two_nationalities_where_fold_pairs_compatriots();
+        let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
+        let settings = TournamentSettings::default().with_nationality(NationalityProtection::On {
+            rounds: None,
+            exempt_nationalities: Vec::new(),
+        });
+
+        let round = pair_players(1, &p, &settings, &[], &present, &[], &[], &[]);
+
+        assert_eq!(round.boards.len(), 2);
+        let nationality_of = |id: TournamentId| {
+            p.iter()
+                .find(|q| q.tournament_id.unwrap() == id)
+                .unwrap()
+                .nationality
+                .clone()
+        };
+        for b in &round.boards {
+            assert_ne!(
+                nationality_of(b.player1),
+                nationality_of(b.player2),
+                "compatriots were paired despite protection"
+            );
+        }
+    }
+
+    #[test]
+    fn nationality_protection_off_by_default_pairs_the_fold() {
+        // With protection off (the default), the nationality rule is silent, so
+        // the fold ideal wins and the compatriots JP-JP / FR-FR are paired.
+        let p = two_nationalities_where_fold_pairs_compatriots();
+        let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
+
+        let round = pair_players(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &[],
+            &present,
+            &[],
+            &[],
+            &[],
+        );
+
+        let pairs = board_pairs(&round);
+        assert!(
+            pairs.contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[2].tournament_id.unwrap()
+            )),
+            "fold pairs the JP compatriots"
+        );
+        assert!(
+            pairs.contains(&unord(
+                p[1].tournament_id.unwrap(),
+                p[3].tournament_id.unwrap()
+            )),
+            "fold pairs the FR compatriots"
+        );
+    }
+
+    #[test]
+    fn exempt_nationality_members_may_be_paired() {
+        // Fold ideal is p0-p2 (both "JP", the host country) and p1-p3 (both of
+        // unknown nationality). With protection on but JP exempt (spelled
+        // differently to prove the match is case-insensitive), the JP pair is
+        // allowed and the fold wins; without the exemption it is broken up.
+        let p = vec![
+            player_nat(1, Some(2000), None, Some("JP")),
+            player_nat(2, Some(1900), None, None),
+            player_nat(3, Some(1800), None, Some("JP")),
+            player_nat(4, Some(1700), None, None),
+        ];
+        let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
+
+        let exempt = TournamentSettings::default().with_nationality(NationalityProtection::On {
+            rounds: None,
+            exempt_nationalities: vec![" jp ".into()],
+        });
+        let round = pair_players(1, &p, &exempt, &[], &present, &[], &[], &[]);
+        assert!(
+            board_pairs(&round).contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[2].tournament_id.unwrap()
+            )),
+            "exempt compatriots should be paired by the fold"
+        );
+
+        let protected = TournamentSettings::default().with_nationality(NationalityProtection::On {
+            rounds: None,
+            exempt_nationalities: Vec::new(),
+        });
+        let round = pair_players(1, &p, &protected, &[], &present, &[], &[], &[]);
+        assert!(
+            !board_pairs(&round).contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[2].tournament_id.unwrap()
+            )),
+            "non-exempt compatriots should not be paired"
+        );
+    }
+
+    #[test]
+    fn nationality_protection_only_applies_within_its_round_window() {
+        // Protection limited to round 1: round 2 must ignore nationalities, so
+        // the fold ideal (compatriot pairs) wins again.
+        let p = two_nationalities_where_fold_pairs_compatriots();
+        let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
+        let settings = TournamentSettings::default().with_nationality(NationalityProtection::On {
+            rounds: NonZeroU32::new(1),
+            exempt_nationalities: Vec::new(),
+        });
+
+        // Pair round 2 directly (no completed rounds needed to exercise the window).
+        let round = pair_players(2, &p, &settings, &[], &present, &[], &[], &[]);
+        let pairs = board_pairs(&round);
+        assert!(
+            pairs.contains(&unord(
+                p[0].tournament_id.unwrap(),
+                p[2].tournament_id.unwrap()
+            )),
+            "past the window, fold pairs JP-JP"
+        );
+        assert!(
+            pairs.contains(&unord(
+                p[1].tournament_id.unwrap(),
+                p[3].tournament_id.unwrap()
+            )),
+            "past the window, fold pairs FR-FR"
+        );
+    }
+
+    /// The point of the whole rule: nationality protection is *weaker* than club
+    /// protection, so when only one of the two can be honoured the club clash is
+    /// the one avoided.
+    ///
+    /// Four players in one score group, with the fold-ideal matching (p0-p2,
+    /// p1-p3) ruled out as a double rematch. That leaves two candidates:
+    ///   * p0-p1 / p2-p3 — one nationality clash (p0, p1 are both JP), fold 20;
+    ///   * p0-p3 / p1-p2 — one club clash (p1, p2 are both "A"), fold 4.
+    ///
+    /// The second is much the better fold and the only nationality-clean one, so
+    /// it is what any ordering *other* than club-above-nationality would pick.
+    #[test]
+    fn club_protection_outranks_nationality_protection() {
+        let p = vec![
+            player_nat(1, Some(2000), Some("B"), Some("JP")),
+            player_nat(2, Some(1900), Some("A"), Some("JP")),
+            player_nat(3, Some(1800), Some("A"), Some("FR")),
+            player_nat(4, Some(1700), Some("C"), Some("DE")),
+        ];
+        let id = |i: usize| p[i].tournament_id.unwrap();
+        let present: Vec<TournamentId> = (0..4).map(id).collect();
+        // Round 1 played the fold ideal, so round 2 cannot repeat it. The losers'
+        // adjustments put all four back on one point, keeping a single score
+        // group — otherwise the score-gap rule, far above both protections,
+        // would decide the round on its own.
+        let r1 = [completed_round(
+            1,
+            &[
+                (id(0), id(2), Winner::Player1),
+                (id(1), id(3), Winner::Player1),
+            ],
+            None,
+        )];
+        let mut p = p.clone();
+        for i in [2, 3] {
+            p[i].adjustments.push(PointAdjustment {
+                id: Uuid::new_v4(),
+                delta: 1,
+                reason: "level the score group".into(),
+            });
+        }
+
+        // With nationality protection alone, the club clash is free and the
+        // better fold wins — so the two candidates really are in tension, and
+        // the assertion below is about the priority and not about one matching
+        // being better on every count.
+        let nationality_only =
+            TournamentSettings::default().with_nationality(NationalityProtection::On {
+                rounds: None,
+                exempt_nationalities: Vec::new(),
+            });
+        let round = pair_players(2, &p, &nationality_only, &r1, &present, &[], &[], &[]);
+        let pairs = board_pairs(&round);
+        assert!(
+            pairs.contains(&unord(id(0), id(3))) && pairs.contains(&unord(id(1), id(2))),
+            "without club protection the nationality-clean, better-fold matching \
+             should win; got {pairs:?}"
+        );
+
+        let both = nationality_only.with_club(ClubProtection::On {
+            rounds: None,
+            exempt_clubs: Vec::new(),
+        });
+        let round = pair_players(2, &p, &both, &r1, &present, &[], &[], &[]);
+        let pairs = board_pairs(&round);
+        assert!(
+            pairs.contains(&unord(id(0), id(1))) && pairs.contains(&unord(id(2), id(3))),
+            "the engine should accept the nationality clash (JP-JP) to avoid the \
+             club clash (A-A), even at a worse fold; got {pairs:?}"
         );
     }
 
@@ -2933,6 +3231,7 @@ mod tests {
         }
         let edges = 3i128; // 5 free + phantom bye = 6 vertices → 3 edges
         let exempt_clubs = HashSet::new();
+        let exempt_nationalities = HashSet::new();
         let fold = fold_ranks(&units, &free);
         let empty_rank: TiVec<UnitKey, i128> = vec![0i128; units.len()].into();
         let ctx = Ctx {
@@ -2941,6 +3240,7 @@ mod tests {
             round: 2,
             floater_style: FloaterStyle::Median, // exercise the floater-selection bound
             exempt_clubs: &exempt_clubs,
+            exempt_nationalities: &exempt_nationalities,
             edges,
             max_gap: (hi - lo) as i128,
             min_points: lo as i128,

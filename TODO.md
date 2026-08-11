@@ -15,8 +15,6 @@ Known limitations and future work, roughly ordered by area.
   plain matching can't express, and by very large fields. Plan: `good_lp` + HiGHS
   first, then CP-SAT.
 
-- **Nationality protection** Same idea as club protection, just a hair weaker.
-
 - **Freeze the round explanation at confirmation.** `explain_round` rebuilds the
   `PairingModel` from `rounds[..idx]`, so correcting an earlier round's result, or
   editing a rating, club or pairing setting, silently changes the reported
@@ -74,3 +72,5 @@ Known limitations and future work, roughly ordered by area.
 - Check all instances of `#[allow(clippy::too_many_arguments)]`
 
 - **Keyboard shortcut to undo** is Ctrl+Z even on Mac, maybe Command+Z would be better ?
+
+- Show **predicted elo change** as the rightmost column of the Standings tab.

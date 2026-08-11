@@ -279,8 +279,8 @@ for how rounds are built.
 ### 5. Rule identity for serialization
 
 Add a `RuleId` serde enum mirroring `Rule` (`rematch`, `score_gap`,
-`float_repeat`, `floater_selection`, `club`, `fold`, `bye_selection`,
-`elo_gap`), plus a `Rule::id()` accessor. `Stability` is internal and never
+`float_repeat`, `floater_selection`, `club`, `nationality`, `fold`,
+`bye_selection`, `elo_gap`), plus a `Rule::id()` accessor. `Stability` is internal and never
 serialized (it carries no explanatory meaning — it's a tiebreaker). The frontend
 maps `RuleId` → localized label.
 
@@ -337,7 +337,8 @@ slot), render a small warning glyph when that board's `BoardLedger` has a
 score group almost never folds perfectly, so a fold deviation fires on most (and
 possibly every) board and carries no signal — a glyph on all of them is just
 noise. So the glyph keys on any rule *above* `Fold` (score gap, repeat float,
-floater selection, club; and their ELO-mode equivalents). The tooltip lists
+floater selection, club, nationality; and their ELO-mode equivalents). The
+tooltip lists
 those in words, e.g.:
 
 > Compromise on: **score gap** (floated across groups), **repeat float**

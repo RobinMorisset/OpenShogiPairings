@@ -3,17 +3,22 @@ import type { ClubProtection } from "./ClubProtection";
 import type { EloEstimator } from "./EloEstimator";
 import type { FloaterStyle } from "./FloaterStyle";
 import type { MacMahon } from "./MacMahon";
+import type { NationalityProtection } from "./NationalityProtection";
 
 /**
  * How the tournament is paired: classic Swiss/MacMahon over static ratings, or
  * the experimental ELO mode over a live estimate. Making this a sum type is what
- * keeps the Swiss-only knobs (floater style, airtight groups, club protection,
- * MacMahon) from coexisting with ELO pairing, and the estimator from existing
- * without an estimate to configure.
+ * keeps the Swiss-only knobs (floater style, airtight groups, club and
+ * nationality protection, MacMahon) from coexisting with ELO pairing, and the
+ * estimator from existing without an estimate to configure.
  */
 export type PairingMode = { "kind": "swiss", floater_style: FloaterStyle, 
 /**
  * "Airtight groups": if set, forbid pairing across MacMahon groups during
  * rounds `1..=n`. Meaningless without thresholds.
  */
-airtight_groups?: number | null, club_protection?: ClubProtection, macmahon: MacMahon, } | { "kind": "elo", estimator: EloEstimator, };
+airtight_groups?: number | null, club_protection?: ClubProtection, 
+/**
+ * The weaker sibling of `club_protection`, configured independently.
+ */
+nationality_protection?: NationalityProtection, macmahon: MacMahon, } | { "kind": "elo", estimator: EloEstimator, };

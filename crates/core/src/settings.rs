@@ -311,6 +311,79 @@ impl ClubProtection {
     }
 }
 
+/// Nationality protection: the same idea as [`ClubProtection`], one notch weaker
+/// — avoid pairing two players of the same nationality, and when the two rules
+/// disagree, the club one wins (it sits directly above this one in the pairing
+/// ladder, see [`crate::pairing`]). Off by default, and shaped identically to
+/// club protection: an optional round window and an exempt list, both folded
+/// into `On` so they cannot be set while protection is disabled.
+///
+/// Deliberately a separate type rather than a reuse of [`ClubProtection`]: the
+/// two are configured independently, and each carries its own exempt list under
+/// its own JSON name.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum NationalityProtection {
+    /// No nationality protection.
+    #[default]
+    Off,
+    /// Avoid pairing players of the same nationality.
+    On {
+        /// `None` = every round; `Some(n)` = only rounds `1..=n`, later rounds
+        /// pairing on score alone.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(as = "Option::<u32>")]
+        rounds: Option<NonZeroU32>,
+        /// Nationalities exempt from protection — the "host country" case, where
+        /// most of the field shares one nationality and is expected to meet.
+        /// Matched case-insensitively.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        exempt_nationalities: Vec<String>,
+    },
+}
+
+impl NationalityProtection {
+    /// Whether protection applies to the given (1-based) round.
+    pub fn active(&self, round: u32) -> bool {
+        match self {
+            NationalityProtection::Off => false,
+            NationalityProtection::On { rounds, .. } => rounds.is_none_or(|n| round <= n.get()),
+        }
+    }
+
+    /// The exempt nationalities in canonical (normalized) form; empty when off.
+    fn exempt_normalized(&self) -> HashSet<String> {
+        match self {
+            NationalityProtection::On {
+                exempt_nationalities,
+                ..
+            } => exempt_nationalities
+                .iter()
+                .map(|c| TournamentSettings::normalize_nationality(c))
+                .collect(),
+            NationalityProtection::Off => HashSet::new(),
+        }
+    }
+
+    /// `skip_serializing_if` helper — `Off` is the default and omitted from JSON.
+    fn is_off(&self) -> bool {
+        matches!(self, NationalityProtection::Off)
+    }
+}
+
+/// Canonical form of an exempt list (clubs or nationalities): each entry
+/// trimmed, blanks dropped, and repeats removed case-insensitively keeping the
+/// first spelling — so the stored list is independent of entry order and of how
+/// each name was capitalized.
+fn normalize_exempt_list(list: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    list.into_iter()
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty() && seen.insert(c.to_lowercase()))
+        .collect()
+}
+
 /// How the referee wants handicap games treated in this tournament. When handicaps
 /// are enabled, [`HandicapDisplay`] controls what the pairings view shows and
 /// `wiel_rule` whether the giver always counts as the winner. Folding the Wiel
@@ -702,9 +775,9 @@ pub struct MacMahon {
 
 /// How the tournament is paired: classic Swiss/MacMahon over static ratings, or
 /// the experimental ELO mode over a live estimate. Making this a sum type is what
-/// keeps the Swiss-only knobs (floater style, airtight groups, club protection,
-/// MacMahon) from coexisting with ELO pairing, and the estimator from existing
-/// without an estimate to configure.
+/// keeps the Swiss-only knobs (floater style, airtight groups, club and
+/// nationality protection, MacMahon) from coexisting with ELO pairing, and the
+/// estimator from existing without an estimate to configure.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -720,6 +793,9 @@ pub enum PairingMode {
         airtight_groups: Option<NonZeroU32>,
         #[serde(default, skip_serializing_if = "ClubProtection::is_off")]
         club_protection: ClubProtection,
+        /// The weaker sibling of `club_protection`, configured independently.
+        #[serde(default, skip_serializing_if = "NationalityProtection::is_off")]
+        nationality_protection: NationalityProtection,
         #[serde(default)]
         macmahon: MacMahon,
     },
@@ -736,6 +812,7 @@ impl Default for PairingMode {
             floater_style: FloaterStyle::default(),
             airtight_groups: None,
             club_protection: ClubProtection::Off,
+            nationality_protection: NationalityProtection::Off,
             macmahon: MacMahon::default(),
         }
     }
@@ -1031,6 +1108,14 @@ impl TournamentSettings {
         club.trim().to_lowercase()
     }
 
+    /// The canonical form of a nationality for comparison: trimmed and
+    /// lower-cased, so "FR", "fr" and " Fr " count as the same nationality.
+    /// (A player's own nationality is stored upper-cased, but an exempt entry is
+    /// typed by hand, so both sides are folded here rather than assumed.)
+    pub fn normalize_nationality(nationality: &str) -> String {
+        nationality.trim().to_lowercase()
+    }
+
     /// The ids of every currently-defined category, for pruning a player's stale
     /// memberships once a category is deleted (see
     /// [`Tournament::update_settings`](crate::Tournament::update_settings)).
@@ -1045,6 +1130,18 @@ impl TournamentSettings {
             PairingMode::Swiss {
                 club_protection, ..
             } => club_protection.active(round),
+            PairingMode::Elo { .. } => false,
+        }
+    }
+
+    /// Whether nationality protection applies to the given (1-based) round:
+    /// enabled and, if a round limit is set, within it.
+    pub fn nationality_protection_active(&self, round: u32) -> bool {
+        match &self.pairing {
+            PairingMode::Swiss {
+                nationality_protection,
+                ..
+            } => nationality_protection.active(round),
             PairingMode::Elo { .. } => false,
         }
     }
@@ -1133,18 +1230,31 @@ impl TournamentSettings {
         }
     }
 
+    /// The exempt nationalities in canonical (normalized) form, for membership
+    /// tests.
+    pub fn exempt_nationalities_normalized(&self) -> HashSet<String> {
+        match &self.pairing {
+            PairingMode::Swiss {
+                nationality_protection,
+                ..
+            } => nationality_protection.exempt_normalized(),
+            PairingMode::Elo { .. } => HashSet::new(),
+        }
+    }
+
     /// Return these settings in canonical form: thresholds sorted ascending by
     /// value and de-duplicated (keeping the first entry for a repeated value,
     /// and treating a `drops_after_round` of 0 as "never drops" since it can't
-    /// take effect before round 1 anyway), and exempt clubs trimmed,
-    /// emptied-dropped and de-duplicated case-insensitively. Independent of the
-    /// order fields were entered, so pairing/standings are reproducible from the
-    /// stored settings.
+    /// take effect before round 1 anyway), and exempt clubs / nationalities
+    /// trimmed, emptied-dropped and de-duplicated case-insensitively.
+    /// Independent of the order fields were entered, so pairing/standings are
+    /// reproducible from the stored settings.
     pub fn normalized(mut self) -> Self {
         // The Swiss-only knobs live under `pairing`; ELO pairing has nothing to
         // canonicalize here.
         if let PairingMode::Swiss {
             club_protection,
+            nationality_protection,
             macmahon,
             ..
         } = &mut self.pairing
@@ -1152,14 +1262,17 @@ impl TournamentSettings {
             macmahon.thresholds =
                 Self::normalize_thresholds(std::mem::take(&mut macmahon.thresholds));
 
-            // Exempt clubs: keep the first spelling of each, trimmed and non-empty.
+            // The two exempt lists: keep the first spelling of each, trimmed and
+            // non-empty.
             if let ClubProtection::On { exempt_clubs, .. } = club_protection {
-                let mut seen = HashSet::new();
-                *exempt_clubs = std::mem::take(exempt_clubs)
-                    .into_iter()
-                    .map(|c| c.trim().to_string())
-                    .filter(|c| !c.is_empty() && seen.insert(c.to_lowercase()))
-                    .collect();
+                *exempt_clubs = normalize_exempt_list(std::mem::take(exempt_clubs));
+            }
+            if let NationalityProtection::On {
+                exempt_nationalities,
+                ..
+            } = nationality_protection
+            {
+                *exempt_nationalities = normalize_exempt_list(std::mem::take(exempt_nationalities));
             }
         }
 
@@ -1431,6 +1544,18 @@ impl TournamentSettings {
         }
         self
     }
+
+    /// Set nationality protection (Swiss).
+    pub(crate) fn with_nationality(mut self, protection: NationalityProtection) -> Self {
+        if let PairingMode::Swiss {
+            nationality_protection,
+            ..
+        } = &mut self.pairing
+        {
+            *nationality_protection = protection;
+        }
+        self
+    }
 }
 
 #[cfg(test)]
@@ -1632,6 +1757,83 @@ mod tests {
         };
         assert_eq!(exempt_clubs, &["Paris", "Lyon"]);
         assert!(s.exempt_clubs_normalized().contains("paris")); // matched lower-cased
+    }
+
+    #[test]
+    fn nationality_protection_active_respects_toggle_and_round_window() {
+        let off = TournamentSettings::default();
+        assert!(!off.nationality_protection_active(1)); // disabled by default
+
+        let all = TournamentSettings::default().with_nationality(NationalityProtection::On {
+            rounds: None,
+            exempt_nationalities: Vec::new(),
+        });
+        assert!(all.nationality_protection_active(1));
+        assert!(all.nationality_protection_active(99)); // None = every round
+
+        let limited = TournamentSettings::default().with_nationality(NationalityProtection::On {
+            rounds: NonZeroU32::new(2),
+            exempt_nationalities: Vec::new(),
+        });
+        assert!(limited.nationality_protection_active(1));
+        assert!(limited.nationality_protection_active(2));
+        assert!(!limited.nationality_protection_active(3)); // past the window
+    }
+
+    #[test]
+    fn nationality_protection_is_independent_of_club_protection() {
+        // The two are separate knobs: turning one on leaves the other off, and
+        // each keeps its own exempt list.
+        let s = TournamentSettings::default().with_nationality(NationalityProtection::On {
+            rounds: None,
+            exempt_nationalities: vec!["JP".into()],
+        });
+        assert!(s.nationality_protection_active(1));
+        assert!(!s.club_protection_active(1));
+        assert!(s.exempt_clubs_normalized().is_empty());
+        assert!(s.exempt_nationalities_normalized().contains("jp"));
+    }
+
+    #[test]
+    fn normalized_trims_and_dedups_exempt_nationalities_case_insensitively() {
+        let s = TournamentSettings::default()
+            .with_nationality(NationalityProtection::On {
+                rounds: None,
+                exempt_nationalities: vec![
+                    "  JP  ".into(),
+                    "jp".into(),  // duplicate of JP (case/space)
+                    "   ".into(), // empty after trim
+                    "FR".into(),
+                ],
+            })
+            .normalized();
+        let PairingMode::Swiss {
+            nationality_protection:
+                NationalityProtection::On {
+                    exempt_nationalities,
+                    ..
+                },
+            ..
+        } = &s.pairing
+        else {
+            panic!("still on");
+        };
+        assert_eq!(exempt_nationalities, &["JP", "FR"]);
+        assert!(s.exempt_nationalities_normalized().contains("jp")); // matched lower-cased
+    }
+
+    #[test]
+    fn nationality_protection_is_omitted_from_json_when_off() {
+        // Off is the default and skipped, so an existing settings payload that
+        // never heard of the knob round-trips unchanged.
+        let json = serde_json::to_string(&TournamentSettings::default()).unwrap();
+        assert!(
+            !json.contains("nationality_protection"),
+            "the default should not serialize the knob: {json}"
+        );
+        let s: TournamentSettings =
+            serde_json::from_str(r#"{"pairing":{"kind":"swiss","macmahon":{}}}"#).unwrap();
+        assert!(!s.nationality_protection_active(1));
     }
 
     #[test]
