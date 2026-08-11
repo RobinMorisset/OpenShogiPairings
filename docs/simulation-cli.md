@@ -43,14 +43,12 @@ osp_core::sim   pure: strength oracle, result model, single-run driver, metrics
 ### Base sources (exactly one)
 
 - `--base FILE.osp` — an `.osp` save (JSON).
-- `--grid FILE.txt` — an American Grid cross-table
-  ([`import_american_grid`](../crates/core/src/grid_import.rs)).
 - `--results FILE.txt` — a **FESA post-tournament result table** (the artefact
   tournaments usually publish; see
   [`fesa_results`](../crates/core/src/fesa_results.rs)). This source is special:
   it reconstructs the rounds *and* supplies every player's **true strength**
   directly — pre-ELO + points gained for a rated player, or the assigned `*`
-  rating for a pre-unrated one — so it needs no separate `--strength*` flag and
+  rating for a pre-unrated one — so it needs no separate `--strength` flag and
   covers 100% of players with no name-matching gaps. Round-cell annotations
   (`(-r )`, `(+b )`, handicap marks, …) are stripped; because the round model
   holds one bye per round, extra `0+` walkover wins are demoted to absences — a
@@ -60,18 +58,12 @@ osp_core::sim   pure: strength oracle, result model, single-run driver, metrics
 ### True-strength overrides (when not using `--results`)
 
 The "true strength" is what outcomes are actually drawn from, distinct from the
-rating the engine *pairs* on (which always comes from the base). Supply it via:
+rating the engine *pairs* on (which always comes from the base). Supply it via
+`--strength FILE` — a JSON object mapping tournament number (as a string) to an
+ELO.
 
-- `--strength FILE` — a JSON object mapping tournament number (as a string) to an
-  ELO.
-- `--strength-fesa-after YYYY-MM-DD` — use the first FESA rating list published
-  *after* the event (it already reflects the results), fetched from fesashogi.eu
-  and matched by name. FESA publishes on 1 Jan / 1 Jun.
-- `--strength-fesa-list URL|PATH` — a specific FESA list instead.
-
-These are mutually exclusive. Unmatched players (unrated, or a differently-spelled
-name) fall back to their registration rating. None of them changes the pairing
-ratings.
+Players with no entry fall back to their registration rating. The override never
+changes the pairing ratings.
 
 ### Other flags
 
@@ -116,7 +108,7 @@ Each player's ground-truth strength for a run is drawn from
 `N(center, (jitter·σ₀)²)`:
 
 - **center** — the player's override (the post-tournament strength from
-  `--results`, a `--strength` value, or a matched FESA-list rating) if present,
+  `--results`, or a `--strength` value) if present,
   otherwise their registration rating (or, for an unrated player,
   `--oracle-unrated-center`, default 600). With `--results`, *every* player has an
   override, so the center is their post-tournament ELO.

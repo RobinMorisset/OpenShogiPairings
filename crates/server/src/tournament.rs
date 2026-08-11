@@ -36,7 +36,6 @@ use crate::{auth, live};
 /// - `DELETE /`               delete the tournament
 /// - `POST   /undo`           revert the last player change
 /// - `GET    /american-grid` export the cross-table for ELO (text)
-/// - `PUT    /american-grid` import a cross-table, rebuilding the tournament (text)
 /// - `PUT    /settings`      update tournament settings (MacMahon, …)
 /// - `POST   /cancel-round`           cancel the last round (or draft)
 /// - `POST   /rounds/prepare`         begin drafting the next round
@@ -74,10 +73,7 @@ pub fn scope(state: AppState) -> Router<AppState> {
     let protected = Router::new()
         .route("/", get(get_tournament).delete(delete_tournament))
         .route("/undo", post(undo))
-        .route(
-            "/american-grid",
-            get(american_grid).put(import_american_grid),
-        )
+        .route("/american-grid", get(american_grid))
         .route("/settings", put(update_settings))
         .route("/cancel-round", post(cancel_round))
         .route("/rounds/prepare", post(prepare_round))
@@ -315,25 +311,6 @@ async fn american_grid(
     let tournament = store.current().ok_or(ApiError::NoTournament)?;
     let grid = osp_core::american_grid(tournament, &tournament.standings());
     Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], grid))
-}
-
-/// Import an American Grid document (raw text body), rebuilding it into the
-/// tournament — replacing whatever was there (keeping this instance's id).
-/// Meant for quickly seeding a non-trivial tournament state in tests and
-/// simulations. Returns the rebuilt [`TournamentView`].
-async fn import_american_grid(
-    TournamentCtx(instance): TournamentCtx,
-    Path(id): Path<Uuid>,
-    ExpectedVersion(expected): ExpectedVersion,
-    body: String,
-) -> Result<Json<TournamentView>, ApiError> {
-    let mut tournament =
-        osp_core::import_american_grid(&body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
-    tournament.id = id;
-    let mut store = instance.write();
-    store.ensure_current_version(expected)?;
-    store.set_current(tournament);
-    view(&store)
 }
 
 /// Update the tournament settings. Takes the whole [`TournamentSettings`] object

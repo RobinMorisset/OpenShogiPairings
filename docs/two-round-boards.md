@@ -368,8 +368,8 @@ Edge cases:
 
 ### Import / round-trip
 
-`crates/core/src/grid_import.rs` and `crates/core/src/fesa_results.rs`
-parse grids back in. Reconstructing a long board from a `0-`-in-N /
+`crates/core/src/fesa_results.rs` (with `result_import.rs`) parses cross-tables
+back in. Reconstructing a long board from a `0-`-in-N /
 result-in-N+1 pattern is genuinely ambiguous (a `0-` in N already means "absent"
 in a normal grid, and the pairing lives across two round columns). **Recommend
 scoping the reverse round-trip out of the first version:** importing such a grid
@@ -577,7 +577,7 @@ Core:
 - `crates/core/src/standings.rs` — doc only (behaviour flows through).
 - `crates/core/src/cup.rs` — cup-round↔tournament-round mapping (phase 2).
 - `crates/core/src/american_grid.rs` — `row_for`/`round_cell` cross-round render.
-- `crates/core/src/grid_import.rs`, `fesa_results.rs` — note lossy reverse
+- `crates/core/src/fesa_results.rs`, `result_import.rs` — note lossy reverse
   round-trip (or handle, if required).
 - `crates/core/src/elo.rs` — confirm single-game weighting (likely no change).
 

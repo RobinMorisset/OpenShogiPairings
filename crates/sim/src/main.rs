@@ -1,6 +1,6 @@
 //! `osp-sim` — Monte-Carlo comparison of pairing-settings variants.
 //!
-//! Loads a base tournament (an `.osp` save or an American Grid), then for each
+//! Loads a base tournament (an `.osp` save or a FESA result table), then for each
 //! settings variant runs many simulated tournaments and reports how the variants
 //! differ on game mismatch (are there fewer foregone-conclusion games?) and on
 //! who tends to win / how faithfully the final ranking tracks true strength. See
@@ -62,17 +62,13 @@ impl std::fmt::Display for CupFormatArg {
 #[command(name = "osp-sim", version)]
 struct Args {
     /// Base tournament as an `.osp` save file (JSON). One base source is required.
-    #[arg(long, value_name = "FILE", conflicts_with_all = ["grid", "results"])]
-    base: Option<PathBuf>,
-
-    /// Base tournament as an American Grid text export.
     #[arg(long, value_name = "FILE", conflicts_with = "results")]
-    grid: Option<PathBuf>,
+    base: Option<PathBuf>,
 
     /// Base tournament as a FESA post-tournament result table. Also supplies each
     /// player's true strength (pre-ELO + points gained, or the assigned rating for
-    /// a pre-unrated player), so no separate --strength* is needed.
-    #[arg(long, value_name = "FILE", conflicts_with_all = ["strength", "strength_fesa_after", "strength_fesa_list"])]
+    /// a pre-unrated player), so no separate --strength is needed.
+    #[arg(long, value_name = "FILE", conflicts_with = "strength")]
     results: Option<PathBuf>,
 
     /// One or more settings variants (each a full TournamentSettings JSON). If
@@ -99,17 +95,6 @@ struct Args {
     /// scatters around at higher jitter (rather than the registration rating).
     #[arg(long, value_name = "FILE")]
     strength: Option<PathBuf>,
-
-    /// Use the first FESA rating list published after this tournament date
-    /// (YYYY-MM-DD) as each player's true strength — matched by name, fetched from
-    /// fesashogi.eu. The post-tournament list already reflects the results.
-    #[arg(long, value_name = "YYYY-MM-DD", conflicts_with_all = ["strength", "strength_fesa_list"])]
-    strength_fesa_after: Option<String>,
-
-    /// Use a specific FESA rating list (https URL or local file path) as true
-    /// strength, matched by name.
-    #[arg(long, value_name = "URL|PATH", conflicts_with = "strength")]
-    strength_fesa_list: Option<String>,
 
     /// Fill each player's FESA game count from the first rating list after this
     /// date (YYYY-MM-DD), matched by name (fetched from fesashogi.eu). A result
@@ -294,20 +279,6 @@ fn run(args: Args) -> Result<(), String> {
             base.players.len()
         );
         strengths
-    } else if let Some(date) = &args.strength_fesa_after {
-        let (map, url, matched) = fesa::overrides_after(date, &base)?;
-        eprintln!(
-            "true strength from FESA list {url} — matched {matched}/{} players (unmatched keep their grid rating)",
-            base.players.len()
-        );
-        map
-    } else if let Some(source) = &args.strength_fesa_list {
-        let (map, matched) = fesa::overrides_from_list(source, &base)?;
-        eprintln!(
-            "true strength from FESA list {source} — matched {matched}/{} players (unmatched keep their grid rating)",
-            base.players.len()
-        );
-        map
     } else if let Some(path) = &args.strength {
         load_overrides(path, &base)?
     } else {
@@ -488,22 +459,15 @@ fn run(args: Args) -> Result<(), String> {
 /// Load the base tournament. A `--results` table also yields each player's true
 /// strength (the second element); the other sources return `None` for it.
 fn load_base(args: &Args) -> Result<(Tournament, Option<StrengthMap>), String> {
-    match (&args.base, &args.grid, &args.results) {
-        (Some(path), None, None) => {
+    match (&args.base, &args.results) {
+        (Some(path), None) => {
             let text = std::fs::read_to_string(path)
                 .map_err(|e| format!("reading {}: {e}", path.display()))?;
             let t = serde_json::from_str(&text)
                 .map_err(|e| format!("parsing {} as a tournament: {e}", path.display()))?;
             Ok((t, None))
         }
-        (None, Some(path), None) => {
-            let text = std::fs::read_to_string(path)
-                .map_err(|e| format!("reading {}: {e}", path.display()))?;
-            let t = osp_core::import_american_grid(&text)
-                .map_err(|e| format!("parsing {} as an American Grid: {e}", path.display()))?;
-            Ok((t, None))
-        }
-        (None, None, Some(path)) => {
+        (None, Some(path)) => {
             // FESA result tables are Latin-1, like the rating lists.
             let bytes =
                 std::fs::read(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
@@ -511,7 +475,7 @@ fn load_base(args: &Args) -> Result<(Tournament, Option<StrengthMap>), String> {
                 .map_err(|e| format!("parsing {} as a FESA result table: {e}", path.display()))?;
             Ok((t, Some(strengths)))
         }
-        _ => Err("provide exactly one of --base, --grid, or --results".into()),
+        _ => Err("provide exactly one of --base or --results".into()),
     }
 }
 

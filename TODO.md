@@ -63,5 +63,3 @@ Known limitations and future work, roughly ordered by area.
 - **Tooltips of player names in standings tab** should lose the "contre" word, and gain the ELO of that player in parentheses after their name.
 
 - Check all instances of `#[allow(clippy::too_many_arguments)]`
-
-- **Remove** american grid imports and a lot of unused simulator options

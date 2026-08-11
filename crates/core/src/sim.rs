@@ -659,7 +659,7 @@ pub fn simulate_run(
 mod tests {
     use super::*;
     use crate::player::NewPlayer;
-    use crate::round::{Sitout, SitoutKind, SitoutValue};
+    use crate::round::{Board, PairingSource, Sitout, SitoutKind, SitoutValue};
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
 
@@ -680,6 +680,47 @@ mod tests {
         }
         t.finalize_registration().unwrap();
         t
+    }
+
+    fn id_of(t: &Tournament, last: &str) -> TournamentId {
+        t.players
+            .iter()
+            .find(|p| p.last_name == last)
+            .expect("player exists")
+            .tournament_id
+            .unwrap()
+    }
+
+    /// Play one round with every pairing forced: `boards` are `(winner, loser)`
+    /// last-name pairs, and the named players sit the round out. Gives a base a
+    /// real played history — the attendance and results a loaded base carries.
+    fn play_round(t: &mut Tournament, boards: &[(&str, &str)], absent: &[&str]) {
+        let forced: Vec<Board> = boards
+            .iter()
+            .map(|&(w, l)| Board::pending(id_of(t, w), id_of(t, l), 0, PairingSource::Forced))
+            .collect();
+        let absentees: Vec<TournamentId> = absent.iter().map(|&a| id_of(t, a)).collect();
+        let winners: Vec<TournamentId> = boards.iter().map(|&(w, _)| id_of(t, w)).collect();
+
+        t.prepare_round().unwrap();
+        t.update_draft(absentees, forced, Vec::new()).unwrap();
+        t.confirm_round().unwrap();
+
+        let round_number = t.rounds.len() as u32;
+        for w in winners {
+            let round = t.rounds.last().unwrap();
+            let idx = round
+                .boards
+                .iter()
+                .position(|b| b.player1 == w || b.player2 == w)
+                .expect("forced board present");
+            let side = if round.boards[idx].player1 == w {
+                Winner::Player1
+            } else {
+                Winner::Player2
+            };
+            t.toggle_board_winner(round_number, idx, side).unwrap();
+        }
     }
 
     #[test]
@@ -1088,23 +1129,9 @@ mod tests {
     #[test]
     fn interest_welfare_is_one_for_coin_flips_and_falls_with_blowouts() {
         // 4 players, one round: A–B and C–D.
-        let grid = "\
-[Dull]
-Nr Name    Nat Elo  1   Pts
-1  [A] [a] FR  1500 [2+] 1
-2  [B] [b] FR  1500 [1-] 0
-3  [C] [c] FR  1500 [4+] 1
-4  [D] [d] FR  1500 [3-] 0
-";
-        let t = crate::import_american_grid(grid).unwrap();
-        let id = |last| {
-            t.players
-                .iter()
-                .find(|p| p.last_name == last)
-                .unwrap()
-                .tournament_id
-                .unwrap()
-        };
+        let mut t = tournament_with(&[("A", 1500), ("B", 1500), ("C", 1500), ("D", 1500)]);
+        play_round(&mut t, &[("A", "B"), ("C", "D")], &[]);
+        let id = |last| id_of(&t, last);
 
         // Equal strengths → every game a coin flip → perfect interest (1).
         let mut equal = StrengthMap::new();
@@ -1125,19 +1152,12 @@ Nr Name    Nat Elo  1   Pts
 
     #[test]
     fn simulation_reproduces_the_base_tournaments_absences() {
-        // Base round 1: A beats B while C and D sit out (`0-`). A faithful
-        // re-simulation must reproduce that attendance — pairing only A and B — so
-        // the round yields a single played game, not the two it would if every
-        // registered player were pulled back in.
-        let grid = "\
-[Abs]
-Nr Name    Nat Elo  1   Pts
-1  [A] [a] FR  2000 [2+] 1
-2  [B] [b] FR  1500 [1-] 0
-3  [C] [c] FR  1000 [0-] 0
-4  [D] [d] FR   900 [0-] 0
-";
-        let base = crate::import_american_grid(grid).unwrap();
+        // Base round 1: A beats B while C and D sit out. A faithful re-simulation
+        // must reproduce that attendance — pairing only A and B — so the round
+        // yields a single played game, not the two it would if every registered
+        // player were pulled back in.
+        let mut base = tournament_with(&[("A", 2000), ("B", 1500), ("C", 1000), ("D", 900)]);
+        play_round(&mut base, &[("A", "B")], &["C", "D"]);
         assert_eq!(base.rounds.len(), 1);
         assert_eq!(base.rounds[0].absentees().count(), 2); // C and D really sat out
 

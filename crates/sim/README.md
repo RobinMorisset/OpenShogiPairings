@@ -24,23 +24,20 @@ cargo run --release -p osp-sim -- <options>
 | Flag | Source |
 |------|--------|
 | `--base <FILE>`    | an `.osp` save (JSON) |
-| `--grid <FILE>`    | an American Grid cross-table export |
-| `--results <FILE>` | a **FESA post-tournament result table** — the artefact tournaments usually publish. This one *also* supplies each player's true strength (pre-ELO + points gained, or the `*` rating for a pre-unrated player), so no `--strength*` flag is needed. |
+| `--results <FILE>` | a **FESA post-tournament result table** — the artefact tournaments usually publish. This one *also* supplies each player's true strength (pre-ELO + points gained, or the `*` rating for a pre-unrated player), so no `--strength` flag is needed. |
 
-The base provides the players and ratings the engine pairs on, and — for `--grid`
-/ `--results` — the real rounds, which drive the **observed** row (see below).
+The base provides the players and ratings the engine pairs on, and — for
+`--results` — the real rounds, which drive the **observed** row (see below).
 
 ## True strength (what outcomes are drawn from)
 
 Outcomes follow the logistic law `P(A beats B) = 1/(1+10^((elo_B−elo_A)/400))` on
 each player's *true strength*. By default that is the base rating; override it
-with one of (mutually exclusive; not needed with `--results`):
+with (not needed with `--results`):
 
 | Flag | True strength |
 |------|---------------|
 | `--strength <FILE>` | JSON object mapping tournament number → ELO |
-| `--strength-fesa-after <YYYY-MM-DD>` | the first FESA rating list after that date (fetched from fesashogi.eu), matched by name |
-| `--strength-fesa-list <URL\|PATH>` | a specific FESA rating list, matched by name |
 | `--jitter <F>` | not a source, but adds rating-dependent noise: `0` = truth is the rating, `1` = sample from the estimator's own prior, `>1` = stress-test |
 
 ## Other options
@@ -68,8 +65,8 @@ from the base's real rounds:
 A player is eligible if their nationality is listed **and** they were not absent
 in any of the cup rounds — the first `log2(size)` real rounds (e.g. 5 for a
 size-32 cup). The top `--cup-size` eligible players (by rating) are seeded.
-Eligibility needs the base's real rounds, so this is meant for a `--grid` /
-`--results` base.
+Eligibility needs the base's real rounds, so this is meant for a `--results`
+base.
 
 ## What it prints
 
@@ -92,11 +89,11 @@ cargo run --release -p osp-sim -- \
   --results results_WOSC_2024.txt \
   --configs swiss.json macmahon.json --runs 2000
 
-# 3. From an American grid, using the next FESA list as true strength.
+# 3. From an .osp save, with hand-written true strengths (number → ELO).
 cargo run --release -p osp-sim -- \
-  --grid AmericanGrid.txt \
+  --base tournament.osp \
   --configs baseline.json airtight.json \
-  --strength-fesa-after 2024-08-05
+  --strength strengths.json
 
 # 4. Robustness sweep: rating noise, custom thresholds, machine-readable output.
 cargo run --release -p osp-sim -- \

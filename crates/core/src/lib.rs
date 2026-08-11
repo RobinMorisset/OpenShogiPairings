@@ -13,11 +13,11 @@ mod cup;
 mod elo;
 mod fesa;
 mod fesa_results;
-mod grid_import;
 mod handicap;
 mod matching;
 mod pairing;
 mod player;
+mod result_import;
 mod round;
 mod scoring;
 mod settings;
@@ -35,12 +35,12 @@ pub use cup::{
 pub use elo::{estimate_elos, PROVISIONAL_GAMES_THRESHOLD};
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
 pub use fesa_results::import_fesa_results;
-pub use grid_import::{import_american_grid, GridImportError};
 pub use pairing::{
     pair_round_weighted, AffectedCycle, BoardLedger, Counterfactual, CounterfactualMode,
     RoundExplanation, RuleContribution, RuleDelta, RuleId, RuleTotal, ScopeReason,
 };
 pub use player::{Grade, GradeKind, NewPlayer, Player, PointAdjustment};
+pub use result_import::ResultImportError;
 pub use round::{
     Board, CupStage, Handicap, HandicapGame, NoShow, PairingSource, Round, RoundDraft, Sitout,
     SitoutKind, SitoutValue, Winner,

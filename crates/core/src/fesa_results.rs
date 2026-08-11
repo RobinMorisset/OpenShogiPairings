@@ -1,8 +1,8 @@
 //! Import a FESA post-tournament **result table** into a finished [`Tournament`].
 //!
 //! Tournaments usually publish the table FESA generates after the event rather
-//! than the raw American Grid. It carries the same cross-table (so the rounds can
-//! be replayed exactly like [`crate::import_american_grid`]) plus, per player, the
+//! than the raw American Grid. It carries the full cross-table (replayed by
+//! [`crate::result_import::build_tournament`]) plus, per player, the
 //! pre-tournament ELO used for pairing and the points gained/lost — which makes it
 //! a precise post-tournament **strength oracle** for simulations.
 //!
@@ -23,8 +23,8 @@
 
 use std::collections::HashMap;
 
-use crate::grid_import::{build_tournament, parse_cell, GridImportError, RawRow};
 use crate::player::Grade;
+use crate::result_import::{build_tournament, parse_cell, RawRow, ResultImportError};
 use crate::tournament::Tournament;
 use crate::units::TournamentId;
 
@@ -37,7 +37,7 @@ const DEFAULT_LAST_NAME_WIDTH: usize = 18;
 /// player) keyed by player id.
 pub fn import_fesa_results(
     text: &str,
-) -> Result<(Tournament, HashMap<TournamentId, f64>), GridImportError> {
+) -> Result<(Tournament, HashMap<TournamentId, f64>), ResultImportError> {
     let mut title: Option<String> = None;
     let mut data: Vec<(usize, &str)> = Vec::new();
 
@@ -151,8 +151,8 @@ fn parse_results_row(
     line: &str,
     line_no: usize,
     width: usize,
-) -> Result<(RawRow, f64), GridImportError> {
-    let bad = |reason: &str| GridImportError::BadRow {
+) -> Result<(RawRow, f64), ResultImportError> {
+    let bad = |reason: &str| ResultImportError::BadRow {
         line: line_no,
         reason: reason.to_string(),
     };
@@ -327,7 +327,7 @@ fn is_cell_token(t: &str) -> bool {
 mod tests {
     use super::*;
     use crate::decode_latin1;
-    use crate::grid_import::Cell;
+    use crate::result_import::Cell;
 
     fn load(fixture: &str) -> (Tournament, HashMap<TournamentId, f64>) {
         let path = format!("{}/tests/fixtures/{fixture}", env!("CARGO_MANIFEST_DIR"));

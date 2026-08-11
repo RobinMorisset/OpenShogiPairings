@@ -1,17 +1,16 @@
-//! Deriving player "true strength" from a FESA rating list.
+//! Enriching base players from a FESA rating list.
 //!
-//! For a historical tournament, the *next* FESA rating list after the event
-//! already reflects its results, so it is a good proxy for each player's true
-//! strength. Given the tournament date, resolve the first list that postdates it
-//! (FESA publishes one every 1 Jan and 1 Jul), fetch it, and match players by
-//! name to build a strength-override map (see `osp_core::sim::sample_strengths`).
+//! A result table carries no game counts, so every player would import as
+//! provisional. Given the tournament date, resolve the first list that postdates
+//! it (FESA publishes one every 1 Jan and 1 Jul), fetch it, and match players by
+//! name to recover each one's FESA game count — the established/provisional
+//! reliability signal — without touching strengths.
 
 use std::collections::HashMap;
 use std::io::Read;
 
 use uuid::Uuid;
 
-use osp_core::sim::StrengthMap;
 use osp_core::{decode_latin1, parse_rating_list, RatedPlayer, Tournament};
 
 /// A calendar date as `(year, month, day)` — ordered so tuple comparison is date
@@ -138,30 +137,6 @@ pub(crate) fn fold_name(s: &str) -> String {
     folded.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Build a strength override by matching base players to FESA entries on
-/// accent-folded `(last, first)` name. Returns the map and how many matched.
-pub fn match_fesa(rated: &[RatedPlayer], base: &Tournament) -> (StrengthMap, usize) {
-    let by_name: HashMap<(String, String), u32> = rated
-        .iter()
-        .map(|r| {
-            (
-                (fold_name(&r.last_name), fold_name(&r.first_name)),
-                r.rating,
-            )
-        })
-        .collect();
-    let mut map = StrengthMap::new();
-    for p in &base.players {
-        if let Some(&elo) = by_name.get(&(fold_name(&p.last_name), fold_name(&p.first_name))) {
-            if let Some(t) = p.tournament_id {
-                map.insert(t, f64::from(elo));
-            }
-        }
-    }
-    let matched = map.len();
-    (map, matched)
-}
-
 /// Match base players to FESA entries by folded `(last, first)` name and return
 /// each matched player's FESA **game count** (plus how many matched). A result
 /// table carries no game counts, so every player imports as provisional; filling
@@ -226,32 +201,10 @@ fn fetch_url(url: &str) -> Result<String, String> {
     Ok(decode_latin1(&bytes))
 }
 
-/// Resolve overrides from the first list after a tournament date. Returns the
-/// map, the resolved list URL (for reporting), and the match count.
-pub fn overrides_after(
-    date: &str,
-    base: &Tournament,
-) -> Result<(StrengthMap, String, usize), String> {
-    let url = list_url_for(parse_ymd(date)?, today_ymd());
-    let rated = parse_rating_list(&fetch_url(&url)?);
-    let (map, matched) = match_fesa(&rated, base);
-    Ok((map, url, matched))
-}
-
-/// Resolve overrides from a specific list (URL or local path). Returns the map
-/// and the match count.
-pub fn overrides_from_list(
-    source: &str,
-    base: &Tournament,
-) -> Result<(StrengthMap, usize), String> {
-    let rated = parse_rating_list(&load_list_text(source)?);
-    Ok(match_fesa(&rated, base))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use osp_core::{NewPlayer, TournamentId};
+    use osp_core::NewPlayer;
 
     #[test]
     fn next_permanent_list_picks_the_first_jan_or_jul_after() {
@@ -309,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn match_fesa_maps_by_name_case_insensitively_and_counts() {
+    fn match_games_maps_by_name_case_insensitively_and_counts() {
         let mut base = Tournament::new("T").unwrap();
         let a_id = base
             .add_player(NewPlayer {
@@ -330,8 +283,6 @@ mod tests {
             .unwrap()
             .id;
         base.finalize_registration().unwrap();
-        let a = tid(&base, a_id);
-        let b = tid(&base, b_id);
 
         let rated = vec![
             RatedPlayer {
@@ -352,25 +303,20 @@ mod tests {
             },
         ];
 
-        let (map, matched) = match_fesa(&rated, &base);
+        // Keyed on the folded name, yielding the FESA game count. The unmatched
+        // player is simply left out (so they stay provisional).
+        let (games, matched) = match_games(&rated, &base);
         assert_eq!(matched, 1);
-        assert_eq!(map[&a], 1834.0); // post-tournament rating used as truth
-        assert!(!map.contains_key(&b)); // no FESA entry → falls back to grid rating
-
-        // The games matcher keys on the same folded name but yields the game count,
-        // not the rating — and leaves the unmatched player out (stays provisional).
-        let (games, gmatched) = match_games(&rated, &base);
-        assert_eq!(gmatched, 1);
         assert_eq!(games[&a_id], 40);
         assert!(!games.contains_key(&b_id));
     }
 
-    fn rated(last: &str, first: &str, rating: u32) -> RatedPlayer {
+    fn rated(last: &str, first: &str, games: u32) -> RatedPlayer {
         RatedPlayer {
             last_name: last.into(),
             first_name: first.into(),
-            rating,
-            games: 30,
+            rating: 1500,
+            games,
             grade: None,
             nationality: "FR".into(),
         }
@@ -379,22 +325,20 @@ mod tests {
     #[test]
     fn folding_matches_across_accents_and_composition() {
         let mut base = Tournament::new("T").unwrap();
-        // Grid without the accent the list carries.
-        let frederik_id = player(&mut base, "Wietholter", "Frederik");
-        // Grid with a *decomposed* (NFD) accent: "André" as 'e' + U+0301.
-        let andre_id = player(&mut base, "Muller", "Andre\u{0301}");
+        // Base without the accent the list carries.
+        let frederik = player(&mut base, "Wietholter", "Frederik");
+        // Base with a *decomposed* (NFD) accent: "André" as 'e' + U+0301.
+        let andre = player(&mut base, "Muller", "Andre\u{0301}");
         base.finalize_registration().unwrap();
-        let frederik = tid(&base, frederik_id);
-        let andre = tid(&base, andre_id);
 
         let list = vec![
-            rated("Wietholter", "Frédérik", 1698), // precomposed accents in the list
-            rated("Müller", "André", 1600),        // precomposed, plus an umlaut surname
+            rated("Wietholter", "Frédérik", 42), // precomposed accents in the list
+            rated("Müller", "André", 17),        // precomposed, plus an umlaut surname
         ];
-        let (map, matched) = match_fesa(&list, &base);
+        let (games, matched) = match_games(&list, &base);
         assert_eq!(matched, 2, "accents/composition should not block a match");
-        assert_eq!(map[&frederik], 1698.0);
-        assert_eq!(map[&andre], 1600.0);
+        assert_eq!(games[&frederik], 42);
+        assert_eq!(games[&andre], 17);
     }
 
     /// A player with the given last/first name.
@@ -409,18 +353,8 @@ mod tests {
         .id
     }
 
-    /// The tournament number assigned to a registered player (post-finalization).
-    fn tid(base: &Tournament, id: uuid::Uuid) -> TournamentId {
-        base.players
-            .iter()
-            .find(|p| p.id == id)
-            .unwrap()
-            .tournament_id
-            .unwrap()
-    }
-
     #[test]
-    fn overrides_from_a_repo_fixture_parse_and_match_without_network() {
+    fn games_from_a_repo_fixture_parse_and_match_without_network() {
         // Reads a checked-in, synthetic FESA list through the real fixed-width
         // parser — no download. Guards the parse + name-match path end to end.
         let path = concat!(
@@ -428,18 +362,15 @@ mod tests {
             "/tests/fixtures/fesa-ratinglist-sample.txt"
         );
         let mut base = Tournament::new("T").unwrap();
-        let cheymol_id = player(&mut base, "Cheymol", "Jean");
-        let goix_id = player(&mut base, "Goix", "Nicolas");
-        let ghost_id = player(&mut base, "Ghost", "Nobody"); // absent from the list
+        let cheymol = player(&mut base, "Cheymol", "Jean");
+        let goix = player(&mut base, "Goix", "Nicolas");
+        let ghost = player(&mut base, "Ghost", "Nobody"); // absent from the list
         base.finalize_registration().unwrap();
-        let cheymol = tid(&base, cheymol_id);
-        let goix = tid(&base, goix_id);
-        let ghost = tid(&base, ghost_id);
 
-        let (map, matched) = overrides_from_list(path, &base).unwrap();
+        let (games, matched) = games_from_list(path, &base).unwrap();
         assert_eq!(matched, 2);
-        assert_eq!(map[&cheymol], 2011.0);
-        assert_eq!(map[&goix], 1720.0);
-        assert!(!map.contains_key(&ghost)); // unmatched → keeps its grid rating
+        assert_eq!(games[&cheymol], 60);
+        assert_eq!(games[&goix], 45);
+        assert!(!games.contains_key(&ghost)); // unmatched → stays provisional
     }
 }
