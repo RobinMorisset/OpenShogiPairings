@@ -188,7 +188,9 @@
         "cup": "That board comes from the cup bracket, not the Swiss engine.",
         "absent": "That player sat this round out, so the engine didn't pair them."
       }
-    }
+    },
+    "markJustifiedTitle": "Mark {name} absent for a reason instead (0−)",
+    "clearAbsenceTitle": "{name} turned up after all"
   },
   "resultsView": {
     "noPlayers": "No players registered yet.",
@@ -229,7 +231,8 @@
     "handicapGameLoss": "Wiel rule: the handicap giver counts as the winner, so this surprise win doesn't count in the standings.",
     "tiebreakNoOpponents": "No opponents counted yet",
     "tiebreakDropped": "(dropped {dropped})",
-    "noRoundsCompleted": "No rounds completed yet — results appear here as rounds are completed."
+    "noRoundsCompleted": "No rounds completed yet — results appear here as rounds are completed.",
+    "justifiedTitle": "Absent for a reason vs {name} (0−; counts as a loss)"
   },
   "pairingSource": {
     "swiss": "Swiss",
@@ -437,8 +440,7 @@
     "membersWithoutPairingRating": "MacMahon starting points need a pairing ELO for every unrated team member — {count} are still missing one.",
     "notEnoughTeams": "A team tournament needs at least 2 teams (there are {have}).",
     "noLateRegistrationInTeamMode": "A team tournament can't take late registrations: every player has to be in a team, and the rosters are frozen.",
-    "notEnoughPresentTeams": "A round needs at least {needed} present teams — only {have} are present.",
-    "partialTeamAbsence": "Only some of team {name}'s players are marked absent. Mark the whole team absent, or pair the round and record the forfeit on the board."
+    "notEnoughPresentTeams": "A round needs at least {needed} present teams — only {have} are present."
   },
   "tiebreaks": {
     "points": {

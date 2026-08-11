@@ -6,7 +6,7 @@
 // facts about a board: what happened on it, who actually won, and who conceded
 // the odds.
 
-import type { Board, NoShow, Outcome, Winner } from "./types";
+import type { Board, Forfeit, Outcome, Winner } from "./types";
 
 /**
  * A board's outcome. The server omits the field entirely while the board is an
@@ -36,8 +36,8 @@ export function drawnOf(board: Board): boolean {
   return outcome.kind === "forfeit" ? false : (outcome.drawn ?? false);
 }
 
-/** Which side(s) failed to appear, if this board was forfeited. */
-export function forfeitOf(board: Board): NoShow | null {
+/** Which side(s) missed this board, and why, if it was forfeited. */
+export function forfeitOf(board: Board): Forfeit | null {
   const outcome = outcomeOf(board);
   return outcome.kind === "forfeit" ? outcome.absent : null;
 }

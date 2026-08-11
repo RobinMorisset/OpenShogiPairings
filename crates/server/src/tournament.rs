@@ -8,8 +8,8 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{
-    Board, Counterfactual, CounterfactualMode, CupBracketView, CupPodium, Handicap, NewPlayer,
-    NoShow, RoundExplanation, SitoutValue, Standing, TeamStanding, Tournament, TournamentId,
+    Board, Counterfactual, CounterfactualMode, CupBracketView, CupPodium, Forfeit, Handicap,
+    NewPlayer, RoundExplanation, SitoutValue, Standing, TeamStanding, Tournament, TournamentId,
     TournamentSettings, Winner,
 };
 use serde::{Deserialize, Serialize};
@@ -616,7 +616,7 @@ async fn set_board_drawn(
 /// `both`), or `null` to clear the flag back to a normal unplayed board.
 #[derive(Debug, Deserialize)]
 struct SetNoShowRequest {
-    absent: Option<NoShow>,
+    absent: Option<Forfeit>,
 }
 
 /// Mark (or clear) a board as a no-show.

@@ -20,7 +20,7 @@ use crate::pairing::{
 };
 use crate::player::{NewPlayer, Player, PointAdjustment};
 use crate::round::{
-    Board, Handicap, HandicapGame, NoShow, Outcome, PairingSource, Round, RoundDraft, Sitout,
+    Board, Forfeit, Handicap, HandicapGame, Outcome, PairingSource, Round, RoundDraft, Sitout,
     SitoutKind, SitoutValue, Winner,
 };
 use crate::scoring::compute_scores;
@@ -45,7 +45,8 @@ use typed_index_collections::TiVec;
 /// v6: boards carry one `outcome` sum in place of the separate `result`,
 /// `drawn` and `no_show` fields.
 /// v7: team tournaments — a `teams` roster list and `settings.teams`.
-pub const TOURNAMENT_FORMAT_VERSION: u32 = 7;
+/// v8: a board's forfeit records *why* each missing side missed it.
+pub const TOURNAMENT_FORMAT_VERSION: u32 = 8;
 
 fn default_format_version() -> u32 {
     TOURNAMENT_FORMAT_VERSION
@@ -290,14 +291,6 @@ pub enum TournamentError {
     /// Too few present teams to start a team round.
     #[error("need at least {needed} present teams (have {have})")]
     NotEnoughPresentTeams { needed: usize, have: usize },
-    /// Some — but not all — of a team's members were marked absent. The team
-    /// would still play, with the missing member's board forfeited, which needs
-    /// the justified/unjustified absence distinction that isn't implemented yet.
-    #[error(
-        "team {name} has only some of its members marked absent; mark the whole \
-         team absent, or pair the round and record the forfeit on the board"
-    )]
-    PartialTeamAbsence { name: String },
     /// A player-level forced pairing or forced bye was submitted for a team
     /// round, where teams are what get paired.
     #[error("a team round is paired by team, so it takes no player-level forced pairing or bye")]
@@ -307,6 +300,12 @@ pub enum TournamentError {
     /// Team-level adjustments are the answer, and are still to come.
     #[error("a team tournament ranks by team, so a per-player point adjustment has no effect")]
     PlayerAdjustmentInTeamMode,
+    /// A justified absence was recorded on a board outside team mode, where it
+    /// cannot arise: an absent player is excluded from the pairing before any
+    /// board exists, so the only forfeit an individual tournament can produce is
+    /// an unjustified no-show.
+    #[error("a justified absence on a board only exists in a team tournament")]
+    JustifiedAbsenceOutsideTeamMode,
     /// A counterfactual probe (or a forced re-pairing) was asked for in team
     /// mode. Both are keyed by player number, which names no unit the team
     /// engine paired; a team-level API for them is still to come.
@@ -1562,21 +1561,30 @@ impl Tournament {
         Ok(round)
     }
 
-    /// Mark a board as a no-show, or clear it.
+    /// Mark a board as forfeited, or clear it.
     ///
-    /// `absent` names the side(s) that failed to appear — one player, or
-    /// [`NoShow::Both`] — or `None` to clear the flag back to a normal unplayed
-    /// board. A single no-show credits the opponent a free point exactly like a
-    /// bye; [`NoShow::Both`] leaves no winner (both take a zero loss). A no-show
+    /// `absent` names the side(s) that missed the board and why — see
+    /// [`Forfeit`] — or `None` to clear it back to a normal unplayed board. A
+    /// single missing side credits the opponent a free point exactly like a bye;
+    /// [`Forfeit::Both`] leaves no winner (both take a zero loss). A forfeit
     /// isn't a played game, so recording one clears any actual result and draw
     /// flag on the board. Like recording a winner, this keeps the round's
-    /// `completed` flag in sync — a no-show counts toward closing the round.
+    /// `completed` flag in sync — a forfeit counts toward closing the round.
+    ///
+    /// A [`justified`](AbsenceKind::Justified) absence is rejected outside team
+    /// mode: an individual tournament excludes an absent player from the pairing
+    /// before a board exists, so there is no board to mark, and accepting one
+    /// would put a `0-` in the grid that nothing else in the tournament can
+    /// explain.
     pub fn set_board_no_show(
         &mut self,
         round_number: u32,
         board_index: usize,
-        absent: Option<NoShow>,
+        absent: Option<Forfeit>,
     ) -> Result<&Board, TournamentError> {
+        if absent.is_some_and(Forfeit::has_justified) && !self.settings.team_mode() {
+            return Err(TournamentError::JustifiedAbsenceOutsideTeamMode);
+        }
         let round = self
             .rounds
             .iter_mut()
@@ -1847,6 +1855,20 @@ impl Tournament {
         if self.name.trim().is_empty() {
             return Err(TournamentError::EmptyTournamentName);
         }
+        // A justified absence on a board is a team-mode fact: an individual
+        // tournament excludes an absent player before a board exists. A file
+        // carrying one outside team mode would export `0-` cells nothing in the
+        // tournament can account for, so it is rejected rather than half-trusted.
+        if !self.settings.team_mode()
+            && self
+                .rounds
+                .iter()
+                .flat_map(|r| &r.boards)
+                .filter_map(|b| b.outcome.forfeit())
+                .any(Forfeit::has_justified)
+        {
+            return Err(TournamentError::JustifiedAbsenceOutsideTeamMode);
+        }
         Ok(())
     }
 }
@@ -1854,6 +1876,7 @@ impl Tournament {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::round::AbsenceKind;
 
     fn named(last_name: &str) -> NewPlayer {
         NewPlayer {
@@ -2366,11 +2389,13 @@ mod tests {
 
         // Marking a no-show settles the only board, so the round completes even
         // though no game was played.
-        let board = t.set_board_no_show(1, 0, Some(NoShow::Player2)).unwrap();
+        let board = t
+            .set_board_no_show(1, 0, Some(Forfeit::Player2(AbsenceKind::NoShow)))
+            .unwrap();
         assert_eq!(
             board.outcome,
             Outcome::Forfeit {
-                absent: NoShow::Player2
+                absent: Forfeit::Player2(AbsenceKind::NoShow)
             }
         );
         assert!(t.rounds[0].completed);
@@ -2380,20 +2405,28 @@ mod tests {
         assert_eq!(board.outcome, Outcome::won(Winner::Player1));
 
         // And marking a no-show again clears the recorded result.
-        let board = t.set_board_no_show(1, 0, Some(NoShow::Player1)).unwrap();
+        let board = t
+            .set_board_no_show(1, 0, Some(Forfeit::Player1(AbsenceKind::NoShow)))
+            .unwrap();
         assert_eq!(
             board.outcome,
             Outcome::Forfeit {
-                absent: NoShow::Player1
+                absent: Forfeit::Player1(AbsenceKind::NoShow)
             }
         );
 
         // Both players absent settles the board too, with no winner.
-        let board = t.set_board_no_show(1, 0, Some(NoShow::Both)).unwrap();
+        let board = t
+            .set_board_no_show(
+                1,
+                0,
+                Some(Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow)),
+            )
+            .unwrap();
         assert_eq!(
             board.outcome,
             Outcome::Forfeit {
-                absent: NoShow::Both
+                absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow)
             }
         );
         assert!(t.rounds[0].completed);
@@ -2420,8 +2453,14 @@ mod tests {
         let no_show0 = board0.player2;
         let board1 = &t.rounds[0].boards[1];
         let (both1, both2) = (board1.player1, board1.player2);
-        t.set_board_no_show(1, 0, Some(NoShow::Player2)).unwrap();
-        t.set_board_no_show(1, 1, Some(NoShow::Both)).unwrap();
+        t.set_board_no_show(1, 0, Some(Forfeit::Player2(AbsenceKind::NoShow)))
+            .unwrap();
+        t.set_board_no_show(
+            1,
+            1,
+            Some(Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow)),
+        )
+        .unwrap();
         assert!(t.rounds[0].completed);
 
         let draft = t.prepare_round().unwrap();
@@ -2814,6 +2853,38 @@ mod tests {
     /// Nobody played, so nobody drew: the draw flag is rejected on a forfeited
     /// board rather than silently recorded, where it would feed the ELO estimate
     /// a game that never happened.
+    /// A justified absence is a team-mode fact — an individual tournament
+    /// excludes an absent player before a board exists — so it is refused both
+    /// when recorded and when loaded, rather than leaving a `0-` in the grid
+    /// that nothing else in the tournament can explain.
+    #[test]
+    fn a_justified_absence_is_refused_outside_team_mode() {
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+
+        assert!(matches!(
+            t.set_board_no_show(1, 0, Some(Forfeit::Player1(AbsenceKind::Justified))),
+            Err(TournamentError::JustifiedAbsenceOutsideTeamMode)
+        ));
+        // An ordinary no-show is of course fine.
+        t.set_board_no_show(1, 0, Some(Forfeit::Player1(AbsenceKind::NoShow)))
+            .unwrap();
+        assert!(t.validate_loaded().is_ok());
+
+        // ...and a save that carries one anyway is rejected on load.
+        t.rounds[0].boards[0].outcome = Outcome::Forfeit {
+            absent: Forfeit::Player1(AbsenceKind::Justified),
+        };
+        assert!(matches!(
+            t.validate_loaded(),
+            Err(TournamentError::JustifiedAbsenceOutsideTeamMode)
+        ));
+    }
+
     #[test]
     fn set_board_drawn_rejects_a_forfeited_board() {
         let mut t = Tournament::new("Cup").unwrap();
@@ -2823,7 +2894,8 @@ mod tests {
         t.finalize_registration().unwrap();
         start_next_round(&mut t);
 
-        t.set_board_no_show(1, 0, Some(NoShow::Player2)).unwrap();
+        t.set_board_no_show(1, 0, Some(Forfeit::Player2(AbsenceKind::NoShow)))
+            .unwrap();
         assert!(matches!(
             t.set_board_drawn(1, 0, true),
             Err(TournamentError::DrawnOnForfeitedBoard { round: 1, board: 0 })
@@ -3245,7 +3317,12 @@ mod tests {
                 (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a)
             })
             .expect("board exists");
-        t.set_board_no_show(rnum, idx, Some(NoShow::Both)).unwrap();
+        t.set_board_no_show(
+            rnum,
+            idx,
+            Some(Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow)),
+        )
+        .unwrap();
     }
 
     #[test]

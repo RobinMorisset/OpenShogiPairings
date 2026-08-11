@@ -188,7 +188,9 @@
         "cup": "Ten stolik pochodzi z drabinki pucharowej, a nie z algorytmu szwajcarskiego.",
         "absent": "Ten gracz był w tej rundzie nieobecny, więc algorytm go nie kojarzył."
       }
-    }
+    },
+    "markJustifiedTitle": "Oznacz {name} jako nieobecnego z ważnego powodu (0−)",
+    "clearAbsenceTitle": "{name} jednak się stawił"
   },
   "resultsView": {
     "noPlayers": "Nie zarejestrowano jeszcze żadnych graczy.",
@@ -229,7 +231,8 @@
     "handicapGameLoss": "Reguła „Wiel”: za zwycięzcę uznaje się dającego forę, więc ta niespodziewana wygrana nie liczy się w tabeli wyników.",
     "tiebreakNoOpponents": "Nie policzono jeszcze żadnych przeciwników",
     "tiebreakDropped": "(pominięto: {dropped})",
-    "noRoundsCompleted": "Nie ukończono jeszcze żadnej rundy — wyniki pojawią się tutaj w miarę kończenia kolejnych rund."
+    "noRoundsCompleted": "Nie ukończono jeszcze żadnej rundy — wyniki pojawią się tutaj w miarę kończenia kolejnych rund.",
+    "justifiedTitle": "Nieobecność z ważnego powodu z {name} (0−; liczy się jako porażka)"
   },
   "pairingSource": {
     "swiss": "Szwajcarski",
@@ -437,8 +440,7 @@
     "membersWithoutPairingRating": "Punkty startowe MacMahona wymagają ELO do kojarzenia dla każdego nierankingowanego zawodnika — brakuje {count}.",
     "notEnoughTeams": "Turniej drużynowy wymaga co najmniej 2 drużyn (jest {have}).",
     "noLateRegistrationInTeamMode": "Turniej drużynowy nie przyjmuje zgłoszeń po terminie: każdy zawodnik musi być w drużynie, a składy są zamrożone.",
-    "notEnoughPresentTeams": "Runda wymaga co najmniej {needed} obecnych drużyn — obecnych jest tylko {have}.",
-    "partialTeamAbsence": "Tylko część zawodników drużyny {name} jest oznaczona jako nieobecna. Oznacz całą drużynę jako nieobecną albo skojarz rundę i zapisz walkower na szachownicy."
+    "notEnoughPresentTeams": "Runda wymaga co najmniej {needed} obecnych drużyn — obecnych jest tylko {have}."
   },
   "tiebreaks": {
     "points": {

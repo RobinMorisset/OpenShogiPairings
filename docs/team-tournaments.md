@@ -1,17 +1,13 @@
 # Team tournaments — design
 
-Status: **partly implemented**. Landed so far: the [preliminary board-outcome
-refactor](#preliminary-refactor-board-outcome-as-a-sum-type), the [engine's unit
-abstraction](#engine-refactor-the-unit-abstraction), the [data
-model](#data-model) with [registration and
-finalization](#registration-and-finalization), and [team
-pairing](#from-matched-teams-to-boards) with the team score replay behind it. A
-team tournament can therefore be configured, rostered, finalized and played.
+Status: **implemented**, bar two pieces. A team tournament can be configured,
+rostered, finalized, paired, played and read end to end, through the interface —
+including a member absent for a reason, recorded as such rather than as a
+no-show.
 
-Still to come: the justified/unjustified absence distinction (so a partly absent
-team is refused for now), team-level draft operations (forced matches, forced
-byes, the counterfactual probe), and team point adjustments (per-player ones are
-refused in team mode meanwhile).
+Still to come: team-level draft operations (forced matches, forced byes, the
+counterfactual probe), and team point adjustments (per-player ones are refused
+in team mode meanwhile).
 
 A team tournament is the format that traditionally precedes European shogi
 championships (e.g. WOSC): teams of N players (usually N = 3) are the unit of
@@ -101,7 +97,8 @@ pub enum Outcome {
     Won { winner: Winner, drawn: bool },
     /// Side(s) failed to appear — no game was played; the present side (if
     /// exactly one) is credited the point like a bye; never feeds ELO
-    /// (the former `no_show`).
+    /// (the former `no_show`). The payload became `Forfeit` in the
+    /// justified-absence commit below; it was `NoShow` at this point.
     Forfeit { absent: NoShow },
 }
 
@@ -376,10 +373,7 @@ pairings and byes are rejected by validation:
   board is created pre-marked with a justified absence (see below), which the
   opponent wins by forfeit. This is how a player who leaves the tournament
   (illness, travel) is recorded without the unjustified-no-show stigma.
-  **Not yet**: it needs the `AbsenceKind` enrichment below, so until that lands
-  a partly absent team is rejected (`PartialTeamAbsence`) rather than treated
-  as one thing or the other. The referee can pair the round and record the
-  forfeit on the board in the meantime.
+  **Landed.**
 - **Forced pairings**: force team A vs team B (expands to N boards).
 - **Forced byes**: force a team bye.
 - `MIN_PRESENT_PLAYERS` becomes "at least 2 teams present".
@@ -401,10 +395,10 @@ plays anyway, so the absent member's board structurally exists, and
 recording the absence as a plain no-show would stamp the unjustified `0#`
 cell on (for example) a player who fell ill.
 
-Building on the preliminary outcome refactor, the team commit enriches the
-`Forfeit` payload with *why* each missing side missed — every state is
-meaningful by construction (at least one side missing, each missing side
-has exactly one kind, no result possible on a forfeit):
+**Landed.** Building on the preliminary outcome refactor, the forfeit payload
+records *why* each missing side missed — every state is meaningful by
+construction (at least one side missing, each missing side has exactly one
+kind, no result possible on a forfeit):
 
 ```rust
 /// Why a missing side missed the board.
@@ -435,6 +429,12 @@ nothing; the two differ only in the exported cell and the honest record:
 |---|---|---|
 | `NoShow` | `0#` | `0+`, board win |
 | `Justified` | `0-` | `0+`, board win |
+
+The kind is rejected outside team mode, both when recorded and at load time:
+an individual tournament excludes an absent player before a board exists, so a
+`0-` cell there would be one nothing in the tournament could account for. In
+the round view each side's absence control cycles present → `0#` → `0-` →
+present, with the middle step the only one an individual tournament offers.
 
 For the **match derivation** the kinds are identical: a forfeit with exactly
 one present side is a board win for that side; `Both` has no winner. Neither

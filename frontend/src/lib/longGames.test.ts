@@ -29,7 +29,7 @@ describe("longPending", () => {
   // A forfeited long board frees its players just like a played one — the
   // winnerless-but-decided case that the force-pairing guard got wrong.
   it("is false for a long board resolved by forfeit", () => {
-    const forfeited = board({ long: true, outcome: { kind: "forfeit", absent: "player2" } });
+    const forfeited = board({ long: true, outcome: { kind: "forfeit", absent: { player2: "no_show" } } });
     expect(longPending(forfeited)).toBe(false);
   });
 });

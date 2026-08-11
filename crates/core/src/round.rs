@@ -162,19 +162,111 @@ impl PairingSource {
     }
 }
 
-/// Which side(s) of a board failed to show up. A single side is a forfeit — the
-/// opponent takes the point exactly like a bye — while `Both` means neither
-/// player appeared, so no winner can be determined (both take a zero loss, and a
-/// cup game with this outcome advances nobody). Serialized snake_case, so the
-/// single-side variants stay wire-compatible with the earlier `Winner`-typed
-/// field.
+/// Why a missing side missed the board.
+///
+/// The distinction only exists because a team match is played whether or not
+/// every member turns up: a member who fell ill still has a board, and stamping
+/// it with the unjustified `0#` would put the wrong thing in the record. In an
+/// individual tournament a justified absence never reaches a board — the player
+/// is excluded from the pairing and gets a sit-out instead — which is why
+/// [`Justified`](Self::Justified) is rejected at load time outside team mode.
+///
+/// Neither kind scores the missing player anything, and neither ever feeds the
+/// ELO estimate; they differ only in the exported cell and the honest record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(rename_all = "snake_case")]
+pub enum AbsenceKind {
+    /// Failed to appear, unjustified — the `0#` cell. The default, and the only
+    /// kind an individual tournament can produce.
+    #[default]
+    NoShow,
+    /// Absent for a valid reason (illness, a departure) — the `0-` cell.
+    Justified,
+}
+
+impl AbsenceKind {
+    /// The cross-table / American Grid cell for a side that missed the board
+    /// this way.
+    pub fn cell(self) -> &'static str {
+        match self {
+            AbsenceKind::NoShow => "0#",
+            AbsenceKind::Justified => "0-",
+        }
+    }
+}
+
+/// Which side(s) of a board missed it, and why each of them did.
+///
+/// A single missing side is a forfeit — the opponent takes the point exactly
+/// like a bye — while `Both` means neither player appeared, so no winner can be
+/// determined (both take a zero loss, and a cup game with this outcome advances
+/// nobody). Every state is meaningful by construction: at least one side is
+/// missing, and each missing side has exactly one reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
-pub enum NoShow {
-    Player1,
-    Player2,
-    Both,
+pub enum Forfeit {
+    Player1(AbsenceKind),
+    Player2(AbsenceKind),
+    Both(AbsenceKind, AbsenceKind),
+}
+
+impl Forfeit {
+    /// The forfeit that has `side` missing for `kind` and the other side
+    /// present — the common single-sided case.
+    pub fn one(side: Winner, kind: AbsenceKind) -> Forfeit {
+        match side {
+            Winner::Player1 => Forfeit::Player1(kind),
+            Winner::Player2 => Forfeit::Player2(kind),
+        }
+    }
+
+    /// The forfeit described by a reason per side, or `None` when both sides
+    /// turned up (which is not a forfeit at all). The single place the two
+    /// per-side controls of the round view are folded into one value.
+    pub fn of(player1: Option<AbsenceKind>, player2: Option<AbsenceKind>) -> Option<Forfeit> {
+        match (player1, player2) {
+            (Some(a), Some(b)) => Some(Forfeit::Both(a, b)),
+            (Some(a), None) => Some(Forfeit::Player1(a)),
+            (None, Some(b)) => Some(Forfeit::Player2(b)),
+            (None, None) => None,
+        }
+    }
+
+    /// Why `side` missed the board, or `None` if they turned up.
+    pub fn kind(self, side: Winner) -> Option<AbsenceKind> {
+        match (self, side) {
+            (Forfeit::Player1(k), Winner::Player1) => Some(k),
+            (Forfeit::Player2(k), Winner::Player2) => Some(k),
+            (Forfeit::Both(k, _), Winner::Player1) => Some(k),
+            (Forfeit::Both(_, k), Winner::Player2) => Some(k),
+            _ => None,
+        }
+    }
+
+    /// Whether `side` missed the board.
+    pub fn absent(self, side: Winner) -> bool {
+        self.kind(side).is_some()
+    }
+
+    /// The side that *did* turn up, when exactly one did — the one credited the
+    /// free point. `None` under `Both`, where nobody is.
+    pub fn present(self) -> Option<Winner> {
+        match self {
+            Forfeit::Player1(_) => Some(Winner::Player2),
+            Forfeit::Player2(_) => Some(Winner::Player1),
+            Forfeit::Both(..) => None,
+        }
+    }
+
+    /// Whether any side missed for a justified reason — the load-time check that
+    /// keeps the kind out of individual tournaments, where it cannot arise.
+    pub fn has_justified(self) -> bool {
+        [Winner::Player1, Winner::Player2]
+            .into_iter()
+            .any(|s| self.kind(s) == Some(AbsenceKind::Justified))
+    }
 }
 
 /// What happened on a board — the single field replacing the former
@@ -209,7 +301,8 @@ pub enum Outcome {
     },
     /// Side(s) failed to appear, so no game was played. The present side (if
     /// exactly one) is credited the point exactly like a bye; never feeds ELO.
-    Forfeit { absent: NoShow },
+    /// The payload records *why* each missing side missed (see [`Forfeit`]).
+    Forfeit { absent: Forfeit },
 }
 
 impl Default for Outcome {
@@ -252,7 +345,7 @@ impl Outcome {
     }
 
     /// Which side(s) failed to appear, if this board was forfeited.
-    pub fn forfeit(self) -> Option<NoShow> {
+    pub fn forfeit(self) -> Option<Forfeit> {
         match self {
             Outcome::Forfeit { absent } => Some(absent),
             Outcome::Pending { .. } | Outcome::Won { .. } => None,
@@ -356,25 +449,26 @@ impl Board {
     }
 
     /// Whether the given `side` failed to show up on this board (true for that
-    /// side under a single no-show, and for both sides under [`NoShow::Both`]).
+    /// side under a single forfeit, and for both sides under
+    /// [`Forfeit::Both`]).
     pub fn no_show_absent(&self, side: Winner) -> bool {
-        match self.outcome.forfeit() {
-            Some(NoShow::Player1) => side == Winner::Player1,
-            Some(NoShow::Player2) => side == Winner::Player2,
-            Some(NoShow::Both) => true,
-            None => false,
-        }
+        self.outcome.forfeit().is_some_and(|f| f.absent(side))
+    }
+
+    /// Why `side` missed this board, if they did — what the exported cell reads
+    /// (`0#` for an unjustified no-show, `0-` for a justified absence).
+    pub fn absence_kind(&self, side: Winner) -> Option<AbsenceKind> {
+        self.outcome.forfeit().and_then(|f| f.kind(side))
     }
 
     /// The id of the player who *did* show up — the one credited the free point,
     /// exactly like a bye — when exactly one side was a no-show. `None` when both
-    /// showed up or [`NoShow::Both`] (neither did, so nobody is credited).
+    /// showed up or [`Forfeit::Both`] (neither did, so nobody is credited).
     pub fn no_show_opponent(&self) -> Option<TournamentId> {
-        match self.outcome.forfeit() {
-            Some(NoShow::Player1) => Some(self.player2),
-            Some(NoShow::Player2) => Some(self.player1),
-            _ => None,
-        }
+        self.outcome.forfeit()?.present().map(|side| match side {
+            Winner::Player1 => self.player1,
+            Winner::Player2 => self.player2,
+        })
     }
 
     /// The winner that counts for standings and pairing. For a handicap game,
@@ -625,9 +719,16 @@ mod tests {
             ),
             (
                 Outcome::Forfeit {
-                    absent: NoShow::Both,
+                    absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
                 },
-                r#"{"kind":"forfeit","absent":"both"}"#,
+                r#"{"kind":"forfeit","absent":{"both":["no_show","no_show"]}}"#,
+            ),
+            // A single missing side, absent for a reason — the team-mode cell.
+            (
+                Outcome::Forfeit {
+                    absent: Forfeit::Player1(AbsenceKind::Justified),
+                },
+                r#"{"kind":"forfeit","absent":{"player1":"justified"}}"#,
             ),
         ];
         for (outcome, json) in cases {

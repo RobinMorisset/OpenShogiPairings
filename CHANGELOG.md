@@ -10,9 +10,10 @@ will be explicitly mentioned in the changelog for that version though.
 ## [Unreleased]
 
 **Save files from earlier versions no longer load** (the save format version is
-now 7): a board records what happened on it as a single value instead of three
-separate flags, and tournaments can carry teams. A stale file is rejected with a
-clear message rather than half-parsed; re-create the tournament.
+now 8): a board records what happened on it as a single value instead of three
+separate flags — and, when it was forfeited, why each missing side missed it —
+and tournaments can carry teams. A stale file is rejected with a clear message
+rather than half-parsed; re-create the tournament.
 
 ### Added
 
@@ -61,6 +62,15 @@ clear message rather than half-parsed; re-create the tournament.
   board wins so far, and the Standings tab gains a team table above the
   per-player one — ranked by the configured criteria, with each team row
   expanding to its players in board order and the games each of them won.
+- **Justified absences.** A forfeited board now records *why* each missing side
+  missed it, and the cross-table and American grid say so: `0-` for a player
+  absent for a reason, `0#` for one who simply didn't turn up. It exists because
+  a team plays whether or not every member appears — a player who falls ill
+  still has a board, and stamping it with the unjustified `0#` put the wrong
+  thing in the record. Marking part of a team absent before pairing now creates
+  those boards already forfeited that way, instead of being refused. In an
+  individual tournament an absent player never reaches a board, so the kind
+  doesn't arise there and is rejected.
 
 - **Hybrid cup: a qualification-round format** (Settings → Hybrid cup), used by
   the German Championship. The top half of the bracket is pre-qualified and

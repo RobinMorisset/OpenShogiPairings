@@ -19,7 +19,9 @@ use uuid::Uuid;
 
 use crate::pairing::{pair_round_weighted, PairingUnit};
 use crate::player::Player;
-use crate::round::{Board, Round, Sitout, SitoutKind, SitoutValue};
+use crate::round::{
+    AbsenceKind, Board, Forfeit, Outcome, Round, Sitout, SitoutKind, SitoutValue, Winner,
+};
 use crate::team_scoring::{match_boards, matches_in_round, team_units, TeamMatch, TeamSlots};
 use crate::tournament::{Tournament, TournamentError, MIN_TEAMS_PER_ROUND};
 use crate::units::{TeamId, TournamentId, UnitKey};
@@ -355,23 +357,6 @@ impl Tournament {
         let slots = self.team_slots();
         let absent: HashSet<TournamentId> = draft.absent.iter().copied().collect();
 
-        // A team sits out as a whole or not at all. Marking *some* of its members
-        // absent is a different thing — the team still plays, and the missing
-        // member's board is forfeited — which needs the absence-kind distinction
-        // that has not landed yet, so it is refused rather than silently treated
-        // as one or the other.
-        for team in self.teams.iter() {
-            let Some(number) = team.tournament_id else {
-                continue;
-            };
-            let members = slots.members_of(number);
-            let away = members.iter().filter(|t| absent.contains(t)).count();
-            if away > 0 && away < members.len() {
-                return Err(TournamentError::PartialTeamAbsence {
-                    name: team.name.clone(),
-                });
-            }
-        }
         // Player-level forcing has no meaning when teams are what get paired.
         if !draft.forced_boards.is_empty() || !draft.forced_byes.is_empty() {
             return Err(TournamentError::PlayerLevelDraftInTeamMode);
@@ -409,6 +394,23 @@ impl Tournament {
                 p.source,
                 &slots,
             ));
+        }
+        // A member marked absent from a team that still plays does not stop the
+        // match: their board exists, and it is created already forfeited with a
+        // *justified* absence. That is how a player who falls ill or leaves is
+        // recorded — the opponent wins the board, and the `0-` cell says why,
+        // without the unjustified-no-show stigma of a `0#`.
+        for board in &mut boards {
+            let missing = |side: Winner| {
+                let player = match side {
+                    Winner::Player1 => board.player1,
+                    Winner::Player2 => board.player2,
+                };
+                absent.contains(&player).then_some(AbsenceKind::Justified)
+            };
+            if let Some(forfeit) = Forfeit::of(missing(Winner::Player1), missing(Winner::Player2)) {
+                board.outcome = Outcome::Forfeit { absent: forfeit };
+            }
         }
         // Display order: by team match (best-ranked team first), then board
         // number within the match — which the expansion above already produced,
@@ -529,7 +531,7 @@ impl Tournament {
 mod tests {
     use super::*;
     use crate::player::NewPlayer;
-    use crate::round::Winner;
+    use crate::round::{AbsenceKind, Winner};
 
     fn player(rating: Option<u32>, pairing: Option<u32>) -> Player {
         let mut p = Player::from_new(NewPlayer {
@@ -998,21 +1000,69 @@ mod tests {
         assert!(round.sitouts.iter().all(|s| away.contains(&s.player)));
     }
 
-    /// A half-absent team is refused rather than guessed at: the team would
-    /// still play, with the missing member's board forfeited, and telling a
-    /// justified absence from a no-show isn't implemented yet.
+    /// A half-absent team still plays: the missing member's board is created
+    /// already forfeited, with a *justified* absence — the record for a player
+    /// who fell ill or left, without the unjustified-no-show stigma.
     #[test]
-    fn a_partly_absent_team_is_rejected() {
+    fn a_partly_absent_team_plays_with_its_missing_boards_forfeited() {
         let (mut t, ids) = team_tournament(2, 4);
         fill_teams(&mut t, &ids, 2, 2);
         t.finalize_registration().unwrap();
-        t.prepare_round().unwrap();
-        t.update_draft(vec![tid(&t, ids[0])], Vec::new(), Vec::new())
-            .unwrap();
-        assert!(matches!(
-            t.confirm_round(),
-            Err(TournamentError::PartialTeamAbsence { .. })
-        ));
+        let away = tid(&t, ids[0]);
+        start_round(&mut t, vec![away]);
+
+        let round = &t.rounds[0];
+        // The team is paired as usual — both boards exist.
+        assert_eq!(round.boards.len(), 2);
+        // ...and the absent member's board is already decided against them,
+        // which is what makes the round completable without further input.
+        let board = round
+            .boards
+            .iter()
+            .find(|b| b.player1 == away || b.player2 == away)
+            .expect("the absent member still has a board");
+        let side = if board.player1 == away {
+            Winner::Player1
+        } else {
+            Winner::Player2
+        };
+        assert_eq!(board.absence_kind(side), Some(AbsenceKind::Justified));
+        assert_eq!(board.absence_kind(other(side)), None);
+        // The opponent takes the board, so the match is 1–1 rather than 2–0.
+        assert_eq!(board.no_show_opponent(), Some(other_player(board, away)));
+        // An absent player who has a board gets no sit-out — the board scores
+        // them, exactly as for an absent cup player.
+        assert!(round.sitout(away).is_none());
+    }
+
+    /// The other side of the coin: the *whole* team absent is still a team
+    /// absence, so nobody is paired and every member gets a sit-out.
+    #[test]
+    fn a_wholly_absent_team_is_still_left_out() {
+        let (mut t, ids) = team_tournament(2, 6);
+        fill_teams(&mut t, &ids, 3, 2);
+        t.finalize_registration().unwrap();
+        let away: Vec<TournamentId> = ids[4..].iter().map(|&id| tid(&t, id)).collect();
+        start_round(&mut t, away.clone());
+        assert_eq!(t.rounds[0].boards.len(), 2);
+        assert!(away.iter().all(|&p| t.rounds[0].sitout(p).is_some()));
+    }
+
+    /// The other side of a board.
+    fn other(side: Winner) -> Winner {
+        match side {
+            Winner::Player1 => Winner::Player2,
+            Winner::Player2 => Winner::Player1,
+        }
+    }
+
+    /// The other player on a board.
+    fn other_player(board: &Board, player: TournamentId) -> TournamentId {
+        if board.player1 == player {
+            board.player2
+        } else {
+            board.player1
+        }
     }
 
     #[test]

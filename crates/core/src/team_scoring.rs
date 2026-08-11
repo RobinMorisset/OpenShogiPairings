@@ -538,7 +538,7 @@ pub(crate) fn match_boards(
 mod tests {
     use super::*;
     use crate::player::NewPlayer;
-    use crate::round::{NoShow, Outcome};
+    use crate::round::{AbsenceKind, Forfeit, Outcome};
     use crate::settings::{MacMahonThreshold, TeamSettings};
     use crate::tournament::Tournament;
     use uuid::Uuid;
@@ -632,7 +632,7 @@ mod tests {
                 Outcome::won(Winner::Player2),
                 // Neither side turned up: a decided board with no winner.
                 Outcome::Forfeit {
-                    absent: NoShow::Both,
+                    absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
                 },
             ],
         );
@@ -651,7 +651,7 @@ mod tests {
             &mut t,
             &[
                 Outcome::Forfeit {
-                    absent: NoShow::Player2,
+                    absent: Forfeit::Player2(AbsenceKind::NoShow),
                 },
                 Outcome::won(Winner::Player2),
             ],

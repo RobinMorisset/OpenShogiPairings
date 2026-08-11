@@ -33,7 +33,7 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::round::{CupStage, NoShow, PairingSource, Round};
+use crate::round::{CupStage, Forfeit, PairingSource, Round};
 use crate::units::TournamentId;
 
 /// The valid cup **bracket** sizes, each a power of two. The qualifier format
@@ -617,7 +617,7 @@ fn decide(rounds: &[Round], k: u32, a: TournamentId, b: TournamentId) -> Option<
         .boards
         .iter()
         .find(|bd| (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a))?;
-    if matches!(board.outcome.forfeit(), Some(NoShow::Both)) {
+    if matches!(board.outcome.forfeit(), Some(Forfeit::Both(..))) {
         return Some(CupResult::BothAbsent);
     }
     // A single no-show: the player who showed up advances by forfeit.
@@ -799,7 +799,7 @@ fn frontier_round_winners(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::{Board, Outcome, PairingSource, Winner};
+    use crate::round::{AbsenceKind, Board, Outcome, PairingSource, Winner};
 
     fn ids(n: usize) -> Vec<TournamentId> {
         (1..=n as u32).map(TournamentId).collect()
@@ -961,7 +961,7 @@ mod tests {
         // The top quarterfinal (seeds 1 & 8) is a double no-show — it advances nobody.
         r1.boards.push(Board {
             outcome: Outcome::Forfeit {
-                absent: NoShow::Both,
+                absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
             },
             source: PairingSource::Cup {
                 stage: CupStage::Quarterfinal,
@@ -1330,7 +1330,7 @@ mod tests {
         );
         let dead = &mut qualification.boards[3];
         dead.outcome = Outcome::Forfeit {
-            absent: NoShow::Both,
+            absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
         };
 
         let pairings = cup.matches_for_round(&[qualification], 2).unwrap();

@@ -7,7 +7,7 @@
     type Counterfactual,
     type CounterfactualMode,
     type Handicap,
-    type NoShow,
+    type Forfeit,
     type Player,
     type Round,
     type RoundExplanation,
@@ -18,7 +18,7 @@
   import { sourceBadge } from "../pairingSource";
   import { matchScore, teamMatches } from "../teams";
   import { drawnOf, forfeitOf, handicapGiverId, winnerOf } from "../boardOutcome";
-  import { absent, isDecided, toggledNoShow } from "../noShow";
+  import { absenceKind, absent, cycledForfeit, isDecided } from "../noShow";
   import { printPage } from "../platform";
   import type { HandicapChoice } from "../handicap";
 
@@ -44,9 +44,9 @@
     onClickWinner: (boardIndex: number, clicked: Winner) => void;
     /** Set/clear the "a draw occurred" flag on a board. */
     onToggleDrawn: (boardIndex: number, drawn: boolean) => void;
-    /** Mark (or clear, with null) a board as a no-show: `absent` names the
-     *  side(s) that failed to appear (one player, or `"both"`). */
-    onSetNoShow: (boardIndex: number, absent: NoShow | null) => void;
+    /** Mark (or clear, with null) a board as forfeited: `absent` names the
+     *  side(s) that missed it and why (see `Forfeit`). */
+    onSetNoShow: (boardIndex: number, absent: Forfeit | null) => void;
     /** Set (or clear, with null) a board's handicap. */
     onSetHandicap: (boardIndex: number, handicap: Handicap | null) => void;
     /** Whether long (two-round) games are enabled — shows the per-board checkbox. */
@@ -119,11 +119,14 @@
   }
 
   // A side's outcome, from the recorded result or a forfeit. An opponent who
-  // failed to appear hands `side` the point, but under `"both"` nobody won —
-  // so winning compares the forfeit strictly, while losing goes through
-  // `absent()`, which counts `"both"` as covering each side.
+  // missed the board hands `side` the point — but only if `side` turned up
+  // themselves, since under a double forfeit nobody won.
   function isWinner(board: Board, side: Winner): boolean {
-    return winnerOf(board) === side || forfeitOf(board) === other(side);
+    const forfeit = forfeitOf(board);
+    return (
+      winnerOf(board) === side ||
+      (forfeit != null && absent(forfeit, other(side)) && !absent(forfeit, side))
+    );
   }
   function isLoser(board: Board, side: Winner): boolean {
     return winnerOf(board) === other(side) || absent(forfeitOf(board), side);
@@ -137,10 +140,41 @@
     return isDecided(board) && !board.long;
   }
 
-  // Toggle `side`'s no-show independently, so the two buttons together cover all
-  // of none / player1 / player2 / both (each side can be a no-show at once).
+  // Cycle `side`'s absence independently, so the two buttons together cover
+  // every state. In team mode the cycle has the extra "absent for a reason"
+  // step: a team plays whether or not every member turns up, so a member who
+  // fell ill has a board, and it must not be stamped with the unjustified `0#`.
+  // Outside team mode an absent player never reaches a board at all, so there
+  // are only two states — and the server rejects the third.
   function toggleNoShow(index: number, board: Board, side: Winner) {
-    onSetNoShow(index, toggledNoShow(forfeitOf(board), side));
+    onSetNoShow(index, cycledForfeit(forfeitOf(board), side, teams.length > 0));
+  }
+
+  /** The glyph a side's absence control shows: its state, or the plain arrow
+   *  pointing at the side while they are present. */
+  function absenceGlyph(board: Board, side: Winner, arrow: string): string {
+    switch (absenceKind(forfeitOf(board), side)) {
+      case "no_show":
+        return "0#";
+      case "justified":
+        return "0−";
+      default:
+        return arrow;
+    }
+  }
+
+  /** The tooltip for that control: what the *next* click will record. */
+  function absenceTitle(board: Board, side: Winner, who: string): string {
+    switch (absenceKind(forfeitOf(board), side)) {
+      case "no_show":
+        return teams.length > 0
+          ? $_("roundView.markJustifiedTitle", { values: { name: who } })
+          : $_("roundView.clearAbsenceTitle", { values: { name: who } });
+      case "justified":
+        return $_("roundView.clearAbsenceTitle", { values: { name: who } });
+      default:
+        return $_("roundView.noShowTitle", { values: { name: who } });
+    }
   }
 
   // Resolve tournament numbers to display names.
@@ -774,23 +808,25 @@
                   type="button"
                   class="noshow-btn"
                   class:active={absent(forfeitOf(board), "player1")}
+                  class:justified={absenceKind(forfeitOf(board), "player1") === "justified"}
                   disabled={busy}
                   aria-pressed={absent(forfeitOf(board), "player1")}
-                  title={$_("roundView.noShowTitle", { values: { name: name(board.player1) } })}
+                  title={absenceTitle(board, "player1", name(board.player1))}
                   onclick={() => toggleNoShow(index, board, "player1")}
                 >
-                  ◀
+                  {absenceGlyph(board, "player1", "◀")}
                 </button>
                 <button
                   type="button"
                   class="noshow-btn"
                   class:active={absent(forfeitOf(board), "player2")}
+                  class:justified={absenceKind(forfeitOf(board), "player2") === "justified"}
                   disabled={busy}
                   aria-pressed={absent(forfeitOf(board), "player2")}
-                  title={$_("roundView.noShowTitle", { values: { name: name(board.player2) } })}
+                  title={absenceTitle(board, "player2", name(board.player2))}
                   onclick={() => toggleNoShow(index, board, "player2")}
                 >
-                  ▶
+                  {absenceGlyph(board, "player2", "▶")}
                 </button>
               </div>
             </td>
@@ -1012,6 +1048,11 @@
 </div>
 
 <style>
+  /* A justified absence is not the same record as a no-show, so it does not
+     read the same: the `0-` control is marked but not alarming. */
+  .noshow-btn.justified {
+    font-style: italic;
+  }
   /* A team match is one row of boards, so it gets one header naming the two
      teams and the board wins so far — the score the match is decided on. */
   .match-head td {

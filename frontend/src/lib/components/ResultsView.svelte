@@ -16,7 +16,7 @@
   } from "../types";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
   import { boardOutcome, drawnOf, forfeitOf, winnerOf } from "../boardOutcome";
-  import { absent } from "../noShow";
+  import { absenceKind } from "../noShow";
   import { partitionDropped } from "../tiebreak";
   import { formatScore, HALF_POINT_TIEBREAKS } from "../score";
   import { printPage } from "../platform";
@@ -265,7 +265,9 @@
     | SitoutCell
     // A no-show board: this player was the absentee (`0#`) or the one who
     // showed up and was credited the free point, bye-style (`0+`).
-    | { kind: "no-show"; opponentName: string }
+    // The player missed this board. `justified` picks the cell: `0-` when they
+    // were absent for a reason, `0#` when they simply didn't turn up.
+    | { kind: "no-show"; opponentName: string; justified: boolean }
     | { kind: "no-show-win"; opponentName: string }
     | { kind: "pending"; opponent: string; opponentName: string }
     // A long (two-round) game started this round: its result belongs to the next
@@ -317,10 +319,11 @@
     const opponentName = nameOfTid(opponentTid);
     const forfeit = forfeitOf(board);
     if (forfeit) {
-      // This side is a no-show for a single absence on their side, or when both
-      // players were absent; otherwise they are the one who showed up.
-      return absent(forfeit, side)
-        ? { kind: "no-show", opponentName }
+      // This side missed the board for a single absence on their side, or when
+      // both players did; otherwise they are the one who showed up.
+      const kind = absenceKind(forfeit, side);
+      return kind
+        ? { kind: "no-show", opponentName, justified: kind === "justified" }
         : { kind: "no-show-win", opponentName };
     }
     if (!winnerOf(board)) return { kind: "pending", opponent, opponentName };
@@ -691,8 +694,10 @@
               {:else if cell.kind === "no-show"}
                 <span
                   class="absent"
-                  data-tip={$_("resultsView.noShowTitle", { values: { name: cell.opponentName } })}
-                  >0#</span
+                  data-tip={$_(
+                    cell.justified ? "resultsView.justifiedTitle" : "resultsView.noShowTitle",
+                    { values: { name: cell.opponentName } },
+                  )}>{cell.justified ? "0−" : "0#"}</span
                 >
               {:else if cell.kind === "no-show-win"}
                 <span

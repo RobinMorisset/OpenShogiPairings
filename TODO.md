@@ -19,19 +19,12 @@ Known limitations and future work, roughly ordered by area.
 
 - **Team tournaments** — design settled in
   [docs/team-tournaments.md](docs/team-tournaments.md): teams as the pairing
-  unit, boards as the atom, derived match outcomes. Landed so far: the
-  board-outcome sum type, the engine's unit abstraction, the team data model
-  (settings, rosters, finalization) and team pairing with its score replay — a
-  team tournament can be configured, rostered, finalized and played. Next: the
-  justified/unjustified absence distinction (a partly absent team is refused
-  until then), team-level draft operations, standings and tie-breaks, team
-  point adjustments (per-player ones are refused in team mode meanwhile), the
-  Everything else has landed, interface included — a team tournament can be
-  configured, rostered, paired, played and read end to end. What is left is the
-  justified/unjustified absence distinction (a partly absent team is refused
-  until then), team-level draft operations (forced matches, forced byes, the
-  counterfactual probe), and team point adjustments (per-player ones are
-  refused in team mode meanwhile).
+  unit, boards as the atom, derived match outcomes. Landed end to end — a team
+  tournament can be configured, rostered, paired, played and read, interface
+  included, with a member's absence recorded as justified or not. What is left
+  is team-level draft operations (forced matches, forced byes, the
+  counterfactual probe) and team point adjustments (per-player ones are refused
+  in team mode meanwhile).
 
 ## Multi-referee server
 

@@ -6,7 +6,7 @@
 // authority — it re-derives all of this when it pairs and when it ranks.
 
 import { forfeitOf } from "./boardOutcome";
-import { isDecided } from "./noShow";
+import { absent, isDecided } from "./noShow";
 import type { Board, Player, Round, Team, Winner } from "./types";
 
 /**
@@ -131,14 +131,14 @@ export function matchScore(
       score.decided = false;
       continue;
     }
-    // On a forfeit the point goes to whoever turned up; under `"both"` nobody
-    // did, so the board decides nothing.
+    // On a forfeit the point goes to whoever turned up, whichever reason the
+    // missing side had; under `both` nobody did, so the board decides nothing.
     const side: Winner | null = forfeit
-      ? forfeit === "both"
-        ? null
-        : forfeit === "player1"
-          ? "player2"
-          : "player1"
+      ? absent(forfeit, "player1")
+        ? absent(forfeit, "player2")
+          ? null
+          : "player2"
+        : "player1"
       : (effectiveWinners[index] ?? null);
     if (side === "player1") score.wins1 += 1;
     else if (side === "player2") score.wins2 += 1;

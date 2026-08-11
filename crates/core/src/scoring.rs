@@ -329,7 +329,8 @@ pub(crate) fn compute_scores(
 mod tests {
     use super::*;
     use crate::round::{
-        Board, CupStage, NoShow, Outcome, PairingSource, Sitout, SitoutKind, SitoutValue,
+        AbsenceKind, Board, CupStage, Forfeit, Outcome, PairingSource, Sitout, SitoutKind,
+        SitoutValue,
     };
     use crate::settings::MacMahonThreshold;
 
@@ -394,7 +395,7 @@ mod tests {
             number: 1,
             boards: vec![Board {
                 outcome: Outcome::Forfeit {
-                    absent: NoShow::Player2,
+                    absent: Forfeit::Player2(AbsenceKind::NoShow),
                 }, // player2 (B) is absent
                 ..Board::pending(
                     a.tournament_id.unwrap(),
@@ -432,7 +433,7 @@ mod tests {
             number: 1,
             boards: vec![Board {
                 outcome: Outcome::Forfeit {
-                    absent: NoShow::Both,
+                    absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
                 },
                 ..Board::pending(
                     a.tournament_id.unwrap(),
@@ -627,7 +628,7 @@ mod tests {
             number: 1,
             boards: vec![Board {
                 outcome: Outcome::Forfeit {
-                    absent: NoShow::Player2,
+                    absent: Forfeit::Player2(AbsenceKind::NoShow),
                 },
                 long: true,
                 ..Board::pending(

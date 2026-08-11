@@ -188,7 +188,9 @@
         "cup": "Dieses Brett stammt aus dem Pokal-Turnierbaum, nicht aus der Engine des Schweizer Systems.",
         "absent": "Dieser Spieler hat diese Runde ausgesetzt, daher hat die Engine ihn nicht gepaart."
       }
-    }
+    },
+    "markJustifiedTitle": "{name} stattdessen als entschuldigt abwesend markieren (0−)",
+    "clearAbsenceTitle": "{name} war doch anwesend"
   },
   "resultsView": {
     "noPlayers": "Noch keine Spieler angemeldet.",
@@ -229,7 +231,8 @@
     "handicapGameLoss": "Wiel-Regel: Der Vorgeber gilt als Sieger, daher zählt dieser überraschende Sieg nicht für die Rangliste.",
     "tiebreakNoOpponents": "Noch keine Gegner gewertet",
     "tiebreakDropped": "(gestrichen: {dropped})",
-    "noRoundsCompleted": "Noch keine Runde abgeschlossen — die Ergebnisse erscheinen hier, sobald Runden abgeschlossen werden."
+    "noRoundsCompleted": "Noch keine Runde abgeschlossen — die Ergebnisse erscheinen hier, sobald Runden abgeschlossen werden.",
+    "justifiedTitle": "Entschuldigt abwesend gegen {name} (0−; zählt als Niederlage)"
   },
   "pairingSource": {
     "swiss": "Schweizer System",
@@ -437,8 +440,7 @@
     "membersWithoutPairingRating": "MacMahon-Startpunkte brauchen für jedes ungewertete Mannschaftsmitglied ein Auslosungs-ELO — {count} fehlen noch.",
     "notEnoughTeams": "Ein Mannschaftsturnier braucht mindestens 2 Mannschaften (vorhanden: {have}).",
     "noLateRegistrationInTeamMode": "Ein Mannschaftsturnier nimmt keine Nachmeldungen an: jeder Spieler muss in einer Mannschaft sein, und die Aufstellungen sind fixiert.",
-    "notEnoughPresentTeams": "Eine Runde braucht mindestens {needed} anwesende Mannschaften — es sind nur {have} anwesend.",
-    "partialTeamAbsence": "Nur ein Teil der Spieler von Mannschaft {name} ist als abwesend markiert. Markieren Sie die ganze Mannschaft als abwesend, oder losen Sie die Runde aus und tragen Sie den kampflosen Sieg am Brett ein."
+    "notEnoughPresentTeams": "Eine Runde braucht mindestens {needed} anwesende Mannschaften — es sind nur {have} anwesend."
   },
   "tiebreaks": {
     "points": {

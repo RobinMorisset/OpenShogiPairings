@@ -66,7 +66,6 @@ export const ERROR_CODE_KEYS: Record<string, string> = {
   not_enough_teams: "serverError.notEnoughTeams",
   no_late_registration_in_team_mode: "serverError.noLateRegistrationInTeamMode",
   not_enough_present_teams: "serverError.notEnoughPresentTeams",
-  partial_team_absence: "serverError.partialTeamAbsence",
 
   unsupported_format_version: "serverError.unsupportedFormatVersion",
   malformed_save: "serverError.malformedSave",

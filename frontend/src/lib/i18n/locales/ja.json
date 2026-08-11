@@ -188,7 +188,9 @@
         "cup": "この卓は決勝トーナメント表によるもので、スイス式の組み合わせではありません。",
         "absent": "この選手はこの回戦を欠場したため、組み合わせの対象外でした。"
       }
-    }
+    },
+    "markJustifiedTitle": "{name} を「事由あり欠席」に変更（0−）",
+    "clearAbsenceTitle": "{name} はやはり出場した"
   },
   "resultsView": {
     "noPlayers": "登録された選手はまだいません。",
@@ -229,7 +231,8 @@
     "handicapGameLoss": "Wielルール: 上手が勝ちとして扱われるため、この下手の勝ちは順位に反映されません。",
     "tiebreakNoOpponents": "対象となる対戦相手がまだいません",
     "tiebreakDropped": "（除外: {dropped}）",
-    "noRoundsCompleted": "終了した回戦はまだありません。回戦が終わるごとにここに表示されます。"
+    "noRoundsCompleted": "終了した回戦はまだありません。回戦が終わるごとにここに表示されます。",
+    "justifiedTitle": "{name} との対局を事由ありで欠席（0−。負けとして扱います）"
   },
   "pairingSource": {
     "swiss": "スイス式",
@@ -437,8 +440,7 @@
     "membersWithoutPairingRating": "マクマホンの持ち点には、レーティングのないチームメンバー全員に組み合わせ用ELOが必要です（あと {count} 人）。",
     "notEnoughTeams": "団体戦には少なくとも2チームが必要です（現在 {have} チーム）。",
     "noLateRegistrationInTeamMode": "団体戦では追加登録できません。全員がチームに所属している必要があり、メンバー構成は確定済みです。",
-    "notEnoughPresentTeams": "1ラウンドには少なくとも {needed} チームの参加が必要ですが、{have} チームしかいません。",
-    "partialTeamAbsence": "チーム {name} の一部の選手だけが欠席になっています。チーム全体を欠席にするか、組み合わせを行ってから各対局に不戦勝を記録してください。"
+    "notEnoughPresentTeams": "1ラウンドには少なくとも {needed} チームの参加が必要ですが、{have} チームしかいません。"
   },
   "tiebreaks": {
     "points": {

@@ -93,7 +93,7 @@ describe("matchScore", () => {
 
   it("credits a forfeit to the side that turned up", () => {
     const r = round([
-      board(1, 3, { outcome: { kind: "forfeit", absent: "player2" } }),
+      board(1, 3, { outcome: { kind: "forfeit", absent: { player2: "no_show" } } }),
       board(2, 4, { outcome: { kind: "won", winner: "player2" } }),
       board(5, 6, { outcome: { kind: "won", winner: "player2" } }),
     ]);
@@ -108,7 +108,7 @@ describe("matchScore", () => {
     const r = round([
       board(1, 3, { outcome: { kind: "won", winner: "player1" } }),
       board(2, 4, { outcome: { kind: "won", winner: "player2" } }),
-      board(5, 6, { outcome: { kind: "forfeit", absent: "both" } }),
+      board(5, 6, { outcome: { kind: "forfeit", absent: { both: ["no_show", "no_show"] } } }),
     ]);
     const m = teamMatches(r, teams, players)[0];
     const score = matchScore(r, m, ["player1", "player2", null]);

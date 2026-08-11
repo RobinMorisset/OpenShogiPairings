@@ -216,9 +216,6 @@ fn domain_payload(err: &TournamentError) -> Option<(&'static str, BTreeMap<Strin
                 ("have", have.to_string()),
             ],
         ),
-        TournamentError::PartialTeamAbsence { name } => {
-            with("partial_team_absence", [("name", name.clone())])
-        }
 
         // Point adjustments.
         TournamentError::EmptyAdjustmentReason => bare("empty_adjustment_reason"),
@@ -266,6 +263,9 @@ fn domain_payload(err: &TournamentError) -> Option<(&'static str, BTreeMap<Strin
         // forcing, so these two mean a client sent something it never renders.
         | TournamentError::PlayerLevelDraftInTeamMode
         | TournamentError::PlayerAdjustmentInTeamMode
+        // The UI only offers a justified absence in team mode, so this means a
+        // client sent a kind it never renders there.
+        | TournamentError::JustifiedAbsenceOutsideTeamMode
         // Deliberately English: unfinished scaffolding (the UI offers no team
         // probe yet), not a state the product is meant to have.
         | TournamentError::TeamProbeNotAvailable
@@ -445,11 +445,9 @@ mod tests {
             TournamentError::PairingRatingNotApplicable,
             TournamentError::NoLateRegistrationInTeamMode,
             TournamentError::NotEnoughPresentTeams { needed: 2, have: 1 },
-            TournamentError::PartialTeamAbsence {
-                name: "Paris".to_string(),
-            },
             TournamentError::PlayerLevelDraftInTeamMode,
             TournamentError::PlayerAdjustmentInTeamMode,
+            TournamentError::JustifiedAbsenceOutsideTeamMode,
             TournamentError::TeamProbeNotAvailable,
             TournamentError::DrawnOnForfeitedBoard { round: 1, board: 0 },
         ]

@@ -188,7 +188,9 @@
         "cup": "Tento stôl pochádza z pohárového pavúka, nie zo švajčiarskeho algoritmu.",
         "absent": "Tento hráč toto kolo vynechal, takže ho algoritmus nepároval."
       }
-    }
+    },
+    "markJustifiedTitle": "Označiť {name} ako ospravedlnene neprítomného (0−)",
+    "clearAbsenceTitle": "{name} sa napokon dostavil"
   },
   "resultsView": {
     "noPlayers": "Zatiaľ nie sú prihlásení žiadni hráči.",
@@ -229,7 +231,8 @@
     "handicapGameLoss": "Pravidlo Wiel: za víťaza sa počíta ten, kto dal hendikep, takže toto prekvapivé víťazstvo sa do tabuľky nezaráta.",
     "tiebreakNoOpponents": "Zatiaľ sa nezapočítali žiadni súperi",
     "tiebreakDropped": "(vynechané: {dropped})",
-    "noRoundsCompleted": "Zatiaľ nebolo dokončené žiadne kolo — výsledky sa tu objavia, ako budú kolá pribúdať."
+    "noRoundsCompleted": "Zatiaľ nebolo dokončené žiadne kolo — výsledky sa tu objavia, ako budú kolá pribúdať.",
+    "justifiedTitle": "Ospravedlnená neprítomnosť proti {name} (0−; počíta sa ako prehra)"
   },
   "pairingSource": {
     "swiss": "Švajčiarsky systém",
@@ -437,8 +440,7 @@
     "membersWithoutPairingRating": "Štartovacie body MacMahona vyžadujú žrebovacie ELO pre každého člena bez ratingu — chýba ich {count}.",
     "notEnoughTeams": "Družstvový turnaj potrebuje aspoň 2 družstvá (teraz {have}).",
     "noLateRegistrationInTeamMode": "Družstvový turnaj neprijíma dodatočné prihlášky: každý hráč musí byť v družstve a zostavy sú zmrazené.",
-    "notEnoughPresentTeams": "Kolo potrebuje aspoň {needed} prítomných družstiev — prítomných je len {have}.",
-    "partialTeamAbsence": "Ako neprítomná je označená len časť hráčov družstva {name}. Označte celé družstvo za neprítomné, alebo vyžrebujte kolo a zapíšte kontumáciu na šachovnici."
+    "notEnoughPresentTeams": "Kolo potrebuje aspoň {needed} prítomných družstiev — prítomných je len {have}."
   },
   "tiebreaks": {
     "points": {

@@ -5,7 +5,7 @@ import type {
   Handicap,
   HealthStatus,
   NewPlayer,
-  NoShow,
+  Forfeit,
   RatedPlayer,
   RoundExplanation,
   SitoutValue,
@@ -652,7 +652,7 @@ export function setBoardDrawn(
 export function setBoardNoShow(
   roundNumber: number,
   boardIndex: number,
-  absent: NoShow | null,
+  absent: Forfeit | null,
 ): Promise<TournamentResponse> {
   return request<TournamentResponse>(
     scopedPath(`/rounds/${roundNumber}/boards/${boardIndex}/no-show`),

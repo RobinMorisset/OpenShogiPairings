@@ -231,14 +231,14 @@ fn game_cell(
         Winner::Player2
     };
 
-    // A no-show board renders distinctly: `0#` for a player who was absent (both,
-    // under a double no-show), `0+` (a bye-equivalent free point) for the one who
-    // showed up.
-    if board.outcome.forfeit().is_some() {
-        return if board.no_show_absent(side) {
-            "0#".into()
-        } else {
-            "0+".into()
+    // A forfeited board renders distinctly: the missing side's own cell says why
+    // it missed — `0#` for an unjustified no-show, `0-` for an absence with a
+    // reason — and the side that turned up gets `0+`, the bye-equivalent free
+    // point. Under a double forfeit both cells are the absentees'.
+    if let Some(forfeit) = board.outcome.forfeit() {
+        return match forfeit.kind(side) {
+            Some(kind) => kind.cell().into(),
+            None => "0+".into(),
         };
     }
 
@@ -298,8 +298,8 @@ fn pad(s: &str, width: usize) -> String {
 mod tests {
     use super::*;
     use crate::round::{
-        CupStage, Handicap, HandicapGame, NoShow, Outcome, PairingSource, Sitout, SitoutKind,
-        SitoutValue,
+        AbsenceKind, CupStage, Forfeit, Handicap, HandicapGame, Outcome, PairingSource, Sitout,
+        SitoutKind, SitoutValue,
     };
 
     /// The tournament number assigned to a registered player (only valid after
@@ -511,7 +511,7 @@ mod tests {
             number: 2,
             boards: vec![Board {
                 outcome: Outcome::Forfeit {
-                    absent: NoShow::Player2,
+                    absent: Forfeit::Player2(AbsenceKind::NoShow),
                 }, // P2 absent
                 ..Board::pending(p1, p2, 0, PairingSource::Swiss)
             }],
@@ -527,6 +527,38 @@ mod tests {
         assert!(grid.contains("0#]"), "no-show token missing: {grid}");
     }
 
+    /// The two absence kinds are what the grid distinguishes: `0#` says the
+    /// player simply didn't turn up, `0-` that they were absent for a reason.
+    /// The opponent's cell is the same free point either way.
+    #[test]
+    fn a_justified_absence_reads_as_a_dash_not_a_hash() {
+        let (mut t, p1, p2) = one_board(|_| {});
+        t.rounds.push(Round {
+            number: 2,
+            boards: vec![Board {
+                outcome: Outcome::Forfeit {
+                    absent: Forfeit::Player2(AbsenceKind::Justified),
+                },
+                ..Board::pending(p1, p2, 0, PairingSource::Swiss)
+            }],
+            sitouts: Vec::new(),
+            completed: true,
+        });
+        let grid = to_grid(&t, &t.standings());
+        assert!(
+            grid.contains("0-]"),
+            "justified absence token missing: {grid}"
+        );
+        assert!(
+            !grid.contains("0#"),
+            "an unjustified token appeared: {grid}"
+        );
+        assert!(
+            grid.contains("0+]"),
+            "the opponent still takes the point: {grid}"
+        );
+    }
+
     #[test]
     fn double_no_show_marks_both_absent() {
         // Neither player shows up: both cells read `0#`, nobody gets `0+`.
@@ -535,7 +567,7 @@ mod tests {
             number: 2,
             boards: vec![Board {
                 outcome: Outcome::Forfeit {
-                    absent: NoShow::Both,
+                    absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
                 },
                 ..Board::pending(p1, p2, 0, PairingSource::Swiss)
             }],
