@@ -521,6 +521,7 @@
     "removeAdjustment": "Remove this adjustment",
     "adjustmentPointsPlaceholder": "Points",
     "adjustmentReasonPlaceholder": "Reason (required)",
+    "cancelAdjustment": "Cancel",
     "addAdjustment": "Add"
   },
   "teamStandings": {

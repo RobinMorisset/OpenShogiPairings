@@ -176,6 +176,23 @@
     adjustmentReason = "";
   }
 
+  /** Close the form, dropping whatever was typed — the way out of a misclick. */
+  function closeAdjustments() {
+    adjustingId = null;
+    adjustmentDelta = "";
+    adjustmentReason = "";
+  }
+
+  function adjustmentKeydown(event: KeyboardEvent, teamId: string) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitAdjustment(teamId);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closeAdjustments();
+    }
+  }
+
   function adjustmentTotal(team: Team): number {
     return (team.adjustments ?? []).reduce((sum, a) => sum + a.delta, 0);
   }
@@ -323,6 +340,7 @@
                 placeholder={$_("teams.adjustmentPointsPlaceholder")}
                 bind:value={adjustmentDelta}
                 disabled={busy}
+                onkeydown={(e) => adjustmentKeydown(e, team.id)}
               />
               <input
                 class="adj-reason"
@@ -330,7 +348,7 @@
                 placeholder={$_("teams.adjustmentReasonPlaceholder")}
                 bind:value={adjustmentReason}
                 disabled={busy}
-                onkeydown={(e) => e.key === "Enter" && submitAdjustment(team.id)}
+                onkeydown={(e) => adjustmentKeydown(e, team.id)}
               />
               <button
                 type="button"
@@ -338,6 +356,11 @@
                 disabled={busy}
                 onclick={() => submitAdjustment(team.id)}>{$_("teams.addAdjustment")}</button
               >
+              <!-- Opening this is one click and closing it was another click on
+                   the same ±, which is not something a misclick suggests. -->
+              <button type="button" class="small" onclick={closeAdjustments}>
+                {$_("teams.cancelAdjustment")}
+              </button>
             </div>
           </div>
         {/if}
@@ -627,7 +650,15 @@
   }
   .adjustment-form {
     display: flex;
+    align-items: center;
     gap: 0.3rem;
+  }
+  /* Sized to the `.small` buttons they sit between, not to the panel's
+     full-size fields — this is a mini-form inside a card. */
+  .adj-delta,
+  .adj-reason {
+    font-size: 0.85em;
+    padding: 0.15rem 0.35rem;
   }
   .adj-delta {
     width: 4rem;

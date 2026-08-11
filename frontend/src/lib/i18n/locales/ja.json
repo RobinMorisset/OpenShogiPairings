@@ -521,6 +521,7 @@
     "removeAdjustment": "この調整を削除",
     "adjustmentPointsPlaceholder": "点数",
     "adjustmentReasonPlaceholder": "理由（必須）",
+    "cancelAdjustment": "キャンセル",
     "addAdjustment": "追加"
   },
   "teamStandings": {

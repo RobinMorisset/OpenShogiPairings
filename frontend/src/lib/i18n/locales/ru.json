@@ -521,6 +521,7 @@
     "removeAdjustment": "Убрать эту корректировку",
     "adjustmentPointsPlaceholder": "Очки",
     "adjustmentReasonPlaceholder": "Причина (обязательно)",
+    "cancelAdjustment": "Отмена",
     "addAdjustment": "Добавить"
   },
   "teamStandings": {
