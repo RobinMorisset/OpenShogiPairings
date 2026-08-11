@@ -8,7 +8,7 @@ import type { Wins } from "./Wins";
  * twin of [`Standing`](crate::standings::Standing). Its position in the
  * [`compute_team_standings`] vector is the team's rank.
  *
- * Faces callers by team [`Uuid`], as `Standing` does by player id; the members
+ * Faces callers by team `Uuid`, as `Standing` does by player id; the members
  * are listed in board order so a client can expand a team row into its players
  * without re-deriving the roster.
  *

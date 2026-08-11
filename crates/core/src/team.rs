@@ -27,7 +27,7 @@ use crate::team_scoring::{match_boards, matches_in_round, team_units, TeamMatch,
 use crate::tournament::{Tournament, TournamentError, MIN_TEAMS_PER_ROUND};
 use crate::units::{TeamId, TournamentId, UnitKey};
 
-/// A registered team. Stored on [`Tournament`](crate::Tournament); present (and
+/// A registered team. Stored on [`Tournament`]; present (and
 /// non-empty) only in team mode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
@@ -393,7 +393,7 @@ impl Tournament {
     }
 
     /// Confirm a team round: pair the present *teams*, then expand each matched
-    /// pair into its `size` boards (roster[k] against roster[k]) and each bye
+    /// pair into its `size` boards (`roster[k]` against `roster[k]`) and each bye
     /// into one sit-out per member.
     ///
     /// The team path is much shorter than the individual one because team mode

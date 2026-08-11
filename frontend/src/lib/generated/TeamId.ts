@@ -3,7 +3,7 @@
 /**
  * A team's dense number — the 1-based key the team score tables are indexed by,
  * assigned at finalization by descending average pairing rating, exactly as
- * [`TournamentId`] is for players. Distinct from the team's [`Uuid`] (its stable
+ * [`TournamentId`] is for players. Distinct from the team's `Uuid` (its stable
  * identity, which survives a rename or a roster edit).
  *
  * Like [`TournamentId`] it serializes as a bare number, exports to TypeScript as

@@ -1845,7 +1845,7 @@ impl Tournament {
     /// flag on the board. Like recording a winner, this keeps the round's
     /// `completed` flag in sync — a forfeit counts toward closing the round.
     ///
-    /// A [`justified`](AbsenceKind::Justified) absence is rejected outside team
+    /// A [`justified`](crate::round::AbsenceKind::Justified) absence is rejected
     /// mode: an individual tournament excludes an absent player from the pairing
     /// before a board exists, so there is no board to mark, and accepting one
     /// would put a `0-` in the grid that nothing else in the tournament can

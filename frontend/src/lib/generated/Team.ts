@@ -3,7 +3,7 @@ import type { PointAdjustment } from "./PointAdjustment";
 import type { TeamId } from "./TeamId";
 
 /**
- * A registered team. Stored on [`Tournament`](crate::Tournament); present (and
+ * A registered team. Stored on [`Tournament`]; present (and
  * non-empty) only in team mode.
  */
 export type Team = { 

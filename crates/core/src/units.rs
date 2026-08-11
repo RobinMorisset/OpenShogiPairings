@@ -175,7 +175,7 @@ impl From<TournamentId> for usize {
 
 /// A team's dense number — the 1-based key the team score tables are indexed by,
 /// assigned at finalization by descending average pairing rating, exactly as
-/// [`TournamentId`] is for players. Distinct from the team's [`Uuid`] (its stable
+/// [`TournamentId`] is for players. Distinct from the team's `Uuid` (its stable
 /// identity, which survives a rename or a roster edit).
 ///
 /// Like [`TournamentId`] it serializes as a bare number, exports to TypeScript as
@@ -256,7 +256,7 @@ impl From<TournamentId> for UnitKey {
 
 /// The inverse, for turning the engine's answer back into players. Only valid on
 /// a key the player wrapper produced — [`UnitKey::PHANTOM`] maps to
-/// [`TournamentId(0)`], which is the same "no player" sentinel the counterfactual
+/// `TournamentId(0)`, which is the same "no player" sentinel the counterfactual
 /// API already uses on the wire.
 impl From<UnitKey> for TournamentId {
     fn from(k: UnitKey) -> Self {
