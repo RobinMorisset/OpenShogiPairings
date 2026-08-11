@@ -42,6 +42,8 @@ mod scoring;
 mod settings;
 pub mod sim;
 mod standings;
+mod team;
+mod team_scoring;
 mod tournament;
 mod units;
 
@@ -55,26 +57,28 @@ pub use elo::{estimate_elos, PROVISIONAL_GAMES_THRESHOLD};
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
 pub use fesa_results::import_fesa_results;
 pub use pairing::{
-    pair_round_weighted, AffectedCycle, BoardLedger, Counterfactual, CounterfactualMode,
-    RoundExplanation, RuleContribution, RuleDelta, RuleId, RuleTotal, ScopeReason,
+    AffectedCycle, BoardLedger, Counterfactual, CounterfactualMode, RoundExplanation,
+    RuleContribution, RuleDelta, RuleId, RuleTotal, ScopeReason,
 };
 pub use player::{Grade, GradeKind, NewPlayer, Player, PointAdjustment};
 pub use result_import::ResultImportError;
 pub use round::{
-    Board, CupStage, Handicap, HandicapGame, NoShow, PairingSource, Round, RoundDraft, Sitout,
-    SitoutKind, SitoutValue, Winner,
+    AbsenceKind, Board, CupStage, ForcedMatch, Forfeit, Handicap, HandicapGame, Outcome,
+    PairingSource, Round, RoundDraft, Sitout, SitoutKind, SitoutValue, Winner,
 };
 pub use settings::{
     ClubProtection, DateError, EloEstimator, EloPriorShape, FloaterStyle, HandicapDisplay,
     HandicapPolicy, IsoDate, MacMahon, MacMahonSource, MacMahonThreshold, PairingMode,
-    PlayerCategory, Ratio, RatioAtLeastOne, ThresholdCriterion, Tiebreak, TournamentDates,
-    TournamentSettings, UnratedK,
+    PlayerCategory, Ratio, RatioAtLeastOne, TeamModeConflict, TeamSettings, ThresholdCriterion,
+    Tiebreak, TournamentDates, TournamentSettings, UnratedK, TEAM_SIZES,
 };
 pub use standings::{compute_standings, Standing};
+pub use team::{average_pairing_rating, pairing_rating, Team};
+pub use team_scoring::{compute_team_standings, TeamMatch, TeamStanding};
 pub use tournament::{
     Tournament, TournamentError, MIN_PLAYERS_PER_ROUND, TOURNAMENT_FORMAT_VERSION,
 };
-pub use units::{HalfPoints, TournamentId, Wins};
+pub use units::{HalfPoints, TeamId, TournamentId, UnitKey, Wins};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

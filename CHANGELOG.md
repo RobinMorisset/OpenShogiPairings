@@ -9,9 +9,11 @@ will be explicitly mentioned in the changelog for that version though.
 
 ## [Unreleased]
 
-Save files from earlier versions load, **except** one saved mid-tournament with
-the hybrid cup enabled: the cup now records which format it was seeded under, and
-that field has no default. Re-create such a tournament rather than loading it.
+**Save files from earlier versions no longer load** (the save format version is
+now 9): a board records what happened on it as a single value instead of three
+separate flags — and, when it was forfeited, why each missing side missed it —
+and tournaments can carry teams. A stale file is rejected with a clear message
+rather than half-parsed; re-create the tournament.
 
 ### Added
 
@@ -26,6 +28,80 @@ that field has no default. Re-create such a tournament rather than loading it.
   sent. The dates are entered as a pair (a one-day event repeats the day) and
   validated — an impossible date or a range ending before it starts is rejected
   rather than exported.
+- **Team tournaments, first half** (see
+  [`docs/team-tournaments.md`](docs/team-tournaments.md)): a tournament can be
+  set to team mode with a team size (2–9, default 3), players grouped into named
+  teams with an explicit board order, and an unrated member given a "pairing
+  ELO" used only for pairing-time computations and never exported. Finalizing
+  validates the rosters loudly — every player in exactly one team, every team
+  full, at least two teams — and numbers the teams by descending average rating.
+  Team mode and the features it cannot support (the cup, long games, ELO
+  pairing, grade-based MacMahon thresholds, the estimated-ELO tie-break) are
+  rejected as a conflicting pair, naming both, rather than either being silently
+  disabled.
+- **Team pairing**: a team round pairs the *teams* — same Swiss/MacMahon rules,
+  applied to team points, team averages and the teams already met — and expands
+  each match into one ordinary board per position, board k against board k. A
+  team bye is one full-point sit-out per member; an absent team is left out of
+  the pairing as a whole. Everything above the boards is derived, never stored:
+  the match a board belongs to, the match result (more board wins takes the
+  point, level splits it), and each team's running score. Club protection now
+  counts the same-club *games* a match would create, so a mixed-club team is
+  handled without any notion of a "team club". Simulating a team tournament is
+  refused explicitly — its metrics are all defined over individual standings.
+- **Team standings**, ranked by the same criteria with team semantics: the SOS
+  family sums opposing *teams'* scores and direct confrontation counts matches
+  won. A new **board wins** tie-break counts games won — a team's total across
+  every board, the established second criterion in team events after match
+  points, and a player's own game count in an individual tournament. Per-player
+  point adjustments are refused in team mode for now, since the ranking is by
+  team and a per-player bonus would move nothing visible; team-level adjustments
+  are still to come.
+- **Team roster endpoints**, so a team tournament can be configured, rostered,
+  finalized and played entirely over the API: create/rename/delete a team,
+  add/remove a member, set or reset the board order, and set an unrated member's
+  pairing ELO. See the route table in the README.
+- **Team setup in the interface**: a "Team tournament" toggle and team size in
+  Settings, and a Teams tab next to Players — create, rename and delete
+  teams, move players in and out, reorder the boards (or reset that order by
+  rating), and give an unrated member a pairing ELO. A player joining a team
+  takes the board their rating calls for, so a roster built one player at a
+  time is already in board order. Each card shows its size
+  (`2/3`) and average rating, so an incomplete roster is visible before
+  finalizing rather than only in the error afterwards. The panel goes read-only
+  once registration is finalized, matching the frozen rosters.
+- **Team results in the interface**: the round view groups a round's boards by
+  the match they belong to, each under a header naming the two teams and the
+  board wins so far, and the Standings tab becomes one table — each team,
+  ranked by the configured criteria, followed by its players in board order.
+  The team's name straddles the player columns; the matches won, the ranking
+  criteria and the float markers belong to the team row, since those are team
+  quantities. The round columns are shared: the team's cell names the team it
+  met and how the match went, the player's names their own opponent. A round a team sat out is
+  re-scored (`0+` / `0=` / `0−`) from the team's own cell, which writes the
+  value to every member at once — a team sits out together, and its score for
+  that round is read from entries that have to agree.
+- **Justified absences.** A forfeited board now records *why* each missing side
+  missed it, and the cross-table and American grid say so: `0-` for a player
+  absent for a reason, `0#` for one who simply didn't turn up. It exists because
+  a team plays whether or not every member appears — a player who falls ill
+  still has a board, and stamping it with the unjustified `0#` put the wrong
+  thing in the record. Marking part of a team absent before pairing now creates
+  those boards already forfeited that way, instead of being refused. In an
+  individual tournament an absent player never reaches a board, so the kind
+  doesn't arise there and is rejected.
+- **Customizing a team round**: the draft's forced pairings and forced byes name
+  *teams* in a team tournament, since teams are what get paired — a forced match
+  expands to its boards like any other. The "why this pairing?" probe and the
+  "force this pairing" action follow, naming teams too. Marking players absent
+  stays per player, because a member can be absent without their team being —
+  but the list is grouped by team, with a box that marks a whole withdrawn one
+  absent in a single step.
+- **Team point adjustments**: a manual bonus or penalty, with its mandatory
+  reason, applies to a *team* in a team tournament — the ranking is by team, so
+  that is the level a delta can move. Unlike the roster controls it stays
+  available once registration is finalized, which is when a referee actually
+  awards one. Per-player adjustments remain refused in team mode.
 
 - **Hybrid cup: a qualification-round format** (Settings → Hybrid cup), used by
   the German Championship. The top half of the bracket is pre-qualified and
@@ -80,6 +156,16 @@ that field has no default. Re-create such a tournament rather than loading it.
   nothing the cell didn't already, and the rating answers what the hover is
   usually for: how strong was that opponent. An unrated opponent keeps the bare
   name.
+
+### Fixed
+
+- Marking a board as a draw after flagging it a no-show recorded a draw on a
+  game nobody played, and fed it to the ELO estimate as a real ½ point. The
+  draw button is now disabled on a forfeited board (clear the no-show first).
+- The float markers in the standings cross-table were doubled: a player who
+  played one point up showed `^^`, two points up `^^^^`. The gap is stored in
+  half-points and the markers counted it raw. Only the display was wrong —
+  the pairings themselves read the direction, never the count.
 
 ## [1.3.0] - 2026-08-05
 

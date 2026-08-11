@@ -29,12 +29,6 @@ Known limitations and future work, roughly ordered by area.
   with a "the data behind this has changed since" warning. Design in the appendix
   of [docs/public-access.md](docs/public-access.md).
 
-- **Team tournaments** — design settled in
-  [docs/team-tournaments.md](docs/team-tournaments.md): teams as the pairing
-  unit, boards as the atom, derived match outcomes. First step is the
-  preliminary board-outcome sum-type refactor (own commit), then the team
-  mode itself.
-
 ## Multi-referee server
 
 - **OAuth authentication**

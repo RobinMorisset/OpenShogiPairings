@@ -82,6 +82,12 @@ pub enum SimError {
     /// The base tournament has too few players to pair a round.
     #[error("need at least {MIN_PLAYERS_PER_ROUND} players to simulate (have {have})")]
     NotEnoughPlayers { have: usize },
+    /// Team tournaments aren't simulated (yet). The pairing would run, but every
+    /// metric here is defined over individual standings — fidelity, welfare, the
+    /// ELO estimate's error — so the numbers would be meaningless rather than
+    /// wrong-looking. Refused instead. See `docs/team-tournaments.md`.
+    #[error("simulating a team tournament is not supported")]
+    TeamTournament,
 }
 
 /// Cup setup for a simulation: the players eligible for the bracket (the caller
@@ -219,8 +225,8 @@ pub fn game_elo_diffs(tournament: &Tournament, strengths: &StrengthMap) -> Vec<f
     let mut diffs = Vec::new();
     for round in &tournament.rounds {
         for board in &round.boards {
-            if board.result.is_none() {
-                continue; // unplayed — not a game yet
+            if board.outcome.winner().is_none() {
+                continue; // unplayed (or forfeited) — not a game yet
             }
             if let (Some(&a), Some(&b)) =
                 (strengths.get(&board.player1), strengths.get(&board.player2))
@@ -324,7 +330,7 @@ pub fn player_game_interest(
     let mut count: HashMap<TournamentId, u32> = HashMap::new();
     for round in &tournament.rounds {
         for board in &round.boards {
-            if board.result.is_none() {
+            if board.outcome.winner().is_none() {
                 continue;
             }
             if let (Some(&a), Some(&b)) =
@@ -524,7 +530,7 @@ fn autofill_last_round(
             .boards
             .iter()
             .enumerate()
-            .filter(|(_, b)| b.result.is_none())
+            .filter(|(_, b)| !b.is_decided())
             .map(|(i, b)| {
                 // Boards already carry the players' tournament numbers — the
                 // deterministic game-outcome key (see [`game_uniform`]).
@@ -586,6 +592,9 @@ pub fn simulate_run(
     cup: Option<&CupConfig>,
     rng: &mut impl Rng,
 ) -> Result<RunOutcome, SimError> {
+    if base.settings.team_mode() || settings.team_mode() {
+        return Err(SimError::TeamTournament);
+    }
     let mut tournament = fresh_state(base, settings, cup)?;
     // A per-run key for the game-keyed outcomes. Drawn before the strength jitter
     // so it depends only on the run's seed, not on how many players were jittered —
@@ -680,6 +689,42 @@ mod tests {
         }
         t.finalize_registration().unwrap();
         t
+    }
+
+    /// The simulator's metrics are all defined over individual standings, so a
+    /// team tournament is refused rather than measured with numbers that would
+    /// look fine and mean nothing.
+    #[test]
+    fn a_team_tournament_is_refused_rather_than_simulated() {
+        let mut t = Tournament::new("Teams").unwrap();
+        t.update_settings(TournamentSettings {
+            teams: Some(crate::settings::TeamSettings { size: 2 }),
+            ..TournamentSettings::default()
+        })
+        .unwrap();
+        for i in 0..4 {
+            t.add_player(rated(&format!("P{i}"), 1500)).unwrap();
+        }
+        for k in 0..2 {
+            let team = t.add_team(&format!("T{k}")).unwrap().id;
+            let members: Vec<Uuid> = t.players[k * 2..k * 2 + 2].iter().map(|p| p.id).collect();
+            for m in members {
+                t.add_team_member(team, m).unwrap();
+            }
+        }
+        t.finalize_registration().unwrap();
+        let mut rng = ChaCha8Rng::seed_from_u64(0);
+        let err = simulate_run(
+            &t,
+            &t.settings.clone(),
+            &StrengthMap::new(),
+            &OracleModel::new(0.0, 1.0),
+            1,
+            None,
+            &mut rng,
+        )
+        .unwrap_err();
+        assert!(matches!(err, SimError::TeamTournament));
     }
 
     fn id_of(t: &Tournament, last: &str) -> TournamentId {

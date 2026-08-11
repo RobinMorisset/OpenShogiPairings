@@ -16,6 +16,7 @@
     "restore": "Przywróć",
     "tabSettings": "Ustawienia",
     "tabPlayers": "Gracze ({count})",
+    "tabTeams": "Drużyny ({count})",
     "tabResults": "Tabela wyników",
     "tabCup": "Puchar",
     "tabRound": "Runda {number}",
@@ -136,6 +137,7 @@
     "carriedHint": "Kliknij gracza, aby zapisać zwycięzcę jego dwurundowej partii.",
     "clickToSetWinner": "Kliknij, aby wskazać zwycięzcę",
     "drawTitle": "Przed partią decydującą padł remis (zapisany na potrzeby ELO)",
+    "drawForfeitedTitle": "Partia nie została rozegrana, więc nie było remisu: najpierw usuń walkower",
     "giverTitle": "Forę daje gracz o wyższym rankingu",
     "giverGives": "{name} daje",
     "needsDifferentRatings": "Wymaga dwóch graczy o różnym rankingu",
@@ -188,8 +190,17 @@
         "forced": "Ten stolik został ustalony przez sędziego, a nie wybrany przez algorytm.",
         "cup": "Ten stolik pochodzi z drabinki pucharowej, a nie z algorytmu szwajcarskiego.",
         "absent": "Ten gracz był w tej rundzie nieobecny, więc algorytm go nie kojarzył."
+      },
+      "pickTeam": "Wybierz drużynę…",
+      "hintForceTeams": "Wybierz dwie drużyny, aby zobaczyć, ile kosztowałoby skojarzenie ich ze sobą.",
+      "hintForbidTeams": "Wybierz dwie skojarzone drużyny, aby zobaczyć, dlaczego algorytm dobrał je w parę.",
+      "scopedOutTeam": {
+        "forced": "Ten mecz został ustalony przez sędziego, a nie wybrany przez algorytm.",
+        "absent": "Ta drużyna była w tej rundzie nieobecna, więc algorytm jej nie kojarzył."
       }
-    }
+    },
+    "markJustifiedTitle": "Oznacz {name} jako nieobecnego z ważnego powodu (0−)",
+    "clearAbsenceTitle": "{name} jednak się stawił"
   },
   "resultsView": {
     "noPlayers": "Nie zarejestrowano jeszcze żadnych graczy.",
@@ -232,6 +243,8 @@
     "tiebreakNoOpponents": "Nie policzono jeszcze żadnych przeciwników",
     "tiebreakDropped": "(pominięto: {dropped})",
     "noRoundsCompleted": "Nie ukończono jeszcze żadnej rundy — wyniki pojawią się tutaj w miarę kończenia kolejnych rund.",
+    "justifiedTitle": "Nieobecność z ważnego powodu z {name} (0−; liczy się jako porażka)",
+    "teamMatchTitle": "{name} — {wins}–{losses} przy stolikach",
     "roundInProgressNote": "Runda {number} trwa: jej kolumna wypełnia się w miarę wpisywania wyników, a klasyfikacja jest przeliczana po ukończeniu rundy."
   },
   "pairingSource": {
@@ -263,7 +276,7 @@
     "removeForcedPairing": "Usuń tę wymuszoną parę",
     "playerEllipsis": "Gracz…",
     "vs": "vs",
-    "forcedBye": "Wymuszone pauzy",
+    "forcedBye": "Wymuszona pauza",
     "forcedByeHint": "Działa tylko przy nieparzystej liczbie obecnych graczy — ten, kto zostanie bez pary, pauzuje i dostaje punkt. Aby wyłączyć gracza z gry przy parzystej liczbie uczestników, oznacz go jako nieobecnego, a następnie w tabeli wyników ustal, ile punktów przyniosła mu ta runda.",
     "forcedByeEvenWarning": "Liczba uczestników jest teraz parzysta, więc ta pauza zostawiłaby bez pary kolejnego gracza, któremu algorytm również przyznałby pauzę. Usuń ją albo oznacz kogoś jako nieobecnego.",
     "removeForcedBye": "Usuń tę wymuszoną pauzę",
@@ -271,7 +284,13 @@
     "startRound": "Rozpocznij rundę {number}",
     "useUndoHintPrefix": "Użyj",
     "useUndoHintSuffix": ", aby odrzucić ten szkic.",
-    "needAtLeastTwoPresent": "Potrzeba co najmniej 2 obecnych graczy."
+    "needAtLeastTwoPresent": "Potrzeba co najmniej 2 obecnych graczy.",
+    "teamEllipsis": "Drużyna…",
+    "needAtLeastTwoTeams": "Runda wymaga co najmniej dwóch obecnych drużyn.",
+    "summaryTeams": "Przygotowanie rundy {number} — drużyn w kojarzeniu: {present}, nieobecnych zawodników: {absent}.",
+    "absentWholeTeam": "Oznacz całą drużynę jako nieobecną w tej rundzie",
+    "forcedByeHintTeams": "Działa tylko przy nieparzystej liczbie obecnych drużyn — ta, która zostanie bez pary, pauzuje i dostaje punkt. Aby wyłączyć drużynę z gry przy parzystej liczbie, oznacz ją jako nieobecną, a następnie w tabeli wyników ustal, ile punktów przyniosła jej ta runda.",
+    "forcedByeEvenWarningTeams": "Liczba drużyn jest teraz parzysta, więc ta pauza zostawiłaby bez pary kolejną drużynę, której algorytm również przyznałby pauzę. Usuń ją albo oznacz drużynę jako nieobecną."
   },
   "serverStatus": {
     "contacting": "Łączenie z serwerem…",
@@ -404,7 +423,12 @@
     "moveDown": "Przesuń w dół",
     "removeTiebreak": "Usuń to kryterium dodatkowe",
     "noTiebreaks": "Brak kryteriów dodatkowych — gracze z równą liczbą punktów są ustawiani według numeru turniejowego.",
-    "addTiebreakPlaceholder": "Dodaj kryterium dodatkowe…"
+    "addTiebreakPlaceholder": "Dodaj kryterium dodatkowe…",
+    "teamTitle": "Turniej drużynowy",
+    "teamDesc": "Kojarzenie drużyn zamiast pojedynczych zawodników: mecz dwóch drużyn to jedna zwykła partia na każdej szachownicy, pierwsza przeciw pierwszej i tak dalej. Wyniki nadal wprowadza się osobno dla każdej partii.",
+    "teamCheckbox": "Rozegraj jako turniej drużynowy",
+    "teamSize": "Zawodników w drużynie",
+    "teamLocked": "Tryb drużynowy i rozmiar drużyny są ustalone po zamknięciu rejestracji."
   },
   "serverError": {
     "noTournament": "Nie ma jeszcze żadnego turnieju — najpierw utwórz nowy.",
@@ -428,7 +452,23 @@
     "zeroPointAdjustment": "Korekta o zero punktów nie miałaby żadnego efektu.",
     "unsupportedFormatVersion": "Ten plik używa formatu turnieju {found}, którego ta wersja programu nie potrafi odczytać (obsługuje {supported}).",
     "malformedSave": "Ten plik nie jest czytelnym zapisem turnieju: {details}",
-    "eloEstimateUnanchored": "Estymacja ELO nie ma nic, co zakotwiczyłoby jej skalę. Dodaj gracza z rankingiem, zablokuj rankingi (mnożnik K równy 0) albo wybierz niepłaski rozkład a priori dla graczy bez rankingu."
+    "eloEstimateUnanchored": "Estymacja ELO nie ma nic, co zakotwiczyłoby jej skalę. Dodaj gracza z rankingiem, zablokuj rankingi (mnożnik K równy 0) albo wybierz niepłaski rozkład a priori dla graczy bez rankingu.",
+    "teamModeRejectsCup": "Turniej drużynowy nie może jednocześnie zawierać pucharu pucharowego. Wyłącz jedno z dwóch.",
+    "teamModeRejectsLongGames": "Turniej drużynowy nie może używać długich partii (na dwie rundy). Wyłącz jedno z dwóch.",
+    "teamModeRejectsEloPairing": "Turnieju drużynowego nie można kojarzyć w trybie ELO. Wybierz system szwajcarski lub MacMahona.",
+    "teamModeRejectsGradeThresholds": "Turniej drużynowy nie może używać progów MacMahona według stopnia — drużyna ma średni ranking, a nie stopień. Użyj progów ELO.",
+    "teamModeRejectsEstEloTiebreak": "Turnieju drużynowego nie można rozstrzygać szacowanym ELO. Usuń to kryterium z kolejności.",
+    "invalidTeamSize": "Rozmiar drużyny {size} jest niedozwolony — musi wynosić od 2 do 9.",
+    "teamSettingsLocked": "Trybu drużynowego i rozmiaru drużyny nie można zmienić po zamknięciu rejestracji.",
+    "emptyTeamName": "Drużyna musi mieć nazwę.",
+    "duplicateTeamName": "Drużyna o nazwie {name} już istnieje.",
+    "teamIsFull": "Ta drużyna ma już swoich {size} zawodników.",
+    "playersWithoutTeam": "{count} zawodników nie należy jeszcze do żadnej drużyny. Przed zamknięciem każdy musi być w drużynie.",
+    "incompleteTeam": "Drużyna {name} ma {have} z {need} zawodników.",
+    "membersWithoutPairingRating": "Punkty startowe MacMahona wymagają ELO do kojarzenia dla każdego nierankingowanego zawodnika — brakuje {count}.",
+    "notEnoughTeams": "Turniej drużynowy wymaga co najmniej 2 drużyn (jest {have}).",
+    "noLateRegistrationInTeamMode": "Turniej drużynowy nie przyjmuje zgłoszeń po terminie: każdy zawodnik musi być w drużynie, a składy są zamrożone.",
+    "notEnoughPresentTeams": "Runda wymaga co najmniej {needed} obecnych drużyn — obecnych jest tylko {have}."
   },
   "tiebreaks": {
     "points": {
@@ -477,6 +517,36 @@
     "est_elo": {
       "label": "Szac. ELO",
       "title": "Bieżąca bayesowska estymacja aktualnej siły gracza"
+    },
+    "board_wins": {
+      "label": "Wygrane partie",
+      "title": "Wygrane partie — własne zawodnika albo suma drużyny ze wszystkich szachownic"
     }
+  },
+  "teams": {
+    "title": "Drużyny",
+    "count": "Drużyn: {count}",
+    "namePlaceholder": "Nazwa drużyny",
+    "add": "Dodaj drużynę",
+    "none": "Brak drużyn — przed zamknięciem rejestracji każdy zawodnik musi być w jakiejś.",
+    "clickToRename": "Kliknij, aby zmienić nazwę",
+    "averageTitle": "Średni ranking do kojarzenia — na jego podstawie powstaje numer drużyny i punkty MacMahona",
+    "sortByRating": "Wg rankingu",
+    "sortByRatingTitle": "Przywróć kolejność szachownic od najsilniejszego",
+    "removeTitle": "Usuń drużynę (jej zawodnicy pozostają zgłoszeni)",
+    "removeMemberTitle": "Usuń zawodnika z drużyny",
+    "moveUp": "Szachownicę wyżej",
+    "moveDown": "Szachownicę niżej",
+    "addMember": "Dodaj zawodnika…",
+    "noMemberMatch": "Żaden nieprzypisany zawodnik nie pasuje — najpierw zarejestruj go w zakładce Gracze.",
+    "pairingEloTitle": "ELO do kojarzenia dla zawodnika bez rankingu: służy wyłącznie do średniej drużyny i kolejności szachownic, nigdy nie jest eksportowane — wszędzie indziej zawodnik pozostaje bez rankingu",
+    "unassigned": "Bez drużyny ({count})",
+    "allAssigned": "Wszyscy zawodnicy są w drużynach.",
+    "adjustmentTitle": "Ręczna premia/kara punktowa dla tej drużyny",
+    "removeAdjustment": "Usuń tę korektę",
+    "adjustmentPointsPlaceholder": "Punkty",
+    "adjustmentReasonPlaceholder": "Powód (wymagany)",
+    "cancelAdjustment": "Anuluj",
+    "addAdjustment": "Dodaj"
   }
 }

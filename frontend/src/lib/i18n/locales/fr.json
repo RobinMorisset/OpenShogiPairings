@@ -16,6 +16,7 @@
     "restore": "Restaurer",
     "tabSettings": "Paramètres",
     "tabPlayers": "Joueurs ({count})",
+    "tabTeams": "Équipes ({count})",
     "tabResults": "Classement",
     "tabCup": "Coupe",
     "tabRound": "Ronde {number}",
@@ -136,6 +137,7 @@
     "carriedHint": "Cliquez sur un joueur pour désigner le vainqueur de sa partie sur deux rondes.",
     "clickToSetWinner": "Cliquer pour désigner le vainqueur",
     "drawTitle": "Une nulle a eu lieu avant la partie décisive (enregistrée pour l'ELO)",
+    "drawForfeitedTitle": "Personne n'a joué, donc personne n'a fait nulle : retirez d'abord l'absence",
     "giverTitle": "Le joueur le mieux classé donne le handicap",
     "giverGives": "{name} donne",
     "needsDifferentRatings": "Nécessite deux joueurs de classements différents",
@@ -188,8 +190,17 @@
         "forced": "Cette table a été fixée par l'arbitre, pas choisie par le moteur.",
         "cup": "Cette table vient du tableau de la coupe, pas du moteur suisse.",
         "absent": "Ce joueur était absent cette ronde, le moteur ne l'a pas apparié."
+      },
+      "pickTeam": "Choisir une équipe…",
+      "hintForceTeams": "Choisissez deux équipes pour voir ce que coûterait de les apparier.",
+      "hintForbidTeams": "Choisissez deux équipes appariées pour voir pourquoi le moteur les a réunies.",
+      "scopedOutTeam": {
+        "forced": "Cette rencontre a été fixée par l'arbitre, pas choisie par le moteur.",
+        "absent": "Cette équipe était absente cette ronde, le moteur ne l'a pas appariée."
       }
-    }
+    },
+    "markJustifiedTitle": "Marquer plutôt {name} absent pour un motif valable (0−)",
+    "clearAbsenceTitle": "{name} était finalement présent"
   },
   "resultsView": {
     "noPlayers": "Aucun joueur inscrit pour l'instant.",
@@ -232,6 +243,8 @@
     "tiebreakNoOpponents": "Aucun adversaire comptabilisé pour l'instant",
     "tiebreakDropped": "(retiré : {dropped})",
     "noRoundsCompleted": "Aucune ronde terminée pour l'instant — les résultats apparaîtront ici au fur et à mesure.",
+    "justifiedTitle": "Absent pour un motif valable contre {name} (0− ; compte comme une défaite)",
+    "teamMatchTitle": "{name} — {wins}–{losses} sur les échiquiers",
     "roundInProgressNote": "Ronde {number} en cours : sa colonne se remplit au fur et à mesure des résultats, et le classement est recalculé une fois la ronde terminée."
   },
   "pairingSource": {
@@ -263,7 +276,7 @@
     "removeForcedPairing": "Retirer cet appariement forcé",
     "playerEllipsis": "Joueur…",
     "vs": "vs",
-    "forcedBye": "Exemptions forcées",
+    "forcedBye": "Exemption forcée",
     "forcedByeHint": "Ne s'applique qu'avec un nombre impair de joueurs présents — celui qui reste passe la ronde avec un point d'office. Pour faire passer un joueur dans un effectif pair, marquez-le plutôt absent, puis fixez ce que la ronde lui rapporte depuis le classement.",
     "forcedByeEvenWarning": "L'effectif est maintenant pair : cette exemption laisserait un autre joueur sans adversaire, que le moteur exempterait aussi. Retirez-la, ou marquez quelqu'un absent.",
     "removeForcedBye": "Retirer cette exemption forcée",
@@ -271,7 +284,13 @@
     "startRound": "Démarrer la ronde {number}",
     "useUndoHintPrefix": "Utilisez",
     "useUndoHintSuffix": " pour abandonner ce brouillon.",
-    "needAtLeastTwoPresent": "Il faut au moins 2 joueurs présents."
+    "needAtLeastTwoPresent": "Il faut au moins 2 joueurs présents.",
+    "teamEllipsis": "Équipe…",
+    "needAtLeastTwoTeams": "Une ronde demande au moins deux équipes présentes.",
+    "summaryTeams": "Préparation de la ronde {number} — {present} équipes dans l'appariement, {absent} joueur(s) absent(s).",
+    "absentWholeTeam": "Marquer toute l'équipe absente pour cette ronde",
+    "forcedByeHintTeams": "Ne s'applique qu'avec un nombre impair d'équipes présentes — celle qui reste passe la ronde avec un point d'office. Pour faire passer une équipe dans un effectif pair, marquez-la plutôt absente, puis fixez ce que la ronde lui rapporte depuis le classement.",
+    "forcedByeEvenWarningTeams": "L'effectif est maintenant pair : cette exemption laisserait une autre équipe sans adversaire, que le moteur exempterait aussi. Retirez-la, ou marquez une équipe absente."
   },
   "serverStatus": {
     "contacting": "Connexion au serveur…",
@@ -404,7 +423,12 @@
     "moveDown": "Descendre",
     "removeTiebreak": "Retirer ce critère",
     "noTiebreaks": "Aucun critère — les joueurs à égalité en points sont départagés par numéro de tournoi.",
-    "addTiebreakPlaceholder": "Ajouter un critère…"
+    "addTiebreakPlaceholder": "Ajouter un critère…",
+    "teamTitle": "Tournoi par équipes",
+    "teamDesc": "Apparier des équipes plutôt que des individus : une rencontre entre deux équipes est un échiquier ordinaire par position, échiquier 1 contre échiquier 1, etc. Les résultats se saisissent toujours par échiquier.",
+    "teamCheckbox": "Organiser un tournoi par équipes",
+    "teamSize": "Joueurs par équipe",
+    "teamLocked": "Le mode par équipes et la taille des équipes sont figés une fois les inscriptions clôturées."
   },
   "serverError": {
     "noTournament": "Aucun tournoi n'existe encore — créez-en un d'abord.",
@@ -428,7 +452,23 @@
     "zeroPointAdjustment": "Un ajustement de zéro point n'aurait aucun effet.",
     "unsupportedFormatVersion": "Ce fichier utilise le format de tournoi {found}, que cette version ne sait pas lire (elle lit le format {supported}).",
     "malformedSave": "Ce fichier n'est pas une sauvegarde de tournoi lisible : {details}",
-    "eloEstimateUnanchored": "L'estimation ELO n'a rien pour ancrer son échelle. Ajoutez un joueur classé, figez les classements (multiplicateur K à 0), ou choisissez un prior non plat pour les non classés."
+    "eloEstimateUnanchored": "L'estimation ELO n'a rien pour ancrer son échelle. Ajoutez un joueur classé, figez les classements (multiplicateur K à 0), ou choisissez un prior non plat pour les non classés.",
+    "teamModeRejectsCup": "Un tournoi par équipes ne peut pas aussi comporter une coupe à élimination directe. Désactivez l'un des deux.",
+    "teamModeRejectsLongGames": "Un tournoi par équipes ne peut pas utiliser les parties longues (sur deux rondes). Désactivez l'un des deux.",
+    "teamModeRejectsEloPairing": "Un tournoi par équipes ne peut pas être apparié en mode ELO. Choisissez Suisse ou MacMahon.",
+    "teamModeRejectsGradeThresholds": "Un tournoi par équipes ne peut pas utiliser de seuils MacMahon par grade — une équipe a un classement moyen, pas un grade. Utilisez des seuils ELO.",
+    "teamModeRejectsEstEloTiebreak": "Un tournoi par équipes ne peut pas être départagé par l'ELO estimé. Retirez ce critère de l'ordre des départages.",
+    "invalidTeamSize": "Une taille d'équipe de {size} n'est pas autorisée — elle doit être comprise entre 2 et 9.",
+    "teamSettingsLocked": "Le mode par équipes et la taille des équipes ne peuvent plus changer une fois les inscriptions clôturées.",
+    "emptyTeamName": "Une équipe doit avoir un nom.",
+    "duplicateTeamName": "Une équipe nommée {name} existe déjà.",
+    "teamIsFull": "Cette équipe a déjà ses {size} membres.",
+    "playersWithoutTeam": "{count} joueurs ne sont pas encore dans une équipe. Chaque joueur doit en avoir une avant la clôture.",
+    "incompleteTeam": "L'équipe {name} a {have} membres sur {need}.",
+    "membersWithoutPairingRating": "Les points de départ MacMahon exigent un ELO d'appariement pour chaque membre non classé — il en manque {count}.",
+    "notEnoughTeams": "Un tournoi par équipes demande au moins 2 équipes (il y en a {have}).",
+    "noLateRegistrationInTeamMode": "Un tournoi par équipes n'accepte pas d'inscription tardive : chaque joueur doit être dans une équipe, et les compositions sont figées.",
+    "notEnoughPresentTeams": "Une ronde demande au moins {needed} équipes présentes — il n'y en a que {have}."
   },
   "tiebreaks": {
     "points": {
@@ -477,6 +517,36 @@
     "est_elo": {
       "label": "ELO est.",
       "title": "Estimation bayésienne en temps réel du niveau actuel du joueur"
+    },
+    "board_wins": {
+      "label": "Parties gagnées",
+      "title": "Parties gagnées — celles du joueur, ou le total de l'équipe sur tous les échiquiers"
     }
+  },
+  "teams": {
+    "title": "Équipes",
+    "count": "{count} équipes",
+    "namePlaceholder": "Nom de l'équipe",
+    "add": "Ajouter une équipe",
+    "none": "Aucune équipe pour l'instant — chaque joueur doit en avoir une avant la clôture.",
+    "clickToRename": "Cliquer pour renommer",
+    "averageTitle": "Classement d'appariement moyen — ce dont dépendent le numéro de l'équipe et ses points MacMahon",
+    "sortByRating": "Par classement",
+    "sortByRatingTitle": "Remettre l'ordre des échiquiers du plus fort au plus faible",
+    "removeTitle": "Supprimer cette équipe (ses joueurs restent inscrits)",
+    "removeMemberTitle": "Retirer ce joueur de l'équipe",
+    "moveUp": "Monter d'un échiquier",
+    "moveDown": "Descendre d'un échiquier",
+    "addMember": "Ajouter un joueur…",
+    "noMemberMatch": "Aucun joueur disponible ne correspond — inscrivez-le d'abord dans l'onglet Joueurs.",
+    "pairingEloTitle": "ELO d'appariement pour un membre non classé : sert uniquement à la moyenne de l'équipe et à l'ordre des échiquiers, jamais exporté — le joueur reste non classé partout ailleurs",
+    "unassigned": "Sans équipe ({count})",
+    "allAssigned": "Tous les joueurs sont dans une équipe.",
+    "adjustmentTitle": "Bonus/malus manuel de points pour cette équipe",
+    "removeAdjustment": "Retirer cet ajustement",
+    "adjustmentPointsPlaceholder": "Points",
+    "adjustmentReasonPlaceholder": "Motif (obligatoire)",
+    "cancelAdjustment": "Annuler",
+    "addAdjustment": "Ajouter"
   }
 }

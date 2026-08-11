@@ -342,7 +342,7 @@ mod tests {
         let (status, body) = send(router(state.clone()), get(&t(id, ""))).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["tournament"]["name"], "Paris Open");
-        assert_eq!(body["tournament"]["format_version"], 5);
+        assert_eq!(body["tournament"]["format_version"], 9);
         assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
         assert_eq!(body["can_undo"], false); // nothing to undo on a fresh tournament
 
@@ -650,6 +650,232 @@ mod tests {
         assert!(body["tournament"]["draft"].is_null());
     }
 
+    /// The team roster routes, end to end: a team tournament is configured,
+    /// rostered, finalized and paired entirely over HTTP.
+    #[tokio::test]
+    async fn team_rosters_are_built_and_played_over_http() {
+        let state = AppState::default();
+        let id = create(&state, "Teams").await;
+
+        // Switch to team mode with two players per team.
+        let (status, _) = send(
+            router(state.clone()),
+            json_req(
+                "PUT",
+                &t(id, "/settings"),
+                json!({ "teams": { "size": 2 } }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Four players.
+        let mut players = Vec::new();
+        for name in ["Alpha", "Beta", "Gamma", "Delta"] {
+            let (_, body) = send(
+                router(state.clone()),
+                json_req(
+                    "POST",
+                    &t(id, "/players"),
+                    json!({ "last_name": name, "rating": 1500 }),
+                ),
+            )
+            .await;
+            let list = body["tournament"]["players"].as_array().unwrap();
+            players.push(list.last().unwrap()["id"].as_str().unwrap().to_string());
+        }
+
+        // Two teams, two members each.
+        let mut teams = Vec::new();
+        for name in ["East", "West"] {
+            let (status, body) = send(
+                router(state.clone()),
+                json_req("POST", &t(id, "/teams"), json!({ "name": name })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            let list = body["tournament"]["teams"].as_array().unwrap();
+            teams.push(list.last().unwrap()["id"].as_str().unwrap().to_string());
+        }
+        for (i, player) in players.iter().enumerate() {
+            let (status, _) = send(
+                router(state.clone()),
+                json_req(
+                    "POST",
+                    &t(id, &format!("/teams/{}/members", teams[i / 2])),
+                    json!({ "player_id": player }),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+
+        // A duplicate name is refused, with the code the client localizes.
+        let (status, body) = send(
+            router(state.clone()),
+            json_req("POST", &t(id, "/teams"), json!({ "name": " east " })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "duplicate_team_name");
+
+        // Reorder one team's boards, then reset the order by rating.
+        let (status, body) = send(
+            router(state.clone()),
+            json_req(
+                "PUT",
+                &t(id, &format!("/teams/{}/board-order", teams[0])),
+                json!({ "order": [players[1], players[0]] }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body["tournament"]["teams"][0]["members"][0],
+            json!(players[1])
+        );
+        send(
+            router(state.clone()),
+            post_empty(&t(id, &format!("/teams/{}/sort-by-rating", teams[0]))),
+        )
+        .await;
+
+        // Pair round 1: one match, two boards, and the team standings appear.
+        start_round(&state, id).await;
+        let (status, body) = send(router(state.clone()), get(&t(id, ""))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body["tournament"]["rounds"][0]["boards"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        let table = body["team_standings"].as_array().unwrap();
+        assert_eq!(table.len(), 2);
+        assert!(table[0]["members"].as_array().unwrap().len() == 2);
+
+        // A finalized team tournament takes no late registration.
+        let (status, body) = send(
+            router(state.clone()),
+            json_req("POST", &t(id, "/players"), json!({ "last_name": "Late" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "no_late_registration_in_team_mode");
+    }
+
+    /// The draft route dispatches on the tournament's mode: a team round takes
+    /// forced *matches*, and the player-level lists are refused rather than
+    /// quietly dropped.
+    #[tokio::test]
+    async fn a_team_draft_takes_forced_matches_and_refuses_forced_boards() {
+        let state = AppState::default();
+        let id = create(&state, "Teams").await;
+        send(
+            router(state.clone()),
+            json_req(
+                "PUT",
+                &t(id, "/settings"),
+                json!({ "teams": { "size": 2 } }),
+            ),
+        )
+        .await;
+        let mut players = Vec::new();
+        for i in 0..8 {
+            let (_, body) = send(
+                router(state.clone()),
+                json_req(
+                    "POST",
+                    &t(id, "/players"),
+                    json!({ "last_name": format!("P{i}"), "rating": 2000 - i * 10 }),
+                ),
+            )
+            .await;
+            let list = body["tournament"]["players"].as_array().unwrap();
+            players.push(list.last().unwrap()["id"].as_str().unwrap().to_string());
+        }
+        for k in 0..4 {
+            let (_, body) = send(
+                router(state.clone()),
+                json_req("POST", &t(id, "/teams"), json!({ "name": format!("T{k}") })),
+            )
+            .await;
+            let team = body["tournament"]["teams"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()["id"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            for player in &players[k * 2..k * 2 + 2] {
+                send(
+                    router(state.clone()),
+                    json_req(
+                        "POST",
+                        &t(id, &format!("/teams/{team}/members")),
+                        json!({ "player_id": player }),
+                    ),
+                )
+                .await;
+            }
+        }
+        send(router(state.clone()), post_empty(&t(id, "/rounds/prepare"))).await;
+
+        // A player-level forced board is refused, naming why.
+        let (status, body) = send(
+            router(state.clone()),
+            json_req(
+                "PUT",
+                &t(id, "/draft"),
+                json!({ "forced_boards": [{ "player1": 1, "player2": 3 }] }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body["error"].as_str().unwrap().contains("paired by team"));
+
+        // A forced *match* is taken, and honoured when the round is confirmed.
+        let (status, body) = send(
+            router(state.clone()),
+            json_req(
+                "PUT",
+                &t(id, "/draft"),
+                json!({ "forced_matches": [{ "team1": 1, "team2": 4 }] }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body["tournament"]["draft"]["forced_matches"],
+            json!([{ "team1": 1, "team2": 4 }])
+        );
+        send(router(state.clone()), post_empty(&t(id, "/rounds"))).await;
+
+        let (_, body) = send(router(state.clone()), get(&t(id, ""))).await;
+        let boards = body["tournament"]["rounds"][0]["boards"]
+            .as_array()
+            .unwrap();
+        // Teams 1 and 4 are board 1 and board 2 of the forced match, so their
+        // two boards are the ones tagged `forced`.
+        let forced: Vec<&serde_json::Value> = boards
+            .iter()
+            .filter(|b| b["source"]["kind"] == "forced")
+            .collect();
+        assert_eq!(forced.len(), 2, "{boards:#?}");
+    }
+
+    /// An individual tournament carries no team table at all, rather than an
+    /// empty one that would read as "no teams yet".
+    #[tokio::test]
+    async fn an_individual_tournament_has_no_team_standings() {
+        let state = AppState::default();
+        let id = create(&state, "Solo").await;
+        let (_, body) = send(router(state.clone()), get(&t(id, ""))).await;
+        assert!(body.get("team_standings").is_none());
+    }
+
     #[tokio::test]
     async fn set_board_result_toggles_winner() {
         let state = AppState::default();
@@ -675,8 +901,8 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
-            body["tournament"]["rounds"][0]["boards"][0]["result"],
-            "player1"
+            body["tournament"]["rounds"][0]["boards"][0]["outcome"],
+            json!({ "kind": "won", "winner": "player1" })
         );
 
         // Bad board index → 404.

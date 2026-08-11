@@ -8,9 +8,9 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{
-    Board, Counterfactual, CounterfactualMode, CupBracketView, CupPodium, Handicap, NewPlayer,
-    NoShow, RoundExplanation, SitoutValue, Standing, Tournament, TournamentId, TournamentSettings,
-    Winner,
+    Board, Counterfactual, CounterfactualMode, CupBracketView, CupPodium, ForcedMatch, Forfeit,
+    Handicap, NewPlayer, RoundExplanation, SitoutValue, Standing, TeamId, TeamStanding, Tournament,
+    TournamentId, TournamentSettings, UnitKey, Winner,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -57,6 +57,16 @@ use crate::{auth, live};
 /// - `POST   /players/{player_id}/category`  set membership in a player category
 /// - `POST   /players/{player_id}/adjustments`             add a manual point bonus/malus
 /// - `DELETE /players/{player_id}/adjustments/{adjustment_id}` remove one
+/// - `PUT    /players/{player_id}/pairing-rating` set/clear the pairing ELO (team mode)
+/// - `POST   /teams`                     create a team
+/// - `PUT    /teams/{team_id}`           rename a team
+/// - `DELETE /teams/{team_id}`           delete a team
+/// - `POST   /teams/{team_id}/members`   add a player to a team
+/// - `DELETE /teams/{team_id}/members/{player_id}` take a player out of a team
+/// - `PUT    /teams/{team_id}/board-order`     reorder a team's boards
+/// - `POST   /teams/{team_id}/sort-by-rating`  reset that order by rating
+/// - `POST   /teams/{team_id}/adjustments`     add a manual point bonus/malus
+/// - `DELETE /teams/{team_id}/adjustments/{adjustment_id}` remove one
 /// - `GET    /backups`         where the automatic backups live, and the list
 /// - `POST   /backups/{backup_id}/restore` restore a backup as the current tournament
 /// - `POST   /login`  exchange this tournament's password for a session token
@@ -109,6 +119,10 @@ pub(crate) fn scope(state: AppState) -> Router<AppState> {
             "/rounds/{round_number}/sitouts/{player}",
             put(set_sitout_value),
         )
+        .route(
+            "/rounds/{round_number}/team-sitouts/{team_id}",
+            put(set_team_sitout_value),
+        )
         .route("/players", post(add_player))
         .route("/players/batch", post(add_players_batch))
         .route("/players/import-csv", post(import_players_csv))
@@ -125,6 +139,24 @@ pub(crate) fn scope(state: AppState) -> Router<AppState> {
         .route(
             "/players/{player_id}/adjustments/{adjustment_id}",
             axum::routing::delete(remove_point_adjustment),
+        )
+        .route(
+            "/players/{player_id}/pairing-rating",
+            put(set_pairing_rating),
+        )
+        .route("/teams", post(add_team))
+        .route("/teams/{team_id}", put(rename_team).delete(remove_team))
+        .route("/teams/{team_id}/members", post(add_team_member))
+        .route(
+            "/teams/{team_id}/members/{player_id}",
+            axum::routing::delete(remove_team_member),
+        )
+        .route("/teams/{team_id}/board-order", put(set_team_board_order))
+        .route("/teams/{team_id}/sort-by-rating", post(sort_team_by_rating))
+        .route("/teams/{team_id}/adjustments", post(add_team_adjustment))
+        .route(
+            "/teams/{team_id}/adjustments/{adjustment_id}",
+            axum::routing::delete(remove_team_adjustment),
         )
         .route("/backups", get(list_backups))
         .route("/backups/{backup_id}/restore", post(restore_backup))
@@ -164,6 +196,11 @@ struct TournamentView {
     /// echo of their own change (see [`crate::live`]).
     version: u32,
     standings: Vec<Standing>,
+    /// The ranked team standings, in team mode only — the table the Standings
+    /// tab shows there, with the per-player figures staying in `standings` for
+    /// the breakdown rows. `None` for an individual tournament.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    team_standings: Option<Vec<TeamStanding>>,
     /// The cup podium once decided (champion / runner-up / third / fourth), for the
     /// Results-tab medals. `None` when there is no cup or the final isn't finished.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -193,6 +230,7 @@ struct TournamentView {
 fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
     let tournament = store.current().cloned().ok_or(ApiError::NoTournament)?;
     let standings = tournament.standings();
+    let team_standings = tournament.team_standings();
     let cup_podium = tournament.cup_podium();
     let cup_bracket = tournament.cup_bracket();
     let draft_cup_players = tournament.draft_cup_players();
@@ -223,6 +261,7 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
         can_undo: store.can_undo(),
         version: store.version(),
         standings,
+        team_standings,
         cup_podium,
         cup_bracket,
         draft_cup_players,
@@ -428,6 +467,12 @@ fn backup_after(instance: &TournamentInstance, store: &TournamentStore, label: &
 }
 
 /// Body of `PUT /draft`: the draft's customization.
+///
+/// The absent set is per player in either mode — in a team tournament a member
+/// can be absent without their team being — while the *forced* halves come in a
+/// pair each: boards and byes name players, matches and team byes name teams.
+/// Which pair applies follows the tournament's mode, and sending the other
+/// mode's is a domain error rather than a silently ignored field.
 #[derive(Debug, Deserialize)]
 struct DraftUpdate {
     #[serde(default)]
@@ -437,6 +482,12 @@ struct DraftUpdate {
     forced_boards: Vec<Board>,
     #[serde(default)]
     forced_byes: Vec<TournamentId>,
+    /// Forced team matches (team mode).
+    #[serde(default)]
+    forced_matches: Vec<ForcedMatch>,
+    /// Teams forced onto a bye (team mode).
+    #[serde(default)]
+    forced_team_byes: Vec<TeamId>,
 }
 
 /// Edit the current draft (absent set, forced pairings, forced byes).
@@ -447,8 +498,33 @@ async fn update_draft(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
     store.mutate(expected, |t| {
-        t.update_draft(req.absent, req.forced_boards, req.forced_byes)
+        if t.settings.team_mode() {
+            // The core rejects the player-level halves in team mode, so hand it
+            // those too rather than dropping them here: a client that sent them
+            // should be told, not quietly obeyed in part.
+            if !req.forced_boards.is_empty() || !req.forced_byes.is_empty() {
+                return t
+                    .update_draft(
+                        req.absent.clone(),
+                        req.forced_boards.clone(),
+                        req.forced_byes.clone(),
+                    )
+                    .map(|_| ());
+            }
+            t.update_team_draft(
+                req.absent.clone(),
+                req.forced_matches.clone(),
+                req.forced_team_byes.clone(),
+            )
             .map(|_| ())
+        } else {
+            t.update_draft(
+                req.absent.clone(),
+                req.forced_boards.clone(),
+                req.forced_byes.clone(),
+            )
+            .map(|_| ())
+        }
     })?;
     view(&store)
 }
@@ -491,8 +567,10 @@ async fn round_explanation(
 struct CounterfactualRequest {
     #[serde(default = "default_counterfactual_mode")]
     mode: CounterfactualMode,
-    a: TournamentId,
-    b: TournamentId,
+    /// The two units to probe: player numbers in an individual tournament, team
+    /// numbers in a team one — whichever the engine paired. `0` means the bye.
+    a: UnitKey,
+    b: UnitKey,
 }
 
 fn default_counterfactual_mode() -> CounterfactualMode {
@@ -520,8 +598,9 @@ async fn round_counterfactual(
 /// Body of the force-pairing endpoint: the two players to pair.
 #[derive(Debug, Deserialize)]
 struct ForcePairingRequest {
-    a: TournamentId,
-    b: TournamentId,
+    /// As for the probe: player numbers, or team numbers in team mode.
+    a: UnitKey,
+    b: UnitKey,
 }
 
 /// Force the pairing `a`–`b` onto the current round (re-pairs it with that board
@@ -618,7 +697,7 @@ async fn set_board_drawn(
 /// `both`), or `null` to clear the flag back to a normal unplayed board.
 #[derive(Debug, Deserialize)]
 struct SetNoShowRequest {
-    absent: Option<NoShow>,
+    absent: Option<Forfeit>,
 }
 
 /// Mark (or clear) a board as a no-show.
@@ -675,6 +754,33 @@ async fn set_sitout_value(
     let mut store = instance.write();
     store.mutate(expected, |t| {
         t.set_sitout_value(params.round_number, params.player, req.value)
+            .map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// The round and team addressed by the team sit-out endpoint.
+#[derive(Deserialize)]
+struct TeamSitoutParams {
+    round_number: u32,
+    team_id: Uuid,
+}
+
+/// Set what a round scored a **team** that sat it out, writing the value to
+/// every member's entry at once.
+///
+/// A team sits out together and its score for the round is read from those
+/// entries, which have to agree — so this is the team-mode way to re-score such
+/// a round; the per-player endpoint above would leave them disagreeing.
+async fn set_team_sitout_value(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<TeamSitoutParams>,
+    Json(req): Json<SetSitoutValueRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| {
+        t.set_team_sitout_value(params.round_number, params.team_id, req.value)
             .map(|_| ())
     })?;
     view(&store)
@@ -908,6 +1014,212 @@ async fn remove_point_adjustment(
     let mut store = instance.write();
     store.mutate(expected, |t| {
         t.remove_point_adjustment(params.player_id, params.adjustment_id)
+            .map(|_| ())
+    })?;
+    view(&store)
+}
+
+// --- Teams -----------------------------------------------------------------
+//
+// Registration-time roster editing for a team tournament. Every handler is a
+// one-line delegation to a `Tournament` method, which is where the rules live
+// (team mode only, registration still open, names unique, a player in exactly
+// one team, …) — the store stays dumb.
+
+/// A team's id from the path (see [`BackupParams`] on why this is a named
+/// struct).
+#[derive(Deserialize)]
+struct TeamParams {
+    team_id: Uuid,
+}
+
+/// A team and one of its members, for the member-removal path.
+#[derive(Deserialize)]
+struct TeamMemberParams {
+    team_id: Uuid,
+    player_id: Uuid,
+}
+
+/// Body of team creation and renaming: the team's name.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TeamNameRequest {
+    name: String,
+}
+
+/// Body of the add-member endpoint: which registered player joins.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AddTeamMemberRequest {
+    player_id: Uuid,
+}
+
+/// Body of the board-order endpoint: the team's members in their new order.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BoardOrderRequest {
+    order: Vec<Uuid>,
+}
+
+/// Body of the pairing-ELO endpoint: the referee-assigned rating, or `null` to
+/// clear it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PairingRatingRequest {
+    #[serde(default)]
+    pairing_rating: Option<u32>,
+}
+
+/// Register a new team.
+async fn add_team(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Json(req): Json<TeamNameRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| t.add_team(&req.name).map(|_| ()))?;
+    view(&store)
+}
+
+/// Rename a team.
+async fn rename_team(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<TeamParams>,
+    Json(req): Json<TeamNameRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| {
+        t.rename_team(params.team_id, &req.name).map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// Delete a team; its members return to the unassigned pool.
+async fn remove_team(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<TeamParams>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| t.remove_team(params.team_id))?;
+    view(&store)
+}
+
+/// Add a registered player to a team, at the end of its board order.
+async fn add_team_member(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<TeamParams>,
+    Json(req): Json<AddTeamMemberRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| {
+        t.add_team_member(params.team_id, req.player_id).map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// Take a player out of a team, back into the unassigned pool.
+async fn remove_team_member(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<TeamMemberParams>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| {
+        t.remove_team_member(params.team_id, params.player_id)
+            .map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// Set a team's board order (index 0 = board 1). The body must be a permutation
+/// of the team's current members.
+async fn set_team_board_order(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<TeamParams>,
+    Json(req): Json<BoardOrderRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| {
+        t.set_team_board_order(params.team_id, req.order.clone())
+            .map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// Re-sort a team's board order by descending pairing rating — the default
+/// order, and the reset after editing ratings.
+async fn sort_team_by_rating(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<TeamParams>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| {
+        t.sort_team_by_rating(params.team_id).map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// A team and one of its adjustments, for the removal path.
+#[derive(Deserialize)]
+struct TeamAdjustmentParams {
+    team_id: Uuid,
+    adjustment_id: Uuid,
+}
+
+/// Body of the team-adjustment endpoint: the delta and its mandatory reason.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TeamAdjustmentRequest {
+    delta: i32,
+    reason: String,
+}
+
+/// Apply a manual point bonus/malus to a team. Available after finalization —
+/// that is when a referee needs it.
+async fn add_team_adjustment(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<TeamParams>,
+    Json(req): Json<TeamAdjustmentRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| {
+        t.add_team_adjustment(params.team_id, req.delta, req.reason.clone())
+            .map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// Remove a previously applied team adjustment.
+async fn remove_team_adjustment(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<TeamAdjustmentParams>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| {
+        t.remove_team_adjustment(params.team_id, params.adjustment_id)
+            .map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// Set (or clear) a player's referee-assigned pairing ELO — team mode with
+/// MacMahon starting points only.
+async fn set_pairing_rating(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<PlayerParams>,
+    Json(req): Json<PairingRatingRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| {
+        t.set_pairing_rating(params.player_id, req.pairing_rating)
             .map(|_| ())
     })?;
     view(&store)

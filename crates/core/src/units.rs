@@ -173,6 +173,113 @@ impl From<TournamentId> for usize {
     }
 }
 
+/// A team's dense number — the 1-based key the team score tables are indexed by,
+/// assigned at finalization by descending average pairing rating, exactly as
+/// [`TournamentId`] is for players. Distinct from the team's [`Uuid`] (its stable
+/// identity, which survives a rename or a roster edit).
+///
+/// Like [`TournamentId`] it serializes as a bare number, exports to TypeScript as
+/// a transparent `number`, and bridges to `usize` so the team tables can be
+/// [`TiVec`](typed_index_collections::TiVec)s indexed by it directly.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, Serialize, Deserialize, TS,
+)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct TeamId(pub u32);
+
+/// `usize` → `TeamId`, for `TiVec` key generation.
+impl From<usize> for TeamId {
+    fn from(i: usize) -> Self {
+        TeamId(i as u32)
+    }
+}
+
+/// `TeamId` → `usize`, what makes a `TiVec<TeamId, _>` indexable by a bare id.
+impl From<TeamId> for usize {
+    fn from(t: TeamId) -> Self {
+        t.0 as usize
+    }
+}
+
+/// The dense key of one **pairable unit** in the matching engine — a player in an
+/// individual tournament, a team in a team tournament. The engine never reads a
+/// [`Player`] or a [`Team`]: it is handed a [`PairingUnit`] table indexed by this
+/// key and returns matched keys, so one implementation serves both modes.
+///
+/// Real units are numbered from 1, mirroring [`TournamentId`] / `TeamId` (the
+/// wrappers pass those numbers straight through), which leaves `0` free for
+/// [`PHANTOM`](Self::PHANTOM), the sentinel vertex a bye is matched to.
+///
+/// Serializes as a bare number like [`TournamentId`], because it is what the
+/// pairing *explanations* ([`BoardLedger`], [`AffectedCycle`]) reference: a
+/// client reads those keys as player numbers in individual mode and team numbers
+/// in team mode, exactly as it reads the boards themselves.
+///
+/// [`Player`]: crate::player::Player
+/// [`Team`]: crate::team::Team
+/// [`PairingUnit`]: crate::pairing::PairingUnit
+/// [`BoardLedger`]: crate::pairing::BoardLedger
+/// [`AffectedCycle`]: crate::pairing::AffectedCycle
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, Serialize, Deserialize, TS,
+)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct UnitKey(pub u32);
+
+impl UnitKey {
+    /// The sentinel vertex standing in for the bye in a matching. Real units are
+    /// numbered from 1, so it can never collide with one.
+    pub const PHANTOM: UnitKey = UnitKey(0);
+}
+
+/// `usize` → `UnitKey`, for `TiVec` key generation.
+impl From<usize> for UnitKey {
+    fn from(i: usize) -> Self {
+        UnitKey(i as u32)
+    }
+}
+
+/// `UnitKey` → `usize`, what makes a `TiVec<UnitKey, _>` indexable by a bare key.
+impl From<UnitKey> for usize {
+    fn from(k: UnitKey) -> Self {
+        k.0 as usize
+    }
+}
+
+/// A player's number *is* its unit key in individual mode — the one place that
+/// identification is written.
+impl From<TournamentId> for UnitKey {
+    fn from(t: TournamentId) -> Self {
+        UnitKey(t.0)
+    }
+}
+
+/// The inverse, for turning the engine's answer back into players. Only valid on
+/// a key the player wrapper produced — [`UnitKey::PHANTOM`] maps to
+/// [`TournamentId(0)`], which is the same "no player" sentinel the counterfactual
+/// API already uses on the wire.
+impl From<UnitKey> for TournamentId {
+    fn from(k: UnitKey) -> Self {
+        TournamentId(k.0)
+    }
+}
+
+/// A team's number *is* its unit key in team mode, the counterpart of the
+/// [`TournamentId`] identification above.
+impl From<TeamId> for UnitKey {
+    fn from(t: TeamId) -> Self {
+        UnitKey(t.0)
+    }
+}
+
+/// The inverse, for turning the engine's answer back into teams. Only valid on a
+/// key the team wrapper produced.
+impl From<UnitKey> for TeamId {
+    fn from(k: UnitKey) -> Self {
+        TeamId(k.0)
+    }
+}
+
 /// Test-only convenience: compare a [`TournamentId`] against a bare `u32` literal,
 /// so the scoring tests keep reading `opponents == vec![btid, btid]` (with `btid`
 /// a plain `u32` tournament number) after the lists became `Vec<TournamentId>`.

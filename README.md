@@ -346,17 +346,18 @@ that tournament's bearer token if it has a password (except `/login` and
 | `PUT /settings` | Replace the whole `TournamentSettings`. Its shape is nested: `pairing` is a tagged union — either `{ "kind": "swiss", "floater_style": "classic"｜"median", "macmahon": { "thresholds": [ { "criterion": { "kind": "elo", "value": 1200 }, "drops_after_round"?: 3 }, { "criterion": { "kind": "grade", "grade": { "kind": "dan"｜"kyu", "level": 1 } } } ], "source": { "kind": "static" } }, "airtight_groups"?: 2, "club_protection": { "kind": "on", "rounds"?: 3, "exempt_clubs"?: ["Paris"] } }` or `{ "kind": "elo", "estimator": { … } }` for the experimental pure-ELO pairing mode. Alongside `pairing`, the top level carries `cup_enabled`, `cup_format` (`"direct"`｜`"qualifier"` — see the hybrid-cup section above; only consulted when `cup_enabled`), `long_boards_enabled`, `handicap_policy` (`{ "kind": "none" }｜{ "kind": "enabled", "display": …, "wiel_rule"?: false }`), `half_point_absences`, `tiebreaks` (an ordered array, e.g. `["points","sos_m",…]`), and `categories` (referee-defined player categories, an array of `{ "id", "name" }`; blank-named entries are dropped on normalization). Notes: a threshold's `criterion` mixes ELO and grade freely (each counted independently) and `drops_after_round` makes it a degressive threshold; `airtight_groups`, if set, forbids pairing across MacMahon groups during rounds `1..=n`; `club_protection` is `{ "kind": "off" }` or `{ "kind": "on", … }`; `macmahon.source` is `{ "kind": "static" }` or `{ "kind": "from_estimate", "estimator": { … } }` (estimate-based MacMahon). The `estimator` knobs are described in [`docs/elo-pairing-mode.md`](docs/elo-pairing-mode.md). |
 | `POST /cancel-round` | Cancel the last round — discards the open draft if one is being prepared, otherwise removes the most recent round (undoable). |
 | `POST /rounds/prepare` | Begin drafting the next round. For round 1, finalizes registration first, in the same undo step — that is the only way to finalize. Body optional: `{ "cup_size": 8｜16｜32｜64 }` when the hybrid cup is enabled — `cup_size` is the *bracket* size; it seeds the top eligible players into it, taking `cup_size` of them under `cup_format: "direct"` and `1.5 × cup_size` under `"qualifier"` (400 if fewer are marked eligible). Ignored from round 2 on (already finalized). A round completes automatically once every board has a result, so there is no separate "complete round" call. |
-| `PUT /draft` | Edit the draft (absent set, forced pairings, forced bye). |
+| `PUT /draft` | Edit the draft: `{ "absent", "forced_boards", "forced_byes" }` — or, in a team tournament, `{ "absent", "forced_matches": [{ "team1", "team2" }], "forced_team_byes" }`, since teams are what get paired there. The absent set is per player in either mode: a team member can be absent without their team being, and their board is then forfeited for them. Sending the other mode's forced lists is an error, not a silently ignored field. |
 | `POST /rounds` | Confirm the draft: pair remaining players and start the round. |
 | `GET /rounds/{n}/explanation` | Explain a round's Swiss pairings: per-board rule ledger and round report. Read-only. |
-| `POST /rounds/{n}/counterfactual` | Explain forcing (`"force"`) or forbidding (`"forbid"`) a pairing `{a, b}` in this round. Read-only. |
-| `POST /rounds/force-pairing` | Re-pair the current round with board `{a, b}` fixed. |
+| `POST /rounds/{n}/counterfactual` | Explain forcing (`"force"`) or forbidding (`"forbid"`) a pairing `{a, b}` in this round. `a`/`b` are player numbers, or **team** numbers in a team tournament — whichever the engine paired; `0` means the bye. Read-only. |
+| `POST /rounds/force-pairing` | Re-pair the current round with `{a, b}` fixed — a board, or a **team match** in a team tournament (same numbering as the counterfactual; `0` forces the other side onto the bye). |
 | `POST /rounds/{n}/boards/{i}/result` | Toggle a board's winner: `{ "clicked": "player1"｜"player2" }`. |
 | `POST /rounds/{n}/boards/{i}/drawn` | Set the "a draw occurred" flag: `{ "drawn": true｜false }`. |
 | `POST /rounds/{n}/boards/{i}/no-show` | Mark a board a no-show (or clear it): `{ "absent": "player1"｜"player2"｜"both"｜null }`. A no-show settles the board (counting toward auto-completing the round) and carries the absence into the next round's draft. |
 | `PUT /rounds/{n}/boards/{i}/handicap` | Set/clear the handicap: `{ "handicap": "4p"｜null }` (giver frozen from ratings; 400 if ratings equal). |
 | `POST /rounds/{n}/boards/{i}/long` | Flag/unflag a board as a two-round "long game": `{ "long": true｜false }` (only when `long_boards_enabled`). Flagging the last-undecided board can complete the round, like recording a result. |
 | `PUT /rounds/{n}/sitouts/{player}` | Re-score what a round was worth to a player who sat it out: `{ "value": "zero"｜"half"｜"full" }`. Allowed on completed rounds. |
+| `PUT /rounds/{n}/team-sitouts/{team_id}` | The same for a whole team, writing the value to every member's entry at once — a team sits out together and its score for the round is read from entries that must agree, so this is how a team's bye or absence is re-scored. Team mode only; rejects a team that played that round. |
 | `POST /players` | Register a player: `{ "last_name", "first_name?", "rating?", "grade?", "nationality?", "club?" }` (`grade` is `{ "kind": "dan"｜"kyu", "level": … }`). |
 | `POST /players/batch` | Register several players at once (one undo step): a JSON array of player objects, each shaped like the `POST /players` body. |
 | `POST /players/import-csv` | Register a roster from a raw CSV text body (parsed server-side, ratings matched against the FESA cache), as a single undo step. |
@@ -366,6 +367,16 @@ that tournament's bearer token if it has a password (except `/login` and
 | `POST /players/{id}/category` | Add/remove membership in a referee-defined category: `{ "category_id", "member": true｜false }` (404 if the category doesn't exist). |
 | `POST /players/{id}/adjustments` | Apply a manual point bonus/penalty: `{ "delta", "reason" }` (reason mandatory). |
 | `DELETE /players/{id}/adjustments/{adjustment_id}` | Remove a point adjustment. |
+| `PUT /players/{id}/pairing-rating` | Set (or clear, with `null`) a player's pairing ELO: `{ "pairing_rating": 1400｜null }`. Team mode with MacMahon starting points only — it feeds the team average and nothing user-facing, and is never exported. |
+| `POST /teams` | Create a team: `{ "name" }` (non-empty, unique ignoring case). Team mode only, and only while registration is open — as for every team route below. |
+| `PUT /teams/{team_id}` | Rename a team: `{ "name" }`. |
+| `DELETE /teams/{team_id}` | Delete a team; its members go back to the unassigned pool (they stay registered). |
+| `POST /teams/{team_id}/members` | Add a registered player to a team, at the board their pairing rating calls for: `{ "player_id" }`. Inserted in front of the first weaker member (unrated last), leaving the rest of the order untouched. A player belongs to exactly one team, and a team stops at its configured size. |
+| `DELETE /teams/{team_id}/members/{player_id}` | Take a player out of a team. |
+| `PUT /teams/{team_id}/board-order` | Set the board order (index 0 = board 1): `{ "order": [player_id, …] }`, which must be a permutation of the team's current members. |
+| `POST /teams/{team_id}/sort-by-rating` | Reset the board order to descending pairing rating (unrated last). |
+| `POST /teams/{team_id}/adjustments` | Apply a manual point bonus/penalty to a team: `{ "delta", "reason" }` (reason mandatory). Unlike the roster routes this stays available after finalization — adjustments are team-level in team mode, and the per-player ones are refused there. |
+| `DELETE /teams/{team_id}/adjustments/{adjustment_id}` | Remove a team adjustment. |
 | `GET /backups` | The automatic backups (taken at every round-lifecycle transition): `{ "directory", "backups": [...] }`, newest first. `directory` is the absolute path they are written to — shown in the Backups button's tooltip and the panel, so the files can be found outside the app — or `null` when no backups directory could be resolved and nothing is being backed up. |
 | `POST /backups/{backup_id}/restore` | Restore a backup as the current tournament; resets undo history. |
 
@@ -427,6 +438,13 @@ alongside it — it starts its own API in-process.
 > `beforeDevCommand`), so don't also have a browser `npm run dev` (or another
 > preview) running on 5173 at the same time — the port is fixed (`strictPort`)
 > and the second one will fail with "Port 5173 is already in use".
+
+> **Rust changes need a restart.** `tauri dev` hot-reloads the frontend, but its
+> file watcher covers `frontend/src-tauri` only — `src-tauri` is its own
+> workspace (see the comment in its `Cargo.toml`) and the `crates/` it depends
+> on are outside it. Edit `crates/core` or `crates/server` and the running app
+> keeps the behaviour it was built with, silently, while the UI updates around
+> it. Stop `tauri dev` and start it again to pick the change up.
 
 ## Packaging (Windows)
 

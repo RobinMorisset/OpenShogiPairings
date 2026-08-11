@@ -16,6 +16,7 @@
     "restore": "Restore",
     "tabSettings": "Settings",
     "tabPlayers": "Players ({count})",
+    "tabTeams": "Teams ({count})",
     "tabResults": "Standings",
     "tabCup": "Cup",
     "tabRound": "Round {number}",
@@ -136,6 +137,7 @@
     "carriedHint": "Click a player to record the winner of their two-round game.",
     "clickToSetWinner": "Click to set as winner",
     "drawTitle": "A draw occurred before the decisive game (recorded for ELO)",
+    "drawForfeitedTitle": "Nobody played, so nobody drew: clear the no-show first",
     "giverTitle": "The higher-rated player gives the odds",
     "giverGives": "{name} gives",
     "needsDifferentRatings": "Needs two players with different ratings",
@@ -188,8 +190,17 @@
         "forced": "That board was fixed by the referee, not chosen by the engine.",
         "cup": "That board comes from the cup bracket, not the Swiss engine.",
         "absent": "That player sat this round out, so the engine didn't pair them."
+      },
+      "pickTeam": "Choose a team…",
+      "hintForceTeams": "Pick two teams to see what pairing them together would cost.",
+      "hintForbidTeams": "Pick two paired teams to see why the engine paired them.",
+      "scopedOutTeam": {
+        "forced": "That match was fixed by the referee, not chosen by the engine.",
+        "absent": "That team sat this round out, so the engine didn't pair it."
       }
-    }
+    },
+    "markJustifiedTitle": "Mark {name} absent for a reason instead (0−)",
+    "clearAbsenceTitle": "{name} turned up after all"
   },
   "resultsView": {
     "noPlayers": "No players registered yet.",
@@ -232,6 +243,8 @@
     "tiebreakNoOpponents": "No opponents counted yet",
     "tiebreakDropped": "(dropped {dropped})",
     "noRoundsCompleted": "No rounds completed yet — results appear here as rounds are completed.",
+    "justifiedTitle": "Absent for a reason vs {name} (0−; counts as a loss)",
+    "teamMatchTitle": "{name} — {wins}–{losses} on the boards",
     "roundInProgressNote": "Round {number} is in progress: its column fills in as results are recorded, and the ranking is recomputed once the round is completed."
   },
   "pairingSource": {
@@ -263,7 +276,7 @@
     "removeForcedPairing": "Remove this forced pairing",
     "playerEllipsis": "Player…",
     "vs": "vs",
-    "forcedBye": "Forced byes",
+    "forcedBye": "Forced bye",
     "forcedByeHint": "Only applies with an odd number of present players — the leftover one sits out with a free point. To sit a player out of an even field, mark them absent instead, then set what the round scored them from the standings.",
     "forcedByeEvenWarning": "The field is now even, so this bye would leave another player unpaired and the engine would bye them too. Remove it, or mark someone absent.",
     "removeForcedBye": "Remove this forced bye",
@@ -271,7 +284,13 @@
     "startRound": "Start round {number}",
     "useUndoHintPrefix": "Use",
     "useUndoHintSuffix": " to discard this draft.",
-    "needAtLeastTwoPresent": "Need at least 2 present players."
+    "needAtLeastTwoPresent": "Need at least 2 present players.",
+    "teamEllipsis": "Team…",
+    "needAtLeastTwoTeams": "A round needs at least two present teams.",
+    "summaryTeams": "Preparing round {number} — {present} teams in the pairing, {absent} absent player(s).",
+    "absentWholeTeam": "Mark the whole team absent this round",
+    "forcedByeHintTeams": "Only applies with an odd number of present teams — the leftover one sits out with a free point. To sit a team out of an even field, mark it absent instead, then set what the round scored it from the standings.",
+    "forcedByeEvenWarningTeams": "The field is now even, so this bye would leave another team unpaired and the engine would bye it too. Remove it, or mark a team absent."
   },
   "serverStatus": {
     "contacting": "Contacting server…",
@@ -404,7 +423,12 @@
     "moveDown": "Move down",
     "removeTiebreak": "Remove this tie-break",
     "noTiebreaks": "No tie-breaks — players level on points are ordered by tournament number.",
-    "addTiebreakPlaceholder": "Add a tie-break…"
+    "addTiebreakPlaceholder": "Add a tie-break…",
+    "teamTitle": "Team tournament",
+    "teamDesc": "Pair teams rather than individuals: a match between two teams is one ordinary board per position, board 1 against board 1 and so on. Results are still entered per board.",
+    "teamCheckbox": "Run this as a team tournament",
+    "teamSize": "Players per team",
+    "teamLocked": "Team mode and team size are fixed once registration is finalized."
   },
   "serverError": {
     "noTournament": "No tournament exists yet — create one first.",
@@ -428,7 +452,23 @@
     "zeroPointAdjustment": "A point adjustment of zero would have no effect.",
     "unsupportedFormatVersion": "This file uses tournament format {found}, which this build cannot read (it reads {supported}).",
     "malformedSave": "This file is not a readable tournament save: {details}",
-    "eloEstimateUnanchored": "The ELO estimate has nothing to anchor its scale. Add a rated player, pin ratings (K multiplier 0), or choose a non-flat unrated prior."
+    "eloEstimateUnanchored": "The ELO estimate has nothing to anchor its scale. Add a rated player, pin ratings (K multiplier 0), or choose a non-flat unrated prior.",
+    "teamModeRejectsCup": "A team tournament can't also run the direct-elimination cup. Turn one of the two off.",
+    "teamModeRejectsLongGames": "A team tournament can't use long (two-round) games. Turn one of the two off.",
+    "teamModeRejectsEloPairing": "A team tournament can't be paired in ELO mode. Choose Swiss or MacMahon.",
+    "teamModeRejectsGradeThresholds": "A team tournament can't use grade-based MacMahon thresholds — a team has an average rating, not a grade. Use ELO thresholds.",
+    "teamModeRejectsEstEloTiebreak": "A team tournament can't rank on the estimated-ELO tie-break. Remove it from the tie-break order.",
+    "invalidTeamSize": "A team size of {size} isn't allowed — it must be between 2 and 9.",
+    "teamSettingsLocked": "Team mode and team size can't be changed once registration is finalized.",
+    "emptyTeamName": "A team needs a name.",
+    "duplicateTeamName": "A team named {name} already exists.",
+    "teamIsFull": "That team already has its {size} members.",
+    "playersWithoutTeam": "{count} players are not in a team yet. Every player must be in one before finalizing.",
+    "incompleteTeam": "Team {name} has {have} of {need} members.",
+    "membersWithoutPairingRating": "MacMahon starting points need a pairing ELO for every unrated team member — {count} are still missing one.",
+    "notEnoughTeams": "A team tournament needs at least 2 teams (there are {have}).",
+    "noLateRegistrationInTeamMode": "A team tournament can't take late registrations: every player has to be in a team, and the rosters are frozen.",
+    "notEnoughPresentTeams": "A round needs at least {needed} present teams — only {have} are present."
   },
   "tiebreaks": {
     "points": {
@@ -477,6 +517,36 @@
     "est_elo": {
       "label": "Est. ELO",
       "title": "Live Bayesian estimate of the player's current strength"
+    },
+    "board_wins": {
+      "label": "Board wins",
+      "title": "Games won — a player's own, or a team's total across every board"
     }
+  },
+  "teams": {
+    "title": "Teams",
+    "count": "{count} teams",
+    "namePlaceholder": "Team name",
+    "add": "Add team",
+    "none": "No teams yet — every player must be in one before you can finalize.",
+    "clickToRename": "Click to rename",
+    "averageTitle": "Average pairing rating — what the team's number and MacMahon points come from",
+    "sortByRating": "By rating",
+    "sortByRatingTitle": "Reset the board order to strongest first",
+    "removeTitle": "Delete this team (its players stay registered)",
+    "removeMemberTitle": "Take this player out of the team",
+    "moveUp": "Move up a board",
+    "moveDown": "Move down a board",
+    "addMember": "Add a player…",
+    "noMemberMatch": "No unassigned player matches — register them on the Players tab first.",
+    "pairingEloTitle": "Pairing ELO for an unrated member: used only for the team average and the board order, never exported — the player stays unrated everywhere else",
+    "unassigned": "Not in a team ({count})",
+    "allAssigned": "Every player is in a team.",
+    "adjustmentTitle": "Manual point bonus/penalty for this team",
+    "removeAdjustment": "Remove this adjustment",
+    "adjustmentPointsPlaceholder": "Points",
+    "adjustmentReasonPlaceholder": "Reason (required)",
+    "cancelAdjustment": "Cancel",
+    "addAdjustment": "Add"
   }
 }

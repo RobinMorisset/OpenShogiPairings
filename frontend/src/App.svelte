@@ -4,6 +4,9 @@
   import {
     addPlayer,
     addPointAdjustment,
+    addTeam,
+    addTeamAdjustment,
+    addTeamMember,
     ApiError,
     cancelRound,
     confirmRound,
@@ -20,15 +23,23 @@
     refreshRatings,
     removePlayer,
     removePointAdjustment,
+    removeTeam,
+    removeTeamAdjustment,
+    removeTeamMember,
+    renameTeam,
     restoreBackup,
     setBoardDrawn,
     setBoardHandicap,
     setBoardLong,
     setBoardNoShow,
     setBoardWinner,
+    setPairingRating,
     setPlayerEligible,
     setPlayerCategory,
     setSitoutValue,
+    setTeamBoardOrder,
+    setTeamSitoutValue,
+    sortTeamByRating,
     undoTournament,
     updateDraft,
     updateSettings,
@@ -38,17 +49,19 @@
   import { describeApiError } from "./lib/errorCodes";
   import { longPending, overrunLongRound } from "./lib/longGames";
   import { isDecided } from "./lib/noShow";
+  import { pairingRating } from "./lib/teams";
   import type {
     BackupList,
     CupBracketView,
     CupPodium,
     Handicap,
     NewPlayer,
-    NoShow,
+    Forfeit,
     RatedPlayer,
     RoundExplanation,
     SitoutValue,
     Standing,
+    TeamStanding,
     Tournament,
     TournamentResponse,
     TournamentSettings,
@@ -63,6 +76,7 @@
   import { authRequired, currentTournamentId, initialTab } from "./lib/session";
   import PlayerRegistration from "./lib/components/PlayerRegistration.svelte";
   import PlayerList from "./lib/components/PlayerList.svelte";
+  import TeamsPanel from "./lib/components/TeamsPanel.svelte";
   import RoundView from "./lib/components/RoundView.svelte";
   import RoundDraftView from "./lib/components/RoundDraftView.svelte";
   import ResultsView from "./lib/components/ResultsView.svelte";
@@ -74,6 +88,9 @@
 
   let tournament = $state<Tournament | null>(null);
   let standings = $state<Standing[]>([]);
+  /** Ranked team standings, in team mode only — the primary table there, with
+   *  the player standings staying as the per-player breakdown. */
+  let teamStandings = $state<TeamStanding[]>([]);
   let cupPodium = $state<CupPodium | null>(null);
   let cupBracket = $state<CupBracketView | null>(null);
   let draftCupPlayers = $state<number[]>([]);
@@ -106,6 +123,7 @@
   function apply(res: TournamentResponse) {
     tournament = res.tournament;
     standings = res.standings;
+    teamStandings = res.team_standings ?? [];
     cupPodium = res.cup_podium ?? null;
     cupBracket = res.cup_bracket ?? null;
     draftCupPlayers = res.draft_cup_players ?? [];
@@ -143,6 +161,11 @@
   // seed order can't change. Sits next to Standings.
   const showCup = $derived(tournament?.cup != null);
 
+  // Team mode: teams are the unit of pairing, so registration grows a Teams tab
+  // (next to Players, where the rosters are built) and the rest of the app
+  // groups by match. Declared here because the tab list below reads it.
+  const teamMode = $derived(tournament?.settings.teams != null);
+
   // The tabs in the order they're rendered below, so the arrow-key shortcuts can
   // step through them. Kept in sync by construction with the markup order.
   const tabOrder = $derived(
@@ -150,6 +173,7 @@
       ? [
           "settings",
           "players",
+          ...(teamMode ? ["teams"] : []),
           ...(showResults ? ["results"] : []),
           ...(showCup ? ["cup"] : []),
           ...tournament.rounds.map((r) => `round-${r.number}`),
@@ -164,6 +188,14 @@
     if (!tournament || !activeRound) return [];
     const idx = tournament.rounds.findIndex((r) => r.number === activeRound.number);
     return idx >= 0 ? (suggestedHandicaps[idx] ?? []) : [];
+  });
+
+  // The same slice of the server-computed effective winners — what the round
+  // view's running match score counts, so the Wiel rule applies there too.
+  const activeRoundWinners = $derived.by(() => {
+    if (!tournament || !activeRound) return [];
+    const idx = tournament.rounds.findIndex((r) => r.number === activeRound.number);
+    return idx >= 0 ? (effectiveWinners[idx] ?? []) : [];
   });
 
   // Long (two-round) games started in the previous round that are still unplayed,
@@ -263,6 +295,13 @@
   // format, a bracket of `size` takes half as many players again (mirrors
   // `cup_field_size` in the backend).
   const cupEnabled = $derived(tournament?.settings.cup_enabled ?? false);
+  const teamSize = $derived(tournament?.settings.teams?.size ?? 1);
+  // MacMahon starting points in use — the one configuration where an unrated
+  // team member needs a referee-assigned pairing ELO.
+  const macmahonInUse = $derived.by(() => {
+    const pairing = tournament?.settings.pairing;
+    return pairing?.kind === "swiss" && (pairing.macmahon.thresholds ?? []).length > 0;
+  });
   const cupFormat = $derived(tournament?.settings.cup_format ?? "direct");
   const eligibleCount = $derived(
     tournament?.players.filter((p) => p.eligible).length ?? 0,
@@ -294,10 +333,42 @@
   const overrunRound = $derived(
     overrunLongRound(tournament?.rounds ?? [], nextRoundNumber),
   );
+  // Preparing round 1 of a team tournament also finalizes the rosters, so the
+  // button carries `finalize_teams`'s guards — in the same order, and phrased as
+  // the error it would otherwise have raised. Without this it looked live and
+  // the server refused. Empty once the rosters are ready (and from round 2 on,
+  // where they are frozen and were validated here).
+  const teamsNotReady = $derived.by(() => {
+    if (!teamMode || phase !== "registration") return "";
+    const teams = tournament?.teams ?? [];
+    const players = tournament?.players ?? [];
+    if (teams.length < 2) {
+      return $_("serverError.notEnoughTeams", { values: { have: teams.length } });
+    }
+    const assigned = new Set(teams.flatMap((t) => t.members));
+    const without = players.filter((p) => !assigned.has(p.id)).length;
+    if (without > 0) {
+      return $_("serverError.playersWithoutTeam", { values: { count: without } });
+    }
+    const short = teams.find((t) => t.members.length !== teamSize);
+    if (short) {
+      return $_("serverError.incompleteTeam", {
+        values: { name: short.name, have: short.members.length, need: teamSize },
+      });
+    }
+    if (macmahonInUse) {
+      const missing = players.filter((p) => pairingRating(p) == null).length;
+      if (missing > 0) {
+        return $_("serverError.membersWithoutPairingRating", { values: { count: missing } });
+      }
+    }
+    return "";
+  });
   const startEnabled = $derived(
     !busy &&
       enoughPlayers &&
       overrunRound === null &&
+      teamsNotReady === "" &&
       ((phase === "registration" && cupReady) || phase === "ready"),
   );
   const startTitle = $derived(
@@ -305,11 +376,13 @@
       ? $_("app.startTitleNotReady")
       : !enoughPlayers
         ? $_("app.startTitleNeedPlayers")
-        : overrunRound !== null
-          ? $_("app.startTitleLongGamePending", { values: { round: overrunRound } })
-          : phase === "registration" && !cupReady
-            ? $_("app.advanceTitleNeedCup", { values: { needed: cupFieldSize(8) } })
-            : "",
+        : teamsNotReady !== ""
+          ? teamsNotReady
+          : overrunRound !== null
+            ? $_("app.startTitleLongGamePending", { values: { round: overrunRound } })
+            : phase === "registration" && !cupReady
+              ? $_("app.advanceTitleNeedCup", { values: { needed: cupFieldSize(8) } })
+              : "",
   );
 
   // "Export grid" button: available only in the "ready" phase (no draft, no
@@ -350,6 +423,7 @@
     const valid = new Set([
       "settings",
       "players",
+      ...(teamMode ? ["teams"] : []),
       ...(showResults ? ["results"] : []),
       ...(showCup ? ["cup"] : []),
       ...tournament.rounds.map((r) => `round-${r.number}`),
@@ -442,6 +516,7 @@
     // moment of stale UI from the previous one never shows.
     tournament = null;
     standings = [];
+    teamStandings = [];
     cupPodium = null;
     cupBracket = null;
     draftCupPlayers = [];
@@ -535,6 +610,72 @@
   function handleRemovePlayer(id: string) {
     run(async () => {
       apply(await removePlayer(id));
+    });
+  }
+
+  // --- Teams ---------------------------------------------------------------
+  //
+  // Each of these is a single request whose response carries the whole updated
+  // tournament, so the panel re-renders from the server's own view of the
+  // rosters rather than a local guess at them.
+
+  function handleAddTeam(name: string) {
+    run(async () => {
+      apply(await addTeam(name));
+    });
+  }
+
+  function handleRenameTeam(teamId: string, name: string) {
+    run(async () => {
+      apply(await renameTeam(teamId, name));
+    });
+  }
+
+  function handleRemoveTeam(teamId: string) {
+    run(async () => {
+      apply(await removeTeam(teamId));
+    });
+  }
+
+  function handleAddTeamMember(teamId: string, playerId: string) {
+    run(async () => {
+      apply(await addTeamMember(teamId, playerId));
+    });
+  }
+
+  function handleRemoveTeamMember(teamId: string, playerId: string) {
+    run(async () => {
+      apply(await removeTeamMember(teamId, playerId));
+    });
+  }
+
+  function handleSetTeamBoardOrder(teamId: string, order: string[]) {
+    run(async () => {
+      apply(await setTeamBoardOrder(teamId, order));
+    });
+  }
+
+  function handleSortTeamByRating(teamId: string) {
+    run(async () => {
+      apply(await sortTeamByRating(teamId));
+    });
+  }
+
+  function handleAddTeamAdjustment(teamId: string, delta: number, reason: string) {
+    run(async () => {
+      apply(await addTeamAdjustment(teamId, delta, reason));
+    });
+  }
+
+  function handleRemoveTeamAdjustment(teamId: string, adjustmentId: string) {
+    run(async () => {
+      apply(await removeTeamAdjustment(teamId, adjustmentId));
+    });
+  }
+
+  function handleSetPairingRating(playerId: string, rating: number | null) {
+    run(async () => {
+      apply(await setPairingRating(playerId, rating));
     });
   }
 
@@ -664,7 +805,13 @@
     });
   }
 
-  function handleSetNoShow(roundNumber: number, boardIndex: number, absent: NoShow | null) {
+  function handleSetTeamSitoutValue(roundNumber: number, teamId: string, value: SitoutValue) {
+    run(async () => {
+      apply(await setTeamSitoutValue(roundNumber, teamId, value));
+    });
+  }
+
+  function handleSetNoShow(roundNumber: number, boardIndex: number, absent: Forfeit | null) {
     run(async () => {
       apply(await setBoardNoShow(roundNumber, boardIndex, absent));
     });
@@ -892,6 +1039,17 @@
         >
           {$_("app.tabPlayers", { values: { count: tournament.players.length } })}
         </button>
+        {#if teamMode}
+          <button
+            type="button"
+            class="tab"
+            class:active={activeTab === "teams"}
+            data-testid="tab-teams"
+            onclick={() => (activeTab = "teams")}
+          >
+            {$_("app.tabTeams", { values: { count: (tournament.teams ?? []).length } })}
+          </button>
+        {/if}
         {#if showResults}
           <button
             type="button"
@@ -1048,19 +1206,40 @@
               onToggleEligible={handleToggleEligible}
               onSetEligibleByNationality={handleSetEligibleByNationality}
               onToggleCategory={handleToggleCategory}
-              onAddAdjustment={handleAddPointAdjustment}
-              onRemoveAdjustment={handleRemovePointAdjustment}
+              onAddAdjustment={teamMode ? undefined : handleAddPointAdjustment}
+              onRemoveAdjustment={teamMode ? undefined : handleRemovePointAdjustment}
               {busy}
             />
           </div>
+        {:else if activeTab === "teams"}
+          <TeamsPanel
+            teams={tournament.teams ?? []}
+            players={tournament.players}
+            size={teamSize}
+            finalized={tournament.registration_finalized}
+            {macmahonInUse}
+            onAdd={handleAddTeam}
+            onRename={handleRenameTeam}
+            onRemove={handleRemoveTeam}
+            onAddMember={handleAddTeamMember}
+            onRemoveMember={handleRemoveTeamMember}
+            onSetBoardOrder={handleSetTeamBoardOrder}
+            onSortByRating={handleSortTeamByRating}
+            onSetPairingRating={handleSetPairingRating}
+            onAddAdjustment={handleAddTeamAdjustment}
+            onRemoveAdjustment={handleRemoveTeamAdjustment}
+            {busy}
+          />
         {:else if activeTab === "results"}
           <ResultsView
             {tournament}
             {standings}
+            teamStandings={teamMode ? teamStandings : []}
             {cupPodium}
             {effectiveWinners}
             categories={tournament.settings.categories ?? []}
             onSetSitoutValue={handleSetSitoutValue}
+            onSetTeamSitoutValue={handleSetTeamSitoutValue}
           />
         {:else if activeTab === "cup" && tournament.cup && cupBracket}
           <CupBracket bracket={cupBracket} cup={tournament.cup} players={tournament.players} />
@@ -1070,6 +1249,7 @@
             players={tournament.players}
             cupPlayers={draftCupPlayers}
             longGamePlayers={busyLongPlayers}
+            teams={teamMode ? (tournament.teams ?? []) : []}
             onUpdate={handleUpdateDraft}
             onConfirm={handleConfirmRound}
             {busy}
@@ -1099,6 +1279,8 @@
             {carriedLongBoards}
             onCarriedWinner={(boardIndex, clicked) =>
               handleSetResult(carriedRoundNumber, boardIndex, clicked)}
+            teams={teamMode ? (tournament.teams ?? []) : []}
+            effectiveWinners={activeRoundWinners}
             {busy}
           />
         {/if}

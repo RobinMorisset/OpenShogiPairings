@@ -3,6 +3,7 @@ import type { Cup } from "./Cup";
 import type { Player } from "./Player";
 import type { Round } from "./Round";
 import type { RoundDraft } from "./RoundDraft";
+import type { Team } from "./Team";
 import type { TournamentSettings } from "./TournamentSettings";
 
 /**
@@ -47,4 +48,10 @@ rounds: Array<Round>,
  * The direct-elimination cup, if this is a hybrid tournament. Fixed at
  * finalization (see [`Cup`]); `None` when there is no cup.
  */
-cup?: Cup | null, };
+cup?: Cup | null, 
+/**
+ * The registered teams, in creation order — the only team state that is
+ * *stored*, everything else about a team being replayed from the boards.
+ * Empty (and absent from JSON) outside team mode.
+ */
+teams?: Array<Team>, };

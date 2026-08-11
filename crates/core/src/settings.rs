@@ -536,6 +536,12 @@ pub enum Tiebreak {
     /// The live Bayesian ELO estimate (experimental ELO pairing mode). Ranks
     /// higher estimate first, like the other metrics.
     EstElo,
+    /// Games won: a player's own wins, or — in a team tournament, where it is
+    /// the established second criterion after match points — the total won by a
+    /// team's players across every board. Distinct from [`Points`](Self::Points),
+    /// which also carries MacMahon starting points and (for a team) counts a
+    /// match rather than the boards inside it.
+    BoardWins,
 }
 
 impl Tiebreak {
@@ -545,6 +551,19 @@ impl Tiebreak {
     pub fn default_order() -> Vec<Tiebreak> {
         vec![
             Tiebreak::Points,
+            Tiebreak::SosM,
+            Tiebreak::SodosM,
+            Tiebreak::SososM,
+        ]
+    }
+
+    /// The default ranking order for a **team** tournament: match points, then
+    /// board wins, then the SOS family — established team-event practice, and
+    /// what the referee gets by switching a fresh tournament to team mode.
+    pub fn default_team_order() -> Vec<Tiebreak> {
+        vec![
+            Tiebreak::Points,
+            Tiebreak::BoardWins,
             Tiebreak::SosM,
             Tiebreak::SodosM,
             Tiebreak::SososM,
@@ -740,6 +759,84 @@ pub struct PlayerCategory {
     pub name: String,
 }
 
+/// Team-tournament configuration. Present exactly when the tournament is a team
+/// tournament — teams become the unit of pairing and ranking, while the games
+/// stay ordinary individual boards (see `docs/team-tournaments.md`).
+///
+/// Orthogonal to [`PairingMode`], like the cup: a team tournament is still
+/// paired Swiss or MacMahon, over teams instead of players.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
+pub struct TeamSettings {
+    /// Players per team — every team has exactly this many members, and a match
+    /// is this many boards. Validated in [`TEAM_SIZES`]; 3 is the European
+    /// convention.
+    pub size: u32,
+}
+
+impl Default for TeamSettings {
+    fn default() -> Self {
+        TeamSettings { size: 3 }
+    }
+}
+
+/// The team sizes a tournament may be run with. Two is the smallest thing that
+/// is still a team; nine is well past any real event and keeps a match's board
+/// count sane.
+pub const TEAM_SIZES: std::ops::RangeInclusive<u32> = 2..=9;
+
+/// A feature that cannot be combined with team mode (v1). Enabling team mode
+/// while one of these is on — or turning one on while team mode is — is a
+/// settings error naming the conflict, never a silent auto-disable.
+///
+/// Serialized snake_case, and each variant has a matching error code, so the
+/// referee is told exactly which two settings disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(rename_all = "snake_case")]
+pub enum TeamModeConflict {
+    /// The direct-elimination cup: a team bracket is a different format, not a
+    /// variation on this one.
+    Cup,
+    /// Long (two-round) games: a board that spans two rounds would leave its
+    /// match — and the round — half-derived.
+    LongGames,
+    /// ELO pairing mode: it pairs on a live per-player estimate, which has no
+    /// team-level meaning.
+    EloPairing,
+    /// Grade-based MacMahon thresholds: a team has an average rating, not a
+    /// grade, so only the ELO criterion has a team reading.
+    GradeThresholds,
+    /// The estimated-ELO tie-break, for the same reason as ELO pairing.
+    EstEloTiebreak,
+}
+
+impl TeamModeConflict {
+    /// The stable machine code for this conflict, shared with the API's error
+    /// codes so the message can be translated.
+    pub fn code(self) -> &'static str {
+        match self {
+            TeamModeConflict::Cup => "team_mode_rejects_cup",
+            TeamModeConflict::LongGames => "team_mode_rejects_long_games",
+            TeamModeConflict::EloPairing => "team_mode_rejects_elo_pairing",
+            TeamModeConflict::GradeThresholds => "team_mode_rejects_grade_thresholds",
+            TeamModeConflict::EstEloTiebreak => "team_mode_rejects_est_elo_tiebreak",
+        }
+    }
+
+    /// English description, the fallback shown when a client has no translation.
+    pub fn describe(self) -> &'static str {
+        match self {
+            TeamModeConflict::Cup => "the direct-elimination cup",
+            TeamModeConflict::LongGames => "long (two-round) games",
+            TeamModeConflict::EloPairing => "ELO pairing mode",
+            TeamModeConflict::GradeThresholds => "grade-based MacMahon thresholds",
+            TeamModeConflict::EstEloTiebreak => "the estimated-ELO tie-break",
+        }
+    }
+}
+
 /// Configuration that isn't tied to a single player or round.
 ///
 /// Kept as its own record so it can grow (time controls, tie-break choices, …)
@@ -831,6 +928,11 @@ pub struct TournamentSettings {
     /// the standings filter/leader marks, never for pairing or scoring.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub categories: Vec<PlayerCategory>,
+    /// Present exactly when this is a **team tournament** (see [`TeamSettings`]).
+    /// Absent — the default — is an ordinary individual tournament.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub teams: Option<TeamSettings>,
 }
 
 impl Default for TournamentSettings {
@@ -848,6 +950,7 @@ impl Default for TournamentSettings {
             half_point_absences: false,
             tiebreaks: default_tiebreaks(),
             categories: Vec::new(),
+            teams: None,
         }
     }
 }
@@ -959,6 +1062,63 @@ impl TournamentSettings {
             PairingMode::Swiss {
                 airtight_groups, ..
             } => airtight_groups.is_some_and(|n| round <= n.get()),
+            PairingMode::Elo { .. } => false,
+        }
+    }
+
+    /// Whether this is a team tournament.
+    pub fn team_mode(&self) -> bool {
+        self.teams.is_some()
+    }
+
+    /// Players per team, or 1 outside team mode — the number of boards one
+    /// pairing expands to, which is exactly how the round builder reads it.
+    pub fn team_size(&self) -> u32 {
+        self.teams.map_or(1, |t| t.size)
+    }
+
+    /// The first feature these settings enable that team mode cannot support, if
+    /// any — the check `update_settings` runs so a conflicting combination is
+    /// rejected naming the culprit, rather than one side being silently disabled.
+    ///
+    /// Returns `None` outside team mode: every one of these is fine on its own.
+    pub fn team_mode_conflict(&self) -> Option<TeamModeConflict> {
+        if !self.team_mode() {
+            return None;
+        }
+        if self.cup_enabled {
+            return Some(TeamModeConflict::Cup);
+        }
+        if self.long_boards_enabled {
+            return Some(TeamModeConflict::LongGames);
+        }
+        match &self.pairing {
+            PairingMode::Elo { .. } => return Some(TeamModeConflict::EloPairing),
+            PairingMode::Swiss { macmahon, .. } => {
+                // A team has an average rating, not a grade, so only the ELO
+                // criterion has a team-level reading.
+                if macmahon
+                    .thresholds
+                    .iter()
+                    .any(|t| matches!(t.criterion, ThresholdCriterion::Grade { .. }))
+                {
+                    return Some(TeamModeConflict::GradeThresholds);
+                }
+            }
+        }
+        if self.tiebreaks.contains(&Tiebreak::EstElo) {
+            return Some(TeamModeConflict::EstEloTiebreak);
+        }
+        None
+    }
+
+    /// Whether MacMahon starting points are actually in use — the condition that
+    /// makes a pairing rating *required* for every team member, since an unrated
+    /// member would otherwise contribute nothing to the team average the
+    /// thresholds are applied to.
+    pub fn macmahon_in_use(&self) -> bool {
+        match &self.pairing {
+            PairingMode::Swiss { macmahon, .. } => !macmahon.thresholds.is_empty(),
             PairingMode::Elo { .. } => false,
         }
     }
@@ -1787,6 +1947,105 @@ mod tests {
             "source": { "kind": "static" } } } }"#;
         let s: TournamentSettings = serde_json::from_str(good).unwrap();
         assert_eq!(s.macmahon_thresholds().len(), 1);
+    }
+
+    // --- Team mode --------------------------------------------------------
+
+    fn team_settings() -> TournamentSettings {
+        TournamentSettings {
+            teams: Some(TeamSettings::default()),
+            ..TournamentSettings::default()
+        }
+    }
+
+    /// Each unsupported feature is reported as its own conflict, so the message
+    /// can name the two settings that disagree rather than a generic refusal.
+    #[test]
+    fn team_mode_names_the_feature_it_conflicts_with() {
+        let cases: Vec<(TournamentSettings, TeamModeConflict)> = vec![
+            (
+                TournamentSettings {
+                    cup_enabled: true,
+                    ..team_settings()
+                },
+                TeamModeConflict::Cup,
+            ),
+            (
+                TournamentSettings {
+                    long_boards_enabled: true,
+                    ..team_settings()
+                },
+                TeamModeConflict::LongGames,
+            ),
+            (
+                TournamentSettings {
+                    pairing: PairingMode::Elo {
+                        estimator: EloEstimator::default(),
+                    },
+                    ..team_settings()
+                },
+                TeamModeConflict::EloPairing,
+            ),
+            (
+                team_settings().with_thresholds(vec![MacMahonThreshold {
+                    criterion: ThresholdCriterion::Grade {
+                        grade: Grade::dan(1),
+                    },
+                    drops_after_round: None,
+                }]),
+                TeamModeConflict::GradeThresholds,
+            ),
+            (
+                TournamentSettings {
+                    tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo],
+                    ..team_settings()
+                },
+                TeamModeConflict::EstEloTiebreak,
+            ),
+        ];
+        for (settings, expected) in cases {
+            assert_eq!(settings.team_mode_conflict(), Some(expected));
+        }
+    }
+
+    /// The very same features are fine on their own — the conflict is with team
+    /// mode, not with the feature.
+    #[test]
+    fn no_conflict_outside_team_mode_or_without_the_feature() {
+        let cup = TournamentSettings {
+            cup_enabled: true,
+            long_boards_enabled: true,
+            ..TournamentSettings::default()
+        };
+        assert_eq!(cup.team_mode_conflict(), None);
+        assert_eq!(team_settings().team_mode_conflict(), None);
+        // An ELO MacMahon threshold reads perfectly well against a team average.
+        assert_eq!(
+            team_settings()
+                .with_thresholds(vec![mmt(1500)])
+                .team_mode_conflict(),
+            None
+        );
+    }
+
+    #[test]
+    fn team_size_is_one_outside_team_mode_and_the_configured_size_within() {
+        assert!(!TournamentSettings::default().team_mode());
+        assert_eq!(TournamentSettings::default().team_size(), 1);
+        assert!(team_settings().team_mode());
+        assert_eq!(team_settings().team_size(), 3);
+    }
+
+    /// The `teams` key is absent from an individual tournament's JSON, so team
+    /// mode is off by construction for anything that never mentions it.
+    #[test]
+    fn team_settings_round_trip_and_stay_absent_when_off() {
+        let json = serde_json::to_string(&TournamentSettings::default()).unwrap();
+        assert!(!json.contains("teams"), "{json}");
+        let s = team_settings();
+        let round_tripped: TournamentSettings =
+            serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(round_tripped.teams, Some(TeamSettings { size: 3 }));
     }
 
     #[test]

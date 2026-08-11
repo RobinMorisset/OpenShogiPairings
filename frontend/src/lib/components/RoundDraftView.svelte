@@ -1,8 +1,8 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
   import type { DraftUpdate } from "../api";
-  import { attendingPlayers, MIN_PRESENT_PLAYERS } from "../roundDraft";
-  import type { Player, RoundDraft } from "../types";
+  import { attendingPlayers, MIN_PRESENT_PLAYERS, MIN_PRESENT_TEAMS } from "../roundDraft";
+  import type { Player, RoundDraft, Team } from "../types";
 
   interface Props {
     draft: RoundDraft;
@@ -16,6 +16,9 @@
      * the two arrived as one list.
      */
     longGamePlayers?: number[];
+    /** The tournament's teams, in team mode — where a forced pairing names two
+     *  *teams*, not two players. Empty for an individual tournament. */
+    teams?: Team[];
     /** Push the edited draft to the server. */
     onUpdate: (update: DraftUpdate) => void;
     /** Confirm the draft: pair remaining players and start the round. */
@@ -28,6 +31,7 @@
     players,
     cupPlayers = [],
     longGamePlayers = [],
+    teams = [],
     onUpdate,
     onConfirm,
     busy = false,
@@ -53,6 +57,51 @@
       ...draft.forced_byes,
     ]),
   );
+
+  // --- Teams ---------------------------------------------------------------
+  //
+  // In team mode the forcing controls name teams, because teams are what get
+  // paired. Absence stays a per-player fact — a member can be absent without
+  // their team being, and their board is then forfeited for them — but the
+  // list is grouped by team, with a box that ticks a whole withdrawn one.
+  const teamMode = $derived(teams.length > 0);
+  // Both are omitted from JSON when empty (they only exist in team mode), so a
+  // missing list reads as "none", not as an error.
+  const forcedMatches = $derived(draft.forced_matches ?? []);
+  const forcedTeamByes = $derived(draft.forced_team_byes ?? []);
+  /** The byes the referee has fixed, whichever unit this tournament forces. */
+  const forcedByeList = $derived(teamMode ? forcedTeamByes : draft.forced_byes);
+  const teamById = $derived(new Map(teams.map((t) => [t.tournament_id ?? -1, t])));
+  /** A team's members' tournament numbers. */
+  const teamMembers = $derived(
+    new Map(
+      teams.map((t) => [
+        t.tournament_id ?? -1,
+        t.members.map((id) => players.find((p) => p.id === id)).filter((p) => p != null).map(tid),
+      ]),
+    ),
+  );
+  /** Teams with at least one member present — the ones that will be paired. */
+  const presentTeams = $derived(
+    teams
+      .filter((t) => (teamMembers.get(t.tournament_id ?? -1) ?? []).some((m) => !absentSet.has(m)))
+      .sort((a, b) => (a.tournament_id ?? 0) - (b.tournament_id ?? 0)),
+  );
+  const forcedTeamIds = $derived(
+    new Set([
+      ...forcedMatches.flatMap((m) => [m.team1, m.team2]),
+      ...forcedTeamByes,
+    ]),
+  );
+  /** Present teams not already fixed into a forced match or bye. */
+  const forceableTeams = $derived(
+    presentTeams.filter((t) => !forcedTeamIds.has(t.tournament_id ?? -1)),
+  );
+
+  function teamLabel(id: number): string {
+    const t = teamById.get(id);
+    return t ? `${id}. ${t.name}` : "(unknown)";
+  }
 
   function byNumber(a: Player, b: Player) {
     return (a.tournament_id ?? Infinity) - (b.tournament_id ?? Infinity);
@@ -96,6 +145,8 @@
         player2: b.player2,
       })),
       forced_byes: [...draft.forced_byes],
+      forced_matches: forcedMatches.map((m) => ({ ...m })),
+      forced_team_byes: [...forcedTeamByes],
     };
   }
 
@@ -111,6 +162,75 @@
         (b) => b.player1 !== id && b.player2 !== id,
       );
       update.forced_byes = update.forced_byes.filter((x) => x !== id);
+      // In team mode, likewise for their team — but only once *every* member is
+      // absent, since a team with one member missing still plays.
+      const team = teams.find((t) => (teamMembers.get(t.tournament_id ?? -1) ?? []).includes(id));
+      const number = team?.tournament_id;
+      if (
+        number != null &&
+        (teamMembers.get(number) ?? []).every((m) => m === id || absentSet.has(m))
+      ) {
+        update.forced_matches = update.forced_matches.filter(
+          (m) => m.team1 !== number && m.team2 !== number,
+        );
+        update.forced_team_byes = update.forced_team_byes.filter((x) => x !== number);
+      }
+    }
+    onUpdate(update);
+  }
+
+  /** The absence list grouped by team, so a team that has withdrawn can be
+   *  ticked in one go. Players in no team — which finalization rules out —
+   *  are kept in a trailing group rather than dropped from the list. */
+  const absenceGroups = $derived.by(() => {
+    const grouped = teams
+      .map((t) => ({
+        number: t.tournament_id ?? -1,
+        members: (teamMembers.get(t.tournament_id ?? -1) ?? [])
+          .map((id) => byId.get(id))
+          .filter((p) => p != null)
+          .sort(byNumber),
+      }))
+      .sort((a, b) => a.number - b.number);
+    const inATeam = new Set(grouped.flatMap((g) => g.members.map(tid)));
+    return {
+      grouped,
+      loose: allSorted.filter((p) => !inATeam.has(tid(p))),
+    };
+  });
+
+  /** Whether every member of a team is already marked absent — the team-level
+   *  checkbox's state, and what makes the team itself absent from the round. */
+  function teamAbsent(number: number): boolean {
+    const members = teamMembers.get(number) ?? [];
+    return members.length > 0 && members.every((m) => absentSet.has(m));
+  }
+
+  function teamPartlyAbsent(number: number): boolean {
+    return (teamMembers.get(number) ?? []).some((m) => absentSet.has(m)) && !teamAbsent(number);
+  }
+
+  /** Mark (or clear) a whole team's absence in one update — one request, so the
+   *  round never sees half a withdrawn team. */
+  function toggleTeamAbsent(number: number) {
+    const members = teamMembers.get(number) ?? [];
+    if (members.length === 0) return;
+    const willBeAbsent = !teamAbsent(number);
+    const update = base();
+    if (willBeAbsent) {
+      const memberSet = new Set(members);
+      update.absent = [...new Set([...update.absent, ...members])];
+      // Nothing absent can stay fixed into a pairing — at either level.
+      update.forced_boards = update.forced_boards.filter(
+        (b) => !memberSet.has(b.player1) && !memberSet.has(b.player2),
+      );
+      update.forced_byes = update.forced_byes.filter((x) => !memberSet.has(x));
+      update.forced_matches = update.forced_matches.filter(
+        (m) => m.team1 !== number && m.team2 !== number,
+      );
+      update.forced_team_byes = update.forced_team_byes.filter((x) => x !== number);
+    } else {
+      update.absent = update.absent.filter((x) => !members.includes(x));
     }
     onUpdate(update);
   }
@@ -123,7 +243,11 @@
   function addForcedPair() {
     if (pairA === "" || pairB === "" || pairA === pairB) return;
     const update = base();
-    update.forced_boards = [...update.forced_boards, { player1: pairA, player2: pairB }];
+    if (teamMode) {
+      update.forced_matches = [...update.forced_matches, { team1: pairA, team2: pairB }];
+    } else {
+      update.forced_boards = [...update.forced_boards, { player1: pairA, player2: pairB }];
+    }
     pairA = "";
     pairB = "";
     onUpdate(update);
@@ -141,7 +265,11 @@
 
   function removeForcedPair(index: number) {
     const update = base();
-    update.forced_boards = update.forced_boards.filter((_, i) => i !== index);
+    if (teamMode) {
+      update.forced_matches = update.forced_matches.filter((_, i) => i !== index);
+    } else {
+      update.forced_boards = update.forced_boards.filter((_, i) => i !== index);
+    }
     onUpdate(update);
   }
 
@@ -151,12 +279,23 @@
   // field, mark them absent instead and set what the round scored them from the
   // standings. (The engine itself is happy either way — that's what lets the
   // importers rebuild a round with several byes.)
-  const byesClosed = $derived(present.length % 2 === 0);
+  const byesClosed = $derived(
+    (teamMode ? presentTeams.length : present.length) % 2 === 0,
+  );
 
   function addForcedBye(id: number | "") {
-    if (id === "" || draft.forced_byes.includes(id)) return;
+    // One bye is all a round can use: the engine byes at most one unit, and a
+    // second would leave someone else unpaired for it to bye as well. Sitting
+    // more out is what marking them absent is for.
+    if (id === "" || forcedByeList.length > 0) return;
     const update = base();
-    update.forced_byes = [...update.forced_byes, id];
+    if (teamMode) {
+      if (update.forced_team_byes.includes(id)) return;
+      update.forced_team_byes = [...update.forced_team_byes, id];
+    } else {
+      if (update.forced_byes.includes(id)) return;
+      update.forced_byes = [...update.forced_byes, id];
+    }
     onUpdate(update);
   }
 
@@ -165,7 +304,11 @@
   // must be able to take it back.
   function removeForcedBye(id: number) {
     const update = base();
-    update.forced_byes = update.forced_byes.filter((x) => x !== id);
+    if (teamMode) {
+      update.forced_team_byes = update.forced_team_byes.filter((x) => x !== id);
+    } else {
+      update.forced_byes = update.forced_byes.filter((x) => x !== id);
+    }
     onUpdate(update);
   }
 
@@ -177,15 +320,42 @@
   // everyone the round includes, and a cup round can legitimately leave the
   // Swiss pool empty with the whole field in the bracket.
   const problem = $derived.by<string | null>(() => {
+    if (teamMode) {
+      // A team round is measured in teams, so that is what the floor counts.
+      return presentTeams.length < MIN_PRESENT_TEAMS
+        ? $_("roundDraftView.needAtLeastTwoTeams")
+        : null;
+    }
     if (attending.length < MIN_PRESENT_PLAYERS)
       return $_("roundDraftView.needAtLeastTwoPresent");
     return null;
   });
 </script>
 
+<!-- One player's absence checkbox, shared by the flat list and the per-team
+     groups so the two can't drift apart. -->
+{#snippet absentBox(p: Player)}
+  <label class="chk">
+    <input
+      type="checkbox"
+      checked={absentSet.has(tid(p))}
+      disabled={busy}
+      onchange={() => toggleAbsent(tid(p))}
+    />
+    {label(tid(p))}{#if cupSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.cupTag")}</span
+      >{:else if longSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.longTag")}</span
+      >{/if}
+  </label>
+{/snippet}
+
 <div class="draft">
   <p class="summary">
-    {#if cupPlayers.length > 0}
+    {#if teamMode}
+      <!-- The pool is measured in teams here, because teams are what get
+           paired; the absent count stays per player, because that is what the
+           referee ticks. -->
+      {$_("roundDraftView.summaryTeams", { values: { number: draft.number, present: presentTeams.length, absent: draft.absent.length } })}
+    {:else if cupPlayers.length > 0}
       {$_("roundDraftView.summaryWithCup", { values: { number: draft.number, present: present.length, cup: cupPlayers.length, absent: draft.absent.length } })}
     {:else}
       {$_("roundDraftView.summary", { values: { number: draft.number, present: present.length, absent: draft.absent.length } })}
@@ -218,28 +388,56 @@
   <section>
     <h3>{$_("roundDraftView.absentThisRound")}</h3>
     <p class="muted small">{$_("roundDraftView.absentDefaultHint")}</p>
-    <div class="players-grid">
-      {#each allSorted as p (p.id)}
-        <label class="chk">
-          <input
-            type="checkbox"
-            checked={absentSet.has(tid(p))}
-            disabled={busy}
-            onchange={() => toggleAbsent(tid(p))}
-          />
-          {label(tid(p))}{#if cupSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.cupTag")}</span>{:else if longSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.longTag")}</span>{/if}
-        </label>
+    {#if teamMode}
+      <!-- Grouped by team: a team that has withdrawn is ticked in one go, and
+           its members' own boxes still work for a single absentee. -->
+      {#each absenceGroups.grouped as group (group.number)}
+        <div class="team-absence">
+          <label class="chk team-chk">
+            <input
+              type="checkbox"
+              checked={teamAbsent(group.number)}
+              indeterminate={teamPartlyAbsent(group.number)}
+              disabled={busy}
+              title={$_("roundDraftView.absentWholeTeam")}
+              onchange={() => toggleTeamAbsent(group.number)}
+            />
+            {teamLabel(group.number)}
+          </label>
+          <div class="players-grid">
+            {#each group.members as p (p.id)}
+              {@render absentBox(p)}
+            {/each}
+          </div>
+        </div>
       {/each}
-    </div>
+      {#if absenceGroups.loose.length > 0}
+        <div class="players-grid">
+          {#each absenceGroups.loose as p (p.id)}
+            {@render absentBox(p)}
+          {/each}
+        </div>
+      {/if}
+    {:else}
+      <div class="players-grid">
+        {#each allSorted as p (p.id)}
+          {@render absentBox(p)}
+        {/each}
+      </div>
+    {/if}
   </section>
 
   <section>
     <h3>{$_("roundDraftView.forcedPairings")}</h3>
-    {#if draft.forced_boards.length > 0}
+    {#if teamMode ? forcedMatches.length > 0 : draft.forced_boards.length > 0}
       <ul class="forced-list">
-        {#each draft.forced_boards as board, i (i)}
+        {#each teamMode ? forcedMatches.map((m) => [m.team1, m.team2]) : draft.forced_boards.map((b) => [b.player1, b.player2]) as pair, i (i)}
           <li>
-            <span>{label(board.player1)} — {label(board.player2)}</span>
+            <span
+              >{teamMode ? teamLabel(pair[0]) : label(pair[0])} — {teamMode
+                ? teamLabel(pair[1])
+                : label(pair[1])}</span
+            >
             <button
               type="button"
               class="remove"
@@ -257,10 +455,18 @@
         disabled={busy}
         onchange={(e) => selectPairA(parseId(e.currentTarget.value))}
       >
-        <option value="">{$_("roundDraftView.playerEllipsis")}</option>
-        {#each forceable as p (p.id)}
-          <option value={tid(p)}>{label(tid(p))}</option>
-        {/each}
+        <option value=""
+          >{$_(teamMode ? "roundDraftView.teamEllipsis" : "roundDraftView.playerEllipsis")}</option
+        >
+        {#if teamMode}
+          {#each forceableTeams as t (t.id)}
+            <option value={t.tournament_id}>{teamLabel(t.tournament_id ?? -1)}</option>
+          {/each}
+        {:else}
+          {#each forceable as p (p.id)}
+            <option value={tid(p)}>{label(tid(p))}</option>
+          {/each}
+        {/if}
       </select>
       <span class="vs">{$_("roundDraftView.vs")}</span>
       <select
@@ -268,24 +474,36 @@
         disabled={busy}
         onchange={(e) => selectPairB(parseId(e.currentTarget.value))}
       >
-        <option value="">{$_("roundDraftView.playerEllipsis")}</option>
-        {#each forceable as p (p.id)}
-          {#if tid(p) !== pairA}
-            <option value={tid(p)}>{label(tid(p))}</option>
-          {/if}
-        {/each}
+        <option value=""
+          >{$_(teamMode ? "roundDraftView.teamEllipsis" : "roundDraftView.playerEllipsis")}</option
+        >
+        {#if teamMode}
+          {#each forceableTeams as t (t.id)}
+            {#if t.tournament_id !== pairA}
+              <option value={t.tournament_id}>{teamLabel(t.tournament_id ?? -1)}</option>
+            {/if}
+          {/each}
+        {:else}
+          {#each forceable as p (p.id)}
+            {#if tid(p) !== pairA}
+              <option value={tid(p)}>{label(tid(p))}</option>
+            {/if}
+          {/each}
+        {/if}
       </select>
     </div>
   </section>
 
-  <section class:disabled={byesClosed && draft.forced_byes.length === 0}>
+  <section class:disabled={byesClosed && forcedByeList.length === 0}>
     <h3>{$_("roundDraftView.forcedBye")}</h3>
-    <p class="muted small">{$_("roundDraftView.forcedByeHint")}</p>
-    {#if draft.forced_byes.length > 0}
+    <p class="muted small">
+      {$_(teamMode ? "roundDraftView.forcedByeHintTeams" : "roundDraftView.forcedByeHint")}
+    </p>
+    {#if forcedByeList.length > 0}
       <ul class="forced-list">
-        {#each draft.forced_byes as id (id)}
+        {#each forcedByeList as id (id)}
           <li>
-            <span>{label(id)}</span>
+            <span>{teamMode ? teamLabel(id) : label(id)}</span>
             <button
               type="button"
               class="remove"
@@ -297,19 +515,34 @@
         {/each}
       </ul>
     {/if}
-    {#if byesClosed && draft.forced_byes.length > 0}
-      <p class="hint warning">⚠ {$_("roundDraftView.forcedByeEvenWarning")}</p>
+    {#if byesClosed && forcedByeList.length > 0}
+      <p class="hint warning">
+        ⚠ {$_(
+          teamMode
+            ? "roundDraftView.forcedByeEvenWarningTeams"
+            : "roundDraftView.forcedByeEvenWarning",
+        )}
+      </p>
     {/if}
-    <select
-      value=""
-      disabled={busy || byesClosed || forceable.length === 0}
-      onchange={(e) => addForcedBye(parseId(e.currentTarget.value))}
-    >
-      <option value="">{$_("roundDraftView.automaticBye")}</option>
-      {#each forceable as p (p.id)}
-        <option value={tid(p)}>{label(tid(p))}</option>
-      {/each}
-    </select>
+    <!-- Gone once a bye is forced: there is only ever one to give, and the ✕
+         above takes it back. -->
+    {#if forcedByeList.length === 0}
+      <select
+        value=""
+        disabled={busy || byesClosed || (teamMode ? forceableTeams : forceable).length === 0}
+        onchange={(e) => addForcedBye(parseId(e.currentTarget.value))}
+      >
+        <option value="">{$_("roundDraftView.automaticBye")}</option>
+        {#if teamMode}
+          {#each forceableTeams as t (t.id)}
+            <option value={t.tournament_id}>{teamLabel(t.tournament_id ?? -1)}</option>
+          {/each}
+        {/if}
+        {#each teamMode ? [] : forceable as p (p.id)}
+          <option value={tid(p)}>{label(tid(p))}</option>
+        {/each}
+      </select>
+    {/if}
   </section>
 
   <div class="confirm-row">
@@ -393,6 +626,18 @@
     align-items: center;
     gap: 0.4rem;
     font-size: 0.9rem;
+  }
+  /* A team and its members read as one block: the team's own box on top, its
+     players indented under it. */
+  .team-absence {
+    margin-top: 0.7rem;
+  }
+  .team-chk {
+    font-weight: 600;
+  }
+  .team-absence .players-grid {
+    margin-top: 0.15rem;
+    margin-left: 1.4rem;
   }
   .forced-list {
     list-style: none;

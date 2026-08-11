@@ -3,6 +3,7 @@ import type { CupFormat } from "./CupFormat";
 import type { HandicapPolicy } from "./HandicapPolicy";
 import type { PairingMode } from "./PairingMode";
 import type { PlayerCategory } from "./PlayerCategory";
+import type { TeamSettings } from "./TeamSettings";
 import type { Tiebreak } from "./Tiebreak";
 import type { TournamentDates } from "./TournamentDates";
 
@@ -107,4 +108,9 @@ tiebreaks: Array<Tiebreak>,
  * default. Descriptive only — used for the Players-tab checkbox columns and
  * the standings filter/leader marks, never for pairing or scoring.
  */
-categories?: Array<PlayerCategory>, };
+categories?: Array<PlayerCategory>, 
+/**
+ * Present exactly when this is a **team tournament** (see [`TeamSettings`]).
+ * Absent — the default — is an ordinary individual tournament.
+ */
+teams?: TeamSettings, };

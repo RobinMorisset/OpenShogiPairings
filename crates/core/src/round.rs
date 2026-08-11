@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::units::{HalfPoints, TournamentId};
+use crate::units::{HalfPoints, TeamId, TournamentId};
 
 /// Which player won a board. Colour (sente/gote) is chosen at random per game
 /// and isn't tracked, so the result is simply which of the two players won.
@@ -162,23 +162,210 @@ impl PairingSource {
     }
 }
 
-/// Which side(s) of a board failed to show up. A single side is a forfeit — the
-/// opponent takes the point exactly like a bye — while `Both` means neither
-/// player appeared, so no winner can be determined (both take a zero loss, and a
-/// cup game with this outcome advances nobody). Serialized snake_case, so the
-/// single-side variants stay wire-compatible with the earlier `Winner`-typed
-/// field.
+/// Why a missing side missed the board.
+///
+/// The distinction only exists because a team match is played whether or not
+/// every member turns up: a member who fell ill still has a board, and stamping
+/// it with the unjustified `0#` would put the wrong thing in the record. In an
+/// individual tournament a justified absence never reaches a board — the player
+/// is excluded from the pairing and gets a sit-out instead — which is why
+/// [`Justified`](Self::Justified) is rejected at load time outside team mode.
+///
+/// Neither kind scores the missing player anything, and neither ever feeds the
+/// ELO estimate; they differ only in the exported cell and the honest record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(rename_all = "snake_case")]
+pub enum AbsenceKind {
+    /// Failed to appear, unjustified — the `0#` cell. The default, and the only
+    /// kind an individual tournament can produce.
+    #[default]
+    NoShow,
+    /// Absent for a valid reason (illness, a departure) — the `0-` cell.
+    Justified,
+}
+
+impl AbsenceKind {
+    /// The cross-table / American Grid cell for a side that missed the board
+    /// this way.
+    pub fn cell(self) -> &'static str {
+        match self {
+            AbsenceKind::NoShow => "0#",
+            AbsenceKind::Justified => "0-",
+        }
+    }
+}
+
+/// Which side(s) of a board missed it, and why each of them did.
+///
+/// A single missing side is a forfeit — the opponent takes the point exactly
+/// like a bye — while `Both` means neither player appeared, so no winner can be
+/// determined (both take a zero loss, and a cup game with this outcome advances
+/// nobody). Every state is meaningful by construction: at least one side is
+/// missing, and each missing side has exactly one reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
-pub enum NoShow {
-    Player1,
-    Player2,
-    Both,
+pub enum Forfeit {
+    Player1(AbsenceKind),
+    Player2(AbsenceKind),
+    Both(AbsenceKind, AbsenceKind),
+}
+
+impl Forfeit {
+    /// The forfeit that has `side` missing for `kind` and the other side
+    /// present — the common single-sided case.
+    pub fn one(side: Winner, kind: AbsenceKind) -> Forfeit {
+        match side {
+            Winner::Player1 => Forfeit::Player1(kind),
+            Winner::Player2 => Forfeit::Player2(kind),
+        }
+    }
+
+    /// The forfeit described by a reason per side, or `None` when both sides
+    /// turned up (which is not a forfeit at all). The single place the two
+    /// per-side controls of the round view are folded into one value.
+    pub fn of(player1: Option<AbsenceKind>, player2: Option<AbsenceKind>) -> Option<Forfeit> {
+        match (player1, player2) {
+            (Some(a), Some(b)) => Some(Forfeit::Both(a, b)),
+            (Some(a), None) => Some(Forfeit::Player1(a)),
+            (None, Some(b)) => Some(Forfeit::Player2(b)),
+            (None, None) => None,
+        }
+    }
+
+    /// Why `side` missed the board, or `None` if they turned up.
+    pub fn kind(self, side: Winner) -> Option<AbsenceKind> {
+        match (self, side) {
+            (Forfeit::Player1(k), Winner::Player1) => Some(k),
+            (Forfeit::Player2(k), Winner::Player2) => Some(k),
+            (Forfeit::Both(k, _), Winner::Player1) => Some(k),
+            (Forfeit::Both(_, k), Winner::Player2) => Some(k),
+            _ => None,
+        }
+    }
+
+    /// Whether `side` missed the board.
+    pub fn absent(self, side: Winner) -> bool {
+        self.kind(side).is_some()
+    }
+
+    /// The side that *did* turn up, when exactly one did — the one credited the
+    /// free point. `None` under `Both`, where nobody is.
+    pub fn present(self) -> Option<Winner> {
+        match self {
+            Forfeit::Player1(_) => Some(Winner::Player2),
+            Forfeit::Player2(_) => Some(Winner::Player1),
+            Forfeit::Both(..) => None,
+        }
+    }
+
+    /// Whether any side missed for a justified reason — the load-time check that
+    /// keeps the kind out of individual tournaments, where it cannot arise.
+    pub fn has_justified(self) -> bool {
+        [Winner::Player1, Winner::Player2]
+            .into_iter()
+            .any(|s| self.kind(s) == Some(AbsenceKind::Justified))
+    }
+}
+
+/// What happened on a board — the single field replacing the former
+/// `result` × `no_show` × `drawn` product.
+///
+/// As three sibling fields, states that cannot occur were representable and only
+/// excluded by convention (a result recorded on a forfeited board, a draw on a
+/// board nobody turned up for), which the ELO reader in particular got wrong.
+/// The sum type makes them unrepresentable instead.
+///
+/// `drawn` lives only in the variants where play happened: the American grid
+/// cannot express "forfeit after draws", so neither does the type.
+///
+/// Serialized internally-tagged, like [`PairingSource`], e.g. `{"kind":"won",
+/// "winner":"player1"}`; the whole field is omitted from JSON while the board is
+/// an ordinary pending one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Outcome {
+    /// No decision yet. `drawn` records at least one draw (sennichite) before
+    /// the decisive replay still in progress — it matters for ELO.
+    Pending {
+        #[serde(default, skip_serializing_if = "is_false")]
+        drawn: bool,
+    },
+    /// Played to a decision, possibly after one or more draws.
+    Won {
+        winner: Winner,
+        #[serde(default, skip_serializing_if = "is_false")]
+        drawn: bool,
+    },
+    /// Side(s) failed to appear, so no game was played. The present side (if
+    /// exactly one) is credited the point exactly like a bye; never feeds ELO.
+    /// The payload records *why* each missing side missed (see [`Forfeit`]).
+    Forfeit { absent: Forfeit },
+}
+
+impl Default for Outcome {
+    /// A fresh board: nothing played, no draw.
+    fn default() -> Self {
+        Outcome::PENDING
+    }
+}
+
+impl Outcome {
+    /// An untouched board — what [`Board::pending`] starts from.
+    pub const PENDING: Outcome = Outcome::Pending { drawn: false };
+
+    /// A board played straight to a decision, with no draw along the way.
+    pub const fn won(winner: Winner) -> Outcome {
+        Outcome::Won {
+            winner,
+            drawn: false,
+        }
+    }
+
+    /// The *actual* winner of the game (ignoring the Wiel rule, which is
+    /// [`Board::effective_winner`]'s business). `None` unless the board was
+    /// played to a decision — a forfeit has no winner here, only a beneficiary
+    /// (see [`Board::no_show_opponent`]).
+    pub fn winner(self) -> Option<Winner> {
+        match self {
+            Outcome::Won { winner, .. } => Some(winner),
+            Outcome::Pending { .. } | Outcome::Forfeit { .. } => None,
+        }
+    }
+
+    /// Whether at least one draw occurred before the decisive replay. Always
+    /// false on a forfeit, where no game was played at all.
+    pub fn drawn(self) -> bool {
+        match self {
+            Outcome::Pending { drawn } | Outcome::Won { drawn, .. } => drawn,
+            Outcome::Forfeit { .. } => false,
+        }
+    }
+
+    /// Which side(s) failed to appear, if this board was forfeited.
+    pub fn forfeit(self) -> Option<Forfeit> {
+        match self {
+            Outcome::Forfeit { absent } => Some(absent),
+            Outcome::Pending { .. } | Outcome::Won { .. } => None,
+        }
+    }
+
+    /// Whether the outcome is settled: played to a decision, or forfeited.
+    pub fn is_decided(self) -> bool {
+        !matches!(self, Outcome::Pending { .. })
+    }
+
+    /// `skip_serializing_if` helper — an untouched board is the default and
+    /// omitted from JSON.
+    fn is_pending_undrawn(&self) -> bool {
+        *self == Outcome::PENDING
+    }
 }
 
 /// A single board (game) in a round: two paired players and, once played, a
-/// result. `result` is `None` while the game hasn't been played yet.
+/// result. See [`Outcome`] for the states a board can be in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Board {
@@ -188,20 +375,18 @@ pub struct Board {
     /// pairing index players directly without a `Uuid → number` lookup.
     pub player1: TournamentId,
     pub player2: TournamentId,
-    /// The *actual* winner of the game, used for end-of-tournament ELO and for
-    /// the sign shown in the results cell. `None` until the game is decided.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub result: Option<Winner>,
-    /// At least one draw (sennichite, repetition) occurred before the decisive game.
-    /// The game is replayed to a win/loss for pairing, but the draw is recorded
-    /// because it matters for ELO.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub drawn: bool,
+    /// What happened on this board: still to play, played to a decision, or
+    /// forfeited by one or both sides. Omitted from JSON while pending.
+    #[serde(default, skip_serializing_if = "Outcome::is_pending_undrawn")]
+    pub outcome: Outcome,
     /// The handicap conceded on this board, if any (see [`HandicapGame`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handicap: Option<HandicapGame>,
     /// The float for this board: `points(player1) − points(player2)` at the time
-    /// the round was paired. Frozen here so the float history stays correct even
+    /// the round was paired, **in half-points** — the unit [`HalfPoints`] keeps
+    /// scores in, so an ordinary one-point float is `±2` here. Only the sign
+    /// matters to the float history; anything displaying the size has to halve
+    /// it. Frozen here so the float history stays correct even
     /// if MacMahon thresholds change later or an earlier result is edited — the
     /// score standings are recomputed live, but *who floated* is a fact of the
     /// pairing. Set for every scored board — Swiss, forced and cup alike — so a
@@ -214,15 +399,6 @@ pub struct Board {
     /// Swiss for saves predating this field.
     #[serde(default, skip_serializing_if = "PairingSource::is_swiss")]
     pub source: PairingSource,
-    /// A player (or both) failed to show up. A single side is a forfeit — the
-    /// opponent is credited the point exactly as for a bye — while `Both` means
-    /// neither appeared, so no winner exists. Kept separate from
-    /// [`result`](Self::result) (which stays `None` — no game was actually
-    /// played) so the cross-table and American grid can show it distinctly (`0#`
-    /// for an absentee, `0+` for a player who showed up), and so it never feeds
-    /// the ELO estimate.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub no_show: Option<NoShow>,
     /// This board is a "long game": double time control, lasting two rounds, and
     /// its winner scores two points instead of one. Off by default and omitted
     /// from JSON when false. The two players sit out the next round's pairing
@@ -243,22 +419,20 @@ impl Board {
         Board {
             player1,
             player2,
-            result: None,
-            drawn: false,
+            outcome: Outcome::PENDING,
             handicap: None,
             points_diff,
             source,
-            no_show: None,
             long: false,
         }
     }
 
     /// Whether this board's outcome is settled: either a game was played (a
-    /// `result` is recorded) or a player was marked as a no-show. Drives the
+    /// winner is recorded) or a player was marked as a no-show. Drives the
     /// round's `completed` flag, so a no-show counts toward closing the round
     /// even though no game was played.
     pub fn is_decided(&self) -> bool {
-        self.result.is_some() || self.no_show.is_some()
+        self.outcome.is_decided()
     }
 
     /// A long board whose game hasn't finished yet — the state that makes its two
@@ -278,25 +452,26 @@ impl Board {
     }
 
     /// Whether the given `side` failed to show up on this board (true for that
-    /// side under a single no-show, and for both sides under [`NoShow::Both`]).
+    /// side under a single forfeit, and for both sides under
+    /// [`Forfeit::Both`]).
     pub fn no_show_absent(&self, side: Winner) -> bool {
-        match self.no_show {
-            Some(NoShow::Player1) => side == Winner::Player1,
-            Some(NoShow::Player2) => side == Winner::Player2,
-            Some(NoShow::Both) => true,
-            None => false,
-        }
+        self.outcome.forfeit().is_some_and(|f| f.absent(side))
+    }
+
+    /// Why `side` missed this board, if they did — what the exported cell reads
+    /// (`0#` for an unjustified no-show, `0-` for a justified absence).
+    pub fn absence_kind(&self, side: Winner) -> Option<AbsenceKind> {
+        self.outcome.forfeit().and_then(|f| f.kind(side))
     }
 
     /// The id of the player who *did* show up — the one credited the free point,
     /// exactly like a bye — when exactly one side was a no-show. `None` when both
-    /// showed up or [`NoShow::Both`] (neither did, so nobody is credited).
+    /// showed up or [`Forfeit::Both`] (neither did, so nobody is credited).
     pub fn no_show_opponent(&self) -> Option<TournamentId> {
-        match self.no_show {
-            Some(NoShow::Player1) => Some(self.player2),
-            Some(NoShow::Player2) => Some(self.player1),
-            _ => None,
-        }
+        self.outcome.forfeit()?.present().map(|side| match side {
+            Winner::Player1 => self.player1,
+            Winner::Player2 => self.player2,
+        })
     }
 
     /// The winner that counts for standings and pairing. For a handicap game,
@@ -308,8 +483,8 @@ impl Board {
     /// [`TournamentSettings::handicap_wiel_rule`]: crate::settings::TournamentSettings::handicap_wiel_rule
     pub fn effective_winner(&self, wiel_rule: bool) -> Option<Winner> {
         match &self.handicap {
-            Some(h) if wiel_rule => self.result.map(|_| h.giver),
-            _ => self.result,
+            Some(h) if wiel_rule => self.outcome.winner().map(|_| h.giver),
+            _ => self.outcome.winner(),
         }
     }
 
@@ -492,6 +667,18 @@ impl Round {
     }
 }
 
+/// A team match the referee has fixed by hand, for a team round's draft — the
+/// team-level counterpart of a forced [`Board`].
+///
+/// The two teams are named by number, and the match expands to its `size`
+/// boards when the round is confirmed, exactly as an engine-chosen one does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct ForcedMatch {
+    pub team1: TeamId,
+    pub team2: TeamId,
+}
+
 /// A round being set up but not yet started (the `RoundDraft` state).
 ///
 /// The referee customizes it — mark players absent, force specific pairings,
@@ -517,4 +704,71 @@ pub struct RoundDraft {
     /// engine still adds its own bye if what's left over is odd.
     #[serde(default)]
     pub forced_byes: Vec<TournamentId>,
+    /// Team matches the referee has fixed by hand — **team mode only**, where
+    /// teams are what get paired, so a forced pairing names two teams rather
+    /// than two players. Empty (and absent from JSON) otherwise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forced_matches: Vec<ForcedMatch>,
+    /// Teams forced to take a bye — team mode only, for the same reason. The
+    /// engine still byes one more team if what's left over is odd.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forced_team_byes: Vec<TeamId>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The wire shape of each [`Outcome`] variant, and that every one survives a
+    /// round trip. The board's whole `outcome` key disappears while pending, so a
+    /// fresh board's JSON is exactly what it was before the sum type.
+    #[test]
+    fn outcome_round_trips_through_json() {
+        let cases = [
+            (Outcome::PENDING, r#"{"kind":"pending"}"#),
+            (
+                Outcome::Pending { drawn: true },
+                r#"{"kind":"pending","drawn":true}"#,
+            ),
+            (
+                Outcome::won(Winner::Player2),
+                r#"{"kind":"won","winner":"player2"}"#,
+            ),
+            (
+                Outcome::Won {
+                    winner: Winner::Player1,
+                    drawn: true,
+                },
+                r#"{"kind":"won","winner":"player1","drawn":true}"#,
+            ),
+            (
+                Outcome::Forfeit {
+                    absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
+                },
+                r#"{"kind":"forfeit","absent":{"both":["no_show","no_show"]}}"#,
+            ),
+            // A single missing side, absent for a reason — the team-mode cell.
+            (
+                Outcome::Forfeit {
+                    absent: Forfeit::Player1(AbsenceKind::Justified),
+                },
+                r#"{"kind":"forfeit","absent":{"player1":"justified"}}"#,
+            ),
+        ];
+        for (outcome, json) in cases {
+            assert_eq!(serde_json::to_string(&outcome).unwrap(), json);
+            assert_eq!(serde_json::from_str::<Outcome>(json).unwrap(), outcome);
+        }
+    }
+
+    /// A pending board serializes without an `outcome` key at all, and reads back
+    /// as pending — the `skip_serializing_if` / `default` pair that keeps saves
+    /// from growing an entry per unplayed board.
+    #[test]
+    fn a_pending_board_omits_its_outcome() {
+        let board = Board::pending(TournamentId(1), TournamentId(2), 0, PairingSource::Swiss);
+        let json = serde_json::to_string(&board).unwrap();
+        assert_eq!(json, r#"{"player1":1,"player2":2}"#);
+        assert_eq!(serde_json::from_str::<Board>(&json).unwrap(), board);
+    }
 }

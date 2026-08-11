@@ -16,6 +16,7 @@
     "restore": "Wiederherstellen",
     "tabSettings": "Einstellungen",
     "tabPlayers": "Spieler ({count})",
+    "tabTeams": "Mannschaften ({count})",
     "tabResults": "Rangliste",
     "tabCup": "Pokal",
     "tabRound": "Runde {number}",
@@ -136,6 +137,7 @@
     "carriedHint": "Klicken Sie auf einen Spieler, um den Sieger seiner Partie über zwei Runden einzutragen.",
     "clickToSetWinner": "Klicken, um als Sieger einzutragen",
     "drawTitle": "Vor der entscheidenden Partie gab es ein Remis (für die ELO-Auswertung erfasst)",
+    "drawForfeitedTitle": "Es wurde nicht gespielt, also gab es kein Remis: Zuerst das Nichtantreten aufheben",
     "giverTitle": "Der höher gewertete Spieler gibt die Vorgabe",
     "giverGives": "{name} gibt vor",
     "needsDifferentRatings": "Erfordert zwei Spieler mit unterschiedlicher Wertung",
@@ -188,8 +190,17 @@
         "forced": "Dieses Brett wurde vom Schiedsrichter festgelegt, nicht von der Engine gewählt.",
         "cup": "Dieses Brett stammt aus dem Pokal-Turnierbaum, nicht aus der Engine des Schweizer Systems.",
         "absent": "Dieser Spieler hat diese Runde ausgesetzt, daher hat die Engine ihn nicht gepaart."
+      },
+      "pickTeam": "Mannschaft wählen…",
+      "hintForceTeams": "Wählen Sie zwei Mannschaften, um zu sehen, was es kosten würde, sie zu paaren.",
+      "hintForbidTeams": "Wählen Sie zwei gepaarte Mannschaften, um zu sehen, warum die Engine sie zusammengebracht hat.",
+      "scopedOutTeam": {
+        "forced": "Dieser Wettkampf wurde vom Schiedsrichter festgelegt, nicht von der Engine gewählt.",
+        "absent": "Diese Mannschaft hat diese Runde ausgesetzt, daher hat die Engine sie nicht gepaart."
       }
-    }
+    },
+    "markJustifiedTitle": "{name} stattdessen als entschuldigt abwesend markieren (0−)",
+    "clearAbsenceTitle": "{name} war doch anwesend"
   },
   "resultsView": {
     "noPlayers": "Noch keine Spieler angemeldet.",
@@ -232,6 +243,8 @@
     "tiebreakNoOpponents": "Noch keine Gegner gewertet",
     "tiebreakDropped": "(gestrichen: {dropped})",
     "noRoundsCompleted": "Noch keine Runde abgeschlossen — die Ergebnisse erscheinen hier, sobald Runden abgeschlossen werden.",
+    "justifiedTitle": "Entschuldigt abwesend gegen {name} (0−; zählt als Niederlage)",
+    "teamMatchTitle": "{name} — {wins}–{losses} an den Brettern",
     "roundInProgressNote": "Runde {number} läuft: Ihre Spalte füllt sich mit den eingetragenen Ergebnissen, und die Rangliste wird neu berechnet, sobald die Runde abgeschlossen ist."
   },
   "pairingSource": {
@@ -263,7 +276,7 @@
     "removeForcedPairing": "Diese erzwungene Paarung entfernen",
     "playerEllipsis": "Spieler…",
     "vs": "gegen",
-    "forcedBye": "Erzwungene Freilose",
+    "forcedBye": "Erzwungenes Freilos",
     "forcedByeHint": "Greift nur bei einer ungeraden Anzahl anwesender Spieler — der Übriggebliebene setzt die Runde mit einem Punkt kampflos aus. Um einen Spieler bei geradem Feld aussetzen zu lassen, markieren Sie ihn stattdessen als abwesend und legen dann in der Rangliste fest, was ihm die Runde einbringt.",
     "forcedByeEvenWarning": "Das Feld ist jetzt gerade: Dieses Freilos würde einen weiteren Spieler ohne Gegner lassen, dem die Engine ebenfalls ein Freilos gäbe. Entfernen Sie es, oder markieren Sie jemanden als abwesend.",
     "removeForcedBye": "Dieses erzwungene Freilos entfernen",
@@ -271,7 +284,13 @@
     "startRound": "Runde {number} starten",
     "useUndoHintPrefix": "Verwenden Sie",
     "useUndoHintSuffix": ", um diesen Entwurf zu verwerfen.",
-    "needAtLeastTwoPresent": "Mindestens 2 anwesende Spieler nötig."
+    "needAtLeastTwoPresent": "Mindestens 2 anwesende Spieler nötig.",
+    "teamEllipsis": "Mannschaft…",
+    "needAtLeastTwoTeams": "Eine Runde braucht mindestens zwei anwesende Mannschaften.",
+    "summaryTeams": "Runde {number} wird vorbereitet — {present} Mannschaften in der Auslosung, {absent} abwesende(r) Spieler.",
+    "absentWholeTeam": "Die ganze Mannschaft für diese Runde als abwesend markieren",
+    "forcedByeHintTeams": "Greift nur bei einer ungeraden Anzahl anwesender Mannschaften — die übriggebliebene setzt die Runde mit einem Punkt kampflos aus. Um eine Mannschaft bei geradem Feld aussetzen zu lassen, markieren Sie sie stattdessen als abwesend und legen dann in der Rangliste fest, was ihr die Runde einbringt.",
+    "forcedByeEvenWarningTeams": "Das Feld ist jetzt gerade: Dieses Freilos würde eine weitere Mannschaft ohne Gegner lassen, der die Engine ebenfalls ein Freilos gäbe. Entfernen Sie es, oder markieren Sie eine Mannschaft als abwesend."
   },
   "serverStatus": {
     "contacting": "Verbindung zum Server…",
@@ -404,7 +423,12 @@
     "moveDown": "Nach unten",
     "removeTiebreak": "Diese Feinwertung entfernen",
     "noTiebreaks": "Keine Feinwertungen — punktgleiche Spieler werden nach Turniernummer geordnet.",
-    "addTiebreakPlaceholder": "Feinwertung hinzufügen…"
+    "addTiebreakPlaceholder": "Feinwertung hinzufügen…",
+    "teamTitle": "Mannschaftsturnier",
+    "teamDesc": "Mannschaften statt Einzelspieler auslosen: ein Kampf zwischen zwei Mannschaften besteht aus je einem gewöhnlichen Brett pro Position, Brett 1 gegen Brett 1 und so weiter. Ergebnisse werden weiterhin pro Brett eingetragen.",
+    "teamCheckbox": "Als Mannschaftsturnier austragen",
+    "teamSize": "Spieler pro Mannschaft",
+    "teamLocked": "Mannschaftsmodus und Mannschaftsgröße sind nach Abschluss der Anmeldung fixiert."
   },
   "serverError": {
     "noTournament": "Es existiert noch kein Turnier — legen Sie zuerst eines an.",
@@ -428,7 +452,23 @@
     "zeroPointAdjustment": "Eine Punktanpassung von null hätte keine Wirkung.",
     "unsupportedFormatVersion": "Diese Datei verwendet das Turnierformat {found}, das diese Version nicht lesen kann (sie liest Format {supported}).",
     "malformedSave": "Diese Datei ist keine lesbare Turnierdatei: {details}",
-    "eloEstimateUnanchored": "Der ELO-Schätzung fehlt ein Anker für ihre Skala. Fügen Sie einen gewerteten Spieler hinzu, fixieren Sie die Wertungen (K-Multiplikator 0), oder wählen Sie einen nicht-flachen Prior für Ungewertete."
+    "eloEstimateUnanchored": "Der ELO-Schätzung fehlt ein Anker für ihre Skala. Fügen Sie einen gewerteten Spieler hinzu, fixieren Sie die Wertungen (K-Multiplikator 0), oder wählen Sie einen nicht-flachen Prior für Ungewertete.",
+    "teamModeRejectsCup": "Ein Mannschaftsturnier kann nicht zusätzlich einen K.-o.-Cup enthalten. Schalten Sie eines von beiden aus.",
+    "teamModeRejectsLongGames": "Ein Mannschaftsturnier kann keine langen Partien (über zwei Runden) verwenden. Schalten Sie eines von beiden aus.",
+    "teamModeRejectsEloPairing": "Ein Mannschaftsturnier kann nicht im ELO-Modus ausgelost werden. Wählen Sie Schweizer System oder MacMahon.",
+    "teamModeRejectsGradeThresholds": "Ein Mannschaftsturnier kann keine grad-basierten MacMahon-Schwellen verwenden — eine Mannschaft hat eine Durchschnittswertung, keinen Grad. Verwenden Sie ELO-Schwellen.",
+    "teamModeRejectsEstEloTiebreak": "Ein Mannschaftsturnier kann nicht nach geschätztem ELO entschieden werden. Entfernen Sie dieses Kriterium aus der Reihenfolge.",
+    "invalidTeamSize": "Eine Mannschaftsgröße von {size} ist nicht zulässig — sie muss zwischen 2 und 9 liegen.",
+    "teamSettingsLocked": "Mannschaftsmodus und Mannschaftsgröße lassen sich nach Abschluss der Anmeldung nicht mehr ändern.",
+    "emptyTeamName": "Eine Mannschaft braucht einen Namen.",
+    "duplicateTeamName": "Eine Mannschaft namens {name} existiert bereits.",
+    "teamIsFull": "Diese Mannschaft hat ihre {size} Mitglieder bereits.",
+    "playersWithoutTeam": "{count} Spieler sind noch in keiner Mannschaft. Vor dem Abschluss muss jeder Spieler einer angehören.",
+    "incompleteTeam": "Mannschaft {name} hat {have} von {need} Mitgliedern.",
+    "membersWithoutPairingRating": "MacMahon-Startpunkte brauchen für jedes ungewertete Mannschaftsmitglied ein Auslosungs-ELO — {count} fehlen noch.",
+    "notEnoughTeams": "Ein Mannschaftsturnier braucht mindestens 2 Mannschaften (vorhanden: {have}).",
+    "noLateRegistrationInTeamMode": "Ein Mannschaftsturnier nimmt keine Nachmeldungen an: jeder Spieler muss in einer Mannschaft sein, und die Aufstellungen sind fixiert.",
+    "notEnoughPresentTeams": "Eine Runde braucht mindestens {needed} anwesende Mannschaften — es sind nur {have} anwesend."
   },
   "tiebreaks": {
     "points": {
@@ -477,6 +517,36 @@
     "est_elo": {
       "label": "Gesch. ELO",
       "title": "Laufende bayessche Schätzung der aktuellen Spielstärke des Spielers"
+    },
+    "board_wins": {
+      "label": "Brettpunkte",
+      "title": "Gewonnene Partien — die des Spielers, oder die Gesamtzahl der Mannschaft über alle Bretter"
     }
+  },
+  "teams": {
+    "title": "Mannschaften",
+    "count": "{count} Mannschaften",
+    "namePlaceholder": "Mannschaftsname",
+    "add": "Mannschaft hinzufügen",
+    "none": "Noch keine Mannschaften — vor dem Abschluss muss jeder Spieler einer angehören.",
+    "clickToRename": "Zum Umbenennen klicken",
+    "averageTitle": "Durchschnittliche Auslosungswertung — daraus ergeben sich Mannschaftsnummer und MacMahon-Punkte",
+    "sortByRating": "Nach Wertung",
+    "sortByRatingTitle": "Brettreihenfolge auf stärkste zuerst zurücksetzen",
+    "removeTitle": "Diese Mannschaft löschen (ihre Spieler bleiben angemeldet)",
+    "removeMemberTitle": "Diesen Spieler aus der Mannschaft nehmen",
+    "moveUp": "Ein Brett nach oben",
+    "moveDown": "Ein Brett nach unten",
+    "addMember": "Spieler hinzufügen…",
+    "noMemberMatch": "Kein freier Spieler passt — zuerst im Reiter Spieler anmelden.",
+    "pairingEloTitle": "Auslosungs-ELO für ein ungewertetes Mitglied: nur für den Mannschaftsdurchschnitt und die Brettreihenfolge, nie exportiert — der Spieler bleibt überall sonst ungewertet",
+    "unassigned": "Ohne Mannschaft ({count})",
+    "allAssigned": "Alle Spieler sind in einer Mannschaft.",
+    "adjustmentTitle": "Manueller Punktbonus/-abzug für diese Mannschaft",
+    "removeAdjustment": "Diese Korrektur entfernen",
+    "adjustmentPointsPlaceholder": "Punkte",
+    "adjustmentReasonPlaceholder": "Grund (erforderlich)",
+    "cancelAdjustment": "Abbrechen",
+    "addAdjustment": "Hinzufügen"
   }
 }

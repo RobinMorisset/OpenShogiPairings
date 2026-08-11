@@ -5,7 +5,7 @@ import type {
   Handicap,
   HealthStatus,
   NewPlayer,
-  NoShow,
+  Forfeit,
   RatedPlayer,
   RoundExplanation,
   SitoutValue,
@@ -467,6 +467,112 @@ export function updateSettings(
   });
 }
 
+// --- Teams -----------------------------------------------------------------
+//
+// Roster editing for a team tournament. Every one of these is registration-time
+// only and team-mode only; the server owns those rules, so a call made outside
+// them comes back as an ordinary domain error.
+
+/** Create a team. The name must be non-empty and unique ignoring case. */
+export function addTeam(name: string): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath("/teams"), {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+/** Rename a team. */
+export function renameTeam(teamId: string, name: string): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath(`/teams/${teamId}`), {
+    method: "PUT",
+    body: JSON.stringify({ name }),
+  });
+}
+
+/** Delete a team; its members return to the unassigned pool, still registered. */
+export function removeTeam(teamId: string): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath(`/teams/${teamId}`), {
+    method: "DELETE",
+  });
+}
+
+/** Add a registered player to a team, at the end of its board order. */
+export function addTeamMember(
+  teamId: string,
+  playerId: string,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath(`/teams/${teamId}/members`), {
+    method: "POST",
+    body: JSON.stringify({ player_id: playerId }),
+  });
+}
+
+/** Take a player out of a team, back into the unassigned pool. */
+export function removeTeamMember(
+  teamId: string,
+  playerId: string,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    scopedPath(`/teams/${teamId}/members/${playerId}`),
+    { method: "DELETE" },
+  );
+}
+
+/** Set a team's board order (index 0 = board 1). Must be a permutation of the
+ *  team's current members. */
+export function setTeamBoardOrder(
+  teamId: string,
+  order: string[],
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath(`/teams/${teamId}/board-order`), {
+    method: "PUT",
+    body: JSON.stringify({ order }),
+  });
+}
+
+/** Reset a team's board order to descending pairing rating (unrated last). */
+export function sortTeamByRating(teamId: string): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    scopedPath(`/teams/${teamId}/sort-by-rating`),
+    { method: "POST" },
+  );
+}
+
+/** Apply a manual point bonus (positive `delta`) or malus to a team. Unlike the
+ *  roster calls this stays available after finalization. */
+export function addTeamAdjustment(
+  teamId: string,
+  delta: number,
+  reason: string,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath(`/teams/${teamId}/adjustments`), {
+    method: "POST",
+    body: JSON.stringify({ delta, reason }),
+  });
+}
+
+/** Remove a previously applied team adjustment. */
+export function removeTeamAdjustment(
+  teamId: string,
+  adjustmentId: string,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    scopedPath(`/teams/${teamId}/adjustments/${adjustmentId}`),
+    { method: "DELETE" },
+  );
+}
+
+/** Set (or clear, with `null`) a player's referee-assigned pairing ELO. */
+export function setPairingRating(
+  playerId: string,
+  pairingRating: number | null,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    scopedPath(`/players/${playerId}/pairing-rating`),
+    { method: "PUT", body: JSON.stringify({ pairing_rating: pairingRating }) },
+  );
+}
+
 /** Cancel the last round (or the open draft), stepping back one stage. */
 export function cancelRound(): Promise<TournamentResponse> {
   return request<TournamentResponse>(scopedPath("/cancel-round"), {
@@ -486,11 +592,17 @@ export function prepareRound(cupSize?: number): Promise<TournamentResponse> {
 
 /** The draft customization sent to the server. */
 export interface DraftUpdate {
+  /** Absent *players*, in either mode — in a team tournament a member can be
+   *  absent without their team being, and their board is forfeited for them. */
   absent: number[];
   forced_boards: { player1: number; player2: number }[];
   /** Players forced onto a bye. The engine still byes one more of its own if
    *  what's left over is odd, so any number of these is consistent. */
   forced_byes: number[];
+  /** Forced team matches — team mode, where teams are what get paired. */
+  forced_matches: { team1: number; team2: number }[];
+  /** Teams forced onto a bye, likewise. */
+  forced_team_byes: number[];
 }
 
 /** Edit the current draft (absent set, forced pairings, forced byes). */
@@ -570,7 +682,7 @@ export function setBoardDrawn(
 export function setBoardNoShow(
   roundNumber: number,
   boardIndex: number,
-  absent: NoShow | null,
+  absent: Forfeit | null,
 ): Promise<TournamentResponse> {
   return request<TournamentResponse>(
     scopedPath(`/rounds/${roundNumber}/boards/${boardIndex}/no-show`),
@@ -618,6 +730,22 @@ export function setSitoutValue(
 ): Promise<TournamentResponse> {
   return request<TournamentResponse>(
     scopedPath(`/rounds/${roundNumber}/sitouts/${player}`),
+    { method: "PUT", body: JSON.stringify({ value }) },
+  );
+}
+
+/**
+ * The same for a whole team's sit-out, writing the value to every member's
+ * entry at once — a team sits out together, and its score for the round is read
+ * from entries that have to agree.
+ */
+export function setTeamSitoutValue(
+  roundNumber: number,
+  teamId: string,
+  value: SitoutValue,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    scopedPath(`/rounds/${roundNumber}/team-sitouts/${teamId}`),
     { method: "PUT", body: JSON.stringify({ value }) },
   );
 }

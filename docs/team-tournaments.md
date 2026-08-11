@@ -1,6 +1,14 @@
 # Team tournaments — design
 
-Status: **draft, under discussion**. Nothing here is implemented yet.
+Status: **implemented**. A team tournament can be configured, rostered,
+finalized, paired, played, customized, adjusted and read end to end, through the
+interface — including a member absent for a reason, recorded as such rather than
+as a no-show.
+
+What is deliberately *not* here is listed under [Scope of v1](#scope-of-v1):
+the cup, long games, ELO pairing, grade thresholds and the estimated-ELO
+tie-break are rejected in team mode, player categories are hidden, substitutes
+are unplanned, and the simulator refuses a team tournament outright.
 
 A team tournament is the format that traditionally precedes European shogi
 championships (e.g. WOSC): teams of N players (usually N = 3) are the unit of
@@ -72,12 +80,12 @@ frontend.
 
 ## Preliminary refactor: board outcome as a sum type
 
-Lands as its **own commit, before any team work**. Today `Board` carries
+**Landed** (own commit, before any team work). `Board` used to carry
 `result: Option<Winner>` and `no_show: Option<NoShow>` as sibling fields, so
-"a result recorded on a forfeited board" is representable and only excluded
-by convention (mutations keep `result` at `None` on forfeits so ELO never
-sees them). Team mode adds a third concern to that product (justified
-absence), so it gets folded into a single sum first:
+"a result recorded on a forfeited board" was representable and only excluded
+by convention (mutations kept `result` at `None` on forfeits so ELO never
+saw them). Team mode adds a third concern to that product (justified
+absence), so it was folded into a single sum first:
 
 ```rust
 /// What happened on a board.
@@ -85,30 +93,44 @@ pub enum Outcome {
     /// No decision yet. `drawn` records at least one draw (sennichite)
     /// before the decisive replay still in progress — it matters for ELO.
     Pending { drawn: bool },
-    /// Played to a decision (today's `result: Some(w)`), possibly after
+    /// Played to a decision (the former `result: Some(w)`), possibly after
     /// draws.
     Won { winner: Winner, drawn: bool },
     /// Side(s) failed to appear — no game was played; the present side (if
     /// exactly one) is credited the point like a bye; never feeds ELO
-    /// (today's `no_show`).
-    Forfeit(NoShow),
+    /// (the former `no_show`). The payload became `Forfeit` in the
+    /// justified-absence commit below; it was `NoShow` at this point.
+    Forfeit { absent: NoShow },
 }
 
 /// On Board, replacing `result` + `no_show` + `drawn`:
 pub outcome: Outcome,
 ```
 
+`Forfeit` carries a named field rather than the tuple this doc first
+sketched, so the whole sum serializes internally-tagged like
+[`PairingSource`] and reaches the frontend as a plain discriminated union on
+`kind`. The field is skipped in JSON while the board is pending, so an
+unplayed board's save shape is unchanged.
+
 `drawn` lives only in the variants where play happened: the American grid
 cannot express "forfeit after draws", so the type doesn't either. This also
 absorbs the third loose field — `result` × `no_show` × `drawn` all collapse
 into the one sum.
+
+One consequence is not mechanical: `set_board_drawn` on a forfeited board
+has nothing to write, so it now **fails loudly**
+(`TournamentError::DrawnOnForfeitedBoard`) and the round view disables the
+draw button there. That combination used to be reachable and was a real bug
+— the ELO reader tested `drawn` before the result and scored the phantom
+game ½.
 
 Touch points (mechanical): `is_decided` / `effective_winner` /
 `effective_loser` / `winner_id`, the result-entry mutations
 (`toggle_board_winner`, `set_board_no_show`, `set_board_drawn`), scoring,
 the American grid cells, the ELO reader, sim auto-fill, and the frontend
 result-entry + `boardOutcome`/`noShow` helpers with regenerated TS types.
-No legacy-save support (see Persistence).
+No legacy-save support (see Persistence); `format_version` is now 6.
 
 ## Data model
 
@@ -137,6 +159,12 @@ pub struct Team {
 `TournamentId`s are still assigned at finalization as today — boards, the
 grid, and per-player scoring all keep using them.
 
+**Landed.** `Team` lives in `crates/core/src/team.rs`, together with the roster
+operations on `Tournament` (create / rename / delete, add / remove member,
+reorder or auto-sort the board order) and `finalize_teams`. `tournament_id` is
+`Option<TeamId>`, assigned at finalization by descending average pairing rating
+with creation order breaking ties.
+
 ### Settings
 
 Team mode is **orthogonal to `PairingMode`**, like the cup — not a third mode
@@ -156,6 +184,12 @@ pub struct TeamSettings {
 
 Changing `size` (or toggling team mode) after finalization is rejected, like
 other structural settings.
+
+**Landed**, with the size validated against `TEAM_SIZES` (2..=9) and each
+incompatible feature reported as its own `TeamModeConflict` variant, so the
+error names the two settings that disagree (`team_mode_rejects_cup`,
+`…_long_games`, `…_elo_pairing`, `…_grade_thresholds`, `…_est_elo_tiebreak`) in
+all nine locales.
 
 ### Pairing-only rating for unrated players (MacMahon only)
 
@@ -182,10 +216,11 @@ and its validation — exist only when MacMahon starting points are in use:
   unofficial.
 - **Without MacMahon** (plain Swiss): unrated members are tolerated exactly
   as unrated players are in individual mode — no fake ELO is asked for. A
-  team's average is taken over its rated members (`None` if it has none),
-  feeding only the soft uses: fold order, `TeamId` numbering, and the
-  default board order (teams/members without ratings sort last, as unrated
-  players do today).
+  team's average needs *every* member rated: a mean over the rated ones
+  would describe part of the team as if it were the whole, so one unrated
+  member and the team simply has no average (`None`). It feeds only the
+  soft uses: fold order, `TeamId` numbering, and the default board order
+  (teams/members without ratings sort last, as unrated players do today).
 
 ### Point adjustments
 
@@ -193,28 +228,40 @@ Manual point adjustments apply to **teams** in team mode (they affect team
 points, hence pairing and standings). Per-player adjustments are disabled in
 team mode — a player-level delta has no team meaning.
 
+**Landed.** `Team::adjustments` mirrors `Player::adjustments`, folded into the
+team's points alongside its MacMahon start (floored at zero, as for a player).
+Unlike every other team operation the mutations stay available *after*
+finalization — a fair-play bonus or a penalty is decided during the tournament,
+which is exactly when the rosters are frozen.
+
 ## Registration and finalization
 
 Registration is **players first, then grouping**: players are registered
 individually exactly as today (same form, same CSV import — an optional
 `Team` CSV column can come later), and teams are a grouping layered on top.
 
-### Teams panel (Players tab, team mode only)
+### Teams tab (next to Players, team mode only)
 
-Alongside the player list, a Teams panel:
+Its own tab, alongside the player list:
 
 - **create / rename / delete** a team (name required non-empty, unique
   case-insensitive);
 - each team card shows its members **in board order** with their pairing
   ratings and the **team average**, plus a live size indicator
   (`2/3` etc.) so incomplete teams are visible at a glance;
-- an **unassigned players** pool; players move between the pool and a team
-  (a per-player team picker or equivalent — exact affordance decided at
-  implementation);
+- an **unassigned players** pool, and on each card a **combobox** over it:
+  focused it lists who is left, typing narrows it, Enter takes the
+  arrowed-to suggestion or an only match. It is a picker, never a
+  free-text field — every candidate is already registered, so text that
+  matches nothing is a typo and has no commit path (a genuinely new player
+  is registered on the Players tab);
 - **board order** defaults to descending pairing rating and is freely
   reorderable until finalization;
-- with MacMahon starting points in use, unrated members are flagged
-  inline with the "pairing ELO" field (see above).
+- an unrated member's rating cell *is* their pairing ELO, edited in place
+  like a cell on the Players tab (with MacMahon starting points in use —
+  the only configuration where the server accepts one). It reads `—` while
+  unset and `1500*` once given: italic and starred, because the player is
+  still unrated everywhere else.
 
 ### Finalization
 
@@ -248,9 +295,11 @@ scope for v1.
 
 ### Engine refactor: the unit abstraction
 
-The matching engine (`pair_round_weighted`) already operates on opaque dense
-keys plus derived per-unit data; it never reads `Player` fields except rating
-and club. The refactor extracts that dependency into an explicit input:
+**Landed** (own commit, no behavioural change — the simulator's output over
+WOSC 2024 is byte-identical before and after). The matching engine
+(`pair_round_weighted`) already operated on opaque dense keys plus derived
+per-unit data; it never read `Player` fields except rating and club. The
+refactor extracted that dependency into an explicit input:
 
 ```rust
 /// What the engine needs to know about one pairable unit, whoever it is.
@@ -263,26 +312,40 @@ pub(crate) struct PairingUnit {
     pub last_descended: Option<u32>,
     pub rating: Option<u32>,         // fold order (team: average pairing rating)
     pub clubs: Vec<Option<String>>,  // member clubs in board order (player: one entry)
+    pub prequalified: bool,          // cup, individual mode only
+    pub elo: i64,                    // ELO pairing mode only
 }
 ```
 
-`pair_round_weighted` becomes a function of `&TiSlice<UnitKey, PairingUnit>`
-(plus settings, forced matches, forced byes) returning matched key pairs and
-at most one bye key. Two thin wrappers build the input: the existing
-player path (from `compute_scores` + `Player`), and the new team path (from
-`compute_team_scores` + `Team`). The blossom solver is untouched.
+The last two fields are not in the original sketch: the cup's pre-qualified
+flag and the live ELO estimate are *also* per-unit facts the rules read, so
+they belong on the unit rather than in a second side table. Both are inert in
+team mode, which rejects the cup and ELO pairing outright.
 
-All the rules generalize unchanged: rematch avoidance, bye-group, score gap,
+`pair_round_weighted` is now a function of `&TiSlice<UnitKey, PairingUnit>`
+(plus settings, forced pairs, forced byes) returning `UnitPairing` — matched
+key pairs, each with the `points_diff` its board(s) must freeze, and at most
+one bye key. Building the `Round` (one board per pair, or `size` boards for a
+team match) is the caller's job. `player_units` is the individual wrapper;
+the team path will add `team_units`. The blossom solver is untouched.
+
+`UnitKey` is a new dense-key newtype in `units.rs`, numbered from 1 so `0`
+stays free for the phantom (bye) vertex. The pairing *explanations*
+(`BoardLedger`, `AffectedCycle`) now reference `UnitKey` rather than
+`TournamentId` — same bare-number wire shape, read as player numbers in
+individual mode and team numbers in team mode.
+
+All the rules generalized unchanged: rematch avoidance, bye-group, score gap,
 float repeat, floater selection, fold — they only read `PairingUnit` fields.
 
-The **club rule** becomes a graded count: an edge's club cost is the number
+The **club rule** became a graded count: an edge's club cost is the number
 of board positions k where both units' board-k clubs are `Some` and equal —
 i.e. the number of same-club *games* the pairing would actually create
 (aligned positions only; a same-club pair on different boards never plays
 each other and costs nothing). Within the club rule's ladder tier the
 matching therefore minimizes the total same-club games of the round. For the
-player wrapper (`clubs` of length 1) this degenerates to exactly today's 0/1
-behavior, so one rule implementation serves both modes. There is no "team
+player wrapper (`clubs` of length 1) this degenerates to exactly the previous
+0/1 behavior, so one rule implementation serves both modes. There is no "team
 club" concept — mixed-club teams are handled naturally by the count.
 
 **Ladder bounds.** The rule multipliers are derived from per-rule worst-case
@@ -290,13 +353,17 @@ contributions (`max_total_units`). These bounds must be recomputed from the
 *team* instance parameters (team count, team points range including MacMahon
 starts and adjustments, and the club rule's per-edge maximum growing from 1
 to N) — any bound that silently assumes player-scale quantities breaks the
-exact lexicographic separation, the worst possible failure mode. The existing
-`ladder_overflow` guard stays; a debug assertion should cross-check bounds
-against the actual instance.
+exact lexicographic separation, the worst possible failure mode. Every bound
+already reads its quantity off the instance, and the club rule's per-edge
+ceiling is now `max_boards` (the widest `clubs` among the free units) instead
+of a hard-coded 1. The existing `ladder_overflow` guard stays; a debug
+assertion should cross-check bounds against the actual instance.
 
 ### From matched teams to boards
 
-`confirm_round_inner`, team path:
+**Landed.** `confirm_team_round` is the team path; `team_units`,
+`compute_team_scores`, the board↔match grouping and the match-outcome derivation
+live in `crates/core/src/team_scoring.rs`. The steps below are what it does:
 
 1. Compute team scores; run the engine over present teams.
 2. Each matched team pair expands to N `Board`s: roster[k] of A vs roster[k]
@@ -314,19 +381,25 @@ In team mode, `RoundDraft` semantics shift to teams; player-level forced
 pairings and byes are rejected by validation:
 
 - **Team absence**: a team all of whose members are marked absent is excluded
-  from pairing entirely; each member gets an `Absent` sitout.
+  from pairing entirely; each member gets an `Absent` sitout. **Landed.**
 - **Individual absence**: marking fewer than N members of a team absent does
   *not* exclude the team — it is paired normally, and each absent member's
   board is created pre-marked with a justified absence (see below), which the
   opponent wins by forfeit. This is how a player who leaves the tournament
   (illness, travel) is recorded without the unjustified-no-show stigma.
+  **Landed.**
 - **Forced pairings**: force team A vs team B (expands to N boards).
-- **Forced byes**: force a team bye.
-- `MIN_PRESENT_PLAYERS` becomes "at least 2 teams present".
+  **Landed**, as `RoundDraft::forced_matches`.
+- **Forced byes**: force a team bye. **Landed**, as
+  `RoundDraft::forced_team_byes`.
+- `MIN_PRESENT_PLAYERS` becomes "at least 2 teams present". **Landed**, as
+  `MIN_TEAMS_PER_ROUND`.
 
 `force_pairing`, the probe/counterfactual API, and pairing explanations all
 operate on `TeamId`s in team mode; the explanation machinery is engine-level
-and carries over with the unit abstraction.
+and carries over with the unit abstraction. **Landed**: both take a `UnitKey`,
+whose meaning follows the mode exactly as the ledgers' keys do, so there is one
+route and one wire shape rather than a parallel team API.
 
 ## Results
 
@@ -341,10 +414,10 @@ plays anyway, so the absent member's board structurally exists, and
 recording the absence as a plain no-show would stamp the unjustified `0#`
 cell on (for example) a player who fell ill.
 
-Building on the preliminary outcome refactor, the team commit enriches the
-`Forfeit` payload with *why* each missing side missed — every state is
-meaningful by construction (at least one side missing, each missing side
-has exactly one kind, no result possible on a forfeit):
+**Landed.** Building on the preliminary outcome refactor, the forfeit payload
+records *why* each missing side missed — every state is meaningful by
+construction (at least one side missing, each missing side has exactly one
+kind, no result possible on a forfeit):
 
 ```rust
 /// Why a missing side missed the board.
@@ -357,7 +430,8 @@ pub enum AbsenceKind {
     Justified,
 }
 
-/// Replaces `Forfeit(NoShow)` from the preliminary refactor:
+/// Replaces the `NoShow` payload of `Outcome::Forfeit` from the
+/// preliminary refactor:
 pub enum Forfeit {
     Player1(AbsenceKind),
     Player2(AbsenceKind),
@@ -374,6 +448,12 @@ nothing; the two differ only in the exported cell and the honest record:
 |---|---|---|
 | `NoShow` | `0#` | `0+`, board win |
 | `Justified` | `0-` | `0+`, board win |
+
+The kind is rejected outside team mode, both when recorded and at load time:
+an individual tournament excludes an absent player before a board exists, so a
+`0-` cell there would be one nothing in the tournament could account for. In
+the round view each side's absence control cycles present → `0#` → `0-` →
+present, with the middle step the only one an individual tournament offers.
 
 For the **match derivation** the kinds are identical: a forfeit with exactly
 one present side is a board win for that side; `Both` has no winner. Neither
@@ -444,7 +524,9 @@ The existing `Tiebreak` enum generalizes with team semantics (SOS/SODOS/
 SOSOS/CUSS over opposing *teams'* team scores; direct confrontation over team
 matches). Additions and restrictions:
 
-- new variant `BoardWins` — total member game wins;
+- new variant `BoardWins` — total member game wins. **Landed**, and defined in
+  individual mode too, where it is simply the player's own game count: it is one
+  quantity read at two levels, so no mode has to reject it;
 - `EstElo` rejected in team mode (settings validation);
 - default team tiebreak order: match points, then `BoardWins`, then the SOS
   family as today — matching established team-event practice (match points,
@@ -455,14 +537,32 @@ matches). Additions and restrictions:
 references). The frontend's hand-maintained `TIEBREAKS` table in
 `types.ts` gains the `BoardWins` row.
 
+**Landed** as `compute_team_standings`. The ranking loop itself is now shared
+with the player standings (`rank_groups`), because the subtle part — direct
+confrontation, whose value depends on who is *still* tied once the earlier
+criteria have run out, so ranking splits groups criterion by criterion rather
+than sorting once — is identical for both. `Tiebreak::default_team_order()`
+gives the team default (match points, board wins, then the SOS family); it is
+what the settings UI will offer when team mode is switched on, rather than
+something applied behind the referee's back to an order they may have chosen.
+
+One ordering fix fell out: the team-mode conflicts are now checked *before*
+`normalized()`, which would otherwise quietly drop the estimated-ELO tie-break
+(it can't rank in team mode) and turn a conflict the referee should see into a
+silent edit of what they asked for.
+
 ### Standings display
 
-Primary table: teams, ranked by the team tiebreak chain — same columns and
-interaction style as today's standings. Each team row expands to (or is
-followed by) its N member rows showing board number, name, individual wins,
-and per-round cells. The cross-table shows opposing team numbers per round
-with the match result. (Inspiration: shogideutschland WOSC team results
-page; consistency with our existing standings wins over matching it exactly.)
+**Landed.** One table, not two: each team's row ranked by the team tiebreak
+chain, followed by its N members in board order. The team's name straddles
+the columns that describe a *player* (both names, rating, nationality,
+club), and the matches won, the ranking criteria, the MacMahon start and
+the float markers sit on the team row alone — they are team quantities, and the float is a
+fact of the team pairing. The round columns are shared: a team's cell names
+the opposing team number and the match result (`3+`, `2=` for a level
+match), a player's names their own opponent. (Inspiration: shogideutschland
+WOSC team results page; consistency with our existing standings wins over
+matching it exactly.)
 
 Per-player ordering, where a flat player list is needed (the grid): team
 rank, then board number — no cross-team player ranking is invented, since
@@ -485,9 +585,11 @@ The store stays dumb. Additions:
 
 - routes: team CRUD (create/edit/delete team, assign/remove member, reorder
   boards, rename), team-level draft operations, team adjustments — each a
-  one-line delegation to a `Tournament` method, like everything else;
+  one-line delegation to a `Tournament` method, like everything else. The CRUD
+  half (plus the pairing-ELO endpoint) has **landed**; the draft and adjustment
+  routes wait on their core operations;
 - `TournamentView` gains `team_standings: Option<Vec<TeamStanding>>`
-  (`None` outside team mode);
+  (`None` outside team mode) — **landed**;
 - `Tournament` gains `teams: Vec<Team>` (empty and absent from JSON outside
   team mode).
 
@@ -504,25 +606,32 @@ version guard) instead of half-parsed.
 ## Frontend summary
 
 - **Settings**: "Team tournament" toggle + size field (no mode-selector
-  restructure); incompatible features (cup, long games, ELO mode, categories,
-  EstElo tiebreak, grade thresholds) surfaced as validation errors when
-  conflicting, with the conflicting controls disabled while team mode is on.
-- **Players tab**: teams panel (creation, member assignment, board reorder,
+  restructure) — **landed**, with both controls disabled after finalization
+  (the server freezes them) and the team tie-break order adopted when the mode
+  is switched on, unless the referee has already reordered the criteria.
+  Incompatible features surface as the server's validation errors.
+- **Teams tab**: rosters (creation, member assignment, board reorder,
   team average ELO, unassigned pool), pairing-ELO entry for unrated members
-  (MacMahon only); finalization errors listed loudly.
+  (MacMahon only); finalization errors listed loudly. **Landed**; the panel
+  goes read-only at finalization, matching the frozen rosters, and the
+  per-player adjustment control is hidden in team mode.
 - **Draft**: team-level absence/forced-match/forced-bye controls; present-team
   count gate.
 - **Round view**: boards grouped by team match with a match header (team
   names, running match score); per-board result entry unchanged;
   `pairingSource` badges unchanged (Swiss/Forced still apply, now at match
-  granularity).
+  granularity). **Landed.**
 - **Standings**: team table + expandable member rows + team cross-table.
+  **Landed** as a table above the per-player one, which stays as the breakdown
+  (and is what the American grid exports); the opponents column carries the
+  team numbers faced.
 - **i18n**: every new string in all 9 locales (test-enforced).
 
 ## Testing
 
-- Preliminary refactor commit: outcome serde round-trips; behavioral
-  no-change pinned by the existing suites;
+- Preliminary refactor commit (done): outcome serde round-trips, the draw
+  flag surviving a winner toggle, and the forfeited-board draw rejection;
+  behavioral no-change pinned by the existing suites;
 - Core: team analogues of the pairing/scoring/standings test suites; ladder
   bound cross-checks; derivation edge cases (forfeit-tie with odd N,
   forfeit boards, team bye values, mixed forfeit kinds);
@@ -545,5 +654,5 @@ All previously open questions are resolved (discussion of 2026-08-10):
 5. **`BoardWins` default position** — immediately after match points.
 6. **Team sizes** — 2..=9, default 3.
 7. **Club rule** — graded per-edge count of same-club games created.
-8. **Board outcome sum type** — preliminary refactor, own commit, lands
+8. **Board outcome sum type** — preliminary refactor, own commit, landed
    first; no backwards compatibility anywhere (no users yet).

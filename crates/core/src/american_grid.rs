@@ -273,14 +273,14 @@ fn game_cell(
         Winner::Player2
     };
 
-    // A no-show board renders distinctly: `0#` for a player who was absent (both,
-    // under a double no-show), `0+` (a bye-equivalent free point) for the one who
-    // showed up.
-    if board.no_show.is_some() {
-        return if board.no_show_absent(side) {
-            "0#".into()
-        } else {
-            "0+".into()
+    // A forfeited board renders distinctly: the missing side's own cell says why
+    // it missed — `0#` for an unjustified no-show, `0-` for an absence with a
+    // reason — and the side that turned up gets `0+`, the bye-equivalent free
+    // point. Under a double forfeit both cells are the absentees'.
+    if let Some(forfeit) = board.outcome.forfeit() {
+        return match forfeit.kind(side) {
+            Some(kind) => kind.cell().into(),
+            None => "0+".into(),
         };
     }
 
@@ -311,11 +311,11 @@ fn game_cell(
 /// draw occurred (the ELO computation only needs that fact), otherwise `+` for a
 /// win and `-` for a loss, following the *actual* game result.
 fn result_marker(board: &Board, is_player1: bool) -> &'static str {
-    if board.drawn {
+    if board.outcome.drawn() {
         return "=";
     }
     let won = matches!(
-        (board.result, is_player1),
+        (board.outcome.winner(), is_player1),
         (Some(Winner::Player1), true) | (Some(Winner::Player2), false)
     );
     if won {
@@ -340,7 +340,8 @@ fn pad(s: &str, width: usize) -> String {
 mod tests {
     use super::*;
     use crate::round::{
-        CupStage, Handicap, HandicapGame, NoShow, PairingSource, Sitout, SitoutKind, SitoutValue,
+        AbsenceKind, CupStage, Forfeit, Handicap, HandicapGame, Outcome, PairingSource, Sitout,
+        SitoutKind, SitoutValue,
     };
 
     /// The tournament number assigned to a registered player (only valid after
@@ -383,7 +384,7 @@ mod tests {
         let p2 = tid(&t, p2);
 
         let mut board = Board {
-            result: Some(Winner::Player1),
+            outcome: Outcome::won(Winner::Player1),
             ..Board::pending(p1, p2, 0, PairingSource::Swiss)
         };
         configure(&mut board);
@@ -511,7 +512,12 @@ mod tests {
     fn draw_collapses_to_equals_for_both_sides() {
         // A draw occurred but the game was replayed to a P1 win. Both cells show
         // `=`, dropping the +/- entirely.
-        let (t, ..) = one_board(|b| b.drawn = true);
+        let (t, ..) = one_board(|b| {
+            b.outcome = Outcome::Won {
+                winner: Winner::Player1,
+                drawn: true,
+            }
+        });
         let rows = data_rows(&to_grid(&t, &t.standings()));
         assert!(rows.iter().any(|r| r.contains("[2=]")));
         assert!(rows.iter().any(|r| r.contains("[1=]")));
@@ -548,7 +554,7 @@ mod tests {
         t.rounds.push(Round {
             number: 1,
             boards: vec![Board {
-                result: Some(Winner::Player1),
+                outcome: Outcome::won(Winner::Player1),
                 long: true,
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
@@ -581,7 +587,7 @@ mod tests {
         t.rounds.push(Round {
             number: 1,
             boards: vec![Board {
-                result: Some(Winner::Player1),
+                outcome: Outcome::won(Winner::Player1),
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
             sitouts: vec![Sitout {
@@ -599,7 +605,7 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             boards: vec![Board {
-                result: Some(Winner::Player2),
+                outcome: Outcome::won(Winner::Player2),
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
             sitouts: vec![Sitout {
@@ -623,7 +629,9 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             boards: vec![Board {
-                no_show: Some(NoShow::Player2), // P2 absent
+                outcome: Outcome::Forfeit {
+                    absent: Forfeit::Player2(AbsenceKind::NoShow),
+                }, // P2 absent
                 ..Board::pending(p1, p2, 0, PairingSource::Swiss)
             }],
             sitouts: Vec::new(),
@@ -638,6 +646,38 @@ mod tests {
         assert!(grid.contains("0#]"), "no-show token missing: {grid}");
     }
 
+    /// The two absence kinds are what the grid distinguishes: `0#` says the
+    /// player simply didn't turn up, `0-` that they were absent for a reason.
+    /// The opponent's cell is the same free point either way.
+    #[test]
+    fn a_justified_absence_reads_as_a_dash_not_a_hash() {
+        let (mut t, p1, p2) = one_board(|_| {});
+        t.rounds.push(Round {
+            number: 2,
+            boards: vec![Board {
+                outcome: Outcome::Forfeit {
+                    absent: Forfeit::Player2(AbsenceKind::Justified),
+                },
+                ..Board::pending(p1, p2, 0, PairingSource::Swiss)
+            }],
+            sitouts: Vec::new(),
+            completed: true,
+        });
+        let grid = to_grid(&t, &t.standings());
+        assert!(
+            grid.contains("0-]"),
+            "justified absence token missing: {grid}"
+        );
+        assert!(
+            !grid.contains("0#"),
+            "an unjustified token appeared: {grid}"
+        );
+        assert!(
+            grid.contains("0+]"),
+            "the opponent still takes the point: {grid}"
+        );
+    }
+
     #[test]
     fn double_no_show_marks_both_absent() {
         // Neither player shows up: both cells read `0#`, nobody gets `0+`.
@@ -645,7 +685,9 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             boards: vec![Board {
-                no_show: Some(NoShow::Both),
+                outcome: Outcome::Forfeit {
+                    absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
+                },
                 ..Board::pending(p1, p2, 0, PairingSource::Swiss)
             }],
             sitouts: Vec::new(),

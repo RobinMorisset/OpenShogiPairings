@@ -16,6 +16,7 @@
     "restore": "復元",
     "tabSettings": "設定",
     "tabPlayers": "選手（{count}名）",
+    "tabTeams": "チーム（{count}組）",
     "tabResults": "順位表",
     "tabCup": "トーナメント",
     "tabRound": "第{number}回戦",
@@ -136,6 +137,7 @@
     "carriedHint": "選手をクリックすると、2回戦にまたがる対局の勝者を記録します。",
     "clickToSetWinner": "クリックで勝者に設定",
     "drawTitle": "決着局の前に千日手が発生しました（レーティング用に記録されます）",
+    "drawForfeitedTitle": "対局が行われていないため千日手はありません。先に不出場を解除してください",
     "giverTitle": "レーティング上位の選手が上手を持ちます",
     "giverGives": "{name} が上手",
     "needsDifferentRatings": "レーティングの異なる2名が必要です",
@@ -188,8 +190,17 @@
         "forced": "この卓は運営者が指定したもので、自動で決まったものではありません。",
         "cup": "この卓は決勝トーナメント表によるもので、スイス式の組み合わせではありません。",
         "absent": "この選手はこの回戦を欠場したため、組み合わせの対象外でした。"
+      },
+      "pickTeam": "チームを選択…",
+      "hintForceTeams": "2チームを選ぶと、その2チームを当てた場合の代償が分かります。",
+      "hintForbidTeams": "組み合わさっている2チームを選ぶと、そうなった理由が分かります。",
+      "scopedOutTeam": {
+        "forced": "この対戦は運営者が指定したもので、自動で決まったものではありません。",
+        "absent": "このチームはこの回戦を欠場したため、組み合わせの対象外でした。"
       }
-    }
+    },
+    "markJustifiedTitle": "{name} を「事由あり欠席」に変更（0−）",
+    "clearAbsenceTitle": "{name} はやはり出場した"
   },
   "resultsView": {
     "noPlayers": "登録された選手はまだいません。",
@@ -232,6 +243,8 @@
     "tiebreakNoOpponents": "対象となる対戦相手がまだいません",
     "tiebreakDropped": "（除外: {dropped}）",
     "noRoundsCompleted": "終了した回戦はまだありません。回戦が終わるごとにここに表示されます。",
+    "justifiedTitle": "{name} との対局を事由ありで欠席（0−。負けとして扱います）",
+    "teamMatchTitle": "{name} — 盤上 {wins}–{losses}",
     "roundInProgressNote": "{number}回戦が進行中です。結果が記録されるごとにこの列が埋まり、回戦が終了すると順位が再計算されます。"
   },
   "pairingSource": {
@@ -271,7 +284,13 @@
     "startRound": "第{number}回戦を開始",
     "useUndoHintPrefix": "この準備中の回戦を破棄するには",
     "useUndoHintSuffix": "を使ってください。",
-    "needAtLeastTwoPresent": "出場者が2名以上必要です。"
+    "needAtLeastTwoPresent": "出場者が2名以上必要です。",
+    "teamEllipsis": "チーム…",
+    "needAtLeastTwoTeams": "1ラウンドには少なくとも2チームの参加が必要です。",
+    "summaryTeams": "第 {number} ラウンドの準備 — 組み合わせ対象 {present} チーム、欠席 {absent} 人。",
+    "absentWholeTeam": "このラウンドはチーム全員を欠場にする",
+    "forcedByeHintTeams": "出場チームが奇数の場合にのみ適用されます。余った1チームがその回戦を不戦勝で通過します。出場チームが偶数のときに1チームを休ませるには、代わりに欠場と指定し、その回戦の扱いを順位表から設定してください。",
+    "forcedByeEvenWarningTeams": "出場チームが偶数になりました。この指定では別の1チームが余り、そのチームも不戦勝になります。指定を解除するか、どこかのチームを欠場にしてください。"
   },
   "serverStatus": {
     "contacting": "サーバーに接続中…",
@@ -404,7 +423,12 @@
     "moveDown": "下へ",
     "removeTiebreak": "この基準を削除",
     "noTiebreaks": "基準がありません。持ち点が同じ選手は選手番号順に並びます。",
-    "addTiebreakPlaceholder": "基準を追加…"
+    "addTiebreakPlaceholder": "基準を追加…",
+    "teamTitle": "団体戦",
+    "teamDesc": "個人ではなくチーム単位で組み合わせます。2チームの対戦は各ポジションごとの通常の対局で構成され、1番同士、2番同士と対戦します。結果はこれまでどおり各対局ごとに入力します。",
+    "teamCheckbox": "団体戦として開催する",
+    "teamSize": "1チームの人数",
+    "teamLocked": "参加登録の確定後は、団体戦の設定とチーム人数を変更できません。"
   },
   "serverError": {
     "noTournament": "大会がまだありません。先に作成してください。",
@@ -428,7 +452,23 @@
     "zeroPointAdjustment": "0点の調整は意味がありません。",
     "unsupportedFormatVersion": "このファイルは大会フォーマット{found}を使っていますが、このバージョンでは読み込めません（対応するのは{supported}です）。",
     "malformedSave": "このファイルは大会データとして読み込めません: {details}",
-    "eloEstimateUnanchored": "レーティング推定の基準となる値がありません。レーティングのある選手を追加するか、レーティングを固定する（K倍率を0にする）か、レーティングなしの事前分布を平坦以外にしてください。"
+    "eloEstimateUnanchored": "レーティング推定の基準となる値がありません。レーティングのある選手を追加するか、レーティングを固定する（K倍率を0にする）か、レーティングなしの事前分布を平坦以外にしてください。",
+    "teamModeRejectsCup": "団体戦とトーナメント（勝ち抜き戦）は併用できません。どちらかをオフにしてください。",
+    "teamModeRejectsLongGames": "団体戦では長時間対局（2ラウンドにまたがる対局）は使えません。どちらかをオフにしてください。",
+    "teamModeRejectsEloPairing": "団体戦はELOモードでは組み合わせできません。スイス式かマクマホンを選んでください。",
+    "teamModeRejectsGradeThresholds": "団体戦では段級位によるマクマホンの区切りは使えません。チームには平均レーティングしかないため、ELOの区切りを使ってください。",
+    "teamModeRejectsEstEloTiebreak": "団体戦では推定ELOによる順位決定は使えません。順位決定方法から外してください。",
+    "invalidTeamSize": "チーム人数 {size} は指定できません。2〜9 の範囲で指定してください。",
+    "teamSettingsLocked": "参加登録の確定後は、団体戦の設定とチーム人数を変更できません。",
+    "emptyTeamName": "チーム名を入力してください。",
+    "duplicateTeamName": "{name} というチームはすでに存在します。",
+    "teamIsFull": "このチームはすでに {size} 人そろっています。",
+    "playersWithoutTeam": "{count} 人がまだどのチームにも所属していません。確定前に全員をチームに入れてください。",
+    "incompleteTeam": "チーム {name} は {need} 人中 {have} 人です。",
+    "membersWithoutPairingRating": "マクマホンの持ち点には、レーティングのないチームメンバー全員に組み合わせ用ELOが必要です（あと {count} 人）。",
+    "notEnoughTeams": "団体戦には少なくとも2チームが必要です（現在 {have} チーム）。",
+    "noLateRegistrationInTeamMode": "団体戦では追加登録できません。全員がチームに所属している必要があり、メンバー構成は確定済みです。",
+    "notEnoughPresentTeams": "1ラウンドには少なくとも {needed} チームの参加が必要ですが、{have} チームしかいません。"
   },
   "tiebreaks": {
     "points": {
@@ -477,6 +517,36 @@
     "est_elo": {
       "label": "推定レート",
       "title": "現在の棋力のベイズ推定値（リアルタイム）"
+    },
+    "board_wins": {
+      "label": "勝局数",
+      "title": "勝った対局数。個人の勝局数、または団体戦では全ての盤の合計"
     }
+  },
+  "teams": {
+    "title": "チーム",
+    "count": "{count} チーム",
+    "namePlaceholder": "チーム名",
+    "add": "チームを追加",
+    "none": "まだチームがありません。確定前に全員をどこかのチームに入れてください。",
+    "clickToRename": "クリックして名前を変更",
+    "averageTitle": "組み合わせ用レーティングの平均。チーム番号とマクマホンの持ち点はここから決まります",
+    "sortByRating": "レーティング順",
+    "sortByRatingTitle": "強い順に並べ直す",
+    "removeTitle": "このチームを削除（所属選手の登録は残ります）",
+    "removeMemberTitle": "この選手をチームから外す",
+    "moveUp": "1つ上の盤へ",
+    "moveDown": "1つ下の盤へ",
+    "addMember": "選手を追加…",
+    "noMemberMatch": "該当する未所属の選手がいません。まず「選手」タブで登録してください。",
+    "pairingEloTitle": "レーティングのないメンバー用の組み合わせELO。チーム平均と盤順にのみ使われ、出力されません。他の場所では引き続き「レーティングなし」と扱われます",
+    "unassigned": "チーム未所属（{count}）",
+    "allAssigned": "全員がチームに所属しています。",
+    "adjustmentTitle": "このチームへの手動の加点・減点",
+    "removeAdjustment": "この調整を削除",
+    "adjustmentPointsPlaceholder": "点数",
+    "adjustmentReasonPlaceholder": "理由（必須）",
+    "cancelAdjustment": "キャンセル",
+    "addAdjustment": "追加"
   }
 }

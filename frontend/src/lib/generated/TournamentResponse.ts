@@ -3,6 +3,7 @@ import type { CupBracketView } from "./CupBracketView";
 import type { CupPodium } from "./CupPodium";
 import type { Handicap } from "./Handicap";
 import type { Standing } from "./Standing";
+import type { TeamStanding } from "./TeamStanding";
 import type { Tournament } from "./Tournament";
 import type { TournamentId } from "./TournamentId";
 import type { Winner } from "./Winner";
@@ -23,6 +24,12 @@ export type TournamentResponse = { tournament: Tournament, can_undo: boolean,
  * echo of their own change (see [`crate::live`]).
  */
 version: number, standings: Array<Standing>, 
+/**
+ * The ranked team standings, in team mode only — the table the Standings
+ * tab shows there, with the per-player figures staying in `standings` for
+ * the breakdown rows. `None` for an individual tournament.
+ */
+team_standings: Array<TeamStanding> | null, 
 /**
  * The cup podium once decided (champion / runner-up / third / fourth), for the
  * Results-tab medals. `None` when there is no cup or the final isn't finished.

@@ -15,17 +15,23 @@ use uuid::Uuid;
 use crate::cup::{cup_field_size, Cup, CupBracketView, CupPairings, CupPodium, CUP_SIZES};
 use crate::pairing::{
     counterfactual_forbid, counterfactual_force, explain_pairing, pair_round_weighted,
-    Counterfactual, CounterfactualMode, RoundExplanation, ScopeReason, PHANTOM,
+    player_units, Counterfactual, CounterfactualMode, PairingUnit, RoundExplanation, ScopeReason,
+    PHANTOM,
 };
 use crate::player::{NewPlayer, Player, PointAdjustment};
 use crate::round::{
-    Board, Handicap, HandicapGame, NoShow, PairingSource, Round, RoundDraft, Sitout, SitoutKind,
-    SitoutValue, Winner,
+    Board, ForcedMatch, Forfeit, Handicap, HandicapGame, Outcome, PairingSource, Round, RoundDraft,
+    Sitout, SitoutKind, SitoutValue, Winner,
 };
 use crate::scoring::compute_scores;
-use crate::settings::TournamentSettings;
+use crate::settings::{TeamModeConflict, TournamentSettings, TEAM_SIZES};
 use crate::standings::{compute_standings, Standing};
-use crate::units::TournamentId;
+use crate::team::Team;
+use crate::team_scoring::{
+    compute_team_standings, matches_in_round, swiss_bye_team, TeamSlots, TeamStanding,
+};
+use crate::units::{TeamId, TournamentId, UnitKey};
+use typed_index_collections::TiVec;
 
 /// On-disk / on-the-wire format version for a serialized [`Tournament`].
 ///
@@ -38,7 +44,12 @@ use crate::units::TournamentId;
 /// v4: players carry a list of manual point `adjustments`.
 /// v5: rounds carry one `sitouts` list (each with what it scores) in place of
 /// the separate `bye`, `cup_byes` and `absent` fields.
-pub const TOURNAMENT_FORMAT_VERSION: u32 = 5;
+/// v6: boards carry one `outcome` sum in place of the separate `result`,
+/// `drawn` and `no_show` fields.
+/// v7: team tournaments — a `teams` roster list and `settings.teams`.
+/// v8: a board's forfeit records *why* each missing side missed it.
+/// v9: teams carry manual point `adjustments`.
+pub const TOURNAMENT_FORMAT_VERSION: u32 = 9;
 
 fn default_format_version() -> u32 {
     TOURNAMENT_FORMAT_VERSION
@@ -46,6 +57,11 @@ fn default_format_version() -> u32 {
 
 /// Minimum number of players required to start a round.
 pub const MIN_PLAYERS_PER_ROUND: usize = 2;
+
+/// Minimum number of present teams required to start a team round — the team
+/// reading of [`MIN_PLAYERS_PER_ROUND`], since teams are what get paired.
+/// Crate-internal: only `team.rs`'s own guard reads it.
+pub(crate) const MIN_TEAMS_PER_ROUND: usize = 2;
 
 /// A tournament: a name and its registered players.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -79,6 +95,11 @@ pub struct Tournament {
     /// finalization (see [`Cup`]); `None` when there is no cup.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cup: Option<Cup>,
+    /// The registered teams, in creation order — the only team state that is
+    /// *stored*, everything else about a team being replayed from the boards.
+    /// Empty (and absent from JSON) outside team mode.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub teams: Vec<Team>,
 }
 
 /// Errors that can arise while mutating a [`Tournament`].
@@ -139,6 +160,10 @@ pub enum TournamentError {
     /// No board with the given index exists in the round.
     #[error("no board {board} in round {round}")]
     BoardNotFound { round: u32, board: usize },
+    /// A draw was recorded on a board that was forfeited — nobody played, so
+    /// nobody drew. The UI disables the control, so this is a client bug.
+    #[error("board {board} of round {round} was forfeited, so it cannot be a draw")]
+    DrawnOnForfeitedBoard { round: u32, board: usize },
     /// A sit-out's value was set for a player who played a board that round (or
     /// wasn't in it at all), so there is no sit-out to score.
     #[error("player {player} did not sit out round {round}")]
@@ -197,6 +222,94 @@ pub enum TournamentError {
     /// No point adjustment with the given id exists for that player.
     #[error("no point adjustment {adjustment} for player {player}")]
     AdjustmentNotFound { player: Uuid, adjustment: Uuid },
+
+    // --- Team tournaments ---
+    /// Team mode was enabled alongside a feature it cannot support (or such a
+    /// feature was turned on while team mode was already active). Neither side is
+    /// silently disabled: the referee is told which two settings disagree and
+    /// picks.
+    #[error("team mode does not support {} — turn one of the two off", .0.describe())]
+    TeamModeConflict(TeamModeConflict),
+    /// The configured team size is outside [`TEAM_SIZES`].
+    #[error("invalid team size {size} (must be between 2 and 9)")]
+    InvalidTeamSize { size: u32 },
+    /// Team mode, or the team size, was changed after registration was
+    /// finalized — both reshape every roster and every future match.
+    #[error("team mode and team size are fixed once registration is finalized")]
+    TeamSettingsLocked,
+    /// A team operation was attempted on an individual tournament.
+    #[error("this is not a team tournament")]
+    NotATeamTournament,
+    /// No team with the given id exists in this tournament.
+    #[error("no team with id {0}")]
+    TeamNotFound(Uuid),
+    /// A team's name was empty or whitespace-only.
+    #[error("team name must not be empty")]
+    EmptyTeamName,
+    /// Another team already has that name (compared ignoring case).
+    #[error("a team named {0} already exists")]
+    DuplicateTeamName(String),
+    /// A player was assigned to a team while already a member of another — a
+    /// player belongs to exactly one team.
+    #[error("player {0} is already in another team")]
+    PlayerAlreadyInATeam(Uuid),
+    /// A player was assigned to a team that already has its full roster.
+    #[error("that team already has its {size} members")]
+    TeamIsFull { size: u32 },
+    /// A player was removed from, or reordered within, a team they aren't in.
+    #[error("player {player} is not a member of team {team}")]
+    NotATeamMember { team: Uuid, player: Uuid },
+    /// A board-order reorder didn't name exactly the team's current members.
+    #[error("a board order must list exactly the team's current members")]
+    InvalidBoardOrder,
+    /// Finalization found a player belonging to no team.
+    #[error("every player must be in a team before finalizing ({count} are not)")]
+    PlayersWithoutTeam { count: usize },
+    /// Finalization found a team whose roster isn't the configured size.
+    #[error("team {name} has {have} of {need} members")]
+    IncompleteTeam {
+        name: String,
+        have: usize,
+        need: u32,
+    },
+    /// Finalization found a team member with neither a rating nor a referee-set
+    /// pairing rating, while MacMahon starting points are in use — so that member
+    /// would contribute nothing to the team average the thresholds read.
+    #[error(
+        "MacMahon starting points need a pairing ELO for every unrated team \
+         member ({count} are missing one)"
+    )]
+    MembersWithoutPairingRating { count: usize },
+    /// Fewer than two teams at finalization.
+    #[error("need at least 2 teams (have {have})")]
+    NotEnoughTeams { have: usize },
+    /// A pairing rating was set outside the one configuration it means anything
+    /// in: team mode with MacMahon starting points.
+    #[error("a pairing ELO is only meaningful in team mode with MacMahon starting points")]
+    PairingRatingNotApplicable,
+    /// Registration of any kind after finalization, in team mode (see
+    /// `docs/team-tournaments.md`: a late individual would be teamless, and a
+    /// late team would need teamless players first).
+    #[error("a team tournament cannot take late registrations")]
+    NoLateRegistrationInTeamMode,
+    /// Too few present teams to start a team round.
+    #[error("need at least {needed} present teams (have {have})")]
+    NotEnoughPresentTeams { needed: usize, have: usize },
+    /// A player-level forced pairing or forced bye was submitted for a team
+    /// round, where teams are what get paired.
+    #[error("a team round is paired by team, so it takes no player-level forced pairing or bye")]
+    PlayerLevelDraftInTeamMode,
+    /// A manual point adjustment was applied to a player in a team tournament,
+    /// where the ranking is by team so a per-player delta moves nothing visible.
+    /// Team-level adjustments are the answer, and are still to come.
+    #[error("a team tournament ranks by team, so a per-player point adjustment has no effect")]
+    PlayerAdjustmentInTeamMode,
+    /// A justified absence was recorded on a board outside team mode, where it
+    /// cannot arise: an absent player is excluded from the pairing before any
+    /// board exists, so the only forfeit an individual tournament can produce is
+    /// an unjustified no-show.
+    #[error("a justified absence on a board only exists in a team tournament")]
+    JustifiedAbsenceOutsideTeamMode,
 }
 
 impl Tournament {
@@ -218,6 +331,7 @@ impl Tournament {
             draft: None,
             rounds: Vec::new(),
             cup: None,
+            teams: Vec::new(),
         })
     }
 
@@ -228,6 +342,13 @@ impl Tournament {
     pub fn add_player(&mut self, new: NewPlayer) -> Result<&Player, TournamentError> {
         if new.last_name.trim().is_empty() {
             return Err(TournamentError::EmptyPlayerName);
+        }
+        // Team mode takes no late registration at all: a player registered now
+        // would be teamless, breaking the frozen "everyone is in exactly one
+        // team" invariant, and a whole new team would need its players registered
+        // teamless first. See `docs/team-tournaments.md`.
+        if self.registration_finalized && self.settings.team_mode() {
+            return Err(TournamentError::NoLateRegistrationInTeamMode);
         }
         let mut player = Player::from_new(new);
         // A player registered after finalization gets the next free number
@@ -311,6 +432,13 @@ impl Tournament {
         if self.players.len() == before {
             return Err(TournamentError::PlayerNotFound(id));
         }
+        // A removed player leaves their team too, so no roster can reference a
+        // player who is no longer registered. (Only reachable before
+        // finalization: after it, team rosters are frozen and every player has
+        // been paired.)
+        for team in &mut self.teams {
+            team.members.retain(|&m| m != id);
+        }
         Ok(())
     }
 
@@ -324,7 +452,30 @@ impl Tournament {
         &mut self,
         settings: TournamentSettings,
     ) -> Result<&TournamentSettings, TournamentError> {
+        // Team mode and the features it can't support are rejected as a pair,
+        // naming the conflict — neither side is silently switched off. Checked
+        // *before* normalization, which would otherwise quietly drop some of them
+        // (the estimated-ELO tie-break can't rank in team mode, so `normalized`
+        // removes it) and turn a conflict the referee should see into a silent
+        // edit of what they asked for.
+        if let Some(conflict) = settings.team_mode_conflict() {
+            return Err(TournamentError::TeamModeConflict(conflict));
+        }
         let settings = settings.normalized();
+        // Team mode is structural: whether teams exist at all, and how many
+        // players a match takes, shape every roster and every board. Both are
+        // fixed at finalization, like the cup bracket.
+        if self.registration_finalized
+            && (settings.team_mode() != self.settings.team_mode()
+                || settings.team_size() != self.settings.team_size())
+        {
+            return Err(TournamentError::TeamSettingsLocked);
+        }
+        if let Some(teams) = &settings.teams {
+            if !TEAM_SIZES.contains(&teams.size) {
+                return Err(TournamentError::InvalidTeamSize { size: teams.size });
+            }
+        }
         // Once the tournament has started, a settings change is the last gate
         // before the new config takes effect (there is no re-finalization), so the
         // ELO scale anchor is validated here too. Before finalization the field may
@@ -332,6 +483,14 @@ impl Tournament {
         // [`finalize_registration_with`], which validates against the final field.
         if self.registration_finalized {
             Self::validate_elo_scale_anchor(&settings, &self.players)?;
+        }
+        // A pairing ELO only means anything under MacMahon starting points; if
+        // this update turns those off, drop the values rather than leaving them
+        // stored where nothing reads them and no UI can reach them.
+        if !(settings.team_mode() && settings.macmahon_in_use()) {
+            for p in &mut self.players {
+                p.pairing_rating = None;
+            }
         }
         // Prune any player memberships in categories this update deleted, so a
         // stale id can never linger (and later collide with a re-created one).
@@ -362,6 +521,24 @@ impl Tournament {
     /// This is the canonical ordering — used by the Results tab and, later, the
     /// American grid — so scoring lives in one place rather than being re-derived
     /// by each client.
+    /// The ranked **team** standings, or `None` outside team mode — the team
+    /// twin of [`Self::standings`], with the same safety floor (nothing to rank
+    /// before finalization assigns the numbers everything is keyed by).
+    pub fn team_standings(&self) -> Option<Vec<TeamStanding>> {
+        if !self.settings.team_mode() {
+            return None;
+        }
+        if !self.registration_finalized {
+            return Some(Vec::new());
+        }
+        Some(compute_team_standings(
+            &self.teams,
+            &self.players,
+            &self.settings,
+            &self.rounds,
+        ))
+    }
+
     pub fn standings(&self) -> Vec<Standing> {
         // Scoring keys players by their tournament number, which is only assigned
         // at finalization, so there is nothing safe (or meaningful) to compute
@@ -425,6 +602,15 @@ impl Tournament {
         } else {
             None
         };
+
+        // In team mode: validate the rosters and number the teams. Placed after
+        // every other pre-validation so nothing can fail once it has started
+        // assigning numbers (team mode rejects the cup, so `cup_shape` is `None`
+        // here anyway — but the ordering is what keeps that a fact rather than a
+        // coincidence).
+        if self.settings.team_mode() {
+            self.finalize_teams()?;
+        }
 
         // Assign tournament numbers 1..N in the sorted-table order: highest ELO
         // first, unrated players last, ties broken by registration order.
@@ -514,6 +700,13 @@ impl Tournament {
         delta: i32,
         reason: String,
     ) -> Result<&Player, TournamentError> {
+        // In a team tournament the ranking is by team, so a delta on one player
+        // would move nothing a referee can see. Adjustments belong to teams there
+        // — not implemented yet, so this refuses rather than storing a bonus that
+        // silently does nothing.
+        if self.settings.team_mode() {
+            return Err(TournamentError::PlayerAdjustmentInTeamMode);
+        }
         let reason = reason.trim().to_string();
         if reason.is_empty() {
             return Err(TournamentError::EmptyAdjustmentReason);
@@ -575,6 +768,25 @@ impl Tournament {
             Some(cup) => cup.prequalified_for_round(&self.rounds, r),
             None => &[],
         }
+    }
+
+    /// The pairing engine's input for round `r`, replayed from `completed` — one
+    /// [`PairingUnit`] per player, keyed by tournament number.
+    ///
+    /// The engine knows nothing about [`Player`]: it pairs opaque units, so that
+    /// one implementation serves individual and team tournaments alike. This is
+    /// the individual side of that seam, and the only place the per-round cup
+    /// context reaches it.
+    ///
+    /// `completed` is passed rather than read off `self` because the explanation
+    /// paths replay a *past* round, from the rounds before it.
+    fn pairing_units(&self, r: u32, completed: &[Round]) -> TiVec<UnitKey, PairingUnit> {
+        player_units(
+            &self.players,
+            &self.settings,
+            completed,
+            self.prequalified_in_round(r),
+        )
     }
 
     /// The players the cup bracket will pair in the round currently being drafted
@@ -697,6 +909,8 @@ impl Tournament {
             absent: default_absent,
             forced_boards: Vec::new(),
             forced_byes: Vec::new(),
+            forced_matches: Vec::new(),
+            forced_team_byes: Vec::new(),
         });
         Ok(self.draft.as_ref().expect("just set the draft"))
     }
@@ -730,6 +944,13 @@ impl Tournament {
             }
         }
 
+        // Player-level forcing has no meaning when teams are what get paired.
+        // The absent set is still per player there — a member can be absent
+        // without their team being — so only the forced halves are rejected.
+        if self.settings.team_mode() && !(forced_boards.is_empty() && forced_byes.is_empty()) {
+            return Err(TournamentError::PlayerLevelDraftInTeamMode);
+        }
+
         let draft = self.draft.as_mut().expect("draft present");
         draft.absent = absent;
         draft.forced_boards = forced_boards
@@ -737,6 +958,62 @@ impl Tournament {
             .map(|b| Board::pending(b.player1, b.player2, 0, PairingSource::Forced))
             .collect();
         draft.forced_byes = forced_byes;
+        draft.forced_matches = Vec::new();
+        draft.forced_team_byes = Vec::new();
+        Ok(self.draft.as_ref().expect("draft present"))
+    }
+
+    /// Replace the current draft's customization in **team mode**: the absent
+    /// players (still per player — a member can be absent without their team
+    /// being), plus the matches and byes the referee has fixed by hand.
+    ///
+    /// The team twin of [`Self::update_draft`], because a forced pairing names
+    /// two *teams* here. Structural consistency is validated when the round is
+    /// confirmed; this only checks that every referenced team and player exists.
+    pub fn update_team_draft(
+        &mut self,
+        absent: Vec<TournamentId>,
+        forced_matches: Vec<ForcedMatch>,
+        forced_team_byes: Vec<TeamId>,
+    ) -> Result<&RoundDraft, TournamentError> {
+        if !self.settings.team_mode() {
+            return Err(TournamentError::NotATeamTournament);
+        }
+        if self.draft.is_none() {
+            return Err(TournamentError::NoDraft);
+        }
+        let known_players: HashSet<TournamentId> = self
+            .players
+            .iter()
+            .filter_map(|p| p.tournament_id)
+            .collect();
+        for id in &absent {
+            if !known_players.contains(id) {
+                return Err(TournamentError::InvalidDraft(format!(
+                    "references unknown player {id}"
+                )));
+            }
+        }
+        let known_teams: HashSet<TeamId> =
+            self.teams.iter().filter_map(|t| t.tournament_id).collect();
+        let referenced = forced_matches
+            .iter()
+            .flat_map(|m| [m.team1, m.team2])
+            .chain(forced_team_byes.iter().copied());
+        for id in referenced {
+            if !known_teams.contains(&id) {
+                return Err(TournamentError::InvalidDraft(format!(
+                    "references unknown team {id}"
+                )));
+            }
+        }
+
+        let draft = self.draft.as_mut().expect("draft present");
+        draft.absent = absent;
+        draft.forced_boards = Vec::new();
+        draft.forced_byes = Vec::new();
+        draft.forced_matches = forced_matches;
+        draft.forced_team_byes = forced_team_byes;
         Ok(self.draft.as_ref().expect("draft present"))
     }
 
@@ -763,6 +1040,9 @@ impl Tournament {
         &mut self,
         order_boards_for_display: bool,
     ) -> Result<&Round, TournamentError> {
+        if self.settings.team_mode() {
+            return self.confirm_team_round();
+        }
         let draft = self.draft.clone().ok_or(TournamentError::NoDraft)?;
 
         let absent: HashSet<TournamentId> = draft.absent.iter().copied().collect();
@@ -900,19 +1180,42 @@ impl Tournament {
         // No parity check on the forced byes: whatever they leave over, the
         // engine byes one more player if the count is odd.
 
-        // Pair the Swiss pool with the engine, then prepend the cup boards.
-        let swiss_round = pair_round_weighted(
+        // Pair the Swiss pool with the engine, then prepend the cup boards. The
+        // engine speaks in units; in individual mode a unit is a player, so each
+        // matched pair is exactly one board and the bye exactly one sit-out.
+        let units = self.pairing_units(draft.number, &self.rounds);
+        let forced_pairs: Vec<(UnitKey, UnitKey)> = draft
+            .forced_boards
+            .iter()
+            .map(|b| (UnitKey::from(b.player1), UnitKey::from(b.player2)))
+            .collect();
+        let forced_bye_keys: Vec<UnitKey> = draft
+            .forced_byes
+            .iter()
+            .copied()
+            .map(UnitKey::from)
+            .collect();
+        let swiss = pair_round_weighted(
             draft.number,
-            &self.players,
             &self.settings,
-            &self.rounds,
-            &swiss_present,
-            &draft.forced_boards,
-            &draft.forced_byes,
-            self.prequalified_in_round(draft.number),
+            &units,
+            &swiss_present
+                .iter()
+                .copied()
+                .map(UnitKey::from)
+                .collect::<Vec<_>>(),
+            &forced_pairs,
+            &forced_bye_keys,
         );
         let mut boards = cup_boards;
-        boards.extend(swiss_round.boards);
+        boards.extend(swiss.pairs.iter().map(|p| {
+            Board::pending(
+                TournamentId::from(p.a),
+                TournamentId::from(p.b),
+                p.points_diff,
+                p.source,
+            )
+        }));
 
         // Display order: cup boards first, then by the rank (from the standings
         // entering this round) of the board's best-placed player — the same
@@ -950,7 +1253,22 @@ impl Tournament {
         // each scores is frozen here — a bye is a full point, an absence follows the
         // tournament default — and the referee can re-value any of them afterwards
         // from the standings.
-        let mut sitouts = swiss_round.sitouts;
+        // The forced byes score a full point, like any bye; so does the engine's
+        // own, when the leftover field was odd.
+        let mut sitouts: Vec<Sitout> = draft
+            .forced_byes
+            .iter()
+            .map(|&player| Sitout {
+                player,
+                kind: SitoutKind::ForcedBye,
+                value: SitoutValue::Full,
+            })
+            .collect();
+        sitouts.extend(swiss.swiss_bye.map(|key| Sitout {
+            player: TournamentId::from(key),
+            kind: SitoutKind::Bye,
+            value: SitoutValue::Full,
+        }));
         sitouts.extend(cup_byes.into_iter().map(|(player, stage)| Sitout {
             player,
             kind: SitoutKind::CupBye { stage },
@@ -1011,20 +1329,41 @@ impl Tournament {
             .ok_or(TournamentError::RoundNotFound(round_number))?;
         let round = &self.rounds[idx];
         let completed = &self.rounds[..idx];
-        let swiss_boards: Vec<(TournamentId, TournamentId)> = round
+        // In team mode the engine paired *teams*, so the explanation is scored
+        // against the team units and its ledgers name team numbers.
+        if self.settings.team_mode() {
+            let slots = self.team_slots();
+            let units = self.team_pairing_units(completed, &slots);
+            let swiss_boards: Vec<(UnitKey, UnitKey)> = matches_in_round(round, &slots)
+                .iter()
+                .filter(|m| {
+                    m.boards
+                        .first()
+                        .is_some_and(|&i| matches!(round.boards[i].source, PairingSource::Swiss))
+                })
+                .map(|m| (UnitKey::from(m.team1), UnitKey::from(m.team2)))
+                .collect();
+            return Ok(explain_pairing(
+                round.number,
+                &self.settings,
+                &units,
+                &swiss_boards,
+                swiss_bye_team(round, &slots).map(UnitKey::from),
+            ));
+        }
+        let swiss_boards: Vec<(UnitKey, UnitKey)> = round
             .boards
             .iter()
             .filter(|b| matches!(b.source, PairingSource::Swiss))
-            .map(|b| (b.player1, b.player2))
+            .map(|b| (UnitKey::from(b.player1), UnitKey::from(b.player2)))
             .collect();
+        let units = self.pairing_units(round.number, completed);
         Ok(explain_pairing(
             round.number,
-            &self.players,
             &self.settings,
-            completed,
+            &units,
             &swiss_boards,
-            round.swiss_bye(),
-            self.prequalified_in_round(round.number),
+            round.swiss_bye().map(UnitKey::from),
         ))
     }
 
@@ -1034,16 +1373,24 @@ impl Tournament {
     /// asks "why aren't A and B paired?"; [`CounterfactualMode::Forbid`] asks
     /// "why did you pair A and B?".
     ///
-    /// If either player isn't an engine-paired Swiss player of that round (they
-    /// were forced, are a cup player, or sat out), the result is `scoped_out`
-    /// with the reason and no diff — the engine didn't choose their board.
+    /// If either unit isn't an engine-paired one for that round (it was forced,
+    /// is a cup player, or sat out), the result is `scoped_out` with the reason
+    /// and no diff — the engine didn't choose its board.
+    ///
+    /// `a` and `b` are [`UnitKey`]s: player numbers in an individual tournament,
+    /// team numbers in a team one, because the engine paired whichever of those
+    /// the tournament is run on. [`UnitKey::PHANTOM`] means the bye.
     pub fn explain_counterfactual(
         &self,
         round_number: u32,
-        a: TournamentId,
-        b: TournamentId,
+        a: UnitKey,
+        b: UnitKey,
         mode: CounterfactualMode,
     ) -> Result<Counterfactual, TournamentError> {
+        if self.settings.team_mode() {
+            return self.explain_team_counterfactual(round_number, a, b, mode);
+        }
+        let (a, b) = (TournamentId::from(a), TournamentId::from(b));
         let idx = self
             .rounds
             .iter()
@@ -1051,11 +1398,11 @@ impl Tournament {
             .ok_or(TournamentError::RoundNotFound(round_number))?;
         let round = &self.rounds[idx];
         let completed = &self.rounds[..idx];
-        let swiss_boards: Vec<(TournamentId, TournamentId)> = round
+        let swiss_boards: Vec<(UnitKey, UnitKey)> = round
             .boards
             .iter()
             .filter(|bd| matches!(bd.source, PairingSource::Swiss))
-            .map(|bd| (bd.player1, bd.player2))
+            .map(|bd| (UnitKey::from(bd.player1), UnitKey::from(bd.player2)))
             .collect();
 
         // Both probed players must be engine-paired (in a Swiss board or the
@@ -1065,7 +1412,8 @@ impl Tournament {
         // when this round actually has an engine-chosen bye to negotiate.
         let swiss_bye = round.swiss_bye();
         let in_swiss = |id: TournamentId| {
-            swiss_bye == Some(id) || swiss_boards.iter().any(|&(x, y)| x == id || y == id)
+            let key = UnitKey::from(id);
+            swiss_bye == Some(id) || swiss_boards.iter().any(|&(x, y)| x == key || y == key)
         };
         for id in [a, b] {
             if id == PHANTOM {
@@ -1093,17 +1441,109 @@ impl Tournament {
             CounterfactualMode::Force => counterfactual_force,
             CounterfactualMode::Forbid => counterfactual_forbid,
         };
+        let units = self.pairing_units(round.number, completed);
         Ok(solve(
             round.number,
-            &self.players,
             &self.settings,
-            completed,
+            &units,
+            &swiss_boards,
+            swiss_bye.map(UnitKey::from),
+            UnitKey::from(a),
+            UnitKey::from(b),
+        ))
+    }
+
+    /// The team reading of [`Self::explain_counterfactual`]: the probe names two
+    /// *teams*, and the diff is over the round's team matches.
+    fn explain_team_counterfactual(
+        &self,
+        round_number: u32,
+        a: UnitKey,
+        b: UnitKey,
+        mode: CounterfactualMode,
+    ) -> Result<Counterfactual, TournamentError> {
+        let idx = self
+            .rounds
+            .iter()
+            .position(|r| r.number == round_number)
+            .ok_or(TournamentError::RoundNotFound(round_number))?;
+        let round = &self.rounds[idx];
+        let completed = &self.rounds[..idx];
+        let slots = self.team_slots();
+        let matches = matches_in_round(round, &slots);
+        let swiss_boards: Vec<(UnitKey, UnitKey)> = matches
+            .iter()
+            .filter(|m| {
+                m.boards
+                    .first()
+                    .is_some_and(|&i| matches!(round.boards[i].source, PairingSource::Swiss))
+            })
+            .map(|m| (UnitKey::from(m.team1), UnitKey::from(m.team2)))
+            .collect();
+        let swiss_bye = swiss_bye_team(round, &slots).map(UnitKey::from);
+
+        // Both probed teams must be engine-paired: in a Swiss match, or on the
+        // engine's own bye. A forced match or bye wasn't the engine's choice, so
+        // there is nothing to explain about it.
+        let scoped_out = |reason: ScopeReason| {
+            Ok(Counterfactual {
+                scoped_out: Some(reason),
+                cost_delta: Vec::new(),
+                cycles: Vec::new(),
+                changed: Vec::new(),
+            })
+        };
+        for key in [a, b] {
+            if key == UnitKey::PHANTOM {
+                if swiss_bye.is_none() {
+                    return scoped_out(ScopeReason::Absent);
+                }
+                continue;
+            }
+            if swiss_bye != Some(key) && !swiss_boards.iter().any(|&(x, y)| x == key || y == key) {
+                return scoped_out(self.team_scope_reason(round, &slots, TeamId::from(key)));
+            }
+        }
+
+        let solve = match mode {
+            CounterfactualMode::Force => counterfactual_force,
+            CounterfactualMode::Forbid => counterfactual_forbid,
+        };
+        let units = self.team_pairing_units(completed, &slots);
+        Ok(solve(
+            round.number,
+            &self.settings,
+            &units,
             &swiss_boards,
             swiss_bye,
-            self.prequalified_in_round(round.number),
             a,
             b,
         ))
+    }
+
+    /// Why a team is out of the engine's hands for `round`: the referee fixed
+    /// its match or its bye, or it sat the round out entirely.
+    fn team_scope_reason(&self, round: &Round, slots: &TeamSlots, team: TeamId) -> ScopeReason {
+        let members = slots.members_of(team);
+        // A whole-team sit-out: a forced bye was the referee's, anything else
+        // (an absence, or the engine's own bye, handled by the caller) is not.
+        if let Some(sitout) = members.first().and_then(|&m| round.sitout(m)) {
+            return match sitout.kind {
+                SitoutKind::ForcedBye => ScopeReason::Forced,
+                _ => ScopeReason::Absent,
+            };
+        }
+        let forced = members.iter().any(|&m| {
+            round
+                .boards
+                .iter()
+                .any(|b| (b.player1 == m || b.player2 == m) && b.source == PairingSource::Forced)
+        });
+        if forced {
+            ScopeReason::Forced
+        } else {
+            ScopeReason::Absent
+        }
     }
 
     /// Actually force the pairing `a`–`b` onto the current (last, in-progress)
@@ -1119,11 +1559,7 @@ impl Tournament {
     /// pairing would discard them). The pair is validated by the re-pairing path
     /// exactly like any referee-forced board/bye (must be a present Swiss
     /// player, neither a cup player nor already forced elsewhere).
-    pub fn force_pairing(
-        &mut self,
-        a: TournamentId,
-        b: TournamentId,
-    ) -> Result<&Round, TournamentError> {
+    pub fn force_pairing(&mut self, a: UnitKey, b: UnitKey) -> Result<&Round, TournamentError> {
         let round = self.rounds.last().ok_or(TournamentError::NoCurrentRound)?;
         if round.completed {
             return Err(TournamentError::RoundHasResults);
@@ -1131,6 +1567,10 @@ impl Tournament {
         if round.boards.iter().any(|bd| bd.is_decided()) {
             return Err(TournamentError::RoundHasResults);
         }
+        if self.settings.team_mode() {
+            return self.force_team_pairing(a, b);
+        }
+        let (a, b) = (TournamentId::from(a), TournamentId::from(b));
 
         // Rebuild the draft the round came from: its absentees, its existing
         // forced boards, plus the newly forced pair (or bye). The engine
@@ -1160,6 +1600,70 @@ impl Tournament {
             absent: round.absentees().collect(),
             forced_boards,
             forced_byes,
+            forced_matches: Vec::new(),
+            forced_team_byes: Vec::new(),
+        };
+
+        // Drop the round and re-confirm from the reconstructed draft. Earlier
+        // rounds stay completed, so the standings entering this round are intact.
+        self.rounds.pop();
+        self.draft = Some(draft);
+        self.confirm_round()
+    }
+
+    /// The team reading of [`Self::force_pairing`]: fix a *match* (or a team's
+    /// bye) onto the current round and re-pair everything else around it.
+    ///
+    /// Rebuilds the draft the round came from — its absentees and the matches
+    /// the referee had already fixed — with the new one added, exactly as the
+    /// individual path does. The round is validated by the re-pairing itself.
+    fn force_team_pairing(&mut self, a: UnitKey, b: UnitKey) -> Result<&Round, TournamentError> {
+        let round = self.rounds.last().expect("checked by the caller");
+        let slots = self.team_slots();
+
+        // The matches the referee had already fixed carry over; the engine's own
+        // choices go back up for grabs.
+        let mut forced_matches: Vec<ForcedMatch> = matches_in_round(round, &slots)
+            .iter()
+            .filter(|m| {
+                m.boards
+                    .first()
+                    .is_some_and(|&i| round.boards[i].source == PairingSource::Forced)
+            })
+            .map(|m| ForcedMatch {
+                team1: m.team1,
+                team2: m.team2,
+            })
+            .collect();
+        // ...and so do the byes the referee fixed; the engine's own does not.
+        let mut forced_team_byes: Vec<TeamId> = round
+            .forced_byes()
+            .filter_map(|p| slots.team_of(p))
+            .collect();
+        forced_team_byes.sort_unstable();
+        forced_team_byes.dedup();
+
+        match (a == UnitKey::PHANTOM, b == UnitKey::PHANTOM) {
+            // Forcing a team onto the bye. Re-asking for a bye it already has is
+            // a no-op, not a double entry.
+            (true, false) | (false, true) => {
+                let team = TeamId::from(if a == UnitKey::PHANTOM { b } else { a });
+                if !forced_team_byes.contains(&team) {
+                    forced_team_byes.push(team);
+                }
+            }
+            _ => forced_matches.push(ForcedMatch {
+                team1: TeamId::from(a),
+                team2: TeamId::from(b),
+            }),
+        }
+        let draft = RoundDraft {
+            number: round.number,
+            absent: round.absentees().collect(),
+            forced_boards: Vec::new(),
+            forced_byes: Vec::new(),
+            forced_matches,
+            forced_team_byes,
         };
 
         // Drop the round and re-confirm from the reconstructed draft. Earlier
@@ -1229,16 +1733,19 @@ impl Tournament {
                 round: round_number,
                 board: board_index,
             })?;
-        board.result = if board.result == Some(clicked) {
-            None
-        } else {
-            Some(clicked)
-        };
         // Recording an actual result supersedes a no-show — the game was played
-        // after all — so the two states stay mutually exclusive.
-        if board.result.is_some() {
-            board.no_show = None;
-        }
+        // after all. A forfeited board carries no draw, so the replayed-draw flag
+        // starts fresh there; on a played board it survives the toggle, since
+        // whether a draw occurred is independent of who eventually won.
+        let drawn = board.outcome.drawn();
+        board.outcome = if board.outcome.winner() == Some(clicked) {
+            Outcome::Pending { drawn }
+        } else {
+            Outcome::Won {
+                winner: clicked,
+                drawn,
+            }
+        };
         round.completed = round.is_complete();
         Ok(&round.boards[board_index])
     }
@@ -1277,21 +1784,81 @@ impl Tournament {
         Ok(round)
     }
 
-    /// Mark a board as a no-show, or clear it.
+    /// Re-score a round a whole **team** sat out (`0+` / `0=` / `0−`).
     ///
-    /// `absent` names the side(s) that failed to appear — one player, or
-    /// [`NoShow::Both`] — or `None` to clear the flag back to a normal unplayed
-    /// board. A single no-show credits the opponent a free point exactly like a
-    /// bye; [`NoShow::Both`] leaves no winner (both take a zero loss). A no-show
+    /// A team sits out together — a bye or an absence is one entry per member —
+    /// and what the round was worth to the team is read from those entries,
+    /// which [`team_sitout`](crate::team_scoring) requires to agree. So the
+    /// value is written to every member at once: re-scoring one member would
+    /// leave a team whose own entries disagree about what it scored.
+    ///
+    /// Rejects a team that played that round (or has a member who did), naming
+    /// the member without a sit-out, rather than half-applying.
+    pub fn set_team_sitout_value(
+        &mut self,
+        round_number: u32,
+        team: Uuid,
+        value: SitoutValue,
+    ) -> Result<&Round, TournamentError> {
+        if !self.settings.team_mode() {
+            return Err(TournamentError::NotATeamTournament);
+        }
+        if !self.teams.iter().any(|t| t.id == team) {
+            return Err(TournamentError::TeamNotFound(team));
+        }
+        let members: Vec<TournamentId> = self
+            .team_members(team)
+            .iter()
+            .filter_map(|p| p.tournament_id)
+            .collect();
+        let round = self
+            .rounds
+            .iter_mut()
+            .find(|r| r.number == round_number)
+            .ok_or(TournamentError::RoundNotFound(round_number))?;
+        // Check every member first: a team that played has no team-level cell to
+        // re-score, and writing the ones that do sit out would be a half-edit.
+        if let Some(&player) = members
+            .iter()
+            .find(|&&m| !round.sitouts.iter().any(|s| s.player == m))
+        {
+            return Err(TournamentError::PlayerNotSittingOut {
+                round: round_number,
+                player,
+            });
+        }
+        for sitout in round.sitouts.iter_mut() {
+            if members.contains(&sitout.player) {
+                sitout.value = value;
+            }
+        }
+        Ok(round)
+    }
+
+    /// Mark a board as forfeited, or clear it.
+    ///
+    /// `absent` names the side(s) that missed the board and why — see
+    /// [`Forfeit`] — or `None` to clear it back to a normal unplayed board. A
+    /// single missing side credits the opponent a free point exactly like a bye;
+    /// [`Forfeit::Both`] leaves no winner (both take a zero loss). A forfeit
     /// isn't a played game, so recording one clears any actual result and draw
     /// flag on the board. Like recording a winner, this keeps the round's
-    /// `completed` flag in sync — a no-show counts toward closing the round.
+    /// `completed` flag in sync — a forfeit counts toward closing the round.
+    ///
+    /// A [`justified`](AbsenceKind::Justified) absence is rejected outside team
+    /// mode: an individual tournament excludes an absent player from the pairing
+    /// before a board exists, so there is no board to mark, and accepting one
+    /// would put a `0-` in the grid that nothing else in the tournament can
+    /// explain.
     pub fn set_board_no_show(
         &mut self,
         round_number: u32,
         board_index: usize,
-        absent: Option<NoShow>,
+        absent: Option<Forfeit>,
     ) -> Result<&Board, TournamentError> {
+        if absent.is_some_and(Forfeit::has_justified) && !self.settings.team_mode() {
+            return Err(TournamentError::JustifiedAbsenceOutsideTeamMode);
+        }
         let round = self
             .rounds
             .iter_mut()
@@ -1304,11 +1871,15 @@ impl Tournament {
                 round: round_number,
                 board: board_index,
             })?;
-        board.no_show = absent;
-        if absent.is_some() {
-            board.result = None;
-            board.drawn = false;
-        }
+        board.outcome = match absent {
+            // A forfeit isn't a played game, so it drops any recorded result and
+            // draw — states the outcome type can't even express together.
+            Some(absent) => Outcome::Forfeit { absent },
+            // Clearing only ever un-forfeits: on a board that carries a real
+            // result there is no forfeit to clear, and the result must survive.
+            None if board.outcome.forfeit().is_some() => Outcome::PENDING,
+            None => board.outcome,
+        };
         round.completed = round.is_complete();
         Ok(&round.boards[board_index])
     }
@@ -1380,6 +1951,10 @@ impl Tournament {
     /// Set (or clear) the "a draw occurred" flag on a board. The game is still
     /// replayed to a decisive [`Winner`]; this only records that the draw
     /// happened, which matters for end-of-tournament ELO.
+    ///
+    /// Nobody played, so nobody drew: a forfeited board is rejected with
+    /// [`TournamentError::DrawnOnForfeitedBoard`] rather than silently recording
+    /// a draw that would then feed the ELO estimate. Clear the forfeit first.
     pub fn set_board_drawn(
         &mut self,
         round_number: u32,
@@ -1387,7 +1962,16 @@ impl Tournament {
         drawn: bool,
     ) -> Result<&Board, TournamentError> {
         let board = self.board_mut(round_number, board_index)?;
-        board.drawn = drawn;
+        board.outcome = match board.outcome {
+            Outcome::Pending { .. } => Outcome::Pending { drawn },
+            Outcome::Won { winner, .. } => Outcome::Won { winner, drawn },
+            Outcome::Forfeit { .. } => {
+                return Err(TournamentError::DrawnOnForfeitedBoard {
+                    round: round_number,
+                    board: board_index,
+                })
+            }
+        };
         Ok(board)
     }
 
@@ -1545,6 +2129,20 @@ impl Tournament {
         if self.name.trim().is_empty() {
             return Err(TournamentError::EmptyTournamentName);
         }
+        // A justified absence on a board is a team-mode fact: an individual
+        // tournament excludes an absent player before a board exists. A file
+        // carrying one outside team mode would export `0-` cells nothing in the
+        // tournament can account for, so it is rejected rather than half-trusted.
+        if !self.settings.team_mode()
+            && self
+                .rounds
+                .iter()
+                .flat_map(|r| &r.boards)
+                .filter_map(|b| b.outcome.forfeit())
+                .any(Forfeit::has_justified)
+        {
+            return Err(TournamentError::JustifiedAbsenceOutsideTeamMode);
+        }
         Ok(())
     }
 }
@@ -1552,6 +2150,7 @@ impl Tournament {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::round::AbsenceKind;
 
     fn named(last_name: &str) -> NewPlayer {
         NewPlayer {
@@ -2000,18 +2599,55 @@ mod tests {
 
         // not played -> player 1 wins
         assert_eq!(
-            t.toggle_board_winner(1, 0, Winner::Player1).unwrap().result,
-            Some(Winner::Player1)
+            t.toggle_board_winner(1, 0, Winner::Player1)
+                .unwrap()
+                .outcome,
+            Outcome::won(Winner::Player1)
         );
         // click player 2 -> switch winner
         assert_eq!(
-            t.toggle_board_winner(1, 0, Winner::Player2).unwrap().result,
-            Some(Winner::Player2)
+            t.toggle_board_winner(1, 0, Winner::Player2)
+                .unwrap()
+                .outcome,
+            Outcome::won(Winner::Player2)
         );
         // click the current winner again -> back to not played
         assert_eq!(
-            t.toggle_board_winner(1, 0, Winner::Player2).unwrap().result,
-            None
+            t.toggle_board_winner(1, 0, Winner::Player2)
+                .unwrap()
+                .outcome,
+            Outcome::PENDING
+        );
+    }
+
+    /// A draw recorded before the decisive replay survives the winner toggle in
+    /// both directions: whether a draw happened is independent of who eventually
+    /// won, and clearing the winner leaves the game still to be replayed.
+    #[test]
+    fn toggling_the_winner_keeps_the_draw_flag() {
+        use crate::round::Winner;
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+
+        t.set_board_drawn(1, 0, true).unwrap();
+        assert_eq!(
+            t.toggle_board_winner(1, 0, Winner::Player1)
+                .unwrap()
+                .outcome,
+            Outcome::Won {
+                winner: Winner::Player1,
+                drawn: true
+            }
+        );
+        assert_eq!(
+            t.toggle_board_winner(1, 0, Winner::Player1)
+                .unwrap()
+                .outcome,
+            Outcome::Pending { drawn: true }
         );
     }
 
@@ -2027,24 +2663,46 @@ mod tests {
 
         // Marking a no-show settles the only board, so the round completes even
         // though no game was played.
-        let board = t.set_board_no_show(1, 0, Some(NoShow::Player2)).unwrap();
-        assert_eq!(board.no_show, Some(NoShow::Player2));
-        assert_eq!(board.result, None);
+        let board = t
+            .set_board_no_show(1, 0, Some(Forfeit::Player2(AbsenceKind::NoShow)))
+            .unwrap();
+        assert_eq!(
+            board.outcome,
+            Outcome::Forfeit {
+                absent: Forfeit::Player2(AbsenceKind::NoShow)
+            }
+        );
         assert!(t.rounds[0].completed);
 
         // Recording an actual winner supersedes the no-show (game was played).
         let board = t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
-        assert_eq!(board.result, Some(Winner::Player1));
-        assert_eq!(board.no_show, None);
+        assert_eq!(board.outcome, Outcome::won(Winner::Player1));
 
         // And marking a no-show again clears the recorded result.
-        let board = t.set_board_no_show(1, 0, Some(NoShow::Player1)).unwrap();
-        assert_eq!(board.result, None);
-        assert_eq!(board.no_show, Some(NoShow::Player1));
+        let board = t
+            .set_board_no_show(1, 0, Some(Forfeit::Player1(AbsenceKind::NoShow)))
+            .unwrap();
+        assert_eq!(
+            board.outcome,
+            Outcome::Forfeit {
+                absent: Forfeit::Player1(AbsenceKind::NoShow)
+            }
+        );
 
         // Both players absent settles the board too, with no winner.
-        let board = t.set_board_no_show(1, 0, Some(NoShow::Both)).unwrap();
-        assert_eq!(board.no_show, Some(NoShow::Both));
+        let board = t
+            .set_board_no_show(
+                1,
+                0,
+                Some(Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow)),
+            )
+            .unwrap();
+        assert_eq!(
+            board.outcome,
+            Outcome::Forfeit {
+                absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow)
+            }
+        );
         assert!(t.rounds[0].completed);
 
         // Clearing it reopens the round.
@@ -2069,8 +2727,14 @@ mod tests {
         let no_show0 = board0.player2;
         let board1 = &t.rounds[0].boards[1];
         let (both1, both2) = (board1.player1, board1.player2);
-        t.set_board_no_show(1, 0, Some(NoShow::Player2)).unwrap();
-        t.set_board_no_show(1, 1, Some(NoShow::Both)).unwrap();
+        t.set_board_no_show(1, 0, Some(Forfeit::Player2(AbsenceKind::NoShow)))
+            .unwrap();
+        t.set_board_no_show(
+            1,
+            1,
+            Some(Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow)),
+        )
+        .unwrap();
         assert!(t.rounds[0].completed);
 
         let draft = t.prepare_round().unwrap();
@@ -2305,7 +2969,7 @@ mod tests {
             "a and b start unpaired"
         );
 
-        let round = t.force_pairing(a, b).unwrap();
+        let round = t.force_pairing(UnitKey::from(a), UnitKey::from(b)).unwrap();
         assert_eq!(
             round.number, 1,
             "the same round is re-paired, not a new one"
@@ -2338,7 +3002,10 @@ mod tests {
         let r1 = t.rounds.last().unwrap();
         let a = r1.boards[0].player1;
         let b = r1.boards[1].player1;
-        assert_eq!(t.force_pairing(a, b), Err(TournamentError::RoundHasResults));
+        assert_eq!(
+            t.force_pairing(UnitKey::from(a), UnitKey::from(b)),
+            Err(TournamentError::RoundHasResults)
+        );
         let _ = ids;
     }
 
@@ -2356,7 +3023,9 @@ mod tests {
         let bye = r1.swiss_bye().expect("odd count byes someone");
         let playing = r1.boards[0].player1;
 
-        let round = t.force_pairing(playing, PHANTOM).unwrap();
+        let round = t
+            .force_pairing(UnitKey::from(playing), UnitKey::from(PHANTOM))
+            .unwrap();
         assert_eq!(round.number, 1, "the same round is re-paired");
         assert_eq!(
             round.byes().collect::<Vec<_>>(),
@@ -2386,7 +3055,12 @@ mod tests {
         let bye = r1.swiss_bye().expect("odd count byes someone");
 
         let cf = t
-            .explain_counterfactual(1, bye, PHANTOM, CounterfactualMode::Forbid)
+            .explain_counterfactual(
+                1,
+                UnitKey::from(bye),
+                UnitKey::from(PHANTOM),
+                CounterfactualMode::Forbid,
+            )
             .unwrap();
         assert!(cf.scoped_out.is_none(), "the bye is in scope for the probe");
     }
@@ -2453,11 +3127,66 @@ mod tests {
 
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
         let board = t.set_board_drawn(1, 0, true).unwrap();
-        assert!(board.drawn);
-        assert_eq!(board.result, Some(Winner::Player1)); // result untouched
-                                                         // Effective winner unaffected by the draw flag.
+        assert!(board.outcome.drawn());
+        // The winner is untouched, and unaffected by the draw flag.
+        assert_eq!(board.outcome.winner(), Some(Winner::Player1));
         assert_eq!(board.effective_winner(false), Some(Winner::Player1));
-        assert!(!t.set_board_drawn(1, 0, false).unwrap().drawn);
+        assert!(!t.set_board_drawn(1, 0, false).unwrap().outcome.drawn());
+    }
+
+    /// Nobody played, so nobody drew: the draw flag is rejected on a forfeited
+    /// board rather than silently recorded, where it would feed the ELO estimate
+    /// a game that never happened.
+    /// A justified absence is a team-mode fact — an individual tournament
+    /// excludes an absent player before a board exists — so it is refused both
+    /// when recorded and when loaded, rather than leaving a `0-` in the grid
+    /// that nothing else in the tournament can explain.
+    #[test]
+    fn a_justified_absence_is_refused_outside_team_mode() {
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+
+        assert!(matches!(
+            t.set_board_no_show(1, 0, Some(Forfeit::Player1(AbsenceKind::Justified))),
+            Err(TournamentError::JustifiedAbsenceOutsideTeamMode)
+        ));
+        // An ordinary no-show is of course fine.
+        t.set_board_no_show(1, 0, Some(Forfeit::Player1(AbsenceKind::NoShow)))
+            .unwrap();
+        assert!(t.validate_loaded().is_ok());
+
+        // ...and a save that carries one anyway is rejected on load.
+        t.rounds[0].boards[0].outcome = Outcome::Forfeit {
+            absent: Forfeit::Player1(AbsenceKind::Justified),
+        };
+        assert!(matches!(
+            t.validate_loaded(),
+            Err(TournamentError::JustifiedAbsenceOutsideTeamMode)
+        ));
+    }
+
+    #[test]
+    fn set_board_drawn_rejects_a_forfeited_board() {
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+
+        t.set_board_no_show(1, 0, Some(Forfeit::Player2(AbsenceKind::NoShow)))
+            .unwrap();
+        assert!(matches!(
+            t.set_board_drawn(1, 0, true),
+            Err(TournamentError::DrawnOnForfeitedBoard { round: 1, board: 0 })
+        ));
+        // Clearing the forfeit makes the board an ordinary pending one again.
+        t.set_board_no_show(1, 0, None).unwrap();
+        assert!(t.set_board_drawn(1, 0, true).unwrap().outcome.drawn());
     }
 
     #[test]
@@ -2491,7 +3220,7 @@ mod tests {
         t.toggle_board_winner(1, 0, receiver_wins).unwrap();
 
         let board = &t.rounds[0].boards[0];
-        assert_eq!(board.result, Some(receiver_wins)); // actual result recorded
+        assert_eq!(board.outcome.winner(), Some(receiver_wins)); // actual result recorded
         let giver_side = if p1_is_high {
             Winner::Player1
         } else {
@@ -2872,7 +3601,12 @@ mod tests {
                 (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a)
             })
             .expect("board exists");
-        t.set_board_no_show(rnum, idx, Some(NoShow::Both)).unwrap();
+        t.set_board_no_show(
+            rnum,
+            idx,
+            Some(Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow)),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -3495,6 +4229,6 @@ mod tests {
         t.confirm_round().unwrap();
         let board = find_board(&t, 1, s[0], s[7]).expect("bracket board created despite absence");
         assert!(matches!(board.source, PairingSource::Cup { .. }));
-        assert!(board.result.is_none());
+        assert!(!board.is_decided());
     }
 }

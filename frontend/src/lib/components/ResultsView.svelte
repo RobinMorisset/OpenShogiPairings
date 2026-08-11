@@ -10,12 +10,15 @@
     Sitout,
     SitoutValue,
     Standing,
+    TeamStanding,
     Tiebreak,
     Tournament,
     Winner,
   } from "../types";
+  import { matchScore, teamAverageRating, teamMatches } from "../teams";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
-  import { boardOutcome } from "../boardOutcome";
+  import { boardOutcome, drawnOf, forfeitOf, winnerOf } from "../boardOutcome";
+  import { absenceKind } from "../noShow";
   import { partitionDropped } from "../tiebreak";
   import { formatScore, HALF_POINT_TIEBREAKS } from "../score";
   import { printPage } from "../platform";
@@ -24,6 +27,9 @@
     tournament: Tournament;
     /** Ranked standings computed server-side (the canonical ordering). */
     standings: Standing[];
+    /** Ranked team standings, in team mode — the table is then one list of
+     *  teams, each followed by its players in board order. Empty otherwise. */
+    teamStandings?: TeamStanding[];
     /** The cup podium, once decided (adds medals; doesn't reorder the table). */
     cupPodium?: CupPodium | null;
     /** Winner that counts for standings/pairing per board, server-computed
@@ -34,15 +40,20 @@
     /** Re-score one player's sit-out in one round. Omitted for a read-only
      *  table, which leaves the sit-out cells as plain text. */
     onSetSitoutValue?: (roundNumber: number, player: number, value: SitoutValue) => void;
+    /** Re-score a whole team's sit-out, writing the value to every member at
+     *  once — the only way to change one in team mode. */
+    onSetTeamSitoutValue?: (roundNumber: number, teamId: string, value: SitoutValue) => void;
   }
 
   let {
     tournament,
     standings,
+    teamStandings = [],
     cupPodium = null,
     effectiveWinners,
     categories = [],
     onSetSitoutValue,
+    onSetTeamSitoutValue,
   }: Props = $props();
 
   // Round number → its index into `tournament.rounds` (and so into
@@ -209,9 +220,14 @@
   // matters — either someone has MacMahon starting points, or a manual
   // bonus/penalty adjusts a starting score. Its cell hosts the adjustment
   // underline that used to live on the Points cell.
+  // In team mode both are team quantities: the starting points come from the
+  // team's average, and adjustments apply to the team.
   const showMacmahon = $derived(
-    standings.some((s) => s.macmahon !== 0) ||
-      tournament.players.some((p) => (p.adjustments ?? []).length > 0),
+    teamStandings.length > 0
+      ? teamStandings.some((t) => t.macmahon !== 0) ||
+          (tournament.teams ?? []).some((t) => (t.adjustments ?? []).length > 0)
+      : standings.some((s) => s.macmahon !== 0) ||
+          tournament.players.some((p) => (p.adjustments ?? []).length > 0),
   );
   const rows = $derived(
     standings
@@ -220,6 +236,173 @@
         (r): r is { standing: Standing; player: Player } => r.player != null,
       ),
   );
+
+  // --- Team mode ------------------------------------------------------------
+  //
+  // A team tournament ranks teams, and its players are what those teams are
+  // made of — so it is one table, not two: each team's row, then its players in
+  // board order. What is a *team* quantity (the ranking criteria, the MacMahon
+  // start, the float markers, which is the pairing's own) belongs to the team
+  // row alone; a player's own identity and results stay on theirs.
+  const teamMode = $derived(teamStandings.length > 0);
+
+  /** The matches of each round with a column, derived from the rosters exactly
+   *  as the round view derives them (see `teams.ts`). */
+  const matchesByRound = $derived(
+    shownRounds.map((round) =>
+      teamMode ? teamMatches(round, tournament.teams ?? [], tournament.players) : [],
+    ),
+  );
+
+  /** How many columns a team's name spans: everything that describes a
+   *  *player* rather than a result — last and first name, rating, the estimate
+   *  when it has a column, nationality and club. */
+  const identityColumns = $derived(5 + (showEstimatedElo ? 1 : 0));
+
+  type TableRow =
+    | { kind: "team"; key: string; team: TeamStanding }
+    | { kind: "player"; key: string; standing: Standing; player: Player };
+
+  /** The table's rows: in team mode each team followed by its members, in
+   *  ranked order; otherwise simply the ranked players. */
+  const tableRows = $derived.by<TableRow[]>(() => {
+    if (!teamMode) {
+      return rows.map((r) => ({ kind: "player", key: r.player.id, ...r }));
+    }
+    const out: TableRow[] = [];
+    for (const team of teamStandings) {
+      out.push({ kind: "team", key: team.team_id, team });
+      for (const id of team.members) {
+        const player = byId.get(id);
+        const standing = standingById.get(id);
+        if (player && standing) out.push({ kind: "player", key: id, standing, player });
+      }
+    }
+    return out;
+  });
+
+  /**
+   * The `TeamStanding` field a criterion reads.
+   *
+   * `TIEBREAKS.field` names the *player* field, and the two disagree on exactly
+   * one criterion: a player's board wins are their own `victories`, while a
+   * team's are its members' total (`board_wins`) — its `victories` are *matches*
+   * won. Reading the player field here would silently show match wins under the
+   * board-wins column, which is the one number the team tie-break turns on.
+   */
+  function teamValue(team: TeamStanding, code: Tiebreak): string {
+    const field = code === "board_wins" ? "board_wins" : (TIEBREAKS.find((t) => t.code === code)?.field ?? "");
+    const raw = (team as unknown as Record<string, number>)[field];
+    if (raw == null) return "—";
+    return HALF_POINT_TIEBREAKS.has(code) ? formatScore(raw) : String(raw);
+  }
+
+  type TeamCell =
+    | {
+        kind: "team-played";
+        opponent: string;
+        opponentName: string;
+        won: boolean;
+        level: boolean;
+        wins: number;
+        losses: number;
+        /** Half-points the team had over its opponent at pairing time
+         *  (negative = paired up). Every board of the match carries it. */
+        pointsDiff: number;
+      }
+    | { kind: "team-pending"; opponent: string; opponentName: string }
+    // The whole team sat the round out — a bye or an absence. Every member has
+    // the same entry, and this is the cell that re-scores them together.
+    | { kind: "team-sitout"; roundNumber: number; sitout: Sitout }
+    | { kind: "not-in-round" };
+
+  function teamCell(team: TeamStanding, i: number): TeamCell {
+    const round = shownRounds[i];
+    const match = matchesByRound[i].find(
+      (m) => m.team1.id === team.team_id || m.team2.id === team.team_id,
+    );
+    if (!match) {
+      // No match this round. Every member sits out the same way, so the first
+      // one says which it was.
+      const first = team.members[0];
+      const pid = first ? byId.get(first)?.tournament_id : null;
+      const sitout = pid != null ? (round.sitouts ?? []).find((s) => s.player === pid) : undefined;
+      if (!sitout) return { kind: "not-in-round" };
+      return { kind: "team-sitout", roundNumber: round.number, sitout };
+    }
+    const isFirst = match.team1.id === team.team_id;
+    const other = isFirst ? match.team2 : match.team1;
+    const opponent = String(other.tournament_id ?? "?");
+    // A team reads as an opponent the way a player does (`opponentLabel`): its
+    // name, and the average rating when every member of it has one.
+    const elo = teamAverageRating(
+      other.members.map((id) => byId.get(id)).filter((p): p is Player => p != null),
+    );
+    const opponentName = elo != null ? `${other.name} (${elo})` : other.name;
+    const roundIdx = roundIndexByNumber.get(round.number);
+    const score = matchScore(round, match, (roundIdx != null && effectiveWinners[roundIdx]) || []);
+    if (!score.decided) return { kind: "team-pending", opponent, opponentName };
+    const wins = isFirst ? score.wins1 : score.wins2;
+    const losses = isFirst ? score.wins2 : score.wins1;
+    // points_diff = points(team1) − points(team2) in half-points, frozen at
+    // pairing time and stamped on every board of the match; flip it for team 2.
+    const diff = round.boards[match.boards[0]]?.points_diff ?? 0;
+    return {
+      kind: "team-played",
+      opponent,
+      opponentName,
+      won: wins > losses,
+      level: wins === losses,
+      wins,
+      losses,
+      pointsDiff: isFirst ? diff : -diff,
+    };
+  }
+
+  // The team sit-out cell whose picker is open, if any — the team twin of
+  // `picking`, keyed by round + team.
+  let pickingTeam = $state<{ roundNumber: number; team: string } | null>(null);
+
+  const isPickingTeam = (roundNumber: number, team: string) =>
+    pickingTeam?.roundNumber === roundNumber && pickingTeam?.team === team;
+
+  function toggleTeamPicker(roundNumber: number, team: string) {
+    pickingTeam = isPickingTeam(roundNumber, team) ? null : { roundNumber, team };
+  }
+
+  function chooseTeamValue(
+    roundNumber: number,
+    team: string,
+    current: SitoutValue,
+    value: SitoutValue,
+  ) {
+    pickingTeam = null;
+    if (value !== current) onSetTeamSitoutValue?.(roundNumber, team, value);
+  }
+
+  /** A team's result cell, e.g. `3+`, `2=`, `4−^`. */
+  function teamLabel(cell: TeamCell & { kind: "team-played" }): string {
+    const sign = cell.level ? "=" : cell.won ? "+" : "−";
+    return `${cell.opponent}${sign}${floatMarkers(cell.pointsDiff)}`;
+  }
+
+  /** The team MacMahon cell's tooltip: the breakdown of any manual bonus or
+   *  penalty awarded to the team. `undefined` when it has none. */
+  function teamAdjustments(team: TeamStanding) {
+    return (tournament.teams ?? []).find((t) => t.id === team.team_id)?.adjustments ?? [];
+  }
+
+  function teamAdjustmentTitle(team: TeamStanding): string | undefined {
+    const adjustments = teamAdjustments(team);
+    if (adjustments.length === 0) return undefined;
+    return adjustments.map((a) => `${a.delta > 0 ? "+" : ""}${a.delta} — ${a.reason}`).join("\n");
+  }
+
+  function teamCellTitle(cell: TeamCell & { kind: "team-played" }): string {
+    return $_("resultsView.teamMatchTitle", {
+      values: { name: cell.opponentName, wins: cell.wins, losses: cell.losses },
+    });
+  }
 
   // The category leaders: for each category, the highest-ranked player in it
   // (rows are already in the server's ranked order). Keyed by player id → the
@@ -274,7 +457,8 @@
     drawn: boolean;
     /** Present for a handicap game: the code, and whether this player conceded. */
     handicap?: { code: string; gave: boolean };
-    /** Points this player had over the opponent at pairing time (negative = played up). */
+    /** Half-points this player had over the opponent at pairing time
+     *  (negative = played up). */
     pointsDiff: number;
   };
 
@@ -293,7 +477,9 @@
     | SitoutCell
     // A no-show board: this player was the absentee (`0#`) or the one who
     // showed up and was credited the free point, bye-style (`0+`).
-    | { kind: "no-show"; opponentName: string }
+    // The player missed this board. `justified` picks the cell: `0-` when they
+    // were absent for a reason, `0#` when they simply didn't turn up.
+    | { kind: "no-show"; opponentName: string; justified: boolean }
     | { kind: "no-show-win"; opponentName: string }
     | { kind: "pending"; opponent: string; opponentName: string }
     // A long (two-round) game started this round: its result belongs to the next
@@ -343,15 +529,16 @@
     const opponentTid = isP1 ? board.player2 : board.player1;
     const opponent = String(opponentTid);
     const opponentName = opponentLabel(opponentTid);
-    if (board.no_show) {
-      // This side is a no-show for a single absence on their side, or when both
-      // players were absent; otherwise they are the one who showed up.
-      const iWasAbsent = board.no_show === side || board.no_show === "both";
-      return iWasAbsent
-        ? { kind: "no-show", opponentName }
+    const forfeit = forfeitOf(board);
+    if (forfeit) {
+      // This side missed the board for a single absence on their side, or when
+      // both players did; otherwise they are the one who showed up.
+      const kind = absenceKind(forfeit, side);
+      return kind
+        ? { kind: "no-show", opponentName, justified: kind === "justified" }
         : { kind: "no-show-win", opponentName };
     }
-    if (!board.result) return { kind: "pending", opponent, opponentName };
+    if (!winnerOf(board)) return { kind: "pending", opponent, opponentName };
 
     const { actualWon, gave } = boardOutcome(board, side);
     // Server-computed, Wiel-rule-aware winner for this board (see
@@ -362,8 +549,8 @@
     const handicap: PlayedCell["handicap"] = board.handicap
       ? { code: board.handicap.handicap, gave }
       : undefined;
-    // points_diff = points(player1) − points(player2), frozen at pairing time.
-    // From this player's own perspective: a positive diff for player1 means
+    // points_diff = points(player1) − points(player2) in half-points, frozen at
+    // pairing time. From this player's own perspective: a positive diff means
     // player1 outranked player2, i.e. player1 played down (▼); the sign flips
     // for player2.
     const diff = board.points_diff ?? 0;
@@ -375,7 +562,7 @@
       opponentName,
       actualWon,
       effectiveWon,
-      drawn: board.drawn ?? false,
+      drawn: drawnOf(board),
       handicap,
       pointsDiff,
     };
@@ -395,10 +582,11 @@
     return sitout.kind !== "absent";
   }
 
-  /** The tooltip for a sit-out cell: why the player sat out, what it scored,
-   *  and (when editable) that it can be clicked. */
-  function sitoutTitle(cell: SitoutCell): string {
-    const kind = cell.sitout.kind;
+  /** The tooltip for a sit-out cell: why the side sat out, what it scored, and
+   *  (when editable) that it can be clicked. Shared by the player cells and a
+   *  team's own, which sits out for the same reasons. */
+  function sitoutTitle(sitout: Sitout, editable: boolean): string {
+    const kind = sitout.kind;
     const reason =
       kind === "absent"
         ? $_("resultsView.sitoutAbsent")
@@ -407,13 +595,19 @@
           : kind === "bye"
             ? $_("resultsView.sitoutBye")
             : $_("resultsView.sitoutCupBye");
-    const worth = $_(`resultsView.sitoutWorth.${cell.sitout.value}`);
-    return onSetSitoutValue ? `${reason}\n${worth}\n${$_("resultsView.sitoutEditHint")}` : `${reason}\n${worth}`;
+    const worth = $_(`resultsView.sitoutWorth.${sitout.value}`);
+    return editable ? `${reason}\n${worth}\n${$_("resultsView.sitoutEditHint")}` : `${reason}\n${worth}`;
   }
 
   // The sit-out cell whose picker is open, if any. Keyed by round + player,
   // since that pair identifies a cell uniquely.
   let picking = $state<{ roundNumber: number; player: number } | null>(null);
+
+  /** Whether the per-player sit-out cells are clickable. Never in team mode:
+   *  every member of a team sits out with the same value, and the team's score
+   *  is read from entries that must agree — the team row's cell edits them
+   *  together. */
+  const editablePlayerSitouts = $derived(onSetSitoutValue != null && !teamMode);
 
   const isPicking = (cell: SitoutCell) =>
     picking?.roundNumber === cell.roundNumber && picking?.player === cell.player;
@@ -431,11 +625,18 @@
     }
   }
 
-  /** Ascending/descending floater markers, e.g. `^`, `vv` — one per point of gap. */
-  function floatMarkers(cell: PlayedCell): string {
-    if (cell.pointsDiff === 0) return "";
-    const marker = cell.pointsDiff < 0 ? "^" : "v";
-    return marker.repeat(Math.abs(cell.pointsDiff));
+  /**
+   * Ascending/descending floater markers, e.g. `^`, `vv` — one per point of gap.
+   *
+   * `points_diff` is in **half-points** (the unit scores are kept in), so it is
+   * halved here: counting it raw gave every ordinary one-point float two
+   * markers. Rounded up, so a half-point gap — which a `0=` bye or a
+   * MacMahon half can produce — still shows as the float it is.
+   */
+  function floatMarkers(pointsDiff: number): string {
+    if (pointsDiff === 0) return "";
+    const marker = pointsDiff < 0 ? "^" : "v";
+    return marker.repeat(Math.ceil(Math.abs(pointsDiff) / 2));
   }
 
   /** The results-cell label, e.g. `3+`, `4=−`, `3+(+4p)`, `4=+(−2p)^`. */
@@ -445,7 +646,10 @@
     const hc = cell.handicap
       ? `(${cell.handicap.gave ? "−" : "+"}${cell.handicap.code})`
       : "";
-    return `${cell.opponent}${draw}${sign}${hc}${floatMarkers(cell)}`;
+    // In team mode a board's float is the *team's* — the engine paired teams —
+    // so it belongs to the team's row and nowhere else.
+    const floats = teamMode ? "" : floatMarkers(cell.pointsDiff);
+    return `${cell.opponent}${draw}${sign}${hc}${floats}`;
   }
 
   /** Tooltip for the MacMahon cell: which estimated ELO these starting points
@@ -637,7 +841,7 @@
       {/if}
     </div>
   {/if}
-  <table onmousemove={trackTip} onmouseleave={clearTip}>
+  <table class:teamed={teamMode} onmousemove={trackTip} onmouseleave={clearTip}>
     <thead>
       <tr>
         <th class="num">{$_("resultsView.id")}</th>
@@ -670,10 +874,97 @@
       </tr>
     </thead>
     <tbody>
-      {#each rows as { standing, player } (player.id)}
-        <tr class:cat-highlight={filtering && isHighlighted(player)} class:cat-dim={filtering && !isHighlighted(player)}>
+      {#each tableRows as row (row.key)}
+        {#if row.kind === "team"}
+          {@const team = row.team}
+          <tr class="team-row">
+            <td class="num">{team.tournament_id}</td>
+            <!-- The team's name stands where its players' names are, straddling
+                 everything that describes a player rather than a result. -->
+            <td class="team-name" colspan={identityColumns}>{team.name}</td>
+            {#each shownRounds as round, i (round.number)}
+              {@const cell = teamCell(team, i)}
+              <td class="num result">
+                {#if cell.kind === "team-played"}
+                  <span
+                    class={cell.level ? "pending" : cell.won ? "win" : "loss"}
+                    data-tip={teamCellTitle(cell)}>{teamLabel(cell)}</span
+                  >
+                {:else if cell.kind === "team-pending"}
+                  <span class="pending" data-tip={cell.opponentName}>{cell.opponent}?</span>
+                {:else if cell.kind === "team-sitout"}
+                  {@const tone = isBye(cell.sitout) && cell.sitout.value === "full" ? "win" : "absent"}
+                  {#if onSetTeamSitoutValue}
+                    <span class="sitout-cell">
+                      <button
+                        type="button"
+                        class="sitout {tone}"
+                        data-testid="team-sitout-{cell.roundNumber}-{team.tournament_id}"
+                        aria-haspopup="true"
+                        aria-expanded={isPickingTeam(cell.roundNumber, team.team_id)}
+                        data-tip={sitoutTitle(cell.sitout, true)}
+                        onclick={() => toggleTeamPicker(cell.roundNumber, team.team_id)}
+                        >{sitoutLabel(cell.sitout.value)}</button
+                      >
+                      {#if isPickingTeam(cell.roundNumber, team.team_id)}
+                        <span class="sitout-picker print-hide" role="menu">
+                          {#each SITOUT_VALUES as value (value)}
+                            <button
+                              type="button"
+                              role="menuitem"
+                              class:current={value === cell.sitout.value}
+                              data-tip={$_(`resultsView.sitoutWorth.${value}`)}
+                              onclick={() =>
+                                chooseTeamValue(
+                                  cell.roundNumber,
+                                  team.team_id,
+                                  cell.sitout.value,
+                                  value,
+                                )}>{sitoutLabel(value)}</button
+                            >
+                          {/each}
+                        </span>
+                      {/if}
+                    </span>
+                  {:else}
+                    <span class={tone} data-tip={sitoutTitle(cell.sitout, false)}
+                      >{sitoutLabel(cell.sitout.value)}</span
+                    >
+                  {/if}
+                {:else}
+                  <span class="absent" data-tip={$_("resultsView.notInRoundTitle")}>0−</span>
+                {/if}
+              </td>
+            {/each}
+            <!-- Matches won. A team's *games* won are its board-wins tie-break,
+                 which has its own column when the referee ranks on it. -->
+            <td class="num victories">{team.victories}</td>
+            {#if showMacmahon}
+              <td
+                class="num macmahon"
+                class:adjusted={teamAdjustments(team).length > 0}
+                data-tip={teamAdjustmentTitle(team)}>{formatScore(team.macmahon)}</td
+              >
+            {/if}
+            {#each tiebreakColumns as col (col.code)}
+              <td
+                class="num"
+                class:points={col.code === "points"}
+                class:tiebreak={col.code !== "points"}
+                data-tip={columnTitle(col.code)}>{teamValue(team, col.code)}</td
+              >
+            {/each}
+          </tr>
+        {:else}
+          {@const standing = row.standing}
+          {@const player = row.player}
+          <tr
+            class:member-row={teamMode}
+            class:cat-highlight={filtering && isHighlighted(player)}
+            class:cat-dim={filtering && !isHighlighted(player)}
+          >
           <td class="num">{player.tournament_id ?? "—"}</td>
-          <td>{#if player.tournament_id != null && medalOf.has(player.tournament_id)}<span class="medal">{medalOf.get(player.tournament_id)}</span> {/if}{#if categoryLeaders.has(player.id)}<span class="cat-star" title={$_("resultsView.categoryLeader", { values: { categories: categoryLeaders.get(player.id)?.join(", ") } })}>⭐</span> {/if}{player.last_name}</td>
+          <td class="last-name">{#if player.tournament_id != null && medalOf.has(player.tournament_id)}<span class="medal">{medalOf.get(player.tournament_id)}</span> {/if}{#if categoryLeaders.has(player.id)}<span class="cat-star" title={$_("resultsView.categoryLeader", { values: { categories: categoryLeaders.get(player.id)?.join(", ") } })}>⭐</span> {/if}{player.last_name}</td>
           <td>{player.first_name || "—"}</td>
           <td class="num">{player.rating ?? "—"}</td>
           {#if showEstimatedElo}
@@ -686,7 +977,7 @@
             <td class="num result">
               {#if cell.kind === "sitout"}
                 {@const tone = isBye(cell.sitout) && cell.sitout.value === "full" ? "win" : "absent"}
-                {#if onSetSitoutValue}
+                {#if editablePlayerSitouts}
                   <span class="sitout-cell">
                     <button
                       type="button"
@@ -694,7 +985,7 @@
                       data-testid="sitout-{cell.roundNumber}-{cell.player}"
                       aria-haspopup="true"
                       aria-expanded={isPicking(cell)}
-                      data-tip={sitoutTitle(cell)}
+                      data-tip={sitoutTitle(cell.sitout, true)}
                       onclick={() => togglePicker(cell)}>{sitoutLabel(cell.sitout.value)}</button
                     >
                     {#if isPicking(cell)}
@@ -713,7 +1004,9 @@
                     {/if}
                   </span>
                 {:else}
-                  <span class={tone} data-tip={sitoutTitle(cell)}>{sitoutLabel(cell.sitout.value)}</span>
+                  <span class={tone} data-tip={sitoutTitle(cell.sitout, false)}
+                    >{sitoutLabel(cell.sitout.value)}</span
+                  >
                 {/if}
               {:else if cell.kind === "not-in-round"}
                 <span class="absent" data-tip={$_("resultsView.notInRoundTitle")}>0−</span>
@@ -727,8 +1020,10 @@
               {:else if cell.kind === "no-show"}
                 <span
                   class="absent"
-                  data-tip={$_("resultsView.noShowTitle", { values: { name: cell.opponentName } })}
-                  >0#</span
+                  data-tip={$_(
+                    cell.justified ? "resultsView.justifiedTitle" : "resultsView.noShowTitle",
+                    { values: { name: cell.opponentName } },
+                  )}>{cell.justified ? "0−" : "0#"}</span
                 >
               {:else if cell.kind === "no-show-win"}
                 <span
@@ -755,28 +1050,40 @@
               {/if}
             </td>
           {/each}
-          <td class="num victories">{standing.victories}</td>
-          {#if showMacmahon}
-            <td
-              class="num macmahon"
-              class:adjusted={(player.adjustments ?? []).length > 0}
-              data-tip={macmahonTitle(player, standing)}>{formatScore(standing.macmahon)}</td
-            >
-          {/if}
-          {#each tiebreakColumns as col (col.code)}
-            {#if col.code === "points"}
-              <td class="num points" data-tip={$_("resultsView.victoriesPlusMacmahon")}
-                >{formatScore(standing.points)}</td
-              >
-            {:else}
-              <td class="num tiebreak" data-tip={tiebreakCellTitle(col.code, standing)}
-                >{HALF_POINT_TIEBREAKS.has(col.code)
-                  ? formatScore(standing[col.field] as number)
-                  : standing[col.field]}</td
+          {#if teamMode}
+            <!-- Wins counts *matches*, and the ranking criteria rank teams: a
+                 player's own figures are not their team's, and lining them up
+                 under those columns would read as if they were. -->
+            <td></td>
+            {#if showMacmahon}<td></td>{/if}
+            {#each tiebreakColumns as col (col.code)}
+              <td></td>
+            {/each}
+          {:else}
+            <td class="num victories">{standing.victories}</td>
+            {#if showMacmahon}
+              <td
+                class="num macmahon"
+                class:adjusted={(player.adjustments ?? []).length > 0}
+                data-tip={macmahonTitle(player, standing)}>{formatScore(standing.macmahon)}</td
               >
             {/if}
-          {/each}
+            {#each tiebreakColumns as col (col.code)}
+              {#if col.code === "points"}
+                <td class="num points" data-tip={$_("resultsView.victoriesPlusMacmahon")}
+                  >{formatScore(standing.points)}</td
+                >
+              {:else}
+                <td class="num tiebreak" data-tip={tiebreakCellTitle(col.code, standing)}
+                  >{HALF_POINT_TIEBREAKS.has(col.code)
+                    ? formatScore(standing[col.field] as number)
+                    : standing[col.field]}</td
+                >
+              {/if}
+            {/each}
+          {/if}
         </tr>
+        {/if}
       {/each}
     </tbody>
   </table>
@@ -834,6 +1141,24 @@
   }
   tbody tr:nth-child(even) {
     background: var(--bg-stripe);
+  }
+  /* In team mode the rows come in blocks — a team, then its players — so
+     striping every other row would cut across them. The team row is the
+     separator instead. */
+  table.teamed tbody tr:nth-child(even) {
+    background: none;
+  }
+  .team-row {
+    background: var(--bg-stripe);
+  }
+  .team-row td {
+    border-top: 2px solid var(--border);
+  }
+  .team-name {
+    font-weight: 700;
+  }
+  .member-row .last-name {
+    padding-left: 1.4rem;
   }
   .num {
     text-align: right;

@@ -212,7 +212,7 @@ pub(crate) fn compute_scores(
             // exactly like a bye and the absentee like an absence (both handled
             // below), so neither records the other as an opponent, and there is
             // no float to read off this board.
-            if board.no_show.is_some() {
+            if board.outcome.forfeit().is_some() {
                 continue;
             }
             // Boards carry tournament numbers, so the score table is indexed
@@ -328,7 +328,10 @@ pub(crate) fn compute_scores(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::{Board, CupStage, NoShow, PairingSource, Sitout, SitoutKind, SitoutValue};
+    use crate::round::{
+        AbsenceKind, Board, CupStage, Forfeit, Outcome, PairingSource, Sitout, SitoutKind,
+        SitoutValue,
+    };
     use crate::settings::MacMahonThreshold;
 
     fn player(tid: u32, rating: Option<u32>) -> Player {
@@ -338,6 +341,7 @@ mod tests {
             last_name: format!("P{tid}"),
             first_name: String::new(),
             rating,
+            pairing_rating: None,
             grade: None,
             fesa_games: None,
             nationality: None,
@@ -358,7 +362,7 @@ mod tests {
         let round = Round {
             number: 1,
             boards: vec![Board {
-                result: Some(Winner::Player1),
+                outcome: Outcome::won(Winner::Player1),
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
@@ -390,7 +394,9 @@ mod tests {
         let round = Round {
             number: 1,
             boards: vec![Board {
-                no_show: Some(NoShow::Player2), // player2 (B) is absent
+                outcome: Outcome::Forfeit {
+                    absent: Forfeit::Player2(AbsenceKind::NoShow),
+                }, // player2 (B) is absent
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
@@ -426,7 +432,9 @@ mod tests {
         let round = Round {
             number: 1,
             boards: vec![Board {
-                no_show: Some(NoShow::Both),
+                outcome: Outcome::Forfeit {
+                    absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
+                },
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
@@ -549,7 +557,7 @@ mod tests {
         let round = Round {
             number: 1,
             boards: vec![Board {
-                result: Some(Winner::Player1),
+                outcome: Outcome::won(Winner::Player1),
                 long: true,
                 ..Board::pending(
                     a.tournament_id.unwrap(),
@@ -619,7 +627,9 @@ mod tests {
         let round = Round {
             number: 1,
             boards: vec![Board {
-                no_show: Some(NoShow::Player2),
+                outcome: Outcome::Forfeit {
+                    absent: Forfeit::Player2(AbsenceKind::NoShow),
+                },
                 long: true,
                 ..Board::pending(
                     a.tournament_id.unwrap(),
@@ -673,7 +683,7 @@ mod tests {
         let round = Round {
             number: 1,
             boards: vec![Board {
-                result: Some(Winner::Player1),
+                outcome: Outcome::won(Winner::Player1),
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
@@ -717,7 +727,7 @@ mod tests {
             .map(|(i, o)| Round {
                 number: i as u32 + 1,
                 boards: vec![Board {
-                    result: Some(Winner::Player1), // A wins every game
+                    outcome: Outcome::won(Winner::Player1), // A wins every game
                     ..Board::pending(
                         a.tournament_id.unwrap(),
                         o.tournament_id.unwrap(),

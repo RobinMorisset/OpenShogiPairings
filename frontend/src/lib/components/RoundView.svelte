@@ -7,16 +7,19 @@
     type Counterfactual,
     type CounterfactualMode,
     type Handicap,
-    type NoShow,
+    type Forfeit,
     type Player,
     type Round,
     type RoundExplanation,
     type RuleId,
+    type ScopeReason,
+    type Team,
     type Winner,
   } from "../types";
   import { sourceBadge } from "../pairingSource";
-  import { handicapGiverId } from "../boardOutcome";
-  import { absent, isDecided, toggledNoShow } from "../noShow";
+  import { matchScore, teamMatches, type TeamMatch } from "../teams";
+  import { drawnOf, forfeitOf, handicapGiverId, winnerOf } from "../boardOutcome";
+  import { absenceKind, absent, cycledForfeit, isDecided } from "../noShow";
   import { printPage } from "../platform";
   import type { HandicapChoice } from "../handicap";
 
@@ -42,9 +45,9 @@
     onClickWinner: (boardIndex: number, clicked: Winner) => void;
     /** Set/clear the "a draw occurred" flag on a board. */
     onToggleDrawn: (boardIndex: number, drawn: boolean) => void;
-    /** Mark (or clear, with null) a board as a no-show: `absent` names the
-     *  side(s) that failed to appear (one player, or `"both"`). */
-    onSetNoShow: (boardIndex: number, absent: NoShow | null) => void;
+    /** Mark (or clear, with null) a board as forfeited: `absent` names the
+     *  side(s) that missed it and why (see `Forfeit`). */
+    onSetNoShow: (boardIndex: number, absent: Forfeit | null) => void;
     /** Set (or clear, with null) a board's handicap. */
     onSetHandicap: (boardIndex: number, handicap: Handicap | null) => void;
     /** Whether long (two-round) games are enabled — shows the per-board checkbox. */
@@ -59,6 +62,13 @@
     carriedLongBoards?: { index: number; board: Board }[];
     /** Record the winner on a carried (previous-round) long board. */
     onCarriedWinner?: (boardIndex: number, clicked: Winner) => void;
+    /** The tournament's teams, in team mode — the boards are then grouped into
+     *  the team matches they belong to. Empty for an individual tournament. */
+    teams?: Team[];
+    /** Winner that counts for standings per board of *this* round, computed
+     *  server-side (so the Wiel rule applies); indexed like `round.boards`. Used
+     *  for the running match score. */
+    effectiveWinners?: (Winner | null)[];
     busy?: boolean;
   }
 
@@ -80,23 +90,82 @@
     onSetLong,
     carriedLongBoards = [],
     onCarriedWinner,
+    teams = [],
+    effectiveWinners = [],
     busy = false,
   }: Props = $props();
+
+  // In team mode the boards of a round are the boards of its team matches, so
+  // they are shown that way: a header per match, then its boards in board order.
+  // The grouping is derived from the rosters (see `teams.ts`), exactly as the
+  // server derives it — nothing about it is stored.
+  const teamMode = $derived(teams.length > 0);
+  const matches = $derived(teamMode ? teamMatches(round, teams, players) : []);
+  /** Player number → their team, for the probe's unit lookups. */
+  const teamOfPlayer = $derived.by(() => {
+    const m = new Map<number, Team>();
+    const tidOf = new Map(players.filter((p) => p.tournament_id != null).map((p) => [p.id, p.tournament_id!]));
+    for (const team of teams) {
+      for (const member of team.members) {
+        const t = tidOf.get(member);
+        if (t != null) m.set(t, team);
+      }
+    }
+    return m;
+  });
+  /** The name of a probed unit: a player in an individual tournament, a team in
+   *  a team one — whichever the engine paired. */
+  function unitName(key: number): string {
+    if (!teamMode) return name(key);
+    return teams.find((t) => t.tournament_id === key)?.name ?? `#${key}`;
+  }
+
+  // The probe picks apart what the engine paired, so it says "team" throughout
+  // in a team tournament — the pickers list teams, and it is a team that was
+  // absent or a match the referee fixed.
+  const probePickLabel = $derived(
+    $_(teamMode ? "roundView.probe.pickTeam" : "roundView.probe.pick"),
+  );
+
+  /** Why a probed unit lies outside what the engine decided. `cup` cannot arise
+   *  in team mode (the cup is rejected there), so only the two reachable
+   *  reasons have a team wording. */
+  function scopedOutText(reason: ScopeReason): string {
+    const group = teamMode && reason !== "cup" ? "scopedOutTeam" : "scopedOut";
+    return $_(`roundView.probe.${group}.${reason}`);
+  }
+
+  /** The board table's rows: each match's header followed by its boards, or —
+   *  in an individual tournament — simply every board in order. */
+  const boardGroups = $derived(
+    matches.length > 0
+      ? matches.map((m) => ({ match: m, boards: m.boards }))
+      : [{ match: null, boards: round.boards.map((_, i) => i) }],
+  );
+
+  /** How many columns the board table has, so a match header can span them. */
+  const columnCount = $derived(
+    6 + (longEnabled ? 1 : 0) + (handicapPolicy !== "none" ? 1 : 0) +
+      (handicapPolicy === "suggested" ? 1 : 0),
+  );
 
   // The other side of a board.
   function other(side: Winner): Winner {
     return side === "player1" ? "player2" : "player1";
   }
 
-  // A side's outcome, from the recorded result or a no-show. An opponent who
-  // failed to appear hands `side` the point, but under `"both"` nobody won —
-  // so winning compares `no_show` strictly, while losing goes through
-  // `absent()`, which counts `"both"` as covering each side.
+  // A side's outcome, from the recorded result or a forfeit. An opponent who
+  // missed the board hands `side` the point — but only if `side` turned up
+  // themselves, since under a double forfeit nobody won.
   function isWinner(board: Board, side: Winner): boolean {
-    return board.result === side || board.no_show === other(side);
+    const forfeit = forfeitOf(board);
+    return (
+      winnerOf(board) === side ||
+      (forfeit != null && absent(forfeit, other(side)) && !absent(forfeit, side))
+    );
   }
   function isLoser(board: Board, side: Winner): boolean {
-    return board.result === other(side) || absent(board.no_show, side);
+    return winnerOf(board) === other(side) || absent(forfeitOf(board), side);
   }
 
   // The long checkbox is editable only on the current round; turning it *on* also
@@ -107,10 +176,41 @@
     return isDecided(board) && !board.long;
   }
 
-  // Toggle `side`'s no-show independently, so the two buttons together cover all
-  // of none / player1 / player2 / both (each side can be a no-show at once).
+  // Cycle `side`'s absence independently, so the two buttons together cover
+  // every state. In team mode the cycle has the extra "absent for a reason"
+  // step: a team plays whether or not every member turns up, so a member who
+  // fell ill has a board, and it must not be stamped with the unjustified `0#`.
+  // Outside team mode an absent player never reaches a board at all, so there
+  // are only two states — and the server rejects the third.
   function toggleNoShow(index: number, board: Board, side: Winner) {
-    onSetNoShow(index, toggledNoShow(board.no_show, side));
+    onSetNoShow(index, cycledForfeit(forfeitOf(board), side, teams.length > 0));
+  }
+
+  /** The glyph a side's absence control shows: its state, or the plain arrow
+   *  pointing at the side while they are present. */
+  function absenceGlyph(board: Board, side: Winner, arrow: string): string {
+    switch (absenceKind(forfeitOf(board), side)) {
+      case "no_show":
+        return "0#";
+      case "justified":
+        return "0−";
+      default:
+        return arrow;
+    }
+  }
+
+  /** The tooltip for that control: what the *next* click will record. */
+  function absenceTitle(board: Board, side: Winner, who: string): string {
+    switch (absenceKind(forfeitOf(board), side)) {
+      case "no_show":
+        return teams.length > 0
+          ? $_("roundView.markJustifiedTitle", { values: { name: who } })
+          : $_("roundView.clearAbsenceTitle", { values: { name: who } });
+      case "justified":
+        return $_("roundView.clearAbsenceTitle", { values: { name: who } });
+      default:
+        return $_("roundView.noShowTitle", { values: { name: who } });
+    }
   }
 
   // Resolve tournament numbers to display names.
@@ -138,8 +238,21 @@
     return map;
   });
 
+  // A ledger is keyed by the two *units* the engine paired. In an individual
+  // tournament those are the players on the board; in a team one they are
+  // teams, and a single ledger covers the whole match — so it is flagged on the
+  // match header rather than repeated on each of its boards, which would read
+  // as several separate compromises.
   function boardLedger(board: Board): BoardLedger | undefined {
+    if (teamMode) return undefined;
     return ledgerByPair.get(pairKey(board.player1, board.player2));
+  }
+
+  function matchLedger(match: TeamMatch): BoardLedger | undefined {
+    const a = match.team1.tournament_id;
+    const b = match.team2.tournament_id;
+    if (a == null || b == null) return undefined;
+    return ledgerByPair.get(pairKey(a, b));
   }
 
   // Fold deviation fires on nearly every board, so it carries no signal — a
@@ -181,13 +294,14 @@
   const hasReport = $derived((explanation?.report.length ?? 0) > 0);
   let reportOpen = $state(false);
 
-  // A board ledger as readable text: "A vs B" or "X (bye)".
+  // A ledger as readable text: "A vs B" or "X (bye)". It names whatever the
+  // engine paired — players in an individual tournament, teams in a team one.
   function ledgerLabel(b: BoardLedger): string {
     if (!b.player2) {
-      return $_("roundView.explanation.byeBoard", { values: { name: name(b.player1) } });
+      return $_("roundView.explanation.byeBoard", { values: { name: unitName(b.player1) } });
     }
     return $_("roundView.explanation.board", {
-      values: { a: name(b.player1), b: name(b.player2) },
+      values: { a: unitName(b.player1), b: unitName(b.player2) },
     });
   }
 
@@ -210,6 +324,29 @@
   // the referee forced, and the rare cup bye. Absences aren't here — they never
   // reach the pairing, so the round view has no row for them.
   const byeSitouts = $derived((round.sitouts ?? []).filter((s) => s.kind !== "absent"));
+
+  /** The byes grouped by the team that took one, so a bye team gets a header of
+   *  its own instead of its players trailing the last match as if they were
+   *  part of it. One group holding everything in an individual tournament, and
+   *  a trailing group for a sit-out whose team can't be identified. */
+  const byeGroups = $derived.by(() => {
+    if (!teamMode) return [{ team: null, sitouts: byeSitouts }];
+    const byTeam = new Map<string, { team: Team; sitouts: typeof byeSitouts }>();
+    const loose: typeof byeSitouts = [];
+    for (const sitout of byeSitouts) {
+      const team = teamOfPlayer.get(sitout.player);
+      if (!team) {
+        loose.push(sitout);
+        continue;
+      }
+      const group = byTeam.get(team.id) ?? { team, sitouts: [] };
+      group.sitouts.push(sitout);
+      byTeam.set(team.id, group);
+    }
+    const groups: { team: Team | null; sitouts: typeof byeSitouts }[] = [...byTeam.values()];
+    if (loose.length > 0) groups.push({ team: null, sitouts: loose });
+    return groups;
+  });
 
   // The bye the *engine* chose, if any. Only this one was the engine's decision,
   // so it's the only one the pairing explanations can speak about.
@@ -302,16 +439,33 @@
 
   // The engine-paired players of this round (Swiss boards + the bye), the only
   // ones a counterfactual can reason about, sorted by name for the pickers.
+  //
+  // In team mode these are *teams*, because teams are what the engine paired —
+  // the probe speaks the same unit the ledgers do (see `UnitKey`).
+  const swissByeUnit = $derived(
+    teamMode && swissBye != null
+      ? (teamOfPlayer.get(swissBye)?.tournament_id ?? null)
+      : swissBye,
+  );
   const swissPlayers = $derived.by(() => {
     const ids = new Set<number>();
-    for (const b of round.boards) {
-      if (!b.source || b.source.kind === "swiss") {
-        ids.add(b.player1);
-        ids.add(b.player2);
+    if (teamMode) {
+      for (const m of matches) {
+        if (round.boards[m.boards[0]]?.source?.kind !== "forced") {
+          if (m.team1.tournament_id != null) ids.add(m.team1.tournament_id);
+          if (m.team2.tournament_id != null) ids.add(m.team2.tournament_id);
+        }
+      }
+    } else {
+      for (const b of round.boards) {
+        if (!b.source || b.source.kind === "swiss") {
+          ids.add(b.player1);
+          ids.add(b.player2);
+        }
       }
     }
-    if (swissBye != null) ids.add(swissBye);
-    return [...ids].sort((x, y) => name(x).localeCompare(name(y)));
+    if (swissByeUnit != null) ids.add(swissByeUnit);
+    return [...ids].sort((x, y) => unitName(x).localeCompare(unitName(y)));
   });
 
   let probeOpen = $state(false);
@@ -355,13 +509,24 @@
   // forbidding the bye itself (i.e. forcing them to play).
   const opponentOf = $derived.by(() => {
     const m = new Map<number, number>();
-    for (const b of round.boards) {
-      if (!b.source || b.source.kind === "swiss") {
-        m.set(b.player1, b.player2);
-        m.set(b.player2, b.player1);
+    if (teamMode) {
+      for (const match of matches) {
+        if (round.boards[match.boards[0]]?.source?.kind === "forced") continue;
+        const [a, b] = [match.team1.tournament_id, match.team2.tournament_id];
+        if (a != null && b != null) {
+          m.set(a, b);
+          m.set(b, a);
+        }
+      }
+    } else {
+      for (const b of round.boards) {
+        if (!b.source || b.source.kind === "swiss") {
+          m.set(b.player1, b.player2);
+          m.set(b.player2, b.player1);
+        }
       }
     }
-    if (swissBye != null) m.set(swissBye, PHANTOM);
+    if (swissByeUnit != null) m.set(swissByeUnit, PHANTOM);
     return m;
   });
 
@@ -421,7 +586,9 @@
   }
 
   function probeName(id: number): string {
-    return id === PHANTOM ? $_("roundView.probe.bye") : name(id);
+    // The ledgers speak the same unit the engine paired, so a probe result
+    // names teams in team mode and players otherwise.
+    return id === PHANTOM ? $_("roundView.probe.bye") : unitName(id);
   }
 
   // A changed board as readable text: "X vs Y" or "X takes the bye".
@@ -646,7 +813,7 @@
       </tbody>
     </table>
   {:else}
-    <table>
+    <table class:teamed={teamMode}>
       <thead>
         <tr>
           <th class="src-col"></th>
@@ -667,7 +834,25 @@
         </tr>
       </thead>
       <tbody>
-        {#each round.boards as board, index (index)}
+        {#each boardGroups as group (group.match?.team1.id ?? "all")}
+          {#if group.match}
+            {@const score = matchScore(round, group.match, effectiveWinners)}
+            {@const ledger = matchLedger(group.match)}
+            <tr class="match-head">
+              <td colspan={columnCount}>
+                <span class="match-team">{group.match.team1.name}</span>
+                <span class="match-score" class:pending={!score.decided}>
+                  {score.wins1}–{score.wins2}
+                </span>
+                <span class="match-team">{group.match.team2.name}</span>
+                {#if isNoteworthy(ledger)}
+                  <span class="compromise print-hide" title={ledgerTooltip(ledger!)}>⚠</span>
+                {/if}
+              </td>
+            </tr>
+          {/if}
+        {#each group.boards as index (index)}
+          {@const board = round.boards[index]}
           <tr>
             <td
               class="src-col src-{sourceBadge($_, board.source).kind}"
@@ -708,14 +893,18 @@
               </button>
             </td>
             <td class="draw-col">
+              <!-- A forfeited board was never played, so it cannot have been
+                   drawn — the server rejects the request outright. -->
               <button
                 type="button"
                 class="draw"
-                class:active={board.drawn}
-                disabled={busy}
-                title={$_("roundView.drawTitle")}
-                aria-pressed={board.drawn ?? false}
-                onclick={() => onToggleDrawn(index, !board.drawn)}
+                class:active={drawnOf(board)}
+                disabled={busy || forfeitOf(board) != null}
+                title={forfeitOf(board) != null
+                  ? $_("roundView.drawForfeitedTitle")
+                  : $_("roundView.drawTitle")}
+                aria-pressed={drawnOf(board)}
+                onclick={() => onToggleDrawn(index, !drawnOf(board))}
               >
                 =
               </button>
@@ -725,24 +914,26 @@
                 <button
                   type="button"
                   class="noshow-btn"
-                  class:active={absent(board.no_show, "player1")}
+                  class:active={absent(forfeitOf(board), "player1")}
+                  class:justified={absenceKind(forfeitOf(board), "player1") === "justified"}
                   disabled={busy}
-                  aria-pressed={absent(board.no_show, "player1")}
-                  title={$_("roundView.noShowTitle", { values: { name: name(board.player1) } })}
+                  aria-pressed={absent(forfeitOf(board), "player1")}
+                  title={absenceTitle(board, "player1", name(board.player1))}
                   onclick={() => toggleNoShow(index, board, "player1")}
                 >
-                  ◀
+                  {absenceGlyph(board, "player1", "◀")}
                 </button>
                 <button
                   type="button"
                   class="noshow-btn"
-                  class:active={absent(board.no_show, "player2")}
+                  class:active={absent(forfeitOf(board), "player2")}
+                  class:justified={absenceKind(forfeitOf(board), "player2") === "justified"}
                   disabled={busy}
-                  aria-pressed={absent(board.no_show, "player2")}
-                  title={$_("roundView.noShowTitle", { values: { name: name(board.player2) } })}
+                  aria-pressed={absent(forfeitOf(board), "player2")}
+                  title={absenceTitle(board, "player2", name(board.player2))}
                   onclick={() => toggleNoShow(index, board, "player2")}
                 >
-                  ▶
+                  {absenceGlyph(board, "player2", "▶")}
                 </button>
               </div>
             </td>
@@ -803,13 +994,32 @@
             {/if}
           </tr>
         {/each}
-        {#each byeSitouts as sitout (sitout.player)}
+        {/each}
+        <!-- The byes come after every match, not inside one: a sit-out belongs
+             to no match, so it must not repeat per group. A team that took the
+             bye gets a header of its own, like the teams that played. -->
+        {#each byeGroups as group (group.team?.id ?? "loose")}
+          {#if group.team}
+            {@const engineBye = group.sitouts.some((s) => s.kind === "bye")}
+            <tr class="match-head">
+              <td colspan={columnCount}>
+                <span class="match-team">{group.team.name}</span>
+                <span class="match-score pending">{$_("roundView.byeOpponent")}</span>
+                <!-- The bye was the engine's decision about the *team*, so its
+                     compromise is flagged once here, not on every member. -->
+                {#if engineBye && isNoteworthy(byeLedger)}
+                  <span class="compromise print-hide" title={ledgerTooltip(byeLedger!)}>⚠</span>
+                {/if}
+              </td>
+            </tr>
+          {/if}
+          {#each group.sitouts as sitout (sitout.player)}
           {@const isCup = typeof sitout.kind !== "string"}
           <tr class="bye-row">
             <td class="src-col">
               {#if isCup}
                 🏆
-              {:else if sitout.kind === "bye" && isNoteworthy(byeLedger)}
+              {:else if !teamMode && sitout.kind === "bye" && isNoteworthy(byeLedger)}
                 <span class="compromise print-hide" title={ledgerTooltip(byeLedger!)}>⚠</span>
               {/if}
             </td>
@@ -834,6 +1044,7 @@
               {/if}
             {/if}
           </tr>
+        {/each}
         {/each}
       </tbody>
     </table>
@@ -881,24 +1092,24 @@
           </div>
           <p class="probe-hint">
             {probeMode === "force"
-              ? $_("roundView.probe.hintForce")
-              : $_("roundView.probe.hintForbid")}
+              ? $_(teamMode ? "roundView.probe.hintForceTeams" : "roundView.probe.hintForce")
+              : $_(teamMode ? "roundView.probe.hintForbidTeams" : "roundView.probe.hintForbid")}
           </p>
           <div class="probe-controls">
             <select bind:value={probeA} disabled={probeBusy}>
-              <option value="">{$_("roundView.probe.pick")}</option>
+              <option value="">{probePickLabel}</option>
               {#each swissPlayers as id (id)}
-                <option value={id}>{name(id)}</option>
+                <option value={id}>{unitName(id)}</option>
               {/each}
             </select>
             {#if probeMode === "force"}
               <span class="probe-vs">{$_("roundView.probe.and")}</span>
               <select bind:value={probeB} disabled={probeBusy}>
-                <option value="">{$_("roundView.probe.pick")}</option>
+                <option value="">{probePickLabel}</option>
                 {#each swissPlayers as id (id)}
-                  <option value={id}>{name(id)}</option>
+                  <option value={id}>{unitName(id)}</option>
                 {/each}
-                {#if swissBye != null}
+                {#if swissByeUnit != null}
                   <option value={PHANTOM}>{$_("roundView.probe.bye")}</option>
                 {/if}
               </select>
@@ -924,7 +1135,7 @@
           {:else if probeResult}
             {#if probeResult.scoped_out}
               <p class="probe-status">
-                {$_(`roundView.probe.scopedOut.${probeResult.scoped_out}`)}
+                {scopedOutText(probeResult.scoped_out)}
               </p>
             {:else if probeResult.changed.length === 0}
               <p class="probe-status">{$_("roundView.probe.noChange")}</p>
@@ -963,6 +1174,39 @@
 </div>
 
 <style>
+  /* A justified absence is not the same record as a no-show, so it does not
+     read the same: the `0-` control is marked but not alarming. */
+  .noshow-btn.justified {
+    font-style: italic;
+  }
+  /* A team match is one row of boards, so it gets one header naming the two
+     teams and the board wins so far — the score the match is decided on. The
+     header is the shaded row, and the boards under it are plain: striping every
+     other row would cut across the matches instead of separating them (the
+     standings table does the same). */
+  /* No extra height of its own: the shading and the rule above it already set
+     a match apart, so the header sits at the same height as its boards. */
+  .match-head td {
+    font-weight: 600;
+    border-top: 2px solid var(--border);
+  }
+  table.teamed tbody tr:nth-child(even) {
+    background: none;
+  }
+  table.teamed tbody tr.match-head {
+    background: var(--bg-stripe);
+  }
+  .match-team {
+    margin: 0 0.4rem;
+  }
+  .match-score {
+    font-variant-numeric: tabular-nums;
+  }
+  .match-score.pending {
+    color: var(--muted);
+    font-weight: 400;
+  }
+
   .round-toolbar {
     display: flex;
     justify-content: flex-end;
@@ -984,7 +1228,7 @@
   }
   th,
   td {
-    padding: 0.3rem 0.6rem;
+    padding: 0.2rem 0.6rem;
     border-bottom: 1px solid var(--border-divider);
     text-align: left;
   }
@@ -1227,7 +1471,7 @@
   .player {
     width: 100%;
     text-align: left;
-    padding: 0.3rem 0.5rem;
+    padding: 0.15rem 0.5rem;
     border: 1px solid transparent;
     border-radius: 0.4rem;
     background: transparent;
@@ -1259,12 +1503,15 @@
     text-align: center;
     width: 3.5rem;
   }
+  /* Sized to the row's text, not above it: these two are what set the height
+     of every board row, and a round of them was standing much taller than the
+     standings table for no reason. */
   .draw {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 1.9rem;
-    height: 1.9rem;
+    width: 1.7rem;
+    height: 1.5rem;
     padding: 0;
     border: 1px solid var(--border-soft);
     border-radius: 0.4rem;
@@ -1298,7 +1545,7 @@
     align-items: center;
     justify-content: center;
     width: 1.5rem;
-    height: 1.9rem;
+    height: 1.5rem;
     padding: 0;
     border: 1px solid var(--border-soft);
     border-radius: 0.4rem;

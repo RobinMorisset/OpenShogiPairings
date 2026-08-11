@@ -83,10 +83,10 @@ use ts_rs::TS;
 use crate::elo::{estimate_elos, UNRATED_PRIOR_MEAN};
 use crate::matching::{min_weight_perfect_matching, Weight};
 use crate::player::Player;
-use crate::round::{Board, PairingSource, Round, Sitout, SitoutKind, SitoutValue};
-use crate::scoring::{compute_scores, Scores};
+use crate::round::{PairingSource, Round};
+use crate::scoring::compute_scores;
 use crate::settings::{FloaterStyle, TournamentSettings};
-use crate::units::{HalfPoints, TournamentId};
+use crate::units::{HalfPoints, TournamentId, UnitKey};
 
 use typed_index_collections::{TiSlice, TiVec};
 
@@ -275,15 +275,64 @@ fn active_rules(settings: &TournamentSettings) -> &'static [Rule] {
     }
 }
 
+/// Everything the engine needs to know about one **pairable unit**, whoever it
+/// is: a player in an individual tournament, a team in a team tournament. The
+/// rules read nothing else, so one engine serves both modes — see [`UnitKey`].
+///
+/// Defaultable so the table can leave a gap at any key no unit holds (key 0, the
+/// phantom, and any number freed by a pre-play removal), exactly as
+/// [`Scores`](crate::scoring::Scores) does.
+///
+/// Built by [`player_units`] for the individual path.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct PairingUnit {
+    /// Total score entering the round: MacMahon start, adjustments and results.
+    pub points: HalfPoints,
+    /// MacMahon starting points alone (the airtight-groups rule's quantity).
+    pub macmahon: HalfPoints,
+    /// Units faced so far, one entry per game (a long board counts twice).
+    pub opponents: Vec<UnitKey>,
+    /// Whether this unit has already had a bye (or the free point an opponent's
+    /// no-show hands it).
+    pub had_bye: bool,
+    /// Round of the most recent up / down float, `None` if never.
+    pub last_ascended: Option<u32>,
+    pub last_descended: Option<u32>,
+    /// What the fold sorts on: a player's rating, a team's average pairing
+    /// rating. `None` for unrated, which sorts last (as rating 1).
+    pub rating: Option<u32>,
+    /// Normalized clubs (see [`TournamentSettings::normalize_club`]) in **board
+    /// order** — one entry for a player, one per member for a team. The club rule
+    /// compares aligned positions, since board `k` of one team only ever meets
+    /// board `k` of the other.
+    pub clubs: Vec<Option<String>>,
+    /// Whether this unit is a **pre-qualified** cup entrant this round (see
+    /// [`Rule::CupPrequalified`]). Always false outside the qualifier cup's
+    /// qualification round, where the rule is filtered out of the set entirely,
+    /// and in team mode, where the cup is rejected.
+    pub prequalified: bool,
+    /// (ELO mode) Rounded live ELO estimate; zero in every other mode, which
+    /// rejects ELO pairing.
+    pub elo: i64,
+}
+
+impl PairingUnit {
+    /// What the fold sorts by: the rating, with unrated as 1 so it sorts last.
+    fn fold_rating(&self) -> u32 {
+        self.rating.unwrap_or(1)
+    }
+}
+
 /// Everything the rules need to score an edge, plus the per-round quantities their
 /// worst-case bounds (and hence multipliers) are derived from.
 struct Ctx<'a> {
-    scores: &'a Scores,
-    /// Fold placement per free player, indexed by tournament number (`None` for a
-    /// non-free player, whose number still indexes the slice).
-    fold: &'a TiSlice<TournamentId, Option<FoldInfo>>,
+    /// The units being paired, indexed by their key (gaps hold a default).
+    units: &'a TiSlice<UnitKey, PairingUnit>,
+    /// Fold placement per free unit, indexed by key (`None` for a non-free unit,
+    /// whose key still indexes the slice).
+    fold: &'a TiSlice<UnitKey, Option<FoldInfo>>,
     round: u32,
-    /// Which player each lower group sends up as its ascending floater.
+    /// Which unit each lower group sends up as its ascending floater.
     floater_style: FloaterStyle,
     /// Clubs exempt from protection, in normalized form (see
     /// [`TournamentSettings::normalize_club`]).
@@ -292,29 +341,22 @@ struct Ctx<'a> {
     edges: i128,
     /// Largest points gap between any two vertices (bounds the score rule).
     max_gap: i128,
-    /// Lowest points among the free players (the bye's target group).
+    /// Lowest points among the free units (the bye's target group).
     min_points: i128,
     /// Largest MacMahon-points gap between any two vertices (bounds the airtight
     /// groups rule).
     max_mm_gap: i128,
-    /// Largest score-group size among the free players (bounds the fold rule).
+    /// Largest score-group size among the free units (bounds the fold rule).
     max_group: i128,
-    /// Number of free players (bounds the bye-selection rule).
+    /// Number of free units (bounds the bye-selection rule).
     free_count: i128,
-    /// Normalized club per player, indexed by tournament number (`None` for no /
-    /// unknown club). Pre-normalized so the club rule is a plain comparison.
-    club_norm: &'a TiSlice<TournamentId, Option<String>>,
-    /// Whether each player is a **pre-qualified** cup entrant this round (see
-    /// [`Rule::CupPrequalified`]). All `false` outside the qualifier cup's first
-    /// round, where the rule is filtered out of the set entirely.
-    prequalified: &'a TiSlice<TournamentId, bool>,
-    /// (ELO mode) Rounded estimated ELO per free player, indexed by tournament
-    /// number; all zero in Swiss mode.
-    elo: &'a TiSlice<TournamentId, i64>,
-    /// (ELO mode) Ascending ELO rank per free player, 0 = weakest, indexed by
-    /// tournament number; all zero in Swiss mode.
-    elo_rank: &'a TiSlice<TournamentId, i128>,
-    /// (ELO mode) Largest rounded-ELO gap among free players (bounds the ELO-gap
+    /// Most board positions any free unit has (1 for a player, the team size for
+    /// a team) — the club rule's per-edge maximum.
+    max_boards: i128,
+    /// (ELO mode) Ascending ELO rank per free unit, 0 = weakest, indexed by key;
+    /// all zero in Swiss mode.
+    elo_rank: &'a TiSlice<UnitKey, i128>,
+    /// (ELO mode) Largest rounded-ELO gap among free units (bounds the ELO-gap
     /// rule).
     max_elo_gap: i128,
 }
@@ -333,7 +375,7 @@ fn float_units(last: Option<u32>, round: u32) -> i128 {
 /// ideally sits last (weakest) in its group and an ascending floater first; in
 /// median Swiss, both ideally sit at the median. 0 if the player has no fold info
 /// (shouldn't happen for free players) or its group is a singleton.
-fn floater_units(ctx: &Ctx, id: TournamentId, descending: bool) -> i128 {
+fn floater_units(ctx: &Ctx, id: UnitKey, descending: bool) -> i128 {
     let Some(f) = &ctx.fold[id] else {
         return 0;
     };
@@ -374,16 +416,16 @@ impl Rule {
     /// specialization in [`accumulate_edge_rule`]), the `match self` folds to that
     /// one arm and the body inlines into the O(k²) fill loop.
     #[inline]
-    fn edge_units(self, ctx: &Ctx, a: TournamentId, b: TournamentId) -> i128 {
-        let sa = ctx.scores.get_tid(a);
-        let sb = ctx.scores.get_tid(b);
+    fn edge_units(self, ctx: &Ctx, a: UnitKey, b: UnitKey) -> i128 {
+        let sa = &ctx.units[a];
+        let sb = &ctx.units[b];
         match self {
             // Rule 1: never play the same opponent twice.
             Rule::Rematch => i128::from(sa.opponents.contains(&b)),
             // Rule 1b (qualifier cup, round 1): never pair two pre-qualified cup
             // players. Only in the rule set when the set is non-empty, so the
             // lookup is free in every other round and every other format.
-            Rule::CupPrequalified => i128::from(ctx.prequalified[a] && ctx.prequalified[b]),
+            Rule::CupPrequalified => i128::from(sa.prequalified && sb.prequalified),
             // Rule 2: bye-only rule, real boards are neutral.
             Rule::ByeGroup => 0,
             // Rule 3 (optional, first N rounds): forbid crossing MacMahon groups;
@@ -427,13 +469,24 @@ impl Rule {
             // Rule 6: avoid pairing club-mates — but only when protection is active
             // this round, ignoring unknown clubs and clubs on the exempt list. Club
             // names are matched case-insensitively.
+            //
+            // The count is over **aligned board positions**: board k of one unit
+            // only ever meets board k of the other, so a same-club pair sitting on
+            // different boards never actually plays and costs nothing. Within the
+            // rule's ladder tier the matching therefore minimizes the same-club
+            // *games* of the round. A player has one position, so this degenerates
+            // to the individual mode's 0/1.
             Rule::Club => {
                 // Only in the rule set when protection is active (inactive rules
                 // are filtered out upstream), so no `club_active` check.
-                match (&ctx.club_norm[a], &ctx.club_norm[b]) {
-                    (Some(na), Some(nb)) => i128::from(na == nb && !ctx.exempt_clubs.contains(na)),
-                    _ => 0,
-                }
+                sa.clubs
+                    .iter()
+                    .zip(&sb.clubs)
+                    .filter(|(ca, cb)| match (ca, cb) {
+                        (Some(na), Some(nb)) => na == nb && !ctx.exempt_clubs.contains(na),
+                        _ => false,
+                    })
+                    .count() as i128
             }
             // Rule 7: fold within a score group — squared deviation from the ideal
             // fold. Squaring (rather than |·|) spreads an unavoidable deviation across
@@ -459,9 +512,7 @@ impl Rule {
             Rule::ByeSelection => 0,
             // ELO mode: prefer equal estimated ELO; penalty is the squared gap.
             Rule::EloGap => {
-                let ga = ctx.elo[a];
-                let gb = ctx.elo[b];
-                let gap = (ga - gb) as i128;
+                let gap = (sa.elo - sb.elo) as i128;
                 gap * gap
             }
         }
@@ -469,8 +520,8 @@ impl Rule {
 
     /// Penalty units for giving `player` the bye (before the priority multiplier).
     /// A bye repeats the rematch rule (never bye twice) and counts as a downfloat.
-    fn bye_units(self, ctx: &Ctx, player: TournamentId) -> i128 {
-        let s = ctx.scores.get_tid(player);
+    fn bye_units(self, ctx: &Ctx, unit: UnitKey) -> i128 {
+        let s = &ctx.units[unit];
         match self {
             Rule::Rematch => i128::from(s.had_bye),
             // A sit-out isn't a pairing, so two pre-qualified players can't clash
@@ -485,9 +536,9 @@ impl Rule {
             Rule::FloatRepeat => float_units(s.last_descended, ctx.round),
             // A bye is a downfloat, so prefer the weakest of the group (classic)
             // or its median (median Swiss) to take it.
-            Rule::FloaterSelection => floater_units(ctx, player, true),
+            Rule::FloaterSelection => floater_units(ctx, unit, true),
             // ELO mode: the weakest present player (lowest ELO rank) takes the bye.
-            Rule::ByeSelection => ctx.elo_rank[player],
+            Rule::ByeSelection => ctx.elo_rank[unit],
             Rule::AirtightGroups | Rule::ScoreGap | Rule::Club | Rule::Fold | Rule::EloGap => 0,
         }
     }
@@ -516,7 +567,11 @@ impl Rule {
             Rule::FloatRepeat => 2 * FLOAT_BASE, // two directions, each ≤ FLOAT_BASE
             // A descender and an ascender term, each a rank distance ≤ group_size − 1.
             Rule::FloaterSelection => 2 * (ctx.max_group - 1).max(0),
-            Rule::Club => 1,
+            // One unit per aligned board position that could clash: 1 for players,
+            // the team size in team mode. Reading it off the *instance* rather
+            // than assuming 1 is what keeps the ladder's separation exact when a
+            // team edge can emit several units at once.
+            Rule::Club => ctx.max_boards,
             // Two squared terms, each a rank deviation ≤ (group_size − 1)².
             Rule::Fold => 2 * (ctx.max_group - 1).max(0).pow(2),
             // The squared gap between the widest-separated free players.
@@ -576,7 +631,7 @@ fn scale_ladder(max_total: &[i128]) -> Vec<i128> {
 /// active rules for this mode. Used off the hot path (explanations, the
 /// alternative-pairing search); the O(k²) cost-matrix fill uses the per-rule
 /// [`accumulate_edge_rule`] instead.
-fn edge_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], a: TournamentId, b: TournamentId) -> i128 {
+fn edge_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], a: UnitKey, b: UnitKey) -> i128 {
     rules
         .iter()
         .zip(mult)
@@ -585,7 +640,7 @@ fn edge_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], a: TournamentId, b: Tourn
 }
 
 /// Add one rule's contribution to the (upper-triangle) real edges of the cost
-/// matrix: `cost[i*vcount + j] += m · units(ctx, tid_i, tid_j)` for every `i < j`.
+/// matrix: `cost[i*vcount + j] += m · units(ctx, key_i, key_j)` for every `i < j`.
 ///
 /// `units` is generic and each call site passes a closure over a *constant* rule,
 /// so it monomorphizes to that rule's arm of [`Rule::edge_units`] with the enum
@@ -595,34 +650,34 @@ fn edge_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], a: TournamentId, b: Tourn
 /// [`min_weight_perfect_matching`] reads the matrix as symmetric, taking just
 /// `cost[i*n + j]` for `i < j`.
 #[inline]
-fn accumulate_edge_rule<F: Fn(&Ctx, TournamentId, TournamentId) -> i128>(
+fn accumulate_edge_rule<F: Fn(&Ctx, UnitKey, UnitKey) -> i128>(
     cost: &mut [i128],
     vcount: usize,
     k: usize,
-    free_tid: &[TournamentId],
+    free: &[UnitKey],
     ctx: &Ctx,
     m: i128,
     units: F,
 ) {
     for i in 0..k {
         let base_i = i * vcount;
-        let ti = free_tid[i];
+        let ki = free[i];
         for j in (i + 1)..k {
-            cost[base_i + j] += m * units(ctx, ti, free_tid[j]);
+            cost[base_i + j] += m * units(ctx, ki, free[j]);
         }
     }
 }
 
-/// Total edge weight for giving `player` the bye, over the active rules.
-fn bye_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], player: TournamentId) -> i128 {
+/// Total edge weight for giving `unit` the bye, over the active rules.
+fn bye_cost(ctx: &Ctx, rules: &[Rule], mult: &[i128], unit: UnitKey) -> i128 {
     rules
         .iter()
         .zip(mult)
-        .map(|(rule, m)| m * rule.bye_units(ctx, player))
+        .map(|(rule, m)| m * rule.bye_units(ctx, unit))
         .sum()
 }
 
-/// Within-group fold placement of a player: its rank in the score group (by
+/// Within-group fold placement of a unit: its rank in the score group (by
 /// rating, descending) and the group's size.
 #[derive(Clone, Copy)]
 struct FoldInfo {
@@ -641,29 +696,32 @@ fn ideal_rank(rank: usize, group_size: usize) -> usize {
     }
 }
 
-/// Fold ranks for the `free` players, grouped by points and sorted within each
-/// group by rating (descending; unrated = 1), ties broken by tournament number
-/// for a stable, reproducible ordering.
+/// Fold ranks for the `free` units, grouped by points and sorted within each
+/// group by rating (descending; unrated = 1), ties broken by unit key for a
+/// stable, reproducible ordering.
 fn fold_ranks(
-    scores: &Scores,
-    rating_by_tid: &TiSlice<TournamentId, u32>,
-    free: &[TournamentId],
-    cap: usize,
-) -> TiVec<TournamentId, Option<FoldInfo>> {
-    // Group the free players (by tournament number) by their points.
-    let mut groups: HashMap<HalfPoints, Vec<TournamentId>> = HashMap::new();
-    for &t in free {
-        groups.entry(scores.get_tid(t).points).or_default().push(t);
+    units: &TiSlice<UnitKey, PairingUnit>,
+    free: &[UnitKey],
+) -> TiVec<UnitKey, Option<FoldInfo>> {
+    // Group the free units by their points.
+    let mut groups: HashMap<HalfPoints, Vec<UnitKey>> = HashMap::new();
+    for &k in free {
+        groups.entry(units[k].points).or_default().push(k);
     }
-    // Result indexed by tournament number (`None` for a non-free player).
-    let mut info: TiVec<TournamentId, Option<FoldInfo>> = vec![None; cap].into();
+    // Result indexed by unit key (`None` for a non-free unit).
+    let mut info: TiVec<UnitKey, Option<FoldInfo>> = vec![None; units.len()].into();
     for group in groups.values_mut() {
-        // Highest rating first; ties broken by tournament number (the key itself)
-        // for a stable, reproducible ordering.
-        group.sort_by(|&x, &y| rating_by_tid[y].cmp(&rating_by_tid[x]).then(x.cmp(&y)));
+        // Highest rating first; ties broken by key for a stable, reproducible
+        // ordering.
+        group.sort_by(|&x, &y| {
+            units[y]
+                .fold_rating()
+                .cmp(&units[x].fold_rating())
+                .then(x.cmp(&y))
+        });
         let m = group.len();
-        for (rank, &t) in group.iter().enumerate() {
-            info[t] = Some(FoldInfo {
+        for (rank, &k) in group.iter().enumerate() {
+            info[k] = Some(FoldInfo {
                 rank,
                 group_size: m,
             });
@@ -679,16 +737,15 @@ fn fold_ranks(
 /// (scores, fold ranks, ELO estimates, the multiplier ladder) and lends a [`Ctx`]
 /// on demand, so an explanation is scored against the *identical* construction
 /// the pairing used — no risk of the two drifting apart.
-struct PairingModel {
-    scores: Scores,
-    /// Per-player data the rules read, all indexed by tournament number so the
-    /// O(k²) cost loop indexes rather than hashes. See [`Ctx`].
-    fold: TiVec<TournamentId, Option<FoldInfo>>,
-    club_norm: TiVec<TournamentId, Option<String>>,
-    prequalified: TiVec<TournamentId, bool>,
+struct PairingModel<'u> {
+    /// The units being paired, indexed by key so the O(k²) cost loop indexes
+    /// rather than hashes. Borrowed: the caller owns the table and reuses it (a
+    /// pairing and its explanation are scored against the very same units).
+    units: &'u TiSlice<UnitKey, PairingUnit>,
+    /// Derived per-round data the rules read, also key-indexed. See [`Ctx`].
+    fold: TiVec<UnitKey, Option<FoldInfo>>,
     exempt_clubs: HashSet<String>,
-    elo: TiVec<TournamentId, i64>,
-    elo_rank: TiVec<TournamentId, i128>,
+    elo_rank: TiVec<UnitKey, i128>,
     round: u32,
     floater_style: FloaterStyle,
     edges: i128,
@@ -697,57 +754,30 @@ struct PairingModel {
     max_mm_gap: i128,
     max_group: i128,
     free_count: i128,
+    max_boards: i128,
     max_elo_gap: i128,
     rules: Vec<Rule>,
     mult: Vec<i128>,
 }
 
-impl PairingModel {
-    /// Build the model for the given `free` set (the players the matching will
+impl<'u> PairingModel<'u> {
+    /// Build the model for the given `free` set (the units the matching will
     /// pair). `need_phantom` is whether a bye vertex participates, so the edge
     /// count — and hence the derived multipliers — match the matching that was or
     /// will be solved.
     fn build(
         number: u32,
-        players: &[Player],
         settings: &TournamentSettings,
-        completed_rounds: &[Round],
-        free: &[TournamentId],
-        prequalified: &[TournamentId],
+        units: &'u TiSlice<UnitKey, PairingUnit>,
+        free: &[UnitKey],
         need_phantom: bool,
     ) -> Self {
-        let scores = compute_scores(players, settings, completed_rounds);
-        let cap = scores.tid_capacity();
-
-        // Per-player data the rules read, indexed by tournament number and built
-        // straight from `players` (whose number is a field — no hashing). Clubs are
-        // normalized here, once.
-        let mut rating_by_tid: TiVec<TournamentId, u32> = vec![1u32; cap].into();
-        let mut club_norm: TiVec<TournamentId, Option<String>> = vec![None; cap].into();
-        for p in players {
-            if let Some(t) = p.tournament_id {
-                rating_by_tid[t] = p.rating.unwrap_or(1);
-                club_norm[t] = p
-                    .club
-                    .as_ref()
-                    .map(|c| TournamentSettings::normalize_club(c));
-            }
-        }
-
-        // Pre-qualified cup entrants, as a tid-indexed flag so the O(k²) cost loop
-        // indexes rather than hashes. Empty (all false) in every round but the
-        // qualifier cup's first.
-        let mut prequalified_flag: TiVec<TournamentId, bool> = vec![false; cap].into();
-        for &t in prequalified {
-            prequalified_flag[t] = true;
-        }
-
-        let fold = fold_ranks(&scores, &rating_by_tid, free, cap);
+        let fold = fold_ranks(units, free);
 
         let (mut lo, mut hi) = (u32::MAX, 0u32);
         let (mut mm_lo, mut mm_hi) = (u32::MAX, 0u32);
-        for &t in free {
-            let s = scores.get_tid(t);
+        for &key in free {
+            let s = &units[key];
             lo = lo.min(s.points.halves());
             hi = hi.max(s.points.halves());
             mm_lo = mm_lo.min(s.macmahon.halves());
@@ -755,37 +785,26 @@ impl PairingModel {
         }
         let exempt_clubs = settings.exempt_clubs_normalized();
 
-        // Either ELO mode: a live estimate per free player (rounded), its ascending
-        // rank (0 = weakest, for the bye-selection rule), and the widest gap (for
-        // the ladder bound), all indexed by tournament number. All zero in Swiss.
-        let (elo, elo_rank, max_elo_gap): (
-            TiVec<TournamentId, i64>,
-            TiVec<TournamentId, i128>,
-            i128,
-        ) = if settings.elo_estimate_needed() {
-            let est = estimate_elos(players, settings, completed_rounds);
-            let mut elo: TiVec<TournamentId, i64> = vec![0i64; cap].into();
-            for p in players {
-                if let Some(t) = p.tournament_id {
-                    let e = est.get(&p.id).copied().unwrap_or(UNRATED_PRIOR_MEAN);
-                    elo[t] = e.round() as i64;
+        // ELO mode: the ascending ELO rank of each free unit (0 = weakest, for the
+        // bye-selection rule) and the widest gap (for the ladder bound). The
+        // estimate itself is on the unit; all of this is zero in Swiss mode.
+        let (elo_rank, max_elo_gap): (TiVec<UnitKey, i128>, i128) =
+            if settings.elo_estimate_needed() {
+                // Ascending ELO; ties by key.
+                let mut order = free.to_vec();
+                order.sort_by(|&x, &y| units[x].elo.cmp(&units[y].elo).then(x.cmp(&y)));
+                let mut elo_rank: TiVec<UnitKey, i128> = vec![0i128; units.len()].into();
+                for (rank, &key) in order.iter().enumerate() {
+                    elo_rank[key] = rank as i128;
                 }
-            }
-            // Ascending ELO; ties by tournament number (which is the key itself).
-            let mut order = free.to_vec();
-            order.sort_by(|&x, &y| elo[x].cmp(&elo[y]).then(x.cmp(&y)));
-            let mut elo_rank: TiVec<TournamentId, i128> = vec![0i128; cap].into();
-            for (rank, &t) in order.iter().enumerate() {
-                elo_rank[t] = rank as i128;
-            }
-            let (elo_lo, elo_hi) = free
-                .iter()
-                .map(|&t| elo[t])
-                .fold((i64::MAX, i64::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
-            (elo, elo_rank, (elo_hi - elo_lo).max(0) as i128)
-        } else {
-            (vec![0i64; cap].into(), vec![0i128; cap].into(), 0)
-        };
+                let (elo_lo, elo_hi) = free
+                    .iter()
+                    .map(|&key| units[key].elo)
+                    .fold((i64::MAX, i64::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
+                (elo_rank, (elo_hi - elo_lo).max(0) as i128)
+            } else {
+                (vec![0i128; units.len()].into(), 0)
+            };
 
         let k = free.len();
         let vcount = k + usize::from(need_phantom);
@@ -793,6 +812,13 @@ impl PairingModel {
             .iter()
             .flatten()
             .map(|f| f.group_size)
+            .max()
+            .unwrap_or(0) as i128;
+        // The club rule's per-edge ceiling, read off the instance rather than
+        // assumed: one board per player, `size` boards per team.
+        let max_boards = free
+            .iter()
+            .map(|&key| units[key].clubs.len())
             .max()
             .unwrap_or(0) as i128;
         // The active rules, minus the whole-round no-ops that contribute 0 to every
@@ -813,19 +839,16 @@ impl PairingModel {
             .filter(|r| match r {
                 Rule::AirtightGroups => airtight_active,
                 Rule::Club => club_active,
-                Rule::CupPrequalified => !prequalified.is_empty(),
+                Rule::CupPrequalified => free.iter().any(|&key| units[key].prequalified),
                 Rule::ByeGroup | Rule::ByeSelection => need_phantom,
                 _ => true,
             })
             .collect();
 
         let mut model = PairingModel {
-            scores,
+            units,
             fold,
-            club_norm,
-            prequalified: prequalified_flag,
             exempt_clubs,
-            elo,
             elo_rank,
             round: number,
             floater_style: settings.floater_style(),
@@ -835,6 +858,7 @@ impl PairingModel {
             max_mm_gap: mm_hi.saturating_sub(mm_lo) as i128,
             max_group,
             free_count: k as i128,
+            max_boards,
             max_elo_gap,
             rules,
             mult: Vec::new(),
@@ -853,13 +877,11 @@ impl PairingModel {
         model
     }
 
-    /// A scoring context borrowing this model's owned data.
+    /// A scoring context borrowing this model's data.
     fn ctx(&self) -> Ctx<'_> {
         Ctx {
-            scores: &self.scores,
+            units: self.units,
             fold: &self.fold,
-            club_norm: &self.club_norm,
-            prequalified: &self.prequalified,
             round: self.round,
             floater_style: self.floater_style,
             exempt_clubs: &self.exempt_clubs,
@@ -869,25 +891,25 @@ impl PairingModel {
             max_mm_gap: self.max_mm_gap,
             max_group: self.max_group,
             free_count: self.free_count,
-            elo: &self.elo,
+            max_boards: self.max_boards,
             elo_rank: &self.elo_rank,
             max_elo_gap: self.max_elo_gap,
         }
     }
 
-    /// Scalar edge weight for pairing numbers `a` against `b`.
-    fn edge_cost(&self, a: TournamentId, b: TournamentId) -> i128 {
+    /// Scalar edge weight for pairing unit `a` against unit `b`.
+    fn edge_cost(&self, a: UnitKey, b: UnitKey) -> i128 {
         edge_cost(&self.ctx(), &self.rules, &self.mult, a, b)
     }
 
-    /// Scalar edge weight for giving player number `player` the bye.
-    fn bye_cost(&self, player: TournamentId) -> i128 {
-        bye_cost(&self.ctx(), &self.rules, &self.mult, player)
+    /// Scalar edge weight for giving `unit` the bye.
+    fn bye_cost(&self, unit: UnitKey) -> i128 {
+        bye_cost(&self.ctx(), &self.rules, &self.mult, unit)
     }
 
     /// Per-rule penalty units (pre-multiplier) for pairing `a` against `b`, in
     /// priority order (aligned with [`Self::rules`]).
-    fn edge_units(&self, a: TournamentId, b: TournamentId) -> Vec<i128> {
+    fn edge_units(&self, a: UnitKey, b: UnitKey) -> Vec<i128> {
         let ctx = self.ctx();
         self.rules
             .iter()
@@ -895,13 +917,10 @@ impl PairingModel {
             .collect()
     }
 
-    /// Per-rule penalty units (pre-multiplier) for giving `player` the bye.
-    fn bye_units(&self, player: TournamentId) -> Vec<i128> {
+    /// Per-rule penalty units (pre-multiplier) for giving `unit` the bye.
+    fn bye_units(&self, unit: UnitKey) -> Vec<i128> {
         let ctx = self.ctx();
-        self.rules
-            .iter()
-            .map(|r| r.bye_units(&ctx, player))
-            .collect()
+        self.rules.iter().map(|r| r.bye_units(&ctx, unit)).collect()
     }
 
     fn rules(&self) -> &[Rule] {
@@ -925,13 +944,17 @@ pub struct RuleContribution {
 /// The rule ledger for one pairing: every rule that fired on it (units > 0), in
 /// priority order, plus the highest-priority one — the rule that "bound" the
 /// pairing. `player2` is `None` for the bye.
+///
+/// The two sides are [`UnitKey`]s, so this reads as player numbers in individual
+/// mode and team numbers in team mode — the pairing it explains is a pairing of
+/// whatever the engine was given.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct BoardLedger {
-    pub player1: TournamentId,
+    pub player1: UnitKey,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub player2: Option<TournamentId>,
+    pub player2: Option<UnitKey>,
     pub contributions: Vec<RuleContribution>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -964,8 +987,8 @@ pub struct RoundExplanation {
 /// Turn a per-rule unit vector (aligned with `rules`, priority order) into a
 /// ledger: keep only the rules that fired, and note the highest-priority one.
 fn ledger(
-    player1: TournamentId,
-    player2: Option<TournamentId>,
+    player1: UnitKey,
+    player2: Option<UnitKey>,
     rules: &[Rule],
     units: &[i128],
 ) -> BoardLedger {
@@ -1009,29 +1032,19 @@ fn accumulate(totals: &mut HashMap<RuleId, (u32, i64)>, rules: &[Rule], units: &
 /// the phantom vertex, exactly as during pairing.
 pub(crate) fn explain_pairing(
     number: u32,
-    players: &[Player],
     settings: &TournamentSettings,
-    completed_rounds: &[Round],
-    swiss_boards: &[(TournamentId, TournamentId)],
-    bye: Option<TournamentId>,
-    prequalified: &[TournamentId],
+    units: &TiSlice<UnitKey, PairingUnit>,
+    swiss_boards: &[(UnitKey, UnitKey)],
+    bye: Option<UnitKey>,
 ) -> RoundExplanation {
-    // The Swiss free set the round was paired from: both players of every Swiss
+    // The Swiss free set the round was paired from: both sides of every Swiss
     // board, plus the bye. With a bye the count is odd, so a phantom participates.
-    let mut free: Vec<TournamentId> = swiss_boards.iter().flat_map(|&(a, b)| [a, b]).collect();
+    let mut free: Vec<UnitKey> = swiss_boards.iter().flat_map(|&(a, b)| [a, b]).collect();
     if let Some(b) = bye {
         free.push(b);
     }
     let need_phantom = bye.is_some();
-    let model = PairingModel::build(
-        number,
-        players,
-        settings,
-        completed_rounds,
-        &free,
-        prequalified,
-        need_phantom,
-    );
+    let model = PairingModel::build(number, settings, units, &free, need_phantom);
     let rules = model.rules();
 
     let mut totals: HashMap<RuleId, (u32, i64)> = HashMap::new();
@@ -1069,13 +1082,13 @@ pub(crate) fn explain_pairing(
 
 // --- Counterfactual ("why not pair A and B?") -----------------------------
 
-/// Sentinel vertex standing in for the bye in a matching. Real tournament numbers
-/// are `>= 1`, so `0` can never collide with a player. Also used by
-/// `tournament` as the wire value meaning "the bye" in a counterfactual probe.
+/// The wire value meaning "the bye" in a counterfactual probe — the caller-facing
+/// spelling of [`UnitKey::PHANTOM`]. Real tournament numbers are `>= 1`, so `0`
+/// can never collide with a player.
 pub(crate) const PHANTOM: TournamentId = TournamentId(0);
 
 /// Normalized (order-independent) edge, so `(a, b)` and `(b, a)` are one key.
-fn unord_pair(a: TournamentId, b: TournamentId) -> (TournamentId, TournamentId) {
+fn unord_pair(a: UnitKey, b: UnitKey) -> (UnitKey, UnitKey) {
     if a <= b {
         (a, b)
     } else {
@@ -1114,7 +1127,7 @@ pub struct RuleDelta {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct AffectedCycle {
-    pub players: Vec<TournamentId>,
+    pub players: Vec<UnitKey>,
 }
 
 /// The consequence of forcing a pairing the engine didn't choose: which boards
@@ -1154,10 +1167,10 @@ pub struct Counterfactual {
 /// exists — which it always does on a complete graph of ≥ 4 vertices.
 fn solve_stable(
     model: &PairingModel,
-    verts: &[TournamentId],
-    baseline: &HashSet<(TournamentId, TournamentId)>,
-    forbidden: &HashSet<(TournamentId, TournamentId)>,
-) -> Vec<(TournamentId, TournamentId)> {
+    verts: &[UnitKey],
+    baseline: &HashSet<(UnitKey, UnitKey)>,
+    forbidden: &HashSet<(UnitKey, UnitKey)>,
+) -> Vec<(UnitKey, UnitKey)> {
     let n = verts.len();
     if n < 2 {
         return Vec::new();
@@ -1167,10 +1180,10 @@ fn solve_stable(
     let mut verts = verts.to_vec();
     verts.sort_unstable();
     let stab = (n / 2) as i128 + 1; // strictly above the largest stability total
-    let base = |a: TournamentId, b: TournamentId| -> i128 {
-        if a == PHANTOM {
+    let base = |a: UnitKey, b: UnitKey| -> i128 {
+        if a == UnitKey::PHANTOM {
             model.bye_cost(b)
-        } else if b == PHANTOM {
+        } else if b == UnitKey::PHANTOM {
             model.bye_cost(a)
         } else {
             model.edge_cost(a, b)
@@ -1220,20 +1233,20 @@ fn solve_stable(
 /// Decompose the symmetric difference of two perfect matchings into its
 /// alternating cycles — the disjoint rings of players whose partners differ.
 fn alternating_cycles(
-    m0: &HashSet<(TournamentId, TournamentId)>,
-    m1: &HashSet<(TournamentId, TournamentId)>,
+    m0: &HashSet<(UnitKey, UnitKey)>,
+    m1: &HashSet<(UnitKey, UnitKey)>,
 ) -> Vec<AffectedCycle> {
     // Adjacency over the changed edges. Every vertex in the symmetric difference
     // has exactly one edge from each matching, so its degree here is exactly 2.
-    let mut adj: HashMap<TournamentId, Vec<TournamentId>> = HashMap::new();
+    let mut adj: HashMap<UnitKey, Vec<UnitKey>> = HashMap::new();
     for &(a, b) in m0.symmetric_difference(m1) {
         adj.entry(a).or_default().push(b);
         adj.entry(b).or_default().push(a);
     }
 
-    let mut visited: HashSet<TournamentId> = HashSet::new();
+    let mut visited: HashSet<UnitKey> = HashSet::new();
     let mut cycles = Vec::new();
-    let mut starts: Vec<TournamentId> = adj.keys().copied().collect();
+    let mut starts: Vec<UnitKey> = adj.keys().copied().collect();
     starts.sort(); // deterministic cycle order
     for start in starts {
         if visited.contains(&start) {
@@ -1241,7 +1254,7 @@ fn alternating_cycles(
         }
         let mut order = Vec::new();
         let mut cur = start;
-        let mut prev: Option<TournamentId> = None;
+        let mut prev: Option<UnitKey> = None;
         loop {
             visited.insert(cur);
             order.push(cur);
@@ -1275,40 +1288,30 @@ pub enum CounterfactualMode {
 
 /// The Swiss free set, the pairing model, and the confirmed matching `M0` (with
 /// the bye as a phantom edge) — the shared setup for either counterfactual.
-fn baseline_matching(
+fn baseline_matching<'u>(
     number: u32,
-    players: &[Player],
     settings: &TournamentSettings,
-    completed_rounds: &[Round],
-    swiss_boards: &[(TournamentId, TournamentId)],
-    bye: Option<TournamentId>,
-    prequalified: &[TournamentId],
+    units: &'u TiSlice<UnitKey, PairingUnit>,
+    swiss_boards: &[(UnitKey, UnitKey)],
+    bye: Option<UnitKey>,
 ) -> (
-    PairingModel,
-    Vec<TournamentId>,
+    PairingModel<'u>,
+    Vec<UnitKey>,
     bool,
-    HashSet<(TournamentId, TournamentId)>,
+    HashSet<(UnitKey, UnitKey)>,
 ) {
-    let mut free: Vec<TournamentId> = swiss_boards.iter().flat_map(|&(x, y)| [x, y]).collect();
+    let mut free: Vec<UnitKey> = swiss_boards.iter().flat_map(|&(x, y)| [x, y]).collect();
     if let Some(p) = bye {
         free.push(p);
     }
     let need_phantom = bye.is_some();
-    let model = PairingModel::build(
-        number,
-        players,
-        settings,
-        completed_rounds,
-        &free,
-        prequalified,
-        need_phantom,
-    );
-    let mut m0: HashSet<(TournamentId, TournamentId)> = swiss_boards
+    let model = PairingModel::build(number, settings, units, &free, need_phantom);
+    let mut m0: HashSet<(UnitKey, UnitKey)> = swiss_boards
         .iter()
         .map(|&(x, y)| unord_pair(x, y))
         .collect();
     if let Some(p) = bye {
-        m0.insert(unord_pair(p, PHANTOM));
+        m0.insert(unord_pair(p, UnitKey::PHANTOM));
     }
     (model, free, need_phantom, m0)
 }
@@ -1318,25 +1321,25 @@ fn baseline_matching(
 /// boards as ledgers.
 fn diff_matchings(
     model: &PairingModel,
-    m0: &HashSet<(TournamentId, TournamentId)>,
-    m1: &HashSet<(TournamentId, TournamentId)>,
+    m0: &HashSet<(UnitKey, UnitKey)>,
+    m1: &HashSet<(UnitKey, UnitKey)>,
 ) -> Counterfactual {
     let rules = model.rules();
-    let units_of = |e: &(TournamentId, TournamentId)| -> Vec<i128> {
+    let units_of = |e: &(UnitKey, UnitKey)| -> Vec<i128> {
         let (x, y) = *e;
-        if x == PHANTOM {
+        if x == UnitKey::PHANTOM {
             model.bye_units(y)
-        } else if y == PHANTOM {
+        } else if y == UnitKey::PHANTOM {
             model.bye_units(x)
         } else {
             model.edge_units(x, y)
         }
     };
-    let ledger_of = |e: &(TournamentId, TournamentId)| -> BoardLedger {
+    let ledger_of = |e: &(UnitKey, UnitKey)| -> BoardLedger {
         let (x, y) = *e;
-        if x == PHANTOM {
+        if x == UnitKey::PHANTOM {
             ledger(y, None, rules, &model.bye_units(y))
-        } else if y == PHANTOM {
+        } else if y == UnitKey::PHANTOM {
             ledger(x, None, rules, &model.bye_units(x))
         } else {
             ledger(x, Some(y), rules, &model.edge_units(x, y))
@@ -1368,7 +1371,7 @@ fn diff_matchings(
         .collect();
 
     // The new boards (added edges), sorted for a stable order, as ledgers.
-    let mut added: Vec<(TournamentId, TournamentId)> = m1.difference(m0).copied().collect();
+    let mut added: Vec<(UnitKey, UnitKey)> = m1.difference(m0).copied().collect();
     added.sort();
     let changed: Vec<BoardLedger> = added.iter().map(ledger_of).collect();
 
@@ -1384,41 +1387,30 @@ fn diff_matchings(
 /// confirmed Swiss pairing. Both must be engine-paired players of this round (the
 /// caller checks scope). Re-solves the rest with the forced edge pre-placed and a
 /// stability tie-break toward the confirmed pairing, then diffs the two.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn counterfactual_force(
     number: u32,
-    players: &[Player],
     settings: &TournamentSettings,
-    completed_rounds: &[Round],
-    swiss_boards: &[(TournamentId, TournamentId)],
-    bye: Option<TournamentId>,
-    prequalified: &[TournamentId],
-    a: TournamentId,
-    b: TournamentId,
+    units: &TiSlice<UnitKey, PairingUnit>,
+    swiss_boards: &[(UnitKey, UnitKey)],
+    bye: Option<UnitKey>,
+    a: UnitKey,
+    b: UnitKey,
 ) -> Counterfactual {
-    let (model, free, need_phantom, m0) = baseline_matching(
-        number,
-        players,
-        settings,
-        completed_rounds,
-        swiss_boards,
-        bye,
-        prequalified,
-    );
+    let (model, free, need_phantom, m0) =
+        baseline_matching(number, settings, units, swiss_boards, bye);
 
     // Re-solve everyone but the forced pair, then add the forced edge back for
     // the full counterfactual matching. The phantom stays in play for the rest
     // *unless* it's one side of the forced pair itself (forcing someone onto the
     // bye) — it's already spoken for then, not up for grabs again.
-    let mut verts: Vec<TournamentId> = free.iter().copied().filter(|&v| v != a && v != b).collect();
-    if need_phantom && a != PHANTOM && b != PHANTOM {
-        verts.push(PHANTOM);
+    let mut verts: Vec<UnitKey> = free.iter().copied().filter(|&v| v != a && v != b).collect();
+    if need_phantom && a != UnitKey::PHANTOM && b != UnitKey::PHANTOM {
+        verts.push(UnitKey::PHANTOM);
     }
     let no_forbidden = HashSet::new();
-    let mut m1: HashSet<(TournamentId, TournamentId)> =
-        solve_stable(&model, &verts, &m0, &no_forbidden)
-            .into_iter()
-            .collect();
+    let mut m1: HashSet<(UnitKey, UnitKey)> = solve_stable(&model, &verts, &m0, &no_forbidden)
+        .into_iter()
+        .collect();
     m1.insert(unord_pair(a, b));
 
     diff_matchings(&model, &m0, &m1)
@@ -1428,131 +1420,124 @@ pub(crate) fn counterfactual_force(
 /// edge, re-solve the whole free set with a stability tie-break toward the
 /// confirmed pairing, and diff. If `a`–`b` wasn't the engine's choice anyway, the
 /// diff is empty.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn counterfactual_forbid(
     number: u32,
-    players: &[Player],
     settings: &TournamentSettings,
-    completed_rounds: &[Round],
-    swiss_boards: &[(TournamentId, TournamentId)],
-    bye: Option<TournamentId>,
-    prequalified: &[TournamentId],
-    a: TournamentId,
-    b: TournamentId,
+    units: &TiSlice<UnitKey, PairingUnit>,
+    swiss_boards: &[(UnitKey, UnitKey)],
+    bye: Option<UnitKey>,
+    a: UnitKey,
+    b: UnitKey,
 ) -> Counterfactual {
-    let (model, free, need_phantom, m0) = baseline_matching(
-        number,
-        players,
-        settings,
-        completed_rounds,
-        swiss_boards,
-        bye,
-        prequalified,
-    );
+    let (model, free, need_phantom, m0) =
+        baseline_matching(number, settings, units, swiss_boards, bye);
 
     let mut verts = free.clone();
     if need_phantom {
-        verts.push(PHANTOM);
+        verts.push(UnitKey::PHANTOM);
     }
-    let forbidden: HashSet<(TournamentId, TournamentId)> = [unord_pair(a, b)].into_iter().collect();
-    let m1: HashSet<(TournamentId, TournamentId)> = solve_stable(&model, &verts, &m0, &forbidden)
+    let forbidden: HashSet<(UnitKey, UnitKey)> = [unord_pair(a, b)].into_iter().collect();
+    let m1: HashSet<(UnitKey, UnitKey)> = solve_stable(&model, &verts, &m0, &forbidden)
         .into_iter()
         .collect();
 
     diff_matchings(&model, &m0, &m1)
 }
 
-/// Pair the `present` players by minimizing the total rule penalty, honoring
-/// referee-forced boards and forced byes. This is the real pairing path used by
-/// [`crate::Tournament::confirm_round`]; the rules and their priority are
-/// described in the module docs.
-///
-/// The forced byes are simply taken out of the pool; if what remains is odd the
-/// engine still picks a bye of its own, so any number of them is consistent.
-///
-/// Preconditions (validated by the caller): every forced player is present and
-/// appears at most once.
-#[allow(clippy::too_many_arguments)]
-pub fn pair_round_weighted(
-    number: u32,
-    players: &[Player],
-    settings: &TournamentSettings,
-    completed_rounds: &[Round],
-    present: &[TournamentId],
-    forced_boards: &[Board],
-    forced_byes: &[TournamentId],
-    prequalified: &[TournamentId],
-) -> Round {
-    let scores = compute_scores(players, settings, completed_rounds);
-    // The float frozen onto each board: points(player1) − points(player2) now.
-    let diff = |p1: TournamentId, p2: TournamentId| {
-        scores.get_tid(p1).points.halves() as i32 - scores.get_tid(p2).points.halves() as i32
-    };
+/// One round's pairing in **unit** terms: who plays whom, and who sits out. The
+/// caller turns each pair into the board(s) it stands for — one for a player
+/// pairing, `size` for a team match — and each bye into the sit-out(s) it means.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UnitPairing {
+    /// The matched pairs: the referee's forced ones first (in draft order), then
+    /// the engine's own.
+    pub pairs: Vec<PairedUnits>,
+    /// The bye the engine chose, if the free field was left odd. There is at most
+    /// one by construction — a matching has a single phantom.
+    pub swiss_bye: Option<UnitKey>,
+}
 
-    let mut placed: HashSet<TournamentId> = HashSet::new();
-    for board in forced_boards {
-        placed.insert(board.player1);
-        placed.insert(board.player2);
+/// One matched pair, with the facts of the pairing the boards must carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PairedUnits {
+    pub a: UnitKey,
+    pub b: UnitKey,
+    /// How the pairing was decided (engine or referee).
+    pub source: PairingSource,
+    /// `points(a) − points(b)` at pairing time, frozen onto every board of the
+    /// pairing: it is a fact of *this* pairing, and the float history replays
+    /// from it.
+    pub points_diff: i32,
+}
+
+/// Pair the `present` units by minimizing the total rule penalty, honoring
+/// referee-forced pairs and forced byes. This is the real pairing path used by
+/// [`crate::Tournament::confirm_round`], for players and teams alike; the rules
+/// and their priority are described in the module docs.
+///
+/// The forced byes are simply taken out of the pool (and not echoed back — the
+/// caller already knows them); if what remains is odd the engine still picks a
+/// bye of its own, so any number of them is consistent.
+///
+/// Preconditions (validated by the caller): every forced unit is present and
+/// appears at most once.
+pub(crate) fn pair_round_weighted(
+    number: u32,
+    settings: &TournamentSettings,
+    units: &TiSlice<UnitKey, PairingUnit>,
+    present: &[UnitKey],
+    forced_pairs: &[(UnitKey, UnitKey)],
+    forced_byes: &[UnitKey],
+) -> UnitPairing {
+    // The float frozen onto each board: points(a) − points(b) now.
+    let diff =
+        |a: UnitKey, b: UnitKey| units[a].points.halves() as i32 - units[b].points.halves() as i32;
+
+    let mut placed: HashSet<UnitKey> = HashSet::new();
+    for &(a, b) in forced_pairs {
+        placed.insert(a);
+        placed.insert(b);
     }
     placed.extend(forced_byes.iter().copied());
-    let mut free: Vec<TournamentId> = present
+    let mut free: Vec<UnitKey> = present
         .iter()
         .copied()
-        .filter(|id| !placed.contains(id))
+        .filter(|key| !placed.contains(key))
         .collect();
 
-    // A phantom vertex absorbs the bye when an odd number of players remain
+    // A phantom vertex absorbs the bye when an odd number of units remain
     // after the forced byes are taken out; whoever the matching pairs with it
     // sits out.
     let need_phantom = free.len() % 2 == 1;
     let k = free.len();
     let vcount = k + usize::from(need_phantom);
 
-    let mut boards: Vec<Board> = forced_boards
+    let mut pairs: Vec<PairedUnits> = forced_pairs
         .iter()
-        .map(|b| {
-            Board::pending(
-                b.player1,
-                b.player2,
-                diff(b.player1, b.player2),
-                PairingSource::Forced,
-            )
+        .map(|&(a, b)| PairedUnits {
+            a,
+            b,
+            source: PairingSource::Forced,
+            points_diff: diff(a, b),
         })
         .collect();
-    // The forced byes score a full point, like any bye; the engine's own bye is
-    // appended below if the leftover field is odd.
-    let mut sitouts: Vec<Sitout> = forced_byes
-        .iter()
-        .map(|&player| Sitout {
-            player,
-            kind: SitoutKind::ForcedBye,
-            value: SitoutValue::Full,
-        })
-        .collect();
+    let mut swiss_bye = None;
 
     if vcount >= 2 {
-        // The pairing model owns the per-round scoring context and the derived
-        // multiplier ladder; the same construction backs `explain_pairing`.
-        let model = PairingModel::build(
-            number,
-            players,
-            settings,
-            completed_rounds,
-            &free,
-            prequalified,
-            need_phantom,
-        );
+        // The pairing model owns the per-round derived data and the multiplier
+        // ladder; the same construction backs `explain_pairing`.
+        let model = PairingModel::build(number, settings, units, &free, need_phantom);
 
-        // Order the matching's vertices canonically by seed (the tournament
-        // number is the seed), so which of several equally-optimal pairings the
-        // solver returns depends only on tournament state — not on the order
-        // players were registered, imported, or reloaded (the model itself is
-        // order-independent, so this affects ties only).
+        // Order the matching's vertices canonically by seed (the unit key is the
+        // seed), so which of several equally-optimal pairings the solver returns
+        // depends only on tournament state — not on the order players were
+        // registered, imported, or reloaded (the model itself is order-independent,
+        // so this affects ties only).
         free.sort_unstable();
 
-        // `free` is the tournament numbers in matching-vertex order, so the edge/bye
-        // scoring indexes the model's per-number tables directly — no per-edge or
-        // per-vertex cast. `ctx` is built once and shared across every edge.
+        // `free` is the unit keys in matching-vertex order, so the edge/bye scoring
+        // indexes the model's per-key tables directly — no per-edge or per-vertex
+        // cast. `ctx` is built once and shared across every edge.
         let ctx = model.ctx();
         // Row-major `vcount × vcount` cost matrix in one flat allocation (entry
         // `(i, j)` at `i * vcount + j`), rather than a `Vec<Vec>`: one allocation
@@ -1605,37 +1590,233 @@ pub fn pair_round_weighted(
             seen[j] = true;
             if need_phantom && (i == k || j == k) {
                 let real = if i == k { j } else { i };
-                sitouts.push(Sitout {
-                    player: free[real],
-                    kind: SitoutKind::Bye,
-                    value: SitoutValue::Full,
-                });
+                swiss_bye = Some(free[real]);
             } else {
-                boards.push(Board::pending(
-                    free[i],
-                    free[j],
-                    diff(free[i], free[j]),
-                    PairingSource::Swiss,
-                ));
+                pairs.push(PairedUnits {
+                    a: free[i],
+                    b: free[j],
+                    source: PairingSource::Swiss,
+                    points_diff: diff(free[i], free[j]),
+                });
             }
         }
     }
 
-    Round {
-        number,
-        boards,
-        sitouts,
-        completed: false,
+    UnitPairing { pairs, swiss_bye }
+}
+
+// --- The individual-mode wrapper ------------------------------------------
+
+/// Build the engine's input for an **individual** tournament: one unit per
+/// player, keyed by their tournament number, from the replayed scores plus the
+/// registration data the rules read (rating, club) and the per-round cup and ELO
+/// context.
+///
+/// Gap keys (number 0, and any number freed by a pre-play removal) hold a default
+/// unit, exactly as [`Scores`](crate::scoring::Scores) leaves gaps — the free set
+/// never names them.
+pub(crate) fn player_units(
+    players: &[Player],
+    settings: &TournamentSettings,
+    completed_rounds: &[Round],
+    prequalified: &[TournamentId],
+) -> TiVec<UnitKey, PairingUnit> {
+    let scores = compute_scores(players, settings, completed_rounds);
+    let cap = scores.tid_capacity();
+    let mut units: TiVec<UnitKey, PairingUnit> = vec![PairingUnit::default(); cap].into();
+
+    // A live ELO estimate is only computed for the mode that pairs on it —
+    // it replays every game, so it is far too expensive to take speculatively.
+    let estimates = settings
+        .elo_estimate_needed()
+        .then(|| estimate_elos(players, settings, completed_rounds));
+
+    for p in players {
+        let Some(tid) = p.tournament_id else {
+            continue; // not finalized yet, so on no board either
+        };
+        let s = scores.get_tid(tid);
+        let key = UnitKey::from(tid);
+        units[key] = PairingUnit {
+            points: s.points,
+            macmahon: s.macmahon,
+            opponents: s.opponents.iter().copied().map(UnitKey::from).collect(),
+            had_bye: s.had_bye,
+            last_ascended: s.last_ascended,
+            last_descended: s.last_descended,
+            rating: p.rating,
+            // One board, so the club rule's aligned-position count degenerates to
+            // the individual mode's 0/1.
+            clubs: vec![p
+                .club
+                .as_ref()
+                .map(|c| TournamentSettings::normalize_club(c))],
+            prequalified: false,
+            elo: estimates
+                .as_ref()
+                .map(|est| {
+                    est.get(&p.id)
+                        .copied()
+                        .unwrap_or(UNRATED_PRIOR_MEAN)
+                        .round() as i64
+                })
+                .unwrap_or(0),
+        };
     }
+    for &tid in prequalified {
+        units[UnitKey::from(tid)].prequalified = true;
+    }
+    units
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::Winner;
+    use crate::round::{Board, Outcome, Sitout, SitoutKind, SitoutValue, Winner};
     use crate::settings::{ClubProtection, MacMahonThreshold, RatioAtLeastOne};
     use std::num::NonZeroU32;
     use uuid::Uuid;
+
+    /// The engine seen through the individual-mode wrapper: build the player
+    /// units, pair them, and reassemble the `Round` the caller would — so these
+    /// tests keep speaking in players and boards, which is what the rules are
+    /// actually about. Mirrors `Tournament::confirm_round_inner`'s Swiss half.
+    #[allow(clippy::too_many_arguments)]
+    fn pair_players(
+        number: u32,
+        players: &[Player],
+        settings: &TournamentSettings,
+        completed_rounds: &[Round],
+        present: &[TournamentId],
+        forced_boards: &[Board],
+        forced_byes: &[TournamentId],
+        prequalified: &[TournamentId],
+    ) -> Round {
+        let units = player_units(players, settings, completed_rounds, prequalified);
+        let present: Vec<UnitKey> = present.iter().copied().map(UnitKey::from).collect();
+        let forced_pairs: Vec<(UnitKey, UnitKey)> = forced_boards
+            .iter()
+            .map(|b| (UnitKey::from(b.player1), UnitKey::from(b.player2)))
+            .collect();
+        let forced_bye_keys: Vec<UnitKey> =
+            forced_byes.iter().copied().map(UnitKey::from).collect();
+        let paired = pair_round_weighted(
+            number,
+            settings,
+            &units,
+            &present,
+            &forced_pairs,
+            &forced_bye_keys,
+        );
+        let mut sitouts: Vec<Sitout> = forced_byes
+            .iter()
+            .map(|&player| Sitout {
+                player,
+                kind: SitoutKind::ForcedBye,
+                value: SitoutValue::Full,
+            })
+            .collect();
+        sitouts.extend(paired.swiss_bye.map(|key| Sitout {
+            player: TournamentId::from(key),
+            kind: SitoutKind::Bye,
+            value: SitoutValue::Full,
+        }));
+        Round {
+            number,
+            boards: paired
+                .pairs
+                .iter()
+                .map(|p| {
+                    Board::pending(
+                        TournamentId::from(p.a),
+                        TournamentId::from(p.b),
+                        p.points_diff,
+                        p.source,
+                    )
+                })
+                .collect(),
+            sitouts,
+            completed: false,
+        }
+    }
+
+    /// `explain_pairing` seen through the individual-mode wrapper (see
+    /// [`pair_players`]), so these tests keep speaking in players.
+    fn explain_players(
+        number: u32,
+        players: &[Player],
+        settings: &TournamentSettings,
+        completed_rounds: &[Round],
+        swiss_boards: &[(TournamentId, TournamentId)],
+        bye: Option<TournamentId>,
+        prequalified: &[TournamentId],
+    ) -> RoundExplanation {
+        let units = player_units(players, settings, completed_rounds, prequalified);
+        explain_pairing(
+            number,
+            settings,
+            &units,
+            &keys(swiss_boards),
+            bye.map(UnitKey::from),
+        )
+    }
+
+    /// The counterfactual probes, likewise wrapped for the player path.
+    #[allow(clippy::too_many_arguments)]
+    fn force_players(
+        number: u32,
+        players: &[Player],
+        settings: &TournamentSettings,
+        completed_rounds: &[Round],
+        swiss_boards: &[(TournamentId, TournamentId)],
+        bye: Option<TournamentId>,
+        prequalified: &[TournamentId],
+        a: TournamentId,
+        b: TournamentId,
+    ) -> Counterfactual {
+        let units = player_units(players, settings, completed_rounds, prequalified);
+        counterfactual_force(
+            number,
+            settings,
+            &units,
+            &keys(swiss_boards),
+            bye.map(UnitKey::from),
+            UnitKey::from(a),
+            UnitKey::from(b),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn forbid_players(
+        number: u32,
+        players: &[Player],
+        settings: &TournamentSettings,
+        completed_rounds: &[Round],
+        swiss_boards: &[(TournamentId, TournamentId)],
+        bye: Option<TournamentId>,
+        prequalified: &[TournamentId],
+        a: TournamentId,
+        b: TournamentId,
+    ) -> Counterfactual {
+        let units = player_units(players, settings, completed_rounds, prequalified);
+        counterfactual_forbid(
+            number,
+            settings,
+            &units,
+            &keys(swiss_boards),
+            bye.map(UnitKey::from),
+            UnitKey::from(a),
+            UnitKey::from(b),
+        )
+    }
+
+    /// Player-number pairs as engine unit keys.
+    fn keys(boards: &[(TournamentId, TournamentId)]) -> Vec<(UnitKey, UnitKey)> {
+        boards
+            .iter()
+            .map(|&(a, b)| (UnitKey::from(a), UnitKey::from(b)))
+            .collect()
+    }
 
     // --- solve_matching's width dispatch -----------------------------------
 
@@ -1684,6 +1865,7 @@ mod tests {
             last_name: format!("P{tid}"),
             first_name: String::new(),
             rating,
+            pairing_rating: None,
             grade: None,
             fesa_games: None,
             nationality: None,
@@ -1704,7 +1886,7 @@ mod tests {
             boards: boards
                 .iter()
                 .map(|&(a, b, w)| Board {
-                    result: Some(w),
+                    outcome: Outcome::won(w),
                     ..Board::pending(a, b, 0, PairingSource::Swiss)
                 })
                 .collect(),
@@ -1755,14 +1937,14 @@ mod tests {
         let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
         let settings = elo_settings();
 
-        let forward = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[], &[]);
+        let forward = pair_players(1, &p, &settings, &[], &present, &[], &[], &[]);
 
         // Same players and tournament numbers, reversed order in both the players
         // slice and the present list.
         let mut p_rev = p.clone();
         p_rev.reverse();
         let present_rev: Vec<TournamentId> = present.iter().rev().copied().collect();
-        let reversed = pair_round_weighted(1, &p_rev, &settings, &[], &present_rev, &[], &[], &[]);
+        let reversed = pair_players(1, &p_rev, &settings, &[], &present_rev, &[], &[], &[]);
 
         assert_eq!(board_pairs(&forward), board_pairs(&reversed));
         assert_eq!(forward.swiss_bye(), reversed.swiss_bye());
@@ -1792,7 +1974,7 @@ mod tests {
         );
         let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
-        let round = pair_round_weighted(
+        let round = pair_players(
             2,
             &p,
             &TournamentSettings::default(),
@@ -1832,7 +2014,7 @@ mod tests {
         );
         let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
-        let round = pair_round_weighted(
+        let round = pair_players(
             2,
             &p,
             &TournamentSettings::default(),
@@ -1881,7 +2063,7 @@ mod tests {
         );
         let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
-        let round = pair_round_weighted(
+        let round = pair_players(
             2,
             &p,
             &TournamentSettings::default(),
@@ -1931,7 +2113,7 @@ mod tests {
             PairingSource::Swiss,
         )];
 
-        let round = pair_round_weighted(
+        let round = pair_players(
             2,
             &p,
             &TournamentSettings::default(),
@@ -1972,7 +2154,7 @@ mod tests {
         let r1 = Round {
             number: 1,
             boards: vec![Board {
-                result: Some(Winner::Player1),
+                outcome: Outcome::won(Winner::Player1),
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
@@ -1993,7 +2175,7 @@ mod tests {
             b.tournament_id.unwrap(),
             c.tournament_id.unwrap(),
         ];
-        let round = pair_round_weighted(
+        let round = pair_players(
             2,
             &players,
             &settings,
@@ -2033,7 +2215,7 @@ mod tests {
         let settings =
             TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
 
-        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[], &[]);
+        let round = pair_players(1, &p, &settings, &[], &present, &[], &[], &[]);
 
         let pairs = board_pairs(&round);
         assert!(
@@ -2073,7 +2255,7 @@ mod tests {
             exempt_clubs: Vec::new(),
         });
 
-        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[], &[]);
+        let round = pair_players(1, &p, &settings, &[], &present, &[], &[], &[]);
 
         assert_eq!(round.boards.len(), 2);
         let club_of = |id: TournamentId| {
@@ -2092,6 +2274,61 @@ mod tests {
         }
     }
 
+    /// The club rule counts the same-club *games* an edge would create, over
+    /// aligned board positions — the form that serves a multi-board unit (a team)
+    /// as well as a player. Positions are aligned because board `k` only ever
+    /// meets board `k`, so a shared club on different boards costs nothing.
+    #[test]
+    fn the_club_rule_counts_aligned_same_club_boards() {
+        let unit = |clubs: &[Option<&str>]| PairingUnit {
+            clubs: clubs
+                .iter()
+                .map(|c| c.map(TournamentSettings::normalize_club))
+                .collect(),
+            ..PairingUnit::default()
+        };
+        // Board 1 shares club X, board 2 differs, board 3 shares club Z — but the
+        // Y on a's board 2 also appears on b's board 3, on a board it never plays.
+        let units: TiVec<UnitKey, PairingUnit> = vec![
+            PairingUnit::default(), // key 0, the phantom's gap slot
+            unit(&[Some("X"), Some("Y"), Some("Z")]),
+            unit(&[Some("x"), Some("W"), Some("Z")]), // case-insensitive on board 1
+            unit(&[None, None, None]),
+        ]
+        .into();
+        let free = [UnitKey(1), UnitKey(2), UnitKey(3)];
+        let exempt_clubs = HashSet::new();
+        let empty_rank: TiVec<UnitKey, i128> = vec![0i128; units.len()].into();
+        let fold = fold_ranks(&units, &free);
+        let ctx = Ctx {
+            units: &units,
+            fold: &fold,
+            round: 1,
+            floater_style: FloaterStyle::Classic,
+            exempt_clubs: &exempt_clubs,
+            edges: 1,
+            max_gap: 0,
+            min_points: 0,
+            max_mm_gap: 0,
+            max_group: 3,
+            free_count: 3,
+            max_boards: 3,
+            elo_rank: &empty_rank,
+            max_elo_gap: 0,
+        };
+        // Two aligned clashes (boards 1 and 3), not three: the Y/W board differs,
+        // and a's Y never meets b's Y because they sit on different boards.
+        assert_eq!(Rule::Club.edge_units(&ctx, UnitKey(1), UnitKey(2)), 2);
+        // An unknown club is never a clash.
+        assert_eq!(Rule::Club.edge_units(&ctx, UnitKey(1), UnitKey(3)), 0);
+        // ...and the ladder bound is read off the instance, so it still covers the
+        // worst edge — the check that keeps the lexicographic separation exact
+        // once an edge can emit more than one unit.
+        let bound = Rule::Club.max_total_units(&ctx);
+        assert!(Rule::Club.edge_units(&ctx, UnitKey(1), UnitKey(2)) * ctx.edges <= bound);
+        assert_eq!(bound, 3);
+    }
+
     #[test]
     fn club_protection_off_by_default_pairs_the_fold() {
         // With protection off (the default), the club rule is silent, so the fold
@@ -2099,7 +2336,7 @@ mod tests {
         let p = two_clubs_where_fold_pairs_mates();
         let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
-        let round = pair_round_weighted(
+        let round = pair_players(
             1,
             &p,
             &TournamentSettings::default(),
@@ -2145,7 +2382,7 @@ mod tests {
             rounds: None,
             exempt_clubs: vec!["  HOME ".into()],
         });
-        let round = pair_round_weighted(1, &p, &exempt, &[], &present, &[], &[], &[]);
+        let round = pair_players(1, &p, &exempt, &[], &present, &[], &[], &[]);
         assert!(
             board_pairs(&round).contains(&unord(
                 p[0].tournament_id.unwrap(),
@@ -2158,7 +2395,7 @@ mod tests {
             rounds: None,
             exempt_clubs: Vec::new(),
         });
-        let round = pair_round_weighted(1, &p, &protected, &[], &present, &[], &[], &[]);
+        let round = pair_players(1, &p, &protected, &[], &present, &[], &[], &[]);
         assert!(
             !board_pairs(&round).contains(&unord(
                 p[0].tournament_id.unwrap(),
@@ -2180,7 +2417,7 @@ mod tests {
         });
 
         // Pair round 2 directly (no completed rounds needed to exercise the window).
-        let round = pair_round_weighted(2, &p, &settings, &[], &present, &[], &[], &[]);
+        let round = pair_players(2, &p, &settings, &[], &present, &[], &[], &[]);
         let pairs = board_pairs(&round);
         assert!(
             pairs.contains(&unord(
@@ -2248,7 +2485,7 @@ mod tests {
 
         // Without airtight groups, score-gap alone finds a cheaper matching that
         // crosses the MacMahon boundary twice.
-        let round_off = pair_round_weighted(
+        let round_off = pair_players(
             2,
             &p,
             &settings_base,
@@ -2276,7 +2513,7 @@ mod tests {
         // With airtight groups active for round 2, every board stays within its
         // MacMahon group.
         let settings_on = settings_base.with_airtight(NonZeroU32::new(2));
-        let round_on = pair_round_weighted(2, &p, &settings_on, &[r1], &present, &[], &[], &[]);
+        let round_on = pair_players(2, &p, &settings_on, &[r1], &present, &[], &[], &[]);
         for b in &round_on.boards {
             assert_eq!(
                 top.contains(&b.player1),
@@ -2331,7 +2568,7 @@ mod tests {
             None,
         );
 
-        let round = pair_round_weighted(2, &p, &settings, &[r1], &present, &[], &[], &[]);
+        let round = pair_players(2, &p, &settings, &[r1], &present, &[], &[], &[]);
         let top: HashSet<TournamentId> = [
             p[0].tournament_id.unwrap(),
             p[1].tournament_id.unwrap(),
@@ -2369,7 +2606,7 @@ mod tests {
         ];
         let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
-        let round = pair_round_weighted(1, &p, &elo_settings(), &[], &present, &[], &[], &[]);
+        let round = pair_players(1, &p, &elo_settings(), &[], &present, &[], &[], &[]);
 
         let pairs = board_pairs(&round);
         assert!(
@@ -2397,7 +2634,7 @@ mod tests {
             .collect();
         let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
-        let round = pair_round_weighted(1, &p, &elo_settings(), &[], &present, &[], &[], &[]);
+        let round = pair_players(1, &p, &elo_settings(), &[], &present, &[], &[], &[]);
 
         assert_eq!(
             round.swiss_bye(),
@@ -2440,7 +2677,7 @@ mod tests {
             None,
         );
 
-        let round = pair_round_weighted(2, &p, &settings, &[r1], &present, &[], &[], &[]);
+        let round = pair_players(2, &p, &settings, &[r1], &present, &[], &[], &[]);
         let pairs = board_pairs(&round);
         // No rematch of the round-1 boards.
         assert!(!pairs.contains(&unord(
@@ -2484,7 +2721,7 @@ mod tests {
         let settings =
             TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
 
-        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[], &[]);
+        let round = pair_players(1, &p, &settings, &[], &present, &[], &[], &[]);
         assert!(
             board_pairs(&round).contains(&unord(
                 p[2].tournament_id.unwrap(),
@@ -2511,7 +2748,7 @@ mod tests {
             TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
 
         let classic = base.clone().with_floater(FloaterStyle::Classic);
-        let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], &[], &[]);
+        let round = pair_players(1, &p, &classic, &[], &present, &[], &[], &[]);
         assert!(
             board_pairs(&round).contains(&unord(
                 p[0].tournament_id.unwrap(),
@@ -2521,7 +2758,7 @@ mod tests {
         );
 
         let median = base.with_floater(FloaterStyle::Median);
-        let round = pair_round_weighted(1, &p, &median, &[], &present, &[], &[], &[]);
+        let round = pair_players(1, &p, &median, &[], &present, &[], &[], &[]);
         assert!(
             board_pairs(&round).contains(&unord(
                 p[0].tournament_id.unwrap(),
@@ -2547,7 +2784,7 @@ mod tests {
             TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
 
         let classic = base.clone().with_floater(FloaterStyle::Classic);
-        let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], &[], &[]);
+        let round = pair_players(1, &p, &classic, &[], &present, &[], &[], &[]);
         assert!(
             board_pairs(&round).contains(&unord(
                 p[2].tournament_id.unwrap(),
@@ -2557,7 +2794,7 @@ mod tests {
         );
 
         let median = base.with_floater(FloaterStyle::Median);
-        let round = pair_round_weighted(1, &p, &median, &[], &present, &[], &[], &[]);
+        let round = pair_players(1, &p, &median, &[], &present, &[], &[], &[]);
         assert!(
             board_pairs(&round).contains(&unord(
                 p[1].tournament_id.unwrap(),
@@ -2582,7 +2819,7 @@ mod tests {
         let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
 
         let classic = TournamentSettings::default().with_floater(FloaterStyle::Classic);
-        let round = pair_round_weighted(1, &p, &classic, &[], &present, &[], &[], &[]);
+        let round = pair_players(1, &p, &classic, &[], &present, &[], &[], &[]);
         assert_eq!(
             round.swiss_bye(),
             Some(p[4].tournament_id.unwrap()),
@@ -2590,7 +2827,7 @@ mod tests {
         );
 
         let median = TournamentSettings::default().with_floater(FloaterStyle::Median);
-        let round = pair_round_weighted(1, &p, &median, &[], &present, &[], &[], &[]);
+        let round = pair_players(1, &p, &median, &[], &present, &[], &[], &[]);
         assert_eq!(
             round.swiss_bye(),
             Some(p[2].tournament_id.unwrap()),
@@ -2640,8 +2877,9 @@ mod tests {
         let settings = TournamentSettings::default();
         let has_bye_rule = |need_phantom: bool, n: u32| {
             let p: Vec<Player> = (1..=n).map(|i| player(i, Some(1500), None)).collect();
-            let free: Vec<TournamentId> = (1..=n).map(TournamentId).collect();
-            let model = PairingModel::build(1, &p, &settings, &[], &free, &[], need_phantom);
+            let free: Vec<UnitKey> = (1..=n).map(UnitKey).collect();
+            let units = player_units(&p, &settings, &[], &[]);
+            let model = PairingModel::build(1, &settings, &units, &free, need_phantom);
             model
                 .rules
                 .iter()
@@ -2679,12 +2917,15 @@ mod tests {
         );
         let settings =
             TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
-        let scores = compute_scores(&p, &settings, &[r1]);
-        let free: Vec<TournamentId> = p.iter().map(|q| q.tournament_id.unwrap()).collect();
+        let units = player_units(&p, &settings, &[r1], &[]);
+        let free: Vec<UnitKey> = p
+            .iter()
+            .map(|q| UnitKey::from(q.tournament_id.unwrap()))
+            .collect();
         let (mut lo, mut hi) = (u32::MAX, 0u32);
         let (mut mm_lo, mut mm_hi) = (u32::MAX, 0u32);
-        for &t in &free {
-            let s = scores.get_tid(t);
+        for &key in &free {
+            let s = &units[key];
             lo = lo.min(s.points.halves());
             hi = hi.max(s.points.halves());
             mm_lo = mm_lo.min(s.macmahon.halves());
@@ -2692,27 +2933,11 @@ mod tests {
         }
         let edges = 3i128; // 5 free + phantom bye = 6 vertices → 3 edges
         let exempt_clubs = HashSet::new();
-        // Tournament-number-indexed views, as `PairingModel::build` makes them.
-        let cap = scores.tid_capacity();
-        let mut rating_by_tid: TiVec<TournamentId, u32> = vec![1u32; cap].into();
-        let mut club_norm: TiVec<TournamentId, Option<String>> = vec![None; cap].into();
-        for q in &p {
-            let t = q.tournament_id.unwrap();
-            rating_by_tid[t] = q.rating.unwrap_or(1);
-            club_norm[t] = q
-                .club
-                .as_ref()
-                .map(|c| TournamentSettings::normalize_club(c));
-        }
-        let fold = fold_ranks(&scores, &rating_by_tid, &free, cap);
-        let empty_prequalified: TiVec<TournamentId, bool> = vec![false; cap].into();
-        let empty_elo: TiVec<TournamentId, i64> = vec![0i64; cap].into();
-        let empty_rank: TiVec<TournamentId, i128> = vec![0i128; cap].into();
+        let fold = fold_ranks(&units, &free);
+        let empty_rank: TiVec<UnitKey, i128> = vec![0i128; units.len()].into();
         let ctx = Ctx {
-            scores: &scores,
+            units: &units,
             fold: &fold,
-            club_norm: &club_norm,
-            prequalified: &empty_prequalified,
             round: 2,
             floater_style: FloaterStyle::Median, // exercise the floater-selection bound
             exempt_clubs: &exempt_clubs,
@@ -2727,7 +2952,11 @@ mod tests {
                 .max()
                 .unwrap_or(0) as i128,
             free_count: free.len() as i128,
-            elo: &empty_elo,
+            max_boards: free
+                .iter()
+                .map(|&k| units[k].clubs.len())
+                .max()
+                .unwrap_or(0) as i128,
             elo_rank: &empty_rank,
             max_elo_gap: 0,
         };
@@ -2779,7 +3008,7 @@ mod tests {
             (p[2].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
         ];
 
-        let ex = explain_pairing(
+        let ex = explain_players(
             1,
             &p,
             &TournamentSettings::default(),
@@ -2817,7 +3046,7 @@ mod tests {
             (p[1].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
         ];
 
-        let ex = explain_pairing(
+        let ex = explain_players(
             1,
             &p,
             &TournamentSettings::default(),
@@ -2849,31 +3078,25 @@ mod tests {
         let settings =
             TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
         let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
-        let round = pair_round_weighted(1, &p, &settings, &[], &present, &[], &[], &[]);
+        let round = pair_players(1, &p, &settings, &[], &present, &[], &[], &[]);
 
         let boards: Vec<(TournamentId, TournamentId)> = round
             .boards
             .iter()
             .map(|b| (b.player1, b.player2))
             .collect();
-        let ex = explain_pairing(1, &p, &settings, &[], &boards, round.swiss_bye(), &[]);
+        let ex = explain_players(1, &p, &settings, &[], &boards, round.swiss_bye(), &[]);
 
         // Re-derive the units independently through a fresh model and compare.
         let mut free: Vec<TournamentId> = boards.iter().flat_map(|&(a, b)| [a, b]).collect();
         if let Some(b) = round.swiss_bye() {
             free.push(b);
         }
-        let model = PairingModel::build(
-            1,
-            &p,
-            &settings,
-            &[],
-            &free,
-            &[],
-            round.swiss_bye().is_some(),
-        );
+        let units = player_units(&p, &settings, &[], &[]);
+        let free: Vec<UnitKey> = free.into_iter().map(UnitKey::from).collect();
+        let model = PairingModel::build(1, &settings, &units, &free, round.swiss_bye().is_some());
         for (ledger, &(a, b)) in ex.boards.iter().zip(&boards) {
-            let units = model.edge_units(a, b);
+            let units = model.edge_units(UnitKey::from(a), UnitKey::from(b));
             let expected: i64 = model
                 .rules()
                 .iter()
@@ -2890,7 +3113,12 @@ mod tests {
     fn changed_pairs(cf: &Counterfactual) -> HashSet<(TournamentId, TournamentId)> {
         cf.changed
             .iter()
-            .map(|b| unord(b.player1, b.player2.unwrap_or(PHANTOM)))
+            .map(|b| {
+                unord(
+                    TournamentId::from(b.player1),
+                    b.player2.map_or(PHANTOM, TournamentId::from),
+                )
+            })
             .collect()
     }
 
@@ -2907,7 +3135,7 @@ mod tests {
             (p[1].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
         ];
 
-        let cf = counterfactual_force(
+        let cf = force_players(
             1,
             &p,
             &TournamentSettings::default(),
@@ -2951,7 +3179,7 @@ mod tests {
             (p[1].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
         ];
 
-        let cf = counterfactual_force(
+        let cf = force_players(
             1,
             &p,
             &TournamentSettings::default(),
@@ -2980,7 +3208,7 @@ mod tests {
             (p[1].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
         ];
 
-        let cf = counterfactual_force(
+        let cf = force_players(
             1,
             &p,
             &TournamentSettings::default(),
@@ -3006,7 +3234,7 @@ mod tests {
         // surfaced as a changed board with no player2.
         let p: Vec<Player> = (1..=3).map(|i| player(i, Some(1500), None)).collect();
         // Engine round: p0-p1 play, p2 byes (deterministic by tournament number).
-        let round = pair_round_weighted(
+        let round = pair_players(
             1,
             &p,
             &TournamentSettings::default(),
@@ -3026,7 +3254,7 @@ mod tests {
         let bye = round.swiss_bye().expect("odd count byes someone");
         let opponent = boards[0].0;
 
-        let cf = counterfactual_force(
+        let cf = force_players(
             1,
             &p,
             &TournamentSettings::default(),
@@ -3058,7 +3286,7 @@ mod tests {
             (p[1].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
         ];
 
-        let cf = counterfactual_forbid(
+        let cf = forbid_players(
             1,
             &p,
             &TournamentSettings::default(),
@@ -3097,7 +3325,7 @@ mod tests {
             (p[1].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
         ];
 
-        let cf = counterfactual_forbid(
+        let cf = forbid_players(
             1,
             &p,
             &TournamentSettings::default(),
@@ -3119,7 +3347,7 @@ mod tests {
         // instead (PHANTOM stands for the bye slot) — p2 must then play the
         // freed-up p1, and the new bye (p0) has no player2.
         let p: Vec<Player> = (1..=3).map(|i| player(i, Some(1500), None)).collect();
-        let round = pair_round_weighted(
+        let round = pair_players(
             1,
             &p,
             &TournamentSettings::default(),
@@ -3140,7 +3368,7 @@ mod tests {
         let (playing_a, playing_b) = boards[0];
         assert_ne!(playing_a, bye);
 
-        let cf = counterfactual_force(
+        let cf = force_players(
             1,
             &p,
             &TournamentSettings::default(),
@@ -3156,7 +3384,7 @@ mod tests {
         assert!(
             cf.changed
                 .iter()
-                .any(|b| b.player1 == playing_a && b.player2.is_none()),
+                .any(|b| TournamentId::from(b.player1) == playing_a && b.player2.is_none()),
             "the forced player now takes the bye"
         );
         assert!(
@@ -3170,7 +3398,7 @@ mod tests {
         // Same setup, but forbid the current bye instead of forcing a new one:
         // the bye-taker must now play, and someone else sits out.
         let p: Vec<Player> = (1..=3).map(|i| player(i, Some(1500), None)).collect();
-        let round = pair_round_weighted(
+        let round = pair_players(
             1,
             &p,
             &TournamentSettings::default(),
@@ -3189,7 +3417,7 @@ mod tests {
             .collect();
         let bye = round.swiss_bye().expect("odd count byes someone");
 
-        let cf = counterfactual_forbid(
+        let cf = forbid_players(
             1,
             &p,
             &TournamentSettings::default(),
@@ -3205,7 +3433,7 @@ mod tests {
         assert!(
             !cf.changed
                 .iter()
-                .any(|b| b.player1 == bye && b.player2.is_none()),
+                .any(|b| TournamentId::from(b.player1) == bye && b.player2.is_none()),
             "the old bye-taker no longer sits out"
         );
         assert!(
