@@ -224,7 +224,6 @@
     "notInRoundTitle": "Nie je v tomto kole",
     "noShowTitle": "Nedostavil sa proti hráčovi {name} (0#; počíta sa ako prehra)",
     "noShowWinTitle": "{name} sa nedostavil (0+; počíta sa ako výhra, tak ako voľno)",
-    "opponentTitle": "proti hráčovi {name}",
     "longPendingTitle": "Prebieha dlhá partia proti hráčovi {name} — výsledok sa objaví v stĺpci nasledujúceho kola",
     "handicapGameWin": "Pravidlo Wiel: ako hráč, ktorý dal hendikep, sa napriek prehratej partii počíta v tabuľke ako víťaz.",
     "handicapGameLoss": "Pravidlo Wiel: za víťaza sa počíta ten, kto dal hendikep, takže toto prekvapivé víťazstvo sa do tabuľky nezaráta.",

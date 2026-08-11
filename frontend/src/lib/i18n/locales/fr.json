@@ -224,7 +224,6 @@
     "notInRoundTitle": "Absent de cette ronde",
     "noShowTitle": "Absent contre {name} (0# ; compte comme une défaite)",
     "noShowWinTitle": "{name} ne s'est pas présenté (0+ ; compte comme une victoire, comme un exempt)",
-    "opponentTitle": "contre {name}",
     "longPendingTitle": "Partie longue contre {name} en cours — le résultat apparaît dans la colonne de la ronde suivante",
     "handicapGameWin": "Règle de Wiel : en tant que donneur de handicap, compte comme une victoire au classement malgré la défaite.",
     "handicapGameLoss": "Règle de Wiel : le donneur de handicap est considéré vainqueur, donc cette victoire surprise ne compte pas au classement.",

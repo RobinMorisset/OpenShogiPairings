@@ -193,6 +193,18 @@
     return p ? `${p.last_name} ${p.first_name}`.trim() : "—";
   };
 
+  /** How a cross-table cell names the opponent it faced: `Doe Jane (1800)`, or
+   * the bare name for an unrated player (an empty `()` would read as a missing
+   * value rather than an absent rating). The rating rides along because it is
+   * the question a referee hovers a cell to answer — was that a win against a
+   * strong player? — and the cross-table number alone doesn't say. */
+  const opponentLabel = (id: number): string => {
+    const p = byTid.get(id);
+    if (!p) return "—";
+    const name = `${p.last_name} ${p.first_name}`.trim();
+    return p.rating != null ? `${name} (${p.rating})` : name;
+  };
+
   // Show a MacMahon column (between Wins and Points) when the starting score
   // matters — either someone has MacMahon starting points, or a manual
   // bonus/penalty adjusts a starting score. Its cell hosts the adjustment
@@ -252,7 +264,7 @@
   type PlayedCell = {
     kind: "played";
     opponent: string;
-    /** The opponent's full name, for the cell tooltip. */
+    /** The opponent, named for the cell tooltip (see `opponentLabel`). */
     opponentName: string;
     /** This player actually won the game — drives the +/− sign and colour. */
     actualWon: boolean;
@@ -301,7 +313,7 @@
     const here = onLong(shownRounds[i]);
     if (here) {
       const opp = here.player1 === pid ? here.player2 : here.player1;
-      return { kind: "long-pending", opponentName: nameOfTid(opp) };
+      return { kind: "long-pending", opponentName: opponentLabel(opp) };
     }
     if (i > 0) {
       const prev = shownRounds[i - 1];
@@ -330,7 +342,7 @@
     const side: Winner = isP1 ? "player1" : "player2";
     const opponentTid = isP1 ? board.player2 : board.player1;
     const opponent = String(opponentTid);
-    const opponentName = nameOfTid(opponentTid);
+    const opponentName = opponentLabel(opponentTid);
     if (board.no_show) {
       // This side is a no-show for a single absence on their side, or when both
       // players were absent; otherwise they are the one who showed up.
@@ -725,22 +737,20 @@
                   >0+</span
                 >
               {:else if cell.kind === "pending"}
-                <span
-                  class="pending"
-                  data-tip={$_("resultsView.opponentTitle", { values: { name: cell.opponentName } })}
-                  >{cell.opponent}?</span
-                >
+                <!-- The opponent alone, unprefixed: the cell already says this
+                     is a game against them, so a "vs" in front of the name is
+                     a word the referee reads past on every single hover. -->
+                <span class="pending" data-tip={cell.opponentName}>{cell.opponent}?</span>
               {:else}
-                {@const opponentTitle = $_("resultsView.opponentTitle", { values: { name: cell.opponentName } })}
                 <span
                   class={cell.actualWon ? "win" : "loss"}
                   data-tip={cell.handicap && cell.effectiveWon !== cell.actualWon
-                    ? `${opponentTitle}\n${$_(
+                    ? `${cell.opponentName}\n${$_(
                         cell.effectiveWon
                           ? "resultsView.handicapGameWin"
                           : "resultsView.handicapGameLoss",
                       )}`
-                    : opponentTitle}>{playedLabel(cell)}</span
+                    : cell.opponentName}>{playedLabel(cell)}</span
                 >
               {/if}
             </td>

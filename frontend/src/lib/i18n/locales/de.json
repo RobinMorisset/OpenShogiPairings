@@ -224,7 +224,6 @@
     "notInRoundTitle": "Nicht in dieser Runde",
     "noShowTitle": "Nicht angetreten gegen {name} (0#; zählt als Niederlage)",
     "noShowWinTitle": "{name} ist nicht angetreten (0+; zählt als Sieg, wie ein Freilos)",
-    "opponentTitle": "gegen {name}",
     "longPendingTitle": "Langpartie gegen {name} läuft — das Ergebnis erscheint in der Spalte der nächsten Runde",
     "handicapGameWin": "Wiel-Regel: Als Vorgeber zählt dies für die Rangliste trotz der Niederlage als Sieg.",
     "handicapGameLoss": "Wiel-Regel: Der Vorgeber gilt als Sieger, daher zählt dieser überraschende Sieg nicht für die Rangliste.",

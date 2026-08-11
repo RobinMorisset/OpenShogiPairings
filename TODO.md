@@ -56,6 +56,4 @@ Known limitations and future work, roughly ordered by area.
 
 - **Reorganize the settings tab**. Some combinations make little sense (e.g. pure-ELO mode with any kind of cup)
 
-- **Tooltips of player names in standings tab** should lose the "contre" word, and gain the ELO of that player in parentheses after their name.
-
 - Check all instances of `#[allow(clippy::too_many_arguments)]`

@@ -224,7 +224,6 @@
     "notInRoundTitle": "Poza tą rundą",
     "noShowTitle": "Nie stawił się do partii z {name} (0#; liczy się jako porażka)",
     "noShowWinTitle": "{name} nie stawił się do partii (0+; liczy się jako zwycięstwo, tak jak pauza)",
-    "opponentTitle": "z {name}",
     "longPendingTitle": "Długa partia z {name} w toku — wynik pojawi się w kolumnie następnej rundy",
     "handicapGameWin": "Reguła „Wiel”: jako dający forę, mimo przegranej partii liczy się to w tabeli wyników jako zwycięstwo.",
     "handicapGameLoss": "Reguła „Wiel”: za zwycięzcę uznaje się dającego forę, więc ta niespodziewana wygrana nie liczy się w tabeli wyników.",

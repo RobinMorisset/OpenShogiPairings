@@ -224,7 +224,6 @@
     "notInRoundTitle": "この回戦には不参加",
     "noShowTitle": "{name} との対局に不出場（0#。負けとして扱います）",
     "noShowWinTitle": "{name} が不出場（0+。不戦勝と同じく勝ちとして扱います）",
-    "opponentTitle": "対 {name}",
     "longPendingTitle": "{name} との長時間対局が進行中です。結果は次の回戦の列に表示されます",
     "handicapGameWin": "Wielルール: 上手のため、対局には敗れましたが順位上は勝ちとして扱われます。",
     "handicapGameLoss": "Wielルール: 上手が勝ちとして扱われるため、この下手の勝ちは順位に反映されません。",

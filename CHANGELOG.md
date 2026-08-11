@@ -36,6 +36,11 @@ that field has no default. Re-create such a tournament rather than loading it.
   points and tie-break columns — and the ranking itself — still count completed
   rounds only, so the table re-sorts in one step at the end of the round rather
   than shuffling under the referee mid-round.
+- **A cross-table cell's tooltip names the opponent with their rating** —
+  `Doe Jane (1800)` — where it used to read `vs Doe Jane`. The "vs" said
+  nothing the cell didn't already, and the rating answers what the hover is
+  usually for: how strong was that opponent. An unrated opponent keeps the bare
+  name.
 
 ## [1.3.0] - 2026-08-05
 
