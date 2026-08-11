@@ -8,6 +8,7 @@
 //! the oldest backups beyond [`MAX_BACKUPS`] are deleted after each write.
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -132,7 +133,11 @@ fn rotate(dir: &Path) {
     files.sort_by_key(|(secs, seq, _)| (*secs, *seq));
     if files.len() > MAX_BACKUPS {
         for (_, _, path) in &files[..files.len() - MAX_BACKUPS] {
-            let _ = fs::remove_file(path);
+            // Keep rotating the rest either way, but say so: a rotation that
+            // keeps failing is how a backups directory grows without bound.
+            if let Err(e) = fs::remove_file(path) {
+                tracing::warn!("backup: could not rotate out {}: {e}", path.display());
+            }
         }
     }
 }
@@ -173,10 +178,17 @@ pub fn list(dir: Option<&Path>) -> Vec<BackupInfo> {
 }
 
 /// Delete every backup in `dir` (the whole directory), when the tournament it
-/// belongs to is deleted. Best-effort, like every other write here.
+/// belongs to is deleted. Best-effort, like every other write here — but a
+/// failure is logged, since backups of a deleted tournament left on disk are
+/// exactly what the caller asked to be rid of. A missing directory is not a
+/// failure: a tournament deleted before its first backup never had one.
 pub fn delete_all(dir: Option<&Path>) {
     if let Some(dir) = dir {
-        let _ = fs::remove_dir_all(dir);
+        if let Err(e) = fs::remove_dir_all(dir) {
+            if e.kind() != io::ErrorKind::NotFound {
+                tracing::warn!("backup: could not delete {}: {e}", dir.display());
+            }
+        }
     }
 }
 

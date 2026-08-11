@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -555,7 +556,12 @@ impl TournamentRegistry {
             return; // in-memory only
         };
         if let Some(dir) = &self.data_dir {
-            let _ = fs::create_dir_all(dir);
+            if let Err(e) = fs::create_dir_all(dir) {
+                // The write below would fail anyway; say which step went wrong,
+                // since "the data directory can't be created" and "this one file
+                // can't be written" call for different fixes.
+                tracing::warn!("could not create the data directory {}: {e}", dir.display());
+            }
         }
         let file = PersistedAuth {
             password_hash: Some(auth.password_hash().to_string()),
@@ -643,7 +649,11 @@ impl TournamentRegistry {
         let id = Uuid::new_v4();
         tournament.id = id;
         if let Some(dir) = &self.data_dir {
-            let _ = fs::create_dir_all(dir);
+            // Nothing below can be persisted without it, and each of those
+            // failures is logged on its own; this names the shared cause.
+            if let Err(e) = fs::create_dir_all(dir) {
+                tracing::warn!("could not create the data directory {}: {e}", dir.display());
+            }
         }
         let auth = password.map(AuthConfig::new);
         let token = auth.as_ref().map(|a| a.token().to_string());
@@ -686,11 +696,21 @@ impl TournamentRegistry {
             // point (and is now deleted) or sees the tombstone and refuses to
             // persist — so a late write can't resurrect the file on disk.
             instance.write().mark_deleted();
+            // A file that was never written is already in the state we want, so
+            // `NotFound` is success; anything else means a deleted tournament is
+            // still on disk and will come back at the next start — worth saying.
+            let delete = |path: PathBuf| {
+                if let Err(e) = fs::remove_file(&path) {
+                    if e.kind() != io::ErrorKind::NotFound {
+                        tracing::warn!("could not delete {}: {e}", path.display());
+                    }
+                }
+            };
             if let Some(path) = self.tournament_path(id) {
-                let _ = fs::remove_file(path);
+                delete(path);
             }
             if let Some(path) = self.auth_path(id) {
-                let _ = fs::remove_file(path);
+                delete(path);
             }
             crate::backup::delete_all(instance.backups_dir.as_deref());
         }

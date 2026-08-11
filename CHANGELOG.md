@@ -53,6 +53,21 @@ that field has no default. Re-create such a tournament rather than loading it.
 
 ### Changed
 
+- **The desktop app keeps a log file**, where it previously logged only in
+  development builds — so a packaged app had no way to report that it could not
+  save. It lives beside the app's other data (`~/Library/Logs/…` on macOS,
+  `%APPDATA%\org.openshogipairings.desktop\logs\` on Windows) as a single file
+  the app itself caps at 40 KB, and it stays near-empty: the release build logs
+  only warnings and errors, plus the startup lines saying which data and backup
+  directories are in use. Nothing is sent anywhere — it is a file to look at (or
+  attach to a bug report) when something has gone wrong.
+- **A filesystem failure the server used to ignore now says so.** Rotating an
+  old backup, deleting a tournament's files, caching the FESA rating list and
+  creating the data directory all discarded their errors, so a full disk or a
+  read-only directory produced silence and a job quietly not done. Each is still
+  best-effort — none of them interrupts what the referee is doing — but each now
+  leaves a line in the log. A file that was already absent when deleting it
+  stays silent, since that is the outcome that was wanted.
 - **The Results tab shows the round in progress**, instead of waiting for it to
   be completed. Its column (marked `R3*`) appears as soon as the round is
   paired, with each board's cell filling in the moment its result is recorded;

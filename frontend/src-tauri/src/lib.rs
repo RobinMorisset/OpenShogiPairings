@@ -110,13 +110,31 @@ pub fn run() {
             print_window
         ])
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            // Log in release too, not just in debug: the packaged app is where a
+            // referee actually meets a full disk or a read-only data directory, and
+            // the line saying their tournament is no longer being saved ("persist:
+            // could not write …") has to land somewhere they can be asked to look.
+            // The embedded server logs through `tracing`, which forwards to the
+            // `log` facade this plugin captures — no `tracing` subscriber is
+            // installed here, which is exactly the condition that forwarding needs.
+            //
+            // Release logs at WARN, because the default target keeps ONE file capped
+            // at 40 KB and *deletes* it when it overflows (`KeepOne`): at INFO the
+            // one interesting line would be rotated away by ordinary chatter, while
+            // a file that stays near-empty until something breaks holds a whole
+            // tournament's worth of trouble. This crate's own startup lines are kept
+            // at INFO either way — three lines per run, and the first question after
+            // "where did my tournament go?" is which directory it was using.
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(if cfg!(debug_assertions) {
+                        log::LevelFilter::Info
+                    } else {
+                        log::LevelFilter::Warn
+                    })
+                    .level_for("app_lib", log::LevelFilter::Info)
+                    .build(),
+            )?;
 
             // Start the API server in-process. Bind to 127.0.0.1:0 so the OS picks a
             // free port — this avoids clashing with anything else on the machine and
