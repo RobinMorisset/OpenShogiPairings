@@ -17,6 +17,18 @@ Known limitations and future work, roughly ordered by area.
 
 - **Weak club protection** Intermediate between normal and exempt.
 
+- **Freeze the round explanation at confirmation.** `explain_round` rebuilds the
+  `PairingModel` from `rounds[..idx]`, so correcting an earlier round's result, or
+  editing a rating, club or pairing setting, silently changes the reported
+  rationale of later rounds — while the ledger still looks plausible. Store the
+  `RoundExplanation` on the `Round` when it is confirmed (a record of a past event,
+  like the frozen `sitouts` scores, not a cache), bumping
+  `TOURNAMENT_FORMAT_VERSION` 5 → 6. Plus an `explanations_faithful_through`
+  watermark on the `Tournament` — decreasing only, `min(mark, k)` on a result edit
+  in round `k` and `0` on a player/settings edit — so rounds above it are shown
+  with a "the data behind this has changed since" warning. Design in the appendix
+  of [docs/public-access.md](docs/public-access.md).
+
 - **Team tournaments** — design settled in
   [docs/team-tournaments.md](docs/team-tournaments.md): teams as the pairing
   unit, boards as the atom, derived match outcomes. First step is the
@@ -29,7 +41,14 @@ Known limitations and future work, roughly ordered by area.
 
 - **Log of which user took which action**
 
-- **Read-only access to the pairings and standings**
+- **Read-only access to the pairings and standings** — design settled in
+  [docs/public-access.md](docs/public-access.md): a `PublicTournamentView`
+  projection (`TournamentView` minus the draft and the referee-only fields),
+  never showing a draft round but publishing each result as it lands, served
+  by its own unauthenticated router group. Three phases, each useful alone:
+  a public endpoint on the hosted server (capability URL + read-only frontend
+  mode), a static HTML export of the same projection for the desktop app, then
+  pushing it to a club's own site.
 
 - **Keep one backup on tournament deletion for a while** 1 month before losing a tournament backup sounds good
 
@@ -41,7 +60,20 @@ Known limitations and future work, roughly ordered by area.
 
 ## Other
 
-- **Webhook for pushing results and pulling players** See https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification
+- **Webhook for pushing results** — phase 3 of
+  [docs/public-access.md](docs/public-access.md) (push the public projection
+  whole, with a `{boot_id, version}` ordering key, never deltas). Reference:
+  https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification
+
+- **Pull the players list from a HelloAsso billetterie** Start from the back-office
+  CSV export mapped onto the existing `POST /players/import-csv`, not the API: no
+  secrets to store and no new dependency. The hard parts are identity, not format —
+  the registrant is not always the player, the FESA name/club/grade live in
+  free-text custom fields, so the import wants a review screen matching against the
+  rating list rather than a silent bulk insert; a re-import (registrations trickle
+  in) needs the HelloAsso participant id kept as an external key to dedup against.
+  Do not import email addresses (see the non-goals in
+  [docs/public-access.md](docs/public-access.md)).
 
 - **More complete american grid exporter** There should be fields in the settings with the dates
   and time control of the tournament, so they can be reported in the header of the american grid;
