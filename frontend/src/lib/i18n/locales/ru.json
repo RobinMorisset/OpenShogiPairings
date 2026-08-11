@@ -240,7 +240,8 @@
     "tiebreakNoOpponents": "Соперники пока не учтены",
     "tiebreakDropped": "(отброшено: {dropped})",
     "noRoundsCompleted": "Ни один тур ещё не завершён — результаты появятся здесь по мере завершения туров.",
-    "justifiedTitle": "Отсутствие по уважительной причине против {name} (0−; засчитывается как поражение)"
+    "justifiedTitle": "Отсутствие по уважительной причине против {name} (0−; засчитывается как поражение)",
+    "teamMatchTitle": "{name} ({elo}) — {wins}–{losses} на досках"
   },
   "pairingSource": {
     "swiss": "Швейцарская",
@@ -531,13 +532,5 @@
     "adjustmentReasonPlaceholder": "Причина (обязательно)",
     "cancelAdjustment": "Отмена",
     "addAdjustment": "Добавить"
-  },
-  "teamStandings": {
-    "title": "Командный зачёт",
-    "rank": "М",
-    "team": "Команда",
-    "opponents": "Соперники",
-    "expandTitle": "Показать игроков команды",
-    "gamesWon": "выиграно партий: {count}"
   }
 }

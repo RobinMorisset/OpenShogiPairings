@@ -240,7 +240,8 @@
     "tiebreakNoOpponents": "Zatiaľ sa nezapočítali žiadni súperi",
     "tiebreakDropped": "(vynechané: {dropped})",
     "noRoundsCompleted": "Zatiaľ nebolo dokončené žiadne kolo — výsledky sa tu objavia, ako budú kolá pribúdať.",
-    "justifiedTitle": "Ospravedlnená neprítomnosť proti {name} (0−; počíta sa ako prehra)"
+    "justifiedTitle": "Ospravedlnená neprítomnosť proti {name} (0−; počíta sa ako prehra)",
+    "teamMatchTitle": "{name} ({elo}) — {wins}–{losses} na šachovniciach"
   },
   "pairingSource": {
     "swiss": "Švajčiarsky systém",
@@ -531,13 +532,5 @@
     "adjustmentReasonPlaceholder": "Dôvod (povinný)",
     "cancelAdjustment": "Zrušiť",
     "addAdjustment": "Pridať"
-  },
-  "teamStandings": {
-    "title": "Družstvové poradie",
-    "rank": "Po",
-    "team": "Družstvo",
-    "opponents": "Súperi",
-    "expandTitle": "Zobraziť hráčov tohto družstva",
-    "gamesWon": "vyhrané partie: {count}"
   }
 }

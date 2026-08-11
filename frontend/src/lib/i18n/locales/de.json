@@ -240,7 +240,8 @@
     "tiebreakNoOpponents": "Noch keine Gegner gewertet",
     "tiebreakDropped": "(gestrichen: {dropped})",
     "noRoundsCompleted": "Noch keine Runde abgeschlossen — die Ergebnisse erscheinen hier, sobald Runden abgeschlossen werden.",
-    "justifiedTitle": "Entschuldigt abwesend gegen {name} (0−; zählt als Niederlage)"
+    "justifiedTitle": "Entschuldigt abwesend gegen {name} (0−; zählt als Niederlage)",
+    "teamMatchTitle": "{name} ({elo}) — {wins}–{losses} an den Brettern"
   },
   "pairingSource": {
     "swiss": "Schweizer System",
@@ -531,13 +532,5 @@
     "adjustmentReasonPlaceholder": "Grund (erforderlich)",
     "cancelAdjustment": "Abbrechen",
     "addAdjustment": "Hinzufügen"
-  },
-  "teamStandings": {
-    "title": "Mannschaftswertung",
-    "rank": "Pl",
-    "team": "Mannschaft",
-    "opponents": "Gegner",
-    "expandTitle": "Spieler dieser Mannschaft anzeigen",
-    "gamesWon": "{count} gewonnene Partien"
   }
 }

@@ -119,6 +119,10 @@ pub fn scope(state: AppState) -> Router<AppState> {
             "/rounds/{round_number}/sitouts/{player}",
             put(set_sitout_value),
         )
+        .route(
+            "/rounds/{round_number}/team-sitouts/{team_id}",
+            put(set_team_sitout_value),
+        )
         .route("/players", post(add_player))
         .route("/players/batch", post(add_players_batch))
         .route("/players/import-csv", post(import_players_csv))
@@ -716,6 +720,33 @@ async fn set_sitout_value(
     let mut store = instance.write();
     store.mutate(expected, |t| {
         t.set_sitout_value(params.round_number, params.player, req.value)
+            .map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// The round and team addressed by the team sit-out endpoint.
+#[derive(Deserialize)]
+struct TeamSitoutParams {
+    round_number: u32,
+    team_id: Uuid,
+}
+
+/// Set what a round scored a **team** that sat it out, writing the value to
+/// every member's entry at once.
+///
+/// A team sits out together and its score for the round is read from those
+/// entries, which have to agree — so this is the team-mode way to re-score such
+/// a round; the per-player endpoint above would leave them disagreeing.
+async fn set_team_sitout_value(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Path(params): Path<TeamSitoutParams>,
+    Json(req): Json<SetSitoutValueRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| {
+        t.set_team_sitout_value(params.round_number, params.team_id, req.value)
             .map(|_| ())
     })?;
     view(&store)

@@ -240,7 +240,8 @@
     "tiebreakNoOpponents": "Nie policzono jeszcze żadnych przeciwników",
     "tiebreakDropped": "(pominięto: {dropped})",
     "noRoundsCompleted": "Nie ukończono jeszcze żadnej rundy — wyniki pojawią się tutaj w miarę kończenia kolejnych rund.",
-    "justifiedTitle": "Nieobecność z ważnego powodu z {name} (0−; liczy się jako porażka)"
+    "justifiedTitle": "Nieobecność z ważnego powodu z {name} (0−; liczy się jako porażka)",
+    "teamMatchTitle": "{name} ({elo}) — {wins}–{losses} przy stolikach"
   },
   "pairingSource": {
     "swiss": "Szwajcarski",
@@ -531,13 +532,5 @@
     "adjustmentReasonPlaceholder": "Powód (wymagany)",
     "cancelAdjustment": "Anuluj",
     "addAdjustment": "Dodaj"
-  },
-  "teamStandings": {
-    "title": "Klasyfikacja drużynowa",
-    "rank": "Ms",
-    "team": "Drużyna",
-    "opponents": "Przeciwnicy",
-    "expandTitle": "Pokaż zawodników tej drużyny",
-    "gamesWon": "wygrane partie: {count}"
   }
 }

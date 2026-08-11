@@ -61,9 +61,16 @@ rather than half-parsed; re-create the tournament.
   once registration is finalized, matching the frozen rosters.
 - **Team results in the interface**: the round view groups a round's boards by
   the match they belong to, each under a header naming the two teams and the
-  board wins so far, and the Standings tab gains a team table above the
-  per-player one — ranked by the configured criteria, with each team row
-  expanding to its players in board order and the games each of them won.
+  board wins so far, and the Standings tab becomes one table — each team,
+  ranked by the configured criteria, followed by its players in board order.
+  The team's name straddles the player columns; the matches won, the ranking
+  criteria and the float markers belong to the team row, since those are team
+  quantities. The
+  round columns are shared: the team's cell names the team it met and how the
+  match went, the player's names their own opponent. A round a team sat out is
+  re-scored (`0+` / `0=` / `0−`) from the team's own cell, which writes the
+  value to every member at once — a team sits out together, and its score for
+  that round is read from entries that have to agree.
 - **Justified absences.** A forfeited board now records *why* each missing side
   missed it, and the cross-table and American grid say so: `0-` for a player
   absent for a reason, `0#` for one who simply didn't turn up. It exists because

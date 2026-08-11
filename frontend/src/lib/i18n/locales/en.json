@@ -240,7 +240,8 @@
     "tiebreakNoOpponents": "No opponents counted yet",
     "tiebreakDropped": "(dropped {dropped})",
     "noRoundsCompleted": "No rounds completed yet — results appear here as rounds are completed.",
-    "justifiedTitle": "Absent for a reason vs {name} (0−; counts as a loss)"
+    "justifiedTitle": "Absent for a reason vs {name} (0−; counts as a loss)",
+    "teamMatchTitle": "{name} ({elo}) — {wins}–{losses} on the boards"
   },
   "pairingSource": {
     "swiss": "Swiss",
@@ -531,13 +532,5 @@
     "adjustmentReasonPlaceholder": "Reason (required)",
     "cancelAdjustment": "Cancel",
     "addAdjustment": "Add"
-  },
-  "teamStandings": {
-    "title": "Team standings",
-    "rank": "Rk",
-    "team": "Team",
-    "opponents": "Opponents",
-    "expandTitle": "Show this team's players",
-    "gamesWon": "{count} games won"
   }
 }

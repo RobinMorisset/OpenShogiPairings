@@ -240,7 +240,8 @@
     "tiebreakNoOpponents": "対象となる対戦相手がまだいません",
     "tiebreakDropped": "（除外: {dropped}）",
     "noRoundsCompleted": "終了した回戦はまだありません。回戦が終わるごとにここに表示されます。",
-    "justifiedTitle": "{name} との対局を事由ありで欠席（0−。負けとして扱います）"
+    "justifiedTitle": "{name} との対局を事由ありで欠席（0−。負けとして扱います）",
+    "teamMatchTitle": "{name} ({elo}) — 盤上 {wins}–{losses}"
   },
   "pairingSource": {
     "swiss": "スイス式",
@@ -531,13 +532,5 @@
     "adjustmentReasonPlaceholder": "理由（必須）",
     "cancelAdjustment": "キャンセル",
     "addAdjustment": "追加"
-  },
-  "teamStandings": {
-    "title": "団体順位",
-    "rank": "順位",
-    "team": "チーム",
-    "opponents": "対戦相手",
-    "expandTitle": "このチームの選手を表示",
-    "gamesWon": "{count} 勝"
   }
 }

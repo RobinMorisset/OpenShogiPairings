@@ -548,7 +548,7 @@ mod tests {
     use crate::player::NewPlayer;
     use crate::round::{AbsenceKind, Forfeit, Outcome};
     use crate::settings::{MacMahonThreshold, TeamSettings};
-    use crate::tournament::Tournament;
+    use crate::tournament::{Tournament, TournamentError};
     use uuid::Uuid;
 
     /// A finalized team tournament of `teams` teams of `size`, players rated
@@ -716,6 +716,42 @@ mod tests {
         let slots = t.team_slots();
         let second = slots.team_of(t.rounds[1].sitouts[0].player).unwrap();
         assert_ne!(second, bye_team, "a team took two byes");
+    }
+
+    #[test]
+    fn a_teams_sit_out_is_re_scored_for_the_whole_team_at_once() {
+        let (mut t, _) = tournament(2, 3, TournamentSettings::default());
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        let number = t.rounds[0].number;
+        for i in 0..t.rounds[0].boards.len() {
+            t.toggle_board_winner(number, i, Winner::Player1).unwrap();
+        }
+        let slots = t.team_slots();
+        let bye_key = slots.team_of(t.rounds[0].sitouts[0].player).unwrap();
+        let bye_team = t
+            .teams
+            .iter()
+            .find(|team| team.tournament_id == Some(bye_key))
+            .unwrap()
+            .id;
+
+        // Downgraded to a half point: every member's entry moves together, so
+        // the team scores it once and `team_sitout`'s uniformity holds.
+        t.set_team_sitout_value(number, bye_team, SitoutValue::Half)
+            .unwrap();
+        assert!(t.rounds[0]
+            .sitouts
+            .iter()
+            .all(|s| s.value == SitoutValue::Half));
+        assert_eq!(scores(&t).get(bye_key).points, HalfPoints::from_halves(1));
+
+        // A team that played has no team-level cell to re-score.
+        let played = t.teams.iter().find(|team| team.id != bye_team).unwrap().id;
+        assert!(matches!(
+            t.set_team_sitout_value(number, played, SitoutValue::Full),
+            Err(TournamentError::PlayerNotSittingOut { .. })
+        ));
     }
 
     #[test]

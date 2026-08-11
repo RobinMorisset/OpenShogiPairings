@@ -734,6 +734,22 @@ export function setSitoutValue(
   );
 }
 
+/**
+ * The same for a whole team's sit-out, writing the value to every member's
+ * entry at once — a team sits out together, and its score for the round is read
+ * from entries that have to agree.
+ */
+export function setTeamSitoutValue(
+  roundNumber: number,
+  teamId: string,
+  value: SitoutValue,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    scopedPath(`/rounds/${roundNumber}/team-sitouts/${teamId}`),
+    { method: "PUT", body: JSON.stringify({ value }) },
+  );
+}
+
 /** Register a player in the current tournament. */
 export function addPlayer(player: NewPlayer): Promise<TournamentResponse> {
   return request<TournamentResponse>(scopedPath("/players"), {

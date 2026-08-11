@@ -240,7 +240,8 @@
     "tiebreakNoOpponents": "Aucun adversaire comptabilisé pour l'instant",
     "tiebreakDropped": "(retiré : {dropped})",
     "noRoundsCompleted": "Aucune ronde terminée pour l'instant — les résultats apparaîtront ici au fur et à mesure.",
-    "justifiedTitle": "Absent pour un motif valable contre {name} (0− ; compte comme une défaite)"
+    "justifiedTitle": "Absent pour un motif valable contre {name} (0− ; compte comme une défaite)",
+    "teamMatchTitle": "{name} ({elo}) — {wins}–{losses} sur les échiquiers"
   },
   "pairingSource": {
     "swiss": "Suisse",
@@ -531,13 +532,5 @@
     "adjustmentReasonPlaceholder": "Motif (obligatoire)",
     "cancelAdjustment": "Annuler",
     "addAdjustment": "Ajouter"
-  },
-  "teamStandings": {
-    "title": "Classement par équipes",
-    "rank": "Rg",
-    "team": "Équipe",
-    "opponents": "Adversaires",
-    "expandTitle": "Afficher les joueurs de cette équipe",
-    "gamesWon": "{count} parties gagnées"
   }
 }

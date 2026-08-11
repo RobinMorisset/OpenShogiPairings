@@ -240,7 +240,8 @@
     "tiebreakNoOpponents": "Суперників поки не враховано",
     "tiebreakDropped": "(відкинуто: {dropped})",
     "noRoundsCompleted": "Жодного туру ще не завершено — результати з'являтимуться тут у міру завершення турів.",
-    "justifiedTitle": "Відсутність з поважної причини проти {name} (0−; зараховується як поразка)"
+    "justifiedTitle": "Відсутність з поважної причини проти {name} (0−; зараховується як поразка)",
+    "teamMatchTitle": "{name} ({elo}) — {wins}–{losses} на дошках"
   },
   "pairingSource": {
     "swiss": "Швейцарська",
@@ -531,13 +532,5 @@
     "adjustmentReasonPlaceholder": "Причина (обов'язково)",
     "cancelAdjustment": "Скасувати",
     "addAdjustment": "Додати"
-  },
-  "teamStandings": {
-    "title": "Командний залік",
-    "rank": "М",
-    "team": "Команда",
-    "opponents": "Суперники",
-    "expandTitle": "Показати гравців команди",
-    "gamesWon": "виграно партій: {count}"
   }
 }

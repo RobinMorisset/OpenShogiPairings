@@ -335,6 +335,7 @@ that tournament's bearer token if it has a password (except `/login` and
 | `PUT /rounds/{n}/boards/{i}/handicap` | Set/clear the handicap: `{ "handicap": "4p"｜null }` (giver frozen from ratings; 400 if ratings equal). |
 | `POST /rounds/{n}/boards/{i}/long` | Flag/unflag a board as a two-round "long game": `{ "long": true｜false }` (only when `long_boards_enabled`). Flagging the last-undecided board can complete the round, like recording a result. |
 | `PUT /rounds/{n}/sitouts/{player}` | Re-score what a round was worth to a player who sat it out: `{ "value": "zero"｜"half"｜"full" }`. Allowed on completed rounds. |
+| `PUT /rounds/{n}/team-sitouts/{team_id}` | The same for a whole team, writing the value to every member's entry at once — a team sits out together and its score for the round is read from entries that must agree, so this is how a team's bye or absence is re-scored. Team mode only; rejects a team that played that round. |
 | `POST /players` | Register a player: `{ "last_name", "first_name?", "rating?", "grade?", "nationality?", "club?" }` (`grade` is `{ "kind": "dan"｜"kyu", "level": … }`). |
 | `POST /players/batch` | Register several players at once (one undo step): a JSON array of player objects, each shaped like the `POST /players` body. |
 | `POST /players/import-csv` | Register a roster from a raw CSV text body (parsed server-side, ratings matched against the FESA cache), as a single undo step. |

@@ -38,6 +38,7 @@
     setPlayerCategory,
     setSitoutValue,
     setTeamBoardOrder,
+    setTeamSitoutValue,
     sortTeamByRating,
     undoTournament,
     updateDraft,
@@ -76,7 +77,6 @@
   import PlayerRegistration from "./lib/components/PlayerRegistration.svelte";
   import PlayerList from "./lib/components/PlayerList.svelte";
   import TeamsPanel from "./lib/components/TeamsPanel.svelte";
-  import TeamStandingsView from "./lib/components/TeamStandingsView.svelte";
   import RoundView from "./lib/components/RoundView.svelte";
   import RoundDraftView from "./lib/components/RoundDraftView.svelte";
   import ResultsView from "./lib/components/ResultsView.svelte";
@@ -792,6 +792,12 @@
     });
   }
 
+  function handleSetTeamSitoutValue(roundNumber: number, teamId: string, value: SitoutValue) {
+    run(async () => {
+      apply(await setTeamSitoutValue(roundNumber, teamId, value));
+    });
+  }
+
   function handleSetNoShow(roundNumber: number, boardIndex: number, absent: Forfeit | null) {
     run(async () => {
       apply(await setBoardNoShow(roundNumber, boardIndex, absent));
@@ -1183,21 +1189,15 @@
             {busy}
           />
         {:else if activeTab === "results"}
-          {#if teamMode && teamStandings.length > 0}
-            <TeamStandingsView
-              {teamStandings}
-              {standings}
-              players={tournament.players}
-              tiebreaks={tournament.settings.tiebreaks ?? []}
-            />
-          {/if}
           <ResultsView
             {tournament}
             {standings}
+            teamStandings={teamMode ? teamStandings : []}
             {cupPodium}
             {effectiveWinners}
             categories={tournament.settings.categories ?? []}
             onSetSitoutValue={handleSetSitoutValue}
+            onSetTeamSitoutValue={handleSetTeamSitoutValue}
           />
         {:else if activeTab === "cup" && tournament.cup && cupBracket}
           <CupBracket bracket={cupBracket} cup={tournament.cup} players={tournament.players} />

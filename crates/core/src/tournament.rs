@@ -1783,6 +1783,57 @@ impl Tournament {
         Ok(round)
     }
 
+    /// Re-score a round a whole **team** sat out (`0+` / `0=` / `0−`).
+    ///
+    /// A team sits out together — a bye or an absence is one entry per member —
+    /// and what the round was worth to the team is read from those entries,
+    /// which [`team_sitout`](crate::team_scoring) requires to agree. So the
+    /// value is written to every member at once: re-scoring one member would
+    /// leave a team whose own entries disagree about what it scored.
+    ///
+    /// Rejects a team that played that round (or has a member who did), naming
+    /// the member without a sit-out, rather than half-applying.
+    pub fn set_team_sitout_value(
+        &mut self,
+        round_number: u32,
+        team: Uuid,
+        value: SitoutValue,
+    ) -> Result<&Round, TournamentError> {
+        if !self.settings.team_mode() {
+            return Err(TournamentError::NotATeamTournament);
+        }
+        if !self.teams.iter().any(|t| t.id == team) {
+            return Err(TournamentError::TeamNotFound(team));
+        }
+        let members: Vec<TournamentId> = self
+            .team_members(team)
+            .iter()
+            .filter_map(|p| p.tournament_id)
+            .collect();
+        let round = self
+            .rounds
+            .iter_mut()
+            .find(|r| r.number == round_number)
+            .ok_or(TournamentError::RoundNotFound(round_number))?;
+        // Check every member first: a team that played has no team-level cell to
+        // re-score, and writing the ones that do sit out would be a half-edit.
+        if let Some(&player) = members
+            .iter()
+            .find(|&&m| !round.sitouts.iter().any(|s| s.player == m))
+        {
+            return Err(TournamentError::PlayerNotSittingOut {
+                round: round_number,
+                player,
+            });
+        }
+        for sitout in round.sitouts.iter_mut() {
+            if members.contains(&sitout.player) {
+                sitout.value = value;
+            }
+        }
+        Ok(round)
+    }
+
     /// Mark a board as forfeited, or clear it.
     ///
     /// `absent` names the side(s) that missed the board and why — see

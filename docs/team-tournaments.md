@@ -553,12 +553,16 @@ silent edit of what they asked for.
 
 ### Standings display
 
-Primary table: teams, ranked by the team tiebreak chain — same columns and
-interaction style as today's standings. Each team row expands to (or is
-followed by) its N member rows showing board number, name, individual wins,
-and per-round cells. The cross-table shows opposing team numbers per round
-with the match result. (Inspiration: shogideutschland WOSC team results
-page; consistency with our existing standings wins over matching it exactly.)
+**Landed.** One table, not two: each team's row ranked by the team tiebreak
+chain, followed by its N members in board order. The team's name straddles
+the columns that describe a *player* (both names, rating, nationality,
+club), and the matches won, the ranking criteria, the MacMahon start and
+the float markers sit on the team row alone — they are team quantities, and the float is a
+fact of the team pairing. The round columns are shared: a team's cell names
+the opposing team number and the match result (`3+`, `2=` for a level
+match), a player's names their own opponent. (Inspiration: shogideutschland
+WOSC team results page; consistency with our existing standings wins over
+matching it exactly.)
 
 Per-player ordering, where a flat player list is needed (the grid): team
 rank, then board number — no cross-team player ranking is invented, since
