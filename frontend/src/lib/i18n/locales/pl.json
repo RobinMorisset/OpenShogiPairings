@@ -482,6 +482,10 @@
     "est_elo": {
       "label": "Szac. ELO",
       "title": "Bieżąca bayesowska estymacja aktualnej siły gracza"
+    },
+    "board_wins": {
+      "label": "Wygrane partie",
+      "title": "Wygrane partie — własne zawodnika albo suma drużyny ze wszystkich szachownic"
     }
   }
 }

@@ -25,7 +25,9 @@ Known limitations and future work, roughly ordered by area.
   team tournament can be configured, rostered, finalized and played. Next: the
   justified/unjustified absence distinction (a partly absent team is refused
   until then), team-level draft operations, standings and tie-breaks, team
-  point adjustments, the server routes and the UI.
+  point adjustments (per-player ones are refused in team mode meanwhile), the
+  team CRUD routes and the UI. Team standings and the `BoardWins` tie-break have
+  landed.
 
 ## Multi-referee server
 

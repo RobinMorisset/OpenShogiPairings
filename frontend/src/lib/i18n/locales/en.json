@@ -482,6 +482,10 @@
     "est_elo": {
       "label": "Est. ELO",
       "title": "Live Bayesian estimate of the player's current strength"
+    },
+    "board_wins": {
+      "label": "Board wins",
+      "title": "Games won — a player's own, or a team's total across every board"
     }
   }
 }

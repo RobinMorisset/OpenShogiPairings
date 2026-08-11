@@ -9,8 +9,8 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{
     Board, Counterfactual, CounterfactualMode, CupBracketView, CupPodium, Handicap, NewPlayer,
-    NoShow, RoundExplanation, SitoutValue, Standing, Tournament, TournamentId, TournamentSettings,
-    Winner,
+    NoShow, RoundExplanation, SitoutValue, Standing, TeamStanding, Tournament, TournamentId,
+    TournamentSettings, Winner,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -164,6 +164,11 @@ struct TournamentView {
     /// echo of their own change (see [`crate::live`]).
     version: u32,
     standings: Vec<Standing>,
+    /// The ranked team standings, in team mode only — the table the Standings
+    /// tab shows there, with the per-player figures staying in `standings` for
+    /// the breakdown rows. `None` for an individual tournament.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    team_standings: Option<Vec<TeamStanding>>,
     /// The cup podium once decided (champion / runner-up / third / fourth), for the
     /// Results-tab medals. `None` when there is no cup or the final isn't finished.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -193,6 +198,7 @@ struct TournamentView {
 fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
     let tournament = store.current().cloned().ok_or(ApiError::NoTournament)?;
     let standings = tournament.standings();
+    let team_standings = tournament.team_standings();
     let cup_podium = tournament.cup_podium();
     let cup_bracket = tournament.cup_bracket();
     let draft_cup_players = tournament.draft_cup_players();
@@ -223,6 +229,7 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
         can_undo: store.can_undo(),
         version: store.version(),
         standings,
+        team_standings,
         cup_podium,
         cup_bracket,
         draft_cup_players,

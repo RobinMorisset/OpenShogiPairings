@@ -404,6 +404,12 @@ pub enum Tiebreak {
     /// The live Bayesian ELO estimate (experimental ELO pairing mode). Ranks
     /// higher estimate first, like the other metrics.
     EstElo,
+    /// Games won: a player's own wins, or — in a team tournament, where it is
+    /// the established second criterion after match points — the total won by a
+    /// team's players across every board. Distinct from [`Points`](Self::Points),
+    /// which also carries MacMahon starting points and (for a team) counts a
+    /// match rather than the boards inside it.
+    BoardWins,
 }
 
 impl Tiebreak {
@@ -413,6 +419,19 @@ impl Tiebreak {
     pub fn default_order() -> Vec<Tiebreak> {
         vec![
             Tiebreak::Points,
+            Tiebreak::SosM,
+            Tiebreak::SodosM,
+            Tiebreak::SososM,
+        ]
+    }
+
+    /// The default ranking order for a **team** tournament: match points, then
+    /// board wins, then the SOS family — established team-event practice, and
+    /// what the referee gets by switching a fresh tournament to team mode.
+    pub fn default_team_order() -> Vec<Tiebreak> {
+        vec![
+            Tiebreak::Points,
+            Tiebreak::BoardWins,
             Tiebreak::SosM,
             Tiebreak::SodosM,
             Tiebreak::SososM,

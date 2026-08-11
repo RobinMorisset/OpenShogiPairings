@@ -37,6 +37,14 @@ clear message rather than half-parsed; re-create the tournament.
   counts the same-club *games* a match would create, so a mixed-club team is
   handled without any notion of a "team club". Simulating a team tournament is
   refused explicitly — its metrics are all defined over individual standings.
+- **Team standings**, ranked by the same criteria with team semantics: the SOS
+  family sums opposing *teams'* scores and direct confrontation counts matches
+  won. A new **board wins** tie-break counts games won — a team's total across
+  every board, the established second criterion in team events after match
+  points, and a player's own game count in an individual tournament. Per-player
+  point adjustments are refused in team mode for now, since the ranking is by
+  team and a per-player bonus would move nothing visible; team-level adjustments
+  are still to come.
 
 - **Hybrid cup: a qualification-round format** (Settings → Hybrid cup), used by
   the German Championship. The top half of the bracket is pre-qualified and

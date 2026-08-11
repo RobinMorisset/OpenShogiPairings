@@ -10,8 +10,8 @@ team tournament can therefore be configured, rostered, finalized and played.
 
 Still to come: the justified/unjustified absence distinction (so a partly absent
 team is refused for now), team-level draft operations (forced matches, forced
-byes, the counterfactual probe), team standings and tie-breaks, team point
-adjustments, the server routes, and the whole UI.
+byes, the counterfactual probe), team point adjustments (per-player ones are
+refused in team mode meanwhile), the team CRUD routes, and the whole UI.
 
 A team tournament is the format that traditionally precedes European shogi
 championships (e.g. WOSC): teams of N players (usually N = 3) are the unit of
@@ -505,7 +505,9 @@ The existing `Tiebreak` enum generalizes with team semantics (SOS/SODOS/
 SOSOS/CUSS over opposing *teams'* team scores; direct confrontation over team
 matches). Additions and restrictions:
 
-- new variant `BoardWins` — total member game wins;
+- new variant `BoardWins` — total member game wins. **Landed**, and defined in
+  individual mode too, where it is simply the player's own game count: it is one
+  quantity read at two levels, so no mode has to reject it;
 - `EstElo` rejected in team mode (settings validation);
 - default team tiebreak order: match points, then `BoardWins`, then the SOS
   family as today — matching established team-event practice (match points,
@@ -515,6 +517,20 @@ matches). Additions and restrictions:
 `Uuid`, carrying the tiebreak columns plus `board_wins` and per-member
 references). The frontend's hand-maintained `TIEBREAKS` table in
 `types.ts` gains the `BoardWins` row.
+
+**Landed** as `compute_team_standings`. The ranking loop itself is now shared
+with the player standings (`rank_groups`), because the subtle part — direct
+confrontation, whose value depends on who is *still* tied once the earlier
+criteria have run out, so ranking splits groups criterion by criterion rather
+than sorting once — is identical for both. `Tiebreak::default_team_order()`
+gives the team default (match points, board wins, then the SOS family); it is
+what the settings UI will offer when team mode is switched on, rather than
+something applied behind the referee's back to an order they may have chosen.
+
+One ordering fix fell out: the team-mode conflicts are now checked *before*
+`normalized()`, which would otherwise quietly drop the estimated-ELO tie-break
+(it can't rank in team mode) and turn a conflict the referee should see into a
+silent edit of what they asked for.
 
 ### Standings display
 
@@ -548,7 +564,7 @@ The store stays dumb. Additions:
   boards, rename), team-level draft operations, team adjustments — each a
   one-line delegation to a `Tournament` method, like everything else;
 - `TournamentView` gains `team_standings: Option<Vec<TeamStanding>>`
-  (`None` outside team mode);
+  (`None` outside team mode) — **landed**;
 - `Tournament` gains `teams: Vec<Team>` (empty and absent from JSON outside
   team mode).
 

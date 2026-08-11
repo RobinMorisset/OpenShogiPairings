@@ -482,6 +482,10 @@
     "est_elo": {
       "label": "Odh. ELO",
       "title": "Priebežný bayesovský odhad aktuálnej sily hráča"
+    },
+    "board_wins": {
+      "label": "Vyhrané partie",
+      "title": "Vyhrané partie — vlastné u hráča, alebo súčet družstva na všetkých šachovniciach"
     }
   }
 }

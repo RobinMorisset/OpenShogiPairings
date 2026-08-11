@@ -13,7 +13,8 @@ use typed_index_collections::TiVec;
 
 use crate::player::Player;
 use crate::round::{Board, Round, SitoutKind, SitoutValue, Winner};
-use crate::settings::TournamentSettings;
+use crate::settings::{Tiebreak, TournamentSettings};
+use crate::standings::{rank_groups, sum_dropping_lowest, DcRow};
 use crate::team::{average_pairing_rating, Team};
 use crate::units::{HalfPoints, TeamId, TournamentId, Wins};
 
@@ -771,6 +772,140 @@ mod tests {
         assert!(matches[0].team1.min(matches[0].team2) < matches[1].team1.min(matches[1].team2));
     }
 
+    // --- Standings --------------------------------------------------------
+
+    /// Play `rounds` rounds where the *first* board of every match is won by
+    /// player 1 and the rest by player 2 — enough to spread the teams out.
+    fn play(t: &mut Tournament, rounds: u32) {
+        for _ in 0..rounds {
+            t.prepare_round().unwrap();
+            t.confirm_round().unwrap();
+            let number = t.rounds.last().unwrap().number;
+            let count = t.rounds.last().unwrap().boards.len();
+            for i in 0..count {
+                let side = if i % 2 == 0 {
+                    Winner::Player1
+                } else {
+                    Winner::Player2
+                };
+                t.toggle_board_winner(number, i, side).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn team_standings_rank_by_match_points_then_board_wins() {
+        let (mut t, _) = tournament(3, 2, TournamentSettings::default());
+        // 2–1 to whichever team is on player1, so it takes the match.
+        one_match(
+            &mut t,
+            &[
+                Outcome::won(Winner::Player1),
+                Outcome::won(Winner::Player2),
+                Outcome::won(Winner::Player1),
+            ],
+        );
+        let table = compute_team_standings(&t.teams, &t.players, &t.settings, &t.rounds);
+        assert_eq!(table.len(), 2);
+        assert_eq!(table[0].tournament_id, TeamId(1));
+        assert_eq!(table[0].points, HalfPoints::from_whole(1));
+        assert_eq!(table[0].board_wins, Wins(2));
+        assert_eq!(table[0].victories, Wins(1));
+        assert_eq!(table[1].board_wins, Wins(1));
+        // The members come back in board order, ready for the breakdown rows.
+        assert_eq!(table[0].members.len(), 3);
+        // Opponents and defeated face callers by team id, as `Standing` does.
+        assert_eq!(table[0].opponents, vec![table[1].team_id]);
+        assert_eq!(table[0].defeated, vec![table[1].team_id]);
+    }
+
+    /// Board wins break a tie on match points — the established second criterion
+    /// in team events, and the reason the tie-break exists.
+    #[test]
+    fn board_wins_break_a_tie_on_match_points() {
+        let settings = TournamentSettings {
+            tiebreaks: Tiebreak::default_team_order(),
+            ..TournamentSettings::default()
+        };
+        // Four teams of two over one round: both matches drawn 1–1 would leave
+        // everyone level, so make one match 2–0 and the other 1–1.
+        let (mut t, _) = tournament(2, 4, settings);
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        let number = t.rounds[0].number;
+        let slots = t.team_slots();
+        let matches = matches_in_round(&t.rounds[0], &slots);
+        // First match: a clean sweep for team1. Second: one each.
+        for (m, sides) in matches.iter().zip([
+            [Winner::Player1, Winner::Player1],
+            [Winner::Player1, Winner::Player2],
+        ]) {
+            for (&i, side) in m.boards.iter().zip(sides) {
+                t.toggle_board_winner(number, i, side).unwrap();
+            }
+        }
+        let table = compute_team_standings(&t.teams, &t.players, &t.settings, &t.rounds);
+        // The sweeping team leads on match points; the two drawn teams are level
+        // on points and split by board wins (1 each) — so the loser of the sweep
+        // (0 board wins) comes last.
+        assert_eq!(table[0].points, HalfPoints::from_whole(1));
+        assert_eq!(table.last().unwrap().board_wins, Wins(0));
+        assert!(table[1].points == table[2].points);
+        assert!(table[1].board_wins >= table[2].board_wins);
+    }
+
+    #[test]
+    fn the_sos_family_sums_opposing_teams_team_scores() {
+        let (mut t, _) = tournament(2, 4, TournamentSettings::default());
+        play(&mut t, 3);
+        let table = compute_team_standings(&t.teams, &t.players, &t.settings, &t.rounds);
+        let by_id: HashMap<uuid::Uuid, &TeamStanding> =
+            table.iter().map(|s| (s.team_id, s)).collect();
+        for s in &table {
+            // Three rounds of four teams: everyone played everyone once.
+            assert_eq!(s.opponents.len(), 3);
+            let expected: u32 = s.opponents.iter().map(|o| by_id[o].points.halves()).sum();
+            assert_eq!(
+                s.sosm.halves(),
+                expected,
+                "SOSM sums opposing teams' points"
+            );
+            let expected_w: u32 = s.opponents.iter().map(|o| by_id[o].victories.get()).sum();
+            assert_eq!(s.sosw.get(), expected_w);
+            // ...and the running columns have one entry per completed round.
+            assert_eq!(s.running_points.len(), 3);
+        }
+    }
+
+    #[test]
+    fn direct_confrontation_ranks_teams_that_all_played_each_other() {
+        let settings = TournamentSettings {
+            tiebreaks: vec![Tiebreak::Points, Tiebreak::Dc],
+            ..TournamentSettings::default()
+        };
+        let (mut t, _) = tournament(2, 4, settings);
+        play(&mut t, 3);
+        let table = compute_team_standings(&t.teams, &t.players, &t.settings, &t.rounds);
+        // Every team met every other, so any tied group is a complete subgraph
+        // and DC applies: a team's DC never exceeds the matches it won.
+        for s in &table {
+            assert!(s.dc <= s.victories);
+        }
+    }
+
+    #[test]
+    fn standings_are_empty_before_finalization_and_absent_outside_team_mode() {
+        let mut t = Tournament::new("Teams").unwrap();
+        t.update_settings(TournamentSettings {
+            teams: Some(TeamSettings { size: 2 }),
+            ..TournamentSettings::default()
+        })
+        .unwrap();
+        assert_eq!(t.team_standings(), Some(Vec::new()));
+        let individual = Tournament::new("Solo").unwrap();
+        assert_eq!(individual.team_standings(), None);
+    }
+
     #[test]
     fn the_wiel_rule_decides_board_wins_as_it_decides_a_players_score() {
         let (mut t, _) = tournament(
@@ -807,4 +942,185 @@ mod tests {
         assert_eq!(giver, Winner::Player1);
         assert_eq!((result.wins1, result.wins2), (Wins(1), Wins(1)));
     }
+}
+
+/// One team's standing: score, board wins and every tie-break metric — the team
+/// twin of [`Standing`](crate::standings::Standing). Its position in the
+/// [`compute_team_standings`] vector is the team's rank.
+///
+/// Faces callers by team [`Uuid`], as `Standing` does by player id; the members
+/// are listed in board order so a client can expand a team row into its players
+/// without re-deriving the roster.
+///
+/// There is no `estimated_elo`: the estimate is a per-player quantity, and the
+/// tie-break that ranks by it is rejected in team mode.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct TeamStanding {
+    pub team_id: uuid::Uuid,
+    /// Dense team number, for the cross-table's opponent column.
+    pub tournament_id: TeamId,
+    pub name: String,
+    /// Matches won (a drawn match scores half a point but no victory).
+    pub victories: Wins,
+    /// Games won by the team's players — the team tie-break.
+    pub board_wins: Wins,
+    /// MacMahon starting points, from the team's average pairing rating.
+    pub macmahon: HalfPoints,
+    /// Total score: MacMahon start + match points + whatever the rounds the team
+    /// sat out were worth.
+    pub points: HalfPoints,
+    pub sosm: HalfPoints,
+    pub sosw: Wins,
+    pub sodosm: HalfPoints,
+    pub sodosw: Wins,
+    pub sososm: HalfPoints,
+    pub sososw: Wins,
+    pub sosm1: HalfPoints,
+    pub sosm2: HalfPoints,
+    pub sosw1: Wins,
+    pub sosw2: Wins,
+    pub cussm: HalfPoints,
+    pub cussw: Wins,
+    /// Direct confrontation among the teams still tied on every earlier
+    /// criterion (see [`Tiebreak::Dc`]).
+    pub dc: Wins,
+    /// Opposing teams faced, one entry per match, in round order.
+    pub opponents: Vec<uuid::Uuid>,
+    /// Opposing teams beaten, the subset of `opponents` SODOS sums over.
+    pub defeated: Vec<uuid::Uuid>,
+    pub running_points: Vec<HalfPoints>,
+    pub running_wins: Vec<Wins>,
+    /// The team's members, by player id, in board order.
+    pub members: Vec<uuid::Uuid>,
+}
+
+impl TeamStanding {
+    /// This team's value for a ranking criterion, as a plain ordinal (see
+    /// [`Standing::tiebreak`](crate::standings::Standing::tiebreak)).
+    pub fn tiebreak(&self, tb: Tiebreak) -> u32 {
+        match tb {
+            Tiebreak::Points => self.points.halves(),
+            Tiebreak::BoardWins => self.board_wins.get(),
+            Tiebreak::SosM => self.sosm.halves(),
+            Tiebreak::SosW => self.sosw.get(),
+            Tiebreak::SodosM => self.sodosm.halves(),
+            Tiebreak::SodosW => self.sodosw.get(),
+            Tiebreak::SososM => self.sososm.halves(),
+            Tiebreak::SososW => self.sososw.get(),
+            Tiebreak::SosM1 => self.sosm1.halves(),
+            Tiebreak::SosM2 => self.sosm2.halves(),
+            Tiebreak::SosW1 => self.sosw1.get(),
+            Tiebreak::SosW2 => self.sosw2.get(),
+            Tiebreak::CussM => self.cussm.halves(),
+            Tiebreak::CussW => self.cussw.get(),
+            Tiebreak::Dc => self.dc.get(),
+            // Rejected in team mode by settings validation, and dropped from the
+            // order by `normalized`, so it never reaches the ranking.
+            Tiebreak::EstElo => {
+                debug_assert!(
+                    false,
+                    "est_elo ranks no team; settings validation rejects it"
+                );
+                0
+            }
+        }
+    }
+}
+
+/// Compute the ranked team standings from the completed rounds — the team
+/// analogue of [`compute_standings`](crate::standings::compute_standings), over
+/// the same criteria with team semantics: the SOS family sums opposing *teams'*
+/// team scores, and direct confrontation counts matches won.
+pub fn compute_team_standings(
+    teams: &[Team],
+    players: &[Player],
+    settings: &TournamentSettings,
+    rounds: &[Round],
+) -> Vec<TeamStanding> {
+    let slots = TeamSlots::new(teams, players);
+    let scores = compute_team_scores(teams, players, settings, rounds, &slots);
+    let score_m = |o: &TeamId| scores.get(*o).points;
+    let score_w = |o: &TeamId| scores.get(*o).victories;
+    // Team number → its registration id, so the output can face callers by id
+    // the way `Standing` does.
+    let mut uuid_of: TiVec<TeamId, uuid::Uuid> = vec![uuid::Uuid::nil(); scores.capacity()].into();
+    for team in teams {
+        if let Some(number) = team.tournament_id {
+            uuid_of[number] = team.id;
+        }
+    }
+
+    // SOSM/SOSW first: the SOSOS metrics are sums of them over opponents.
+    let mut sosm: TiVec<TeamId, HalfPoints> = vec![HalfPoints::ZERO; scores.capacity()].into();
+    let mut sosw: TiVec<TeamId, Wins> = vec![Wins::ZERO; scores.capacity()].into();
+    for number in slots.teams() {
+        let s = scores.get(number);
+        sosm[number] = s.opponents.iter().map(score_m).sum();
+        sosw[number] = s.opponents.iter().map(score_w).sum();
+    }
+
+    let ranked: Vec<&Team> = teams.iter().filter(|t| t.tournament_id.is_some()).collect();
+    let mut standings: Vec<TeamStanding> = ranked
+        .iter()
+        .map(|team| {
+            let number = team.tournament_id.expect("filtered above");
+            let s = scores.get(number);
+            let opp_m: Vec<HalfPoints> = s.opponents.iter().map(&score_m).collect();
+            let opp_w: Vec<Wins> = s.opponents.iter().map(&score_w).collect();
+            TeamStanding {
+                team_id: team.id,
+                tournament_id: number,
+                name: team.name.clone(),
+                victories: s.victories,
+                board_wins: s.board_wins,
+                macmahon: s.macmahon,
+                points: s.points,
+                sosm: sosm[number],
+                sosw: sosw[number],
+                sodosm: s.defeated.iter().map(&score_m).sum(),
+                sodosw: s.defeated.iter().map(&score_w).sum(),
+                sososm: s.opponents.iter().map(|&o| sosm[o]).sum(),
+                sososw: s.opponents.iter().map(|&o| sosw[o]).sum(),
+                sosm1: sum_dropping_lowest(opp_m.clone(), 1),
+                sosm2: sum_dropping_lowest(opp_m, 2),
+                sosw1: sum_dropping_lowest(opp_w.clone(), 1),
+                sosw2: sum_dropping_lowest(opp_w, 2),
+                cussm: s.cuss_m,
+                cussw: s.cuss_w,
+                // Filled in by the ranking, which is what decides who is tied.
+                dc: Wins::ZERO,
+                opponents: s.opponents.iter().map(|&o| uuid_of[o]).collect(),
+                defeated: s.defeated.iter().map(|&o| uuid_of[o]).collect(),
+                running_points: s.running_points.clone(),
+                running_wins: s.running_wins.clone(),
+                members: team.members.clone(),
+            }
+        })
+        .collect();
+
+    let rows: Vec<DcRow> = standings
+        .iter()
+        .map(|s| DcRow {
+            id: s.team_id,
+            opponents: s.opponents.clone(),
+            defeated: s.defeated.clone(),
+        })
+        .collect();
+    let mut seed_order: Vec<usize> = (0..standings.len()).collect();
+    seed_order.sort_by_key(|&i| standings[i].tournament_id);
+
+    let (order, dc) = rank_groups(
+        seed_order,
+        &settings.tiebreaks,
+        // The estimate is per player and ranks no team; settings validation
+        // rejects it in team mode, and this is the belt to that braces.
+        |tb| tb == Tiebreak::EstElo,
+        |i, tb| standings[i].tiebreak(tb),
+        &rows,
+    );
+    for (i, wins) in dc.into_iter().enumerate() {
+        standings[i].dc = Wins(wins);
+    }
+    order.into_iter().map(|i| standings[i].clone()).collect()
 }

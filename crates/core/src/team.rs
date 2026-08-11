@@ -570,7 +570,7 @@ mod tests {
 
     // --- Rosters on a tournament -----------------------------------------
 
-    use crate::settings::{MacMahonThreshold, TeamSettings, TournamentSettings};
+    use crate::settings::{MacMahonThreshold, TeamSettings, Tiebreak, TournamentSettings};
 
     /// A team tournament of `size`, with `n` players rated 2000, 1990, … so the
     /// ordering assertions have something to bite on.
@@ -852,6 +852,35 @@ mod tests {
             Err(TournamentError::TeamModeConflict(_))
         ));
         assert!(t.settings.team_mode());
+    }
+
+    /// The estimated-ELO tie-break can't rank a team, and `normalized` drops a
+    /// criterion that can't rank — so without checking the conflict *first*, the
+    /// referee's setting would be quietly edited instead of refused.
+    #[test]
+    fn the_est_elo_conflict_is_reported_not_normalized_away() {
+        let (mut t, _) = team_tournament(3, 0);
+        assert!(matches!(
+            t.update_settings(TournamentSettings {
+                teams: Some(TeamSettings { size: 3 }),
+                tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo],
+                ..TournamentSettings::default()
+            }),
+            Err(TournamentError::TeamModeConflict(
+                crate::settings::TeamModeConflict::EstEloTiebreak
+            ))
+        ));
+    }
+
+    /// A per-player bonus would move nothing a referee can see in a team
+    /// tournament, so it is refused rather than stored where nothing reads it.
+    #[test]
+    fn player_point_adjustments_are_rejected_in_team_mode() {
+        let (mut t, ids) = team_tournament(2, 4);
+        assert!(matches!(
+            t.add_point_adjustment(ids[0], 1, "fair play".into()),
+            Err(TournamentError::PlayerAdjustmentInTeamMode)
+        ));
     }
 
     #[test]

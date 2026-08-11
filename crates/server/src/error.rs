@@ -265,6 +265,7 @@ fn domain_payload(err: &TournamentError) -> Option<(&'static str, BTreeMap<Strin
         // The team draft UI only offers whole-team absences and team-level
         // forcing, so these two mean a client sent something it never renders.
         | TournamentError::PlayerLevelDraftInTeamMode
+        | TournamentError::PlayerAdjustmentInTeamMode
         // Deliberately English: unfinished scaffolding (the UI offers no team
         // probe yet), not a state the product is meant to have.
         | TournamentError::TeamProbeNotAvailable
@@ -448,6 +449,7 @@ mod tests {
                 name: "Paris".to_string(),
             },
             TournamentError::PlayerLevelDraftInTeamMode,
+            TournamentError::PlayerAdjustmentInTeamMode,
             TournamentError::TeamProbeNotAvailable,
             TournamentError::DrawnOnForfeitedBoard { round: 1, board: 0 },
         ]

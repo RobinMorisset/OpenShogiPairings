@@ -158,6 +158,10 @@ impl Standing {
             // the estimate both is maintained and estimates rated players (see the
             // `EstElo` skip in ranking), so it is `Some` for every player; a
             // missing one sorts as 0.
+            // A player's board wins *are* their own game wins — same quantity,
+            // one board at a time. It is a team's members' total that makes the
+            // criterion interesting, but the meaning is one and the same.
+            Tiebreak::BoardWins => self.victories.get(),
             Tiebreak::EstElo => {
                 debug_assert!(
                     self.estimated_elo.is_some(),
@@ -173,7 +177,10 @@ impl Standing {
 /// Sum a list of opponent scores after dropping the `drop` lowest — the
 /// Buchholz-cut family (`drop` = 0 is the plain sum). Generic over the score
 /// unit so it serves both the half-point (`…M`) and win-count (`…W`) flavours.
-fn sum_dropping_lowest<T: Ord + Copy + std::iter::Sum>(mut scores: Vec<T>, drop: usize) -> T {
+pub(crate) fn sum_dropping_lowest<T: Ord + Copy + std::iter::Sum>(
+    mut scores: Vec<T>,
+    drop: usize,
+) -> T {
     scores.sort_unstable();
     scores.into_iter().skip(drop).sum()
 }
@@ -293,16 +300,59 @@ pub fn compute_standings(
         .iter()
         .map(|p| (p.id, p.tournament_id.expect("player has a number")))
         .collect();
+    let rows: Vec<DcRow> = standings
+        .iter()
+        .map(|s| DcRow {
+            id: s.player_id,
+            opponents: s.opponents.clone(),
+            defeated: s.defeated.clone(),
+        })
+        .collect();
+    let mut seed_order: Vec<usize> = (0..standings.len()).collect();
+    seed_order.sort_by_key(|&i| tnum[&standings[i].player_id]);
 
-    let mut start: Vec<usize> = (0..standings.len()).collect();
-    start.sort_by_key(|&i| tnum[&standings[i].player_id]);
-    let mut groups: Vec<Vec<usize>> = vec![start];
-
-    for &tb in &settings.tiebreaks {
+    let (order, dc) = rank_groups(
+        seed_order,
+        &settings.tiebreaks,
         // Estimated ELO only ranks in ELO pairing mode, and only while rated
         // players are actually estimated (see `est_elo_ranks`); skip it otherwise
         // (defends against a loaded save that predates normalization dropping it).
-        if tb == Tiebreak::EstElo && !settings.est_elo_ranks() {
+        |tb| tb == Tiebreak::EstElo && !settings.est_elo_ranks(),
+        |i, tb| standings[i].tiebreak(tb),
+        &rows,
+    );
+    for (i, wins) in dc.into_iter().enumerate() {
+        standings[i].dc = Wins(wins);
+    }
+    order.into_iter().map(|i| standings[i].clone()).collect()
+}
+
+/// Rank rows by the configured criteria, in order, and report each row's
+/// direct-confrontation score.
+///
+/// Shared by the player and team standings, because the subtle part is identical
+/// for both: most criteria are a plain per-row number, so ranking by them is a
+/// lexicographic sort — but direct confrontation isn't. Its value depends on
+/// which *other* rows are still tied once every earlier criterion has run out, so
+/// ranking proceeds by repeatedly splitting the still-tied groups, criterion by
+/// criterion, rather than by one sort.
+///
+/// `seed_order` is the starting order (by tournament / team number), which
+/// survives as the final tie-break because every split below is stable. `skip`
+/// drops a criterion that cannot rank in this configuration. `value` reads a
+/// criterion off a row — never [`Tiebreak::Dc`], which is computed here and
+/// returned alongside the order, since it isn't known until the ranking runs.
+pub(crate) fn rank_groups(
+    seed_order: Vec<usize>,
+    tiebreaks: &[Tiebreak],
+    skip: impl Fn(Tiebreak) -> bool,
+    value: impl Fn(usize, Tiebreak) -> u32,
+    rows: &[DcRow],
+) -> (Vec<usize>, Vec<u32>) {
+    let mut dc = vec![0u32; rows.len()];
+    let mut groups: Vec<Vec<usize>> = vec![seed_order];
+    for &tb in tiebreaks {
+        if skip(tb) {
             continue;
         }
         let mut next_groups: Vec<Vec<usize>> = Vec::new();
@@ -312,12 +362,12 @@ pub fn compute_standings(
                 continue;
             }
             if tb == Tiebreak::Dc {
-                match direct_confrontation(&group, &standings) {
-                    Some(dc) => {
+                match direct_confrontation(&group, rows) {
+                    Some(scores) => {
                         for &i in &group {
-                            standings[i].dc = Wins(dc[&standings[i].player_id]);
+                            dc[i] = scores[&rows[i].id];
                         }
-                        next_groups.extend(split_by_key(group, |i| standings[i].dc.get()));
+                        next_groups.extend(split_by_key(group, |i| dc[i]));
                     }
                     // Not a complete subgraph: DC stays 0 for everyone here, and
                     // the group stays tied going into the next criterion.
@@ -325,16 +375,11 @@ pub fn compute_standings(
                 }
                 continue;
             }
-            next_groups.extend(split_by_key(group, |i| standings[i].tiebreak(tb)));
+            next_groups.extend(split_by_key(group, |i| value(i, tb)));
         }
         groups = next_groups;
     }
-
-    groups
-        .into_iter()
-        .flatten()
-        .map(|i| standings[i].clone())
-        .collect()
+    (groups.into_iter().flatten().collect(), dc)
 }
 
 /// Stable-split a tied group into subgroups sharing the same (descending) key —
@@ -352,15 +397,24 @@ fn split_by_key(mut group: Vec<usize>, key: impl Fn(usize) -> u32) -> Vec<Vec<us
     result
 }
 
-/// Direct confrontation scores for a tied `group`: each player's wins against
+/// The head-to-head record the direct-confrontation criterion needs, for one
+/// ranked row — a player's or a team's, since the rule is identical either way
+/// (who did this unit face, and which of them did it beat).
+pub(crate) struct DcRow {
+    pub id: Uuid,
+    pub opponents: Vec<Uuid>,
+    pub defeated: Vec<Uuid>,
+}
+
+/// Direct confrontation scores for a tied `group`: each row's wins against
 /// the others in the group. Only defined — `Some` — when the group is a
 /// complete subgraph (every pair in it has played each other at least once);
 /// otherwise `None`, meaning the criterion doesn't apply to this group.
-fn direct_confrontation(group: &[usize], standings: &[Standing]) -> Option<HashMap<Uuid, u32>> {
-    let ids: Vec<Uuid> = group.iter().map(|&i| standings[i].player_id).collect();
+fn direct_confrontation(group: &[usize], rows: &[DcRow]) -> Option<HashMap<Uuid, u32>> {
+    let ids: Vec<Uuid> = group.iter().map(|&i| rows[i].id).collect();
     for (pos, &i) in group.iter().enumerate() {
         for &other_id in &ids[(pos + 1)..] {
-            if !standings[i].opponents.contains(&other_id) {
+            if !rows[i].opponents.contains(&other_id) {
                 return None;
             }
         }
@@ -370,12 +424,12 @@ fn direct_confrontation(group: &[usize], standings: &[Standing]) -> Option<HashM
         group
             .iter()
             .map(|&i| {
-                let wins = standings[i]
+                let wins = rows[i]
                     .defeated
                     .iter()
                     .filter(|d| id_set.contains(d))
                     .count() as u32;
-                (standings[i].player_id, wins)
+                (rows[i].id, wins)
             })
             .collect(),
     )

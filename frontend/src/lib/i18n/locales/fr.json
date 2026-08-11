@@ -482,6 +482,10 @@
     "est_elo": {
       "label": "ELO est.",
       "title": "Estimation bayésienne en temps réel du niveau actuel du joueur"
+    },
+    "board_wins": {
+      "label": "Parties gagnées",
+      "title": "Parties gagnées — celles du joueur, ou le total de l'équipe sur tous les échiquiers"
     }
   }
 }

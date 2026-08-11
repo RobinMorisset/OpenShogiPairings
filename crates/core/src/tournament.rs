@@ -27,7 +27,7 @@ use crate::scoring::compute_scores;
 use crate::settings::{TeamModeConflict, TournamentSettings, TEAM_SIZES};
 use crate::standings::{compute_standings, Standing};
 use crate::team::Team;
-use crate::team_scoring::{matches_in_round, swiss_bye_team};
+use crate::team_scoring::{compute_team_standings, matches_in_round, swiss_bye_team, TeamStanding};
 use crate::units::{TournamentId, UnitKey};
 use typed_index_collections::TiVec;
 
@@ -302,6 +302,11 @@ pub enum TournamentError {
     /// round, where teams are what get paired.
     #[error("a team round is paired by team, so it takes no player-level forced pairing or bye")]
     PlayerLevelDraftInTeamMode,
+    /// A manual point adjustment was applied to a player in a team tournament,
+    /// where the ranking is by team so a per-player delta moves nothing visible.
+    /// Team-level adjustments are the answer, and are still to come.
+    #[error("a team tournament ranks by team, so a per-player point adjustment has no effect")]
+    PlayerAdjustmentInTeamMode,
     /// A counterfactual probe (or a forced re-pairing) was asked for in team
     /// mode. Both are keyed by player number, which names no unit the team
     /// engine paired; a team-level API for them is still to come.
@@ -449,6 +454,15 @@ impl Tournament {
         &mut self,
         settings: TournamentSettings,
     ) -> Result<&TournamentSettings, TournamentError> {
+        // Team mode and the features it can't support are rejected as a pair,
+        // naming the conflict — neither side is silently switched off. Checked
+        // *before* normalization, which would otherwise quietly drop some of them
+        // (the estimated-ELO tie-break can't rank in team mode, so `normalized`
+        // removes it) and turn a conflict the referee should see into a silent
+        // edit of what they asked for.
+        if let Some(conflict) = settings.team_mode_conflict() {
+            return Err(TournamentError::TeamModeConflict(conflict));
+        }
         let settings = settings.normalized();
         // Team mode is structural: whether teams exist at all, and how many
         // players a match takes, shape every roster and every board. Both are
@@ -463,11 +477,6 @@ impl Tournament {
             if !TEAM_SIZES.contains(&teams.size) {
                 return Err(TournamentError::InvalidTeamSize { size: teams.size });
             }
-        }
-        // Team mode and the features it can't support are rejected as a pair,
-        // naming the conflict — neither side is silently switched off.
-        if let Some(conflict) = settings.team_mode_conflict() {
-            return Err(TournamentError::TeamModeConflict(conflict));
         }
         // Once the tournament has started, a settings change is the last gate
         // before the new config takes effect (there is no re-finalization), so the
@@ -514,6 +523,24 @@ impl Tournament {
     /// This is the canonical ordering — used by the Results tab and, later, the
     /// American grid — so scoring lives in one place rather than being re-derived
     /// by each client.
+    /// The ranked **team** standings, or `None` outside team mode — the team
+    /// twin of [`Self::standings`], with the same safety floor (nothing to rank
+    /// before finalization assigns the numbers everything is keyed by).
+    pub fn team_standings(&self) -> Option<Vec<TeamStanding>> {
+        if !self.settings.team_mode() {
+            return None;
+        }
+        if !self.registration_finalized {
+            return Some(Vec::new());
+        }
+        Some(compute_team_standings(
+            &self.teams,
+            &self.players,
+            &self.settings,
+            &self.rounds,
+        ))
+    }
+
     pub fn standings(&self) -> Vec<Standing> {
         // Scoring keys players by their tournament number, which is only assigned
         // at finalization, so there is nothing safe (or meaningful) to compute
@@ -675,6 +702,13 @@ impl Tournament {
         delta: i32,
         reason: String,
     ) -> Result<&Player, TournamentError> {
+        // In a team tournament the ranking is by team, so a delta on one player
+        // would move nothing a referee can see. Adjustments belong to teams there
+        // — not implemented yet, so this refuses rather than storing a bonus that
+        // silently does nothing.
+        if self.settings.team_mode() {
+            return Err(TournamentError::PlayerAdjustmentInTeamMode);
+        }
         let reason = reason.trim().to_string();
         if reason.is_empty() {
             return Err(TournamentError::EmptyAdjustmentReason);

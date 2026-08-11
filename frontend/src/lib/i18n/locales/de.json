@@ -482,6 +482,10 @@
     "est_elo": {
       "label": "Gesch. ELO",
       "title": "Laufende bayessche Schätzung der aktuellen Spielstärke des Spielers"
+    },
+    "board_wins": {
+      "label": "Brettpunkte",
+      "title": "Gewonnene Partien — die des Spielers, oder die Gesamtzahl der Mannschaft über alle Bretter"
     }
   }
 }
