@@ -254,8 +254,11 @@ Its own tab, alongside the player list:
   implementation);
 - **board order** defaults to descending pairing rating and is freely
   reorderable until finalization;
-- with MacMahon starting points in use, unrated members are flagged
-  inline with the "pairing ELO" field (see above).
+- an unrated member's rating cell *is* their pairing ELO, edited in place
+  like a cell on the Players tab (with MacMahon starting points in use —
+  the only configuration where the server accepts one). It reads `—` while
+  unset and `1500*` once given: italic and starred, because the player is
+  still unrated everywhere else.
 
 ### Finalization
 

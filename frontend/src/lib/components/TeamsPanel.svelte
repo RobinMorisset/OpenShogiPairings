@@ -106,18 +106,62 @@
     onSetBoardOrder(team.id, order);
   }
 
-  /** The pairing-ELO field's value as typed: empty clears it. */
-  function commitPairingRating(player: Player, raw: string) {
-    const trimmed = raw.trim();
-    const value = trimmed === "" ? null : Number(trimmed);
-    if (value !== null && !Number.isFinite(value)) return;
-    if (value === (player.pairing_rating ?? null)) return;
-    onSetPairingRating(player.id, value);
+  /** How a member's rating reads on their row: a real one as it is, a pairing
+   *  ELO starred (and italic, see the stylesheet) because the player is unrated,
+   *  and an em dash when there is neither. */
+  function ratingLabel(p: Player): string {
+    if (p.rating != null) return String(p.rating);
+    return p.pairing_rating != null ? `${p.pairing_rating}*` : "—";
+  }
+
+  /** A member's rating cell is editable when it is the *pairing* ELO — an
+   *  unrated player, MacMahon starting points in use (the server refuses one
+   *  otherwise), rosters not yet frozen. A rated player's ELO belongs to the
+   *  Players tab. */
+  function editableRating(p: Player): boolean {
+    return macmahonInUse && p.rating == null && !finalized;
   }
 
   /** Whether this member still needs a pairing ELO before finalization. */
   function needsPairingRating(p: Player): boolean {
     return macmahonInUse && pairingRating(p) == null;
+  }
+
+  /** The member whose pairing ELO is being typed, and the text so far. */
+  let editingRating: string | null = $state(null);
+  let ratingDraft = $state("");
+
+  function startRating(p: Player) {
+    if (busy) return;
+    editingRating = p.id;
+    ratingDraft = p.pairing_rating != null ? String(p.pairing_rating) : "";
+  }
+
+  /** Commit the pairing ELO as typed: empty clears it, anything that isn't a
+   *  non-negative whole number is refused rather than sent as a wrong value. */
+  function commitRating(p: Player) {
+    if (editingRating !== p.id) return;
+    editingRating = null;
+    const raw = ratingDraft.trim();
+    const value = raw === "" ? null : Number(raw);
+    if (value !== null && (!Number.isInteger(value) || value < 0)) return;
+    if (value === (p.pairing_rating ?? null)) return;
+    onSetPairingRating(p.id, value);
+  }
+
+  function ratingKeydown(event: KeyboardEvent, p: Player) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitRating(p);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      editingRating = null;
+    }
+  }
+
+  function autofocus(node: HTMLInputElement) {
+    node.focus();
+    node.select();
   }
 
   // Which team's adjustments panel is open, and the working values for its
@@ -303,20 +347,36 @@
             <li>
               <span class="board">{index + 1}</span>
               <span class="member-name">{name(member)}</span>
-              <span class="rating" class:unofficial={member.rating == null}>
-                {pairingRating(member) ?? "—"}
-              </span>
-              {#if macmahonInUse && member.rating == null && !finalized}
+              {#if editingRating === member.id}
+                <!-- Same shape as the Players tab's editable cells: type=text
+                     with a numeric keypad (type=number ignores `size`), commit
+                     on Enter or blur, Escape to drop it. -->
                 <input
-                  type="number"
-                  class="pairing-elo"
-                  class:missing={needsPairingRating(member)}
-                  value={member.pairing_rating ?? ""}
-                  placeholder={$_("teams.pairingEloPlaceholder")}
+                  class="rating-input"
+                  type="text"
+                  inputmode="numeric"
+                  size="1"
                   title={$_("teams.pairingEloTitle")}
-                  disabled={busy}
-                  onchange={(e) => commitPairingRating(member, e.currentTarget.value)}
+                  bind:value={ratingDraft}
+                  onkeydown={(e) => ratingKeydown(e, member)}
+                  onblur={() => commitRating(member)}
+                  use:autofocus
                 />
+              {:else if editableRating(member)}
+                <button
+                  type="button"
+                  class="rating unofficial rating-btn"
+                  class:missing={needsPairingRating(member)}
+                  disabled={busy}
+                  title={$_("teams.pairingEloTitle")}
+                  onclick={() => startRating(member)}
+                >
+                  {ratingLabel(member)}
+                </button>
+              {:else}
+                <span class="rating" class:unofficial={member.rating == null}>
+                  {ratingLabel(member)}
+                </span>
               {/if}
               {#if !finalized}
                 <button
@@ -378,7 +438,9 @@
           {#each unassigned as p (p.id)}
             <li>
               {name(p)}
-              <span class="rating">{pairingRating(p) ?? "—"}</span>
+              <span class="rating" class:unofficial={p.rating == null}>
+                {ratingLabel(p)}
+              </span>
             </li>
           {/each}
         </ul>
@@ -404,6 +466,22 @@
   .rating {
     color: var(--muted);
     font-size: 0.9em;
+  }
+  /* Every field in the panel — the new-team name, the rename box, the pairing
+     ELO, the adjustment pair and the member picker. `button` is styled globally
+     in app.css but `input`/`select` are not, so without this they fall back to
+     the browser's own form font, visibly smaller than the app's. `border-box`
+     keeps the widths declared below meaning the whole control, so the picker
+     still fits its card. */
+  input,
+  select {
+    padding: 0.3rem 0.45rem;
+    border: 1px solid var(--border);
+    border-radius: 0.4rem;
+    background: var(--bg-inset);
+    color: inherit;
+    font: inherit;
+    box-sizing: border-box;
   }
   .new-team {
     display: flex;
@@ -491,12 +569,33 @@
   .member-name {
     flex: 1;
   }
-  /* A pairing ELO is not a real rating, and must never read as one. */
+  /* A pairing ELO is not a real rating, and must never read as one: italic, and
+     starred in `ratingLabel`. */
   .rating.unofficial {
     font-style: italic;
   }
-  .pairing-elo {
-    width: 5rem;
+  /* The pairing ELO is edited in place, so its cell is a bare button that reads
+     as the text it replaces — the styling the Players tab's editable cells use. */
+  .rating-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-size: 0.9em;
+    color: inherit;
+    cursor: pointer;
+  }
+  .rating-btn:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+  /* Still missing, and MacMahon needs it before the tournament can start. */
+  .rating-btn.missing {
+    color: var(--warning, #c90);
+    font-weight: 600;
+  }
+  .rating-input {
+    width: 4rem;
+    font-size: 0.9em;
   }
   .adj-badge {
     font-variant-numeric: tabular-nums;
@@ -536,9 +635,6 @@
   .adj-reason {
     flex: 1;
     min-width: 4rem;
-  }
-  .pairing-elo.missing {
-    border-color: var(--warning, #c90);
   }
   .small {
     padding: 0 0.35rem;

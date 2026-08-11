@@ -514,7 +514,6 @@
     "moveUp": "O šachovnicu vyššie",
     "moveDown": "O šachovnicu nižšie",
     "addMember": "Pridať hráča…",
-    "pairingEloPlaceholder": "Žrebovacie ELO",
     "pairingEloTitle": "Žrebovacie ELO pre člena bez ratingu: slúži len na priemer družstva a poradie šachovníc, nikdy sa neexportuje — inde zostáva hráč bez ratingu",
     "unassigned": "Bez družstva ({count})",
     "allAssigned": "Všetci hráči sú v družstvách.",

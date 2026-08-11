@@ -514,7 +514,6 @@
     "moveUp": "Ein Brett nach oben",
     "moveDown": "Ein Brett nach unten",
     "addMember": "Spieler hinzufügen…",
-    "pairingEloPlaceholder": "Auslosungs-ELO",
     "pairingEloTitle": "Auslosungs-ELO für ein ungewertetes Mitglied: nur für den Mannschaftsdurchschnitt und die Brettreihenfolge, nie exportiert — der Spieler bleibt überall sonst ungewertet",
     "unassigned": "Ohne Mannschaft ({count})",
     "allAssigned": "Alle Spieler sind in einer Mannschaft.",

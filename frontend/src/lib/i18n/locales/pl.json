@@ -514,7 +514,6 @@
     "moveUp": "Szachownicę wyżej",
     "moveDown": "Szachownicę niżej",
     "addMember": "Dodaj zawodnika…",
-    "pairingEloPlaceholder": "ELO do kojarzenia",
     "pairingEloTitle": "ELO do kojarzenia dla zawodnika bez rankingu: służy wyłącznie do średniej drużyny i kolejności szachownic, nigdy nie jest eksportowane — wszędzie indziej zawodnik pozostaje bez rankingu",
     "unassigned": "Bez drużyny ({count})",
     "allAssigned": "Wszyscy zawodnicy są w drużynach.",
