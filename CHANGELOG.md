@@ -26,6 +26,18 @@ that field has no default. Re-create such a tournament rather than loading it.
   bracket" option, unchanged and still the default.
 - `osp-sim --cup-format direct|qualifier`, so simulations can run either cup
   format (see [`docs/simulation-cli.md`](docs/simulation-cli.md)).
+- **Configurable data and backup directories.** `OSP_DATA_DIR` (tournaments)
+  and the new `OSP_BACKUP_DIR` (automatic backups) now apply to the **desktop
+  app** as well as the standalone server, which previously hardcoded both under
+  the per-user data directory — so the files can live on a synced folder, a
+  second drive, or beside a portable install. Unset keeps exactly the old
+  locations. Both are logged at startup.
+- **The Backups button says where the backups are kept** — the absolute
+  directory, in its tooltip and at the top of the panel (selectable there, to
+  paste into a file manager). A rotating store of recovery copies is only as
+  useful as the referee's ability to find the files; it also makes the new
+  `OSP_BACKUP_DIR` visibly take effect. `GET /backups` grew the directory
+  alongside the list to carry it.
 
 ### Changed
 

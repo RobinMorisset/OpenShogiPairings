@@ -7,6 +7,8 @@
     "save": "Speichern",
     "backups": "Sicherungen…",
     "backupsTitle": "Automatische Sicherungen bei jedem Rundenwechsel",
+    "backupsDirectory": "Gespeichert in {path}",
+    "backupsNowhere": "Kein Sicherungsordner: automatische Sicherungen sind deaktiviert.",
     "switchTournament": "Turnier wechseln…",
     "switchTournamentTitle": "Zurück zur Turnierliste",
     "unsavedChanges": "Nicht gespeicherte Änderungen",

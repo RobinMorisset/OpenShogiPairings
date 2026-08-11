@@ -7,6 +7,8 @@
     "save": "Uložiť",
     "backups": "Zálohy…",
     "backupsTitle": "Automatické zálohy vytvorené pri každom prechode medzi kolami",
+    "backupsDirectory": "Ukladajú sa do {path}",
+    "backupsNowhere": "Žiadny priečinok pre zálohy: automatické zálohy sú vypnuté.",
     "switchTournament": "Prepnúť turnaj…",
     "switchTournamentTitle": "Návrat na zoznam turnajov",
     "unsavedChanges": "Neuložené zmeny",

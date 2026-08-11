@@ -7,6 +7,8 @@
     "save": "Save",
     "backups": "Backups…",
     "backupsTitle": "Automatic backups taken at each round transition",
+    "backupsDirectory": "Saved in {path}",
+    "backupsNowhere": "No backups directory: automatic backups are disabled.",
     "switchTournament": "Switch tournament…",
     "switchTournamentTitle": "Return to the tournament list",
     "unsavedChanges": "Unsaved changes",

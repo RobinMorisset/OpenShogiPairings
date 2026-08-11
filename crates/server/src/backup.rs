@@ -35,17 +35,26 @@ pub struct BackupInfo {
     pub label: String,
 }
 
-fn backups_dir(tournament_id: Uuid) -> Option<PathBuf> {
-    // Under `cargo test`, divert to the OS temp dir instead of the real
-    // per-user data directory — every round-lifecycle test in this crate
-    // exercises the endpoints that call `take`, and none of them should touch
-    // the developer's actual OpenShogiPairings data.
-    let root = if cfg!(test) {
-        std::env::temp_dir().join("osp-test-backups")
+/// Where backups go when the server was given no explicit root: the per-user
+/// data directory, as every release has used. `None` on a platform with no
+/// known data directory — the caller then keeps no backups at all rather than
+/// inventing a location.
+///
+/// Under `cargo test`, diverts to the OS temp dir instead — every
+/// round-lifecycle test in this crate exercises the endpoints that call
+/// [`take`], and none of them should touch the developer's actual
+/// OpenShogiPairings data.
+pub fn default_root() -> Option<PathBuf> {
+    if cfg!(test) {
+        Some(std::env::temp_dir().join("osp-test-backups"))
     } else {
-        dirs::data_dir()?.join("openshogipairings").join("backups")
-    };
-    Some(root.join(tournament_id.to_string()))
+        Some(dirs::data_dir()?.join("openshogipairings").join("backups"))
+    }
+}
+
+/// The directory holding one tournament's backups: its own id under `root`.
+pub fn dir_for(root: &Path, tournament_id: Uuid) -> PathBuf {
+    root.join(tournament_id.to_string())
 }
 
 fn now_secs() -> u64 {
@@ -80,12 +89,12 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 /// (e.g. "round 2 started"), then rotate out the oldest backups beyond
 /// [`MAX_BACKUPS`]. Best-effort: I/O or serialization failures are logged, not
 /// propagated — a backup problem must never block the referee's actual action.
-pub fn take(tournament: &Tournament, label: &str) {
-    let Some(dir) = backups_dir(tournament.id) else {
-        tracing::warn!("backup: could not determine the data directory");
+pub fn take(dir: Option<&Path>, tournament: &Tournament, label: &str) {
+    let Some(dir) = dir else {
+        tracing::warn!("backup: no backups directory — this tournament is not being backed up");
         return;
     };
-    if let Err(e) = fs::create_dir_all(&dir) {
+    if let Err(e) = fs::create_dir_all(dir) {
         tracing::warn!("backup: could not create {}: {e}", dir.display());
         return;
     }
@@ -99,7 +108,7 @@ pub fn take(tournament: &Tournament, label: &str) {
         }
         Err(e) => tracing::warn!("backup: could not serialize the tournament: {e}"),
     }
-    rotate(&dir);
+    rotate(dir);
 }
 
 /// Delete the oldest backups in `dir` beyond [`MAX_BACKUPS`], oldest first by
@@ -128,12 +137,12 @@ fn rotate(dir: &Path) {
     }
 }
 
-/// List backups for `tournament_id`, newest first.
-pub fn list(tournament_id: Uuid) -> Vec<BackupInfo> {
-    let Some(dir) = backups_dir(tournament_id) else {
+/// List the backups in `dir`, newest first.
+pub fn list(dir: Option<&Path>) -> Vec<BackupInfo> {
+    let Some(dir) = dir else {
         return Vec::new();
     };
-    let Ok(entries) = fs::read_dir(&dir) else {
+    let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
     // Sort by (seconds, sequence) — several backups can share the same second,
@@ -163,24 +172,23 @@ pub fn list(tournament_id: Uuid) -> Vec<BackupInfo> {
     infos.into_iter().map(|(_, _, info)| info).collect()
 }
 
-/// Delete every backup for `tournament_id` (its whole backups directory), when
-/// the tournament itself is deleted. Best-effort, like every other write here.
-pub fn delete_all(tournament_id: Uuid) {
-    if let Some(dir) = backups_dir(tournament_id) {
+/// Delete every backup in `dir` (the whole directory), when the tournament it
+/// belongs to is deleted. Best-effort, like every other write here.
+pub fn delete_all(dir: Option<&Path>) {
+    if let Some(dir) = dir {
         let _ = fs::remove_dir_all(dir);
     }
 }
 
-/// Load a specific backup by id (its file stem), if it exists for this
-/// tournament. Rejects anything that isn't a plain `<secs>-<seq>-<slug>`
-/// token (alphanumerics and dashes only), so this can never escape the
-/// backups directory.
-pub fn load(tournament_id: Uuid, id: &str) -> Option<Tournament> {
+/// Load a specific backup by id (its file stem) from `dir`, if it exists.
+/// Rejects anything that isn't a plain `<secs>-<seq>-<slug>` token
+/// (alphanumerics and dashes only), so this can never escape the backups
+/// directory.
+pub fn load(dir: Option<&Path>, id: &str) -> Option<Tournament> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return None;
     }
-    let dir = backups_dir(tournament_id)?;
-    let bytes = fs::read(dir.join(format!("{id}.json"))).ok()?;
+    let bytes = fs::read(dir?.join(format!("{id}.json"))).ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 
@@ -188,15 +196,22 @@ pub fn load(tournament_id: Uuid, id: &str) -> Option<Tournament> {
 mod tests {
     use super::*;
 
+    /// A backups directory of this tournament's own, under the test root — so
+    /// concurrently-running tests can't see each other's files.
+    fn dir_of(t: &Tournament) -> PathBuf {
+        dir_for(&default_root().expect("a test root"), t.id)
+    }
+
     #[test]
     fn take_then_list_then_load_round_trips() {
         let t = Tournament::new("Backup Test").unwrap();
-        take(&t, "round 2 started");
-        let backups = list(t.id);
+        let dir = dir_of(&t);
+        take(Some(&dir), &t, "round 2 started");
+        let backups = list(Some(&dir));
         assert_eq!(backups.len(), 1);
         assert_eq!(backups[0].label, "round 2 started");
 
-        let restored = load(t.id, &backups[0].id).unwrap();
+        let restored = load(Some(&dir), &backups[0].id).unwrap();
         assert_eq!(restored.id, t.id);
         assert_eq!(restored.name, "Backup Test");
     }
@@ -204,10 +219,11 @@ mod tests {
     #[test]
     fn list_is_newest_first() {
         let t = Tournament::new("Order Test").unwrap();
-        take(&t, "first");
-        take(&t, "second");
-        take(&t, "third");
-        let backups = list(t.id);
+        let dir = dir_of(&t);
+        take(Some(&dir), &t, "first");
+        take(Some(&dir), &t, "second");
+        take(Some(&dir), &t, "third");
+        let backups = list(Some(&dir));
         assert_eq!(
             backups.iter().map(|b| b.label.as_str()).collect::<Vec<_>>(),
             vec!["third", "second", "first"],
@@ -217,10 +233,11 @@ mod tests {
     #[test]
     fn rotation_keeps_only_the_newest_max_backups() {
         let t = Tournament::new("Rotation Test").unwrap();
+        let dir = dir_of(&t);
         for i in 0..MAX_BACKUPS + 5 {
-            take(&t, &format!("step {i}"));
+            take(Some(&dir), &t, &format!("step {i}"));
         }
-        let backups = list(t.id);
+        let backups = list(Some(&dir));
         assert_eq!(backups.len(), MAX_BACKUPS);
         // The newest one taken is still there; the earliest ones were rotated out.
         assert_eq!(backups[0].label, format!("step {}", MAX_BACKUPS + 4));
@@ -233,14 +250,26 @@ mod tests {
     #[test]
     fn load_rejects_a_path_traversal_attempt() {
         let t = Tournament::new("Traversal Test").unwrap();
-        take(&t, "only backup");
-        assert!(load(t.id, "../../etc/passwd").is_none());
-        assert!(load(t.id, "nonexistent-0-id").is_none());
+        let dir = dir_of(&t);
+        take(Some(&dir), &t, "only backup");
+        assert!(load(Some(&dir), "../../etc/passwd").is_none());
+        assert!(load(Some(&dir), "nonexistent-0-id").is_none());
     }
 
     #[test]
     fn list_is_empty_for_a_tournament_with_no_backups() {
-        let random_id = Uuid::new_v4();
-        assert!(list(random_id).is_empty());
+        let dir = dir_for(&default_root().expect("a test root"), Uuid::new_v4());
+        assert!(list(Some(&dir)).is_empty());
+    }
+
+    /// No directory at all (no known data directory on this platform) is a
+    /// no-op everywhere rather than a panic or an invented location.
+    #[test]
+    fn no_directory_keeps_no_backups() {
+        let t = Tournament::new("Homeless Test").unwrap();
+        take(None, &t, "nowhere to go");
+        assert!(list(None).is_empty());
+        assert!(load(None, "0-0-nowhere-to-go").is_none());
+        delete_all(None);
     }
 }

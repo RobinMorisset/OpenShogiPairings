@@ -10,7 +10,7 @@ struct ApiBase(String);
 /// ask for it rather than assuming a fixed port.
 #[tauri::command]
 fn api_base(state: tauri::State<'_, ApiBase>) -> String {
-  state.0.clone()
+    state.0.clone()
 }
 
 /// Write UTF-8 text to a path chosen by the user via the native save dialog.
@@ -20,13 +20,13 @@ fn api_base(state: tauri::State<'_, ApiBase>) -> String {
 /// arbitrary user-selected location doesn't require configuring an fs scope.
 #[tauri::command]
 fn write_text_file(path: String, contents: String) -> Result<(), String> {
-  std::fs::write(&path, contents).map_err(|e| e.to_string())
+    std::fs::write(&path, contents).map_err(|e| e.to_string())
 }
 
 /// Read UTF-8 text from a path chosen by the user via the native open dialog.
 #[tauri::command]
 fn read_text_file(path: String) -> Result<String, String> {
-  std::fs::read_to_string(&path).map_err(|e| e.to_string())
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
 /// Open the native print dialog for the calling webview window.
@@ -43,11 +43,11 @@ fn read_text_file(path: String) -> Result<String, String> {
 /// synchronous Tauri commands do.
 #[tauri::command]
 fn print_window(webview_window: tauri::WebviewWindow, landscape: bool) -> Result<(), String> {
-  #[cfg(target_os = "macos")]
-  set_mac_print_orientation(landscape);
-  #[cfg(not(target_os = "macos"))]
-  let _ = landscape;
-  webview_window.print().map_err(|e| e.to_string())
+    #[cfg(target_os = "macos")]
+    set_mac_print_orientation(landscape);
+    #[cfg(not(target_os = "macos"))]
+    let _ = landscape;
+    webview_window.print().map_err(|e| e.to_string())
 }
 
 /// Set the *shared* `NSPrintInfo`'s paper orientation, which wry's print
@@ -55,15 +55,15 @@ fn print_window(webview_window: tauri::WebviewWindow, landscape: bool) -> Result
 /// jobs, so every caller passes its intended orientation explicitly.
 #[cfg(target_os = "macos")]
 fn set_mac_print_orientation(landscape: bool) {
-  use objc2_app_kit::{NSPaperOrientation, NSPrintInfo};
-  let orientation = if landscape {
-    NSPaperOrientation::Landscape
-  } else {
-    NSPaperOrientation::Portrait
-  };
-  // `sharedPrintInfo` is the process-wide singleton; mutating it on the main
-  // thread (where sync commands run) is what AppKit expects.
-  NSPrintInfo::sharedPrintInfo().setOrientation(orientation);
+    use objc2_app_kit::{NSPaperOrientation, NSPrintInfo};
+    let orientation = if landscape {
+        NSPaperOrientation::Landscape
+    } else {
+        NSPaperOrientation::Portrait
+    };
+    // `sharedPrintInfo` is the process-wide singleton; mutating it on the main
+    // thread (where sync commands run) is what AppKit expects.
+    NSPrintInfo::sharedPrintInfo().setOrientation(orientation);
 }
 
 /// Where the embedded server persists its tournaments, so the desktop app's
@@ -72,57 +72,96 @@ fn set_mac_print_orientation(landscape: bool) {
 /// `crates/server/src/backup.rs`), just a `tournaments` sibling of `backups`.
 /// `None` (no known data directory on this platform) falls back to in-memory
 /// only, same as a throwaway dev server.
+///
+/// `OSP_DATA_DIR` overrides it — the same variable the standalone `osp-server`
+/// reads, so one name means one thing across both. It exists for the installs
+/// the default doesn't suit: a synced folder, a second drive, a portable
+/// install that keeps its data beside the executable.
 fn local_data_dir() -> Option<std::path::PathBuf> {
-  Some(dirs::data_dir()?.join("openshogipairings").join("tournaments"))
+    if let Some(dir) = std::env::var_os("OSP_DATA_DIR") {
+        return Some(dir.into());
+    }
+    Some(
+        dirs::data_dir()?
+            .join("openshogipairings")
+            .join("tournaments"),
+    )
+}
+
+/// Where the embedded server writes its automatic backups, overridable with
+/// `OSP_BACKUP_DIR` (again the standalone server's own variable).
+///
+/// Separate from [`local_data_dir`] rather than derived from it: the backups
+/// are the recovery copy, so "put the tournaments on the synced drive" and
+/// "keep the backups on this machine" are both reasonable and neither should
+/// imply the other. Left to the server's own default when unset.
+fn local_backup_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("OSP_BACKUP_DIR").map(Into::into)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
-    .plugin(tauri_plugin_dialog::init())
-    .invoke_handler(tauri::generate_handler![
-      api_base,
-      write_text_file,
-      read_text_file,
-      print_window
-    ])
-    .setup(|app| {
-      if cfg!(debug_assertions) {
-        app.handle().plugin(
-          tauri_plugin_log::Builder::default()
-            .level(log::LevelFilter::Info)
-            .build(),
-        )?;
-      }
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            api_base,
+            write_text_file,
+            read_text_file,
+            print_window
+        ])
+        .setup(|app| {
+            if cfg!(debug_assertions) {
+                app.handle().plugin(
+                    tauri_plugin_log::Builder::default()
+                        .level(log::LevelFilter::Info)
+                        .build(),
+                )?;
+            }
 
-      // Start the API server in-process. Bind to 127.0.0.1:0 so the OS picks a
-      // free port — this avoids clashing with anything else on the machine and
-      // is what makes the packaged app run reliably anywhere. We bind
-      // synchronously here so the port is known before any window logic runs,
-      // then hand the listener to a background task to serve requests.
-      let listener = tauri::async_runtime::block_on(async {
-        tokio::net::TcpListener::bind(("127.0.0.1", 0)).await
-      })?;
-      let port = listener.local_addr()?.port();
-      let base = format!("http://127.0.0.1:{port}");
-      log::info!("OpenShogiPairings embedded server listening on {base}");
-      app.manage(ApiBase(base));
+            // Start the API server in-process. Bind to 127.0.0.1:0 so the OS picks a
+            // free port — this avoids clashing with anything else on the machine and
+            // is what makes the packaged app run reliably anywhere. We bind
+            // synchronously here so the port is known before any window logic runs,
+            // then hand the listener to a background task to serve requests.
+            let listener = tauri::async_runtime::block_on(async {
+                tokio::net::TcpListener::bind(("127.0.0.1", 0)).await
+            })?;
+            let port = listener.local_addr()?.port();
+            let base = format!("http://127.0.0.1:{port}");
+            log::info!("OpenShogiPairings embedded server listening on {base}");
+            app.manage(ApiBase(base));
 
-      // No admin password and no static dir (the frontend is the webview
-      // itself, not served by this API) — just persistence, so tournaments
-      // created here survive an app restart. See `local_data_dir`.
-      let config = osp_server::ServerConfig {
-        data_dir: local_data_dir(),
-        ..Default::default()
-      };
-      tauri::async_runtime::spawn(async move {
-        if let Err(err) = osp_server::serve_with_config(listener, config).await {
-          log::error!("embedded server stopped: {err}");
-        }
-      });
+            // No admin password and no static dir (the frontend is the webview
+            // itself, not served by this API) — just persistence, so tournaments
+            // created here survive an app restart. See `local_data_dir`.
+            let config = osp_server::ServerConfig {
+                data_dir: local_data_dir(),
+                backup_dir: local_backup_dir(),
+                ..Default::default()
+            };
+            // Log both resolved locations: they are configurable now, and the first
+            // question after "where did my tournament go?" is which directory this
+            // app was actually using.
+            match &config.data_dir {
+                Some(dir) => log::info!("tournaments stored under {}", dir.display()),
+                None => log::warn!("no data directory — tournaments live in memory only"),
+            }
+            match config
+                .backup_dir
+                .clone()
+                .or_else(osp_server::backup_default_root)
+            {
+                Some(dir) => log::info!("automatic backups written under {}", dir.display()),
+                None => log::warn!("no backups directory — automatic backups are disabled"),
+            }
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) = osp_server::serve_with_config(listener, config).await {
+                    log::error!("embedded server stopped: {err}");
+                }
+            });
 
-      Ok(())
-    })
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }

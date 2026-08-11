@@ -7,6 +7,8 @@
     "save": "Enregistrer",
     "backups": "Sauvegardes…",
     "backupsTitle": "Sauvegardes automatiques prises à chaque transition de ronde",
+    "backupsDirectory": "Enregistrées dans {path}",
+    "backupsNowhere": "Aucun dossier de sauvegarde : les sauvegardes automatiques sont désactivées.",
     "switchTournament": "Changer de tournoi…",
     "switchTournamentTitle": "Revenir à la liste des tournois",
     "unsavedChanges": "Modifications non enregistrées",

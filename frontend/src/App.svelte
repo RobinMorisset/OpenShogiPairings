@@ -39,7 +39,7 @@
   import { longPending, overrunLongRound } from "./lib/longGames";
   import { isDecided } from "./lib/noShow";
   import type {
-    BackupInfo,
+    BackupList,
     CupBracketView,
     CupPodium,
     Handicap,
@@ -382,6 +382,16 @@
         // Resuming whatever the server already had isn't a new edit made in
         // this session — nothing to warn about losing yet.
         hasUnsavedChanges = false;
+        // Pull the backups listing now rather than when the panel is first
+        // opened: its directory is what the Backups button's tooltip names, and
+        // a tooltip that only becomes true after you've clicked the button is
+        // no use. Best-effort, like the ratings above — a failure here just
+        // leaves the tooltip without its path until the panel is opened.
+        fetchBackups()
+          .then((listing) => (backupListing = listing))
+          .catch(() => {
+            /* the panel fetches it again when opened */
+          });
       } else {
         // The tournament no longer exists (e.g. deleted from another
         // client/tab) — back to the picker.
@@ -440,6 +450,9 @@
     canUndo = false;
     appliedVersion = null;
     hasUnsavedChanges = false;
+    // Each tournament has its own backups directory, so the previous one's
+    // listing (and the path in the tooltip) must not carry over.
+    backupListing = null;
     error = null;
     // Read (and clear) the requested tab *untracked*: this effect must depend
     // only on `currentTournamentId`. Subscribing to `initialTab` here would let
@@ -673,15 +686,30 @@
   }
 
   // Automatic server-side backups, taken at round state-machine transitions —
-  // shown in a small toggled panel, fetched lazily when opened.
+  // shown in a small toggled panel. `null` until the listing has been fetched
+  // (see `loadInitial`), which is distinct from a listing whose `directory` is
+  // null: that one means the server is keeping no backups at all.
   let showBackups = $state(false);
-  let backups = $state<BackupInfo[]>([]);
+  let backupListing = $state<BackupList | null>(null);
+  const backups = $derived(backupListing?.backups ?? []);
+
+  // The button's tooltip names the directory the backups actually land in.
+  // Where they are kept is the first thing a referee needs when the answer to
+  // "can I get yesterday's state back?" is "yes, they're on disk" — and the
+  // one thing the panel of timestamps can't tell them.
+  const backupsTitle = $derived.by(() => {
+    const base = $_("app.backupsTitle");
+    if (backupListing === null) return base; // not fetched yet
+    return backupListing.directory
+      ? `${base}\n${$_("app.backupsDirectory", { values: { path: backupListing.directory } })}`
+      : `${base}\n${$_("app.backupsNowhere")}`;
+  });
 
   function handleToggleBackups() {
     showBackups = !showBackups;
     if (!showBackups) return;
     run(async () => {
-      backups = await fetchBackups();
+      backupListing = await fetchBackups();
     });
   }
 
@@ -786,7 +814,7 @@
             data-testid="toggle-backups"
             onclick={handleToggleBackups}
             disabled={busy}
-            title={$_("app.backupsTitle")}
+            title={backupsTitle}
           >
             {$_("app.backups")}
           </button>
@@ -805,6 +833,19 @@
 
       {#if showBackups}
         <div class="backups-panel">
+          <!-- The path, in the panel as well as the button's tooltip: with an
+               empty list it is the only thing that answers "where would they
+               be?", and it is selectable here, so it can be pasted into a file
+               manager rather than retyped from a tooltip. -->
+          {#if backupListing !== null}
+            <p class="small backups-dir">
+              {#if backupListing.directory}
+                {$_("app.backupsDirectory", { values: { path: backupListing.directory } })}
+              {:else}
+                {$_("app.backupsNowhere")}
+              {/if}
+            </p>
+          {/if}
           {#if backups.length === 0}
             <p class="small">
               {$_("app.noBackupsYet")}
@@ -1143,6 +1184,14 @@
     font-size: 0.8rem;
     color: var(--text-secondary);
     margin: 0;
+  }
+  /* The directory line: a path, so monospaced and selectable, and allowed to
+     wrap — an absolute path is easily wider than the panel. */
+  .backups-dir {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    overflow-wrap: anywhere;
+    user-select: text;
+    margin-bottom: 0.4rem;
   }
   .backups-list {
     list-style: none;

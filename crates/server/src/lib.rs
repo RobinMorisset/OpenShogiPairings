@@ -124,6 +124,22 @@ pub struct ServerConfig {
     /// Directory holding one file per tournament, loaded on boot and written
     /// through to on every change; `None` = in-memory only (lost on restart).
     pub data_dir: Option<PathBuf>,
+    /// Root holding one directory of automatic backups per tournament (see
+    /// [`backup`]); `None` = the per-user data directory
+    /// ([`backup::default_root`]), which is where they have always gone.
+    /// Separate from `data_dir` on purpose: the backups are the recovery copy,
+    /// and putting them on another disk (or a synced folder) is exactly what a
+    /// recovery copy is for.
+    pub backup_dir: Option<PathBuf>,
+}
+
+/// Where automatic backups go when [`ServerConfig::backup_dir`] is left unset:
+/// `<per-user data dir>/openshogipairings/backups`, or `None` on a platform
+/// with no known data directory (backups are then kept nowhere). Exposed so a
+/// host — the standalone binary, the desktop app — can *report* the effective
+/// location without duplicating how it is derived.
+pub fn backup_default_root() -> Option<PathBuf> {
+    backup::default_root()
 }
 
 /// Serve the standalone server with the given [`ServerConfig`] (remote mode).
@@ -132,7 +148,7 @@ pub async fn serve_with_config(
     config: ServerConfig,
 ) -> std::io::Result<()> {
     let state = AppState {
-        registry: Arc::new(TournamentRegistry::new(config.data_dir)),
+        registry: Arc::new(TournamentRegistry::new(config.data_dir, config.backup_dir)),
         admin_auth: config.admin_password.map(AuthConfig::new),
         ..Default::default()
     };
@@ -852,9 +868,16 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::CREATED);
 
-        let (status, backups) = send(router(state.clone()), get(&t(id, "/backups"))).await;
+        let (status, listing) = send(router(state.clone()), get(&t(id, "/backups"))).await;
         assert_eq!(status, StatusCode::OK);
-        let backups = backups.as_array().unwrap();
+        // The listing says where the files are, so the referee can reach them
+        // outside the app; the directory is this tournament's own.
+        let directory = listing["directory"].as_str().expect("a backups directory");
+        assert!(
+            directory.ends_with(&id.to_string()),
+            "the backups directory is the tournament's own: {directory}"
+        );
+        let backups = listing["backups"].as_array().unwrap();
         assert_eq!(backups.len(), 2);
         // Newest first.
         assert_eq!(backups[0]["label"], "round 1 started");

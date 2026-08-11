@@ -339,6 +339,13 @@ pub enum MutateError {
 pub struct TournamentInstance {
     pub store: RwLock<TournamentStore>,
     pub auth: Option<AuthConfig>,
+    /// Where this tournament's automatic backups are written (see
+    /// [`crate::backup`]) — its own directory under the registry's backups
+    /// root. `None` when no root could be resolved at all, which keeps no
+    /// backups rather than inventing a location. Carried per instance so a
+    /// handler that has resolved the tournament (and only it) can back up,
+    /// list and report the directory without reaching back for the registry.
+    pub backups_dir: Option<PathBuf>,
 }
 
 impl TournamentInstance {
@@ -411,11 +418,16 @@ pub struct TournamentRegistry {
     /// Directory holding one `{id}.json` (+ `{id}.auth.json`) per tournament,
     /// or `None` for in-memory-only (embedded/dev/tests).
     data_dir: Option<PathBuf>,
+    /// Root holding one directory of automatic backups per tournament (see
+    /// [`crate::backup`]). Independent of `data_dir`: backups are a recovery
+    /// store, and a referee may well want them on a different disk from the
+    /// live tournaments. `None` = keep no backups at all.
+    backups_root: Option<PathBuf>,
 }
 
 impl Default for TournamentRegistry {
     fn default() -> Self {
-        Self::new(None)
+        Self::new(None, None)
     }
 }
 
@@ -425,7 +437,12 @@ impl TournamentRegistry {
     /// actually runs — a handful of tournaments). A file that fails to parse is
     /// skipped with a warning, same as a single corrupt `OSP_DATA_FILE` used to
     /// be.
-    pub fn new(data_dir: Option<PathBuf>) -> Self {
+    ///
+    /// `backups_root` overrides where the automatic backups go; `None` falls
+    /// back to [`crate::backup::default_root`] (the per-user data directory),
+    /// which is what every release before it was configurable used.
+    pub fn new(data_dir: Option<PathBuf>, backups_root: Option<PathBuf>) -> Self {
+        let backups_root = backups_root.or_else(crate::backup::default_root);
         let mut instances = HashMap::new();
         if let Some(dir) = &data_dir {
             if let Ok(entries) = fs::read_dir(dir) {
@@ -469,6 +486,9 @@ impl TournamentRegistry {
                         Arc::new(TournamentInstance {
                             store: RwLock::new(store),
                             auth,
+                            backups_dir: backups_root
+                                .as_ref()
+                                .map(|root| crate::backup::dir_for(root, id)),
                         }),
                     );
                 }
@@ -477,7 +497,16 @@ impl TournamentRegistry {
         Self {
             instances: RwLock::new(instances),
             data_dir,
+            backups_root,
         }
+    }
+
+    /// Where a given tournament's automatic backups live, or `None` when no
+    /// backups root could be resolved.
+    fn backups_dir(&self, id: Uuid) -> Option<PathBuf> {
+        self.backups_root
+            .as_ref()
+            .map(|root| crate::backup::dir_for(root, id))
     }
 
     fn tournament_path(&self, id: Uuid) -> Option<PathBuf> {
@@ -634,6 +663,7 @@ impl TournamentRegistry {
                 Arc::new(TournamentInstance {
                     store: RwLock::new(store),
                     auth,
+                    backups_dir: self.backups_dir(id),
                 }),
             );
         (id, token)
@@ -661,7 +691,7 @@ impl TournamentRegistry {
             if let Some(path) = self.auth_path(id) {
                 let _ = fs::remove_file(path);
             }
-            crate::backup::delete_all(id);
+            crate::backup::delete_all(instance.backups_dir.as_deref());
         }
         removed.is_some()
     }
@@ -834,14 +864,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("osp-registry-{}", uuid::Uuid::new_v4()));
 
         let id = {
-            let registry = TournamentRegistry::new(Some(dir.clone()));
+            let registry = TournamentRegistry::new(Some(dir.clone()), None);
             registry
                 .create("Persisted Cup", Some("secret".into()))
                 .unwrap()
                 .0
         };
 
-        let reloaded = TournamentRegistry::new(Some(dir.clone()));
+        let reloaded = TournamentRegistry::new(Some(dir.clone()), None);
         let instance = reloaded.get(id).expect("reloaded from disk");
         assert_eq!(
             instance.store.read().unwrap().current().unwrap().name,
@@ -859,7 +889,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("osp-authfail-{}", uuid::Uuid::new_v4()));
 
         let id = {
-            let registry = TournamentRegistry::new(Some(dir.clone()));
+            let registry = TournamentRegistry::new(Some(dir.clone()), None);
             registry
                 .create("Locked Cup", Some("secret".into()))
                 .unwrap()
@@ -873,7 +903,7 @@ mod tests {
 
         // The tournament must NOT come back open (which would drop its password);
         // it is dropped from the registry until an admin fixes the sidecar.
-        let reloaded = TournamentRegistry::new(Some(dir.clone()));
+        let reloaded = TournamentRegistry::new(Some(dir.clone()), None);
         assert!(
             reloaded.get(id).is_none(),
             "a tournament with an unreadable auth sidecar must fail closed, not load open"
@@ -891,6 +921,7 @@ mod tests {
                 s
             }),
             auth: None,
+            backups_dir: None,
         });
 
         // Poison the store lock: panic while holding its write guard, exactly the

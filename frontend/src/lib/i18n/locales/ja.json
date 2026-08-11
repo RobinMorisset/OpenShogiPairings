@@ -7,6 +7,8 @@
     "save": "保存",
     "backups": "バックアップ…",
     "backupsTitle": "回戦が進むたびに自動で取得されるバックアップ",
+    "backupsDirectory": "保存先: {path}",
+    "backupsNowhere": "バックアップ用のフォルダーがないため、自動バックアップは無効です。",
     "switchTournament": "大会を切り替え…",
     "switchTournamentTitle": "大会一覧に戻ります",
     "unsavedChanges": "未保存の変更があります",

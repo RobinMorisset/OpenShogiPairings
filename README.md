@@ -176,6 +176,24 @@ A login exchanges the password for a per-boot random bearer token
 `OSP_DATA_DIR` is set, tournaments (and their passwords) persist to disk and
 reload on boot; otherwise the registry is in-memory only.
 
+### Where the files live
+
+Two directories, configured independently by environment variable — the desktop
+app reads the same two, so one name means one thing everywhere:
+
+| Variable | Holds | Default (desktop app) | Default (`osp-server`) |
+| --- | --- | --- | --- |
+| `OSP_DATA_DIR` | One `{id}.json` (+ `{id}.auth.json`) per tournament. | `<data dir>/openshogipairings/tournaments` | *(unset = in-memory only)* |
+| `OSP_BACKUP_DIR` | One directory of rotating automatic backups per tournament. | `<data dir>/openshogipairings/backups` | same |
+
+`<data dir>` is the per-user data directory (`~/Library/Application Support` on
+macOS, `%APPDATA%` on Windows, `$XDG_DATA_HOME` on Linux). They are separate
+knobs on purpose: the backups are the recovery copy, so putting the live
+tournaments on a synced folder while the backups stay on the local disk (or the
+reverse) is a reasonable thing to want. Both are logged at startup, and the
+backups path is also shown in the app — in the Backups button's tooltip and at
+the top of its panel.
+
 ### Live multi-referee sync and conflict detection
 
 Several referees can edit the same tournament from different machines at
@@ -347,7 +365,7 @@ that tournament's bearer token if it has a password (except `/login` and
 | `POST /players/{id}/category` | Add/remove membership in a referee-defined category: `{ "category_id", "member": true｜false }` (404 if the category doesn't exist). |
 | `POST /players/{id}/adjustments` | Apply a manual point bonus/penalty: `{ "delta", "reason" }` (reason mandatory). |
 | `DELETE /players/{id}/adjustments/{adjustment_id}` | Remove a point adjustment. |
-| `GET /backups` | List automatic backups, newest first (taken at every round-lifecycle transition). |
+| `GET /backups` | The automatic backups (taken at every round-lifecycle transition): `{ "directory", "backups": [...] }`, newest first. `directory` is the absolute path they are written to — shown in the Backups button's tooltip and the panel, so the files can be found outside the app — or `null` when no backups directory could be resolved and nothing is being backed up. |
 | `POST /backups/{backup_id}/restore` | Restore a backup as the current tournament; resets undo history. |
 
 The FESA rating list is fixed-width, Latin-1 text (parsed in

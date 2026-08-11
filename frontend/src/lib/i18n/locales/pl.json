@@ -7,6 +7,8 @@
     "save": "Zapisz",
     "backups": "Kopie zapasowe…",
     "backupsTitle": "Automatyczne kopie zapasowe tworzone przy każdej zmianie stanu rundy",
+    "backupsDirectory": "Zapisywane w {path}",
+    "backupsNowhere": "Brak katalogu kopii zapasowych: automatyczne kopie są wyłączone.",
     "switchTournament": "Zmień turniej…",
     "switchTournamentTitle": "Wróć do listy turniejów",
     "unsavedChanges": "Niezapisane zmiany",
