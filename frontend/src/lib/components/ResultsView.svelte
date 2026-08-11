@@ -280,8 +280,8 @@
         level: boolean;
         wins: number;
         losses: number;
-        /** Points the team had over its opponent at pairing time (negative =
-         *  paired up). Every board of the match carries the team's float. */
+        /** Half-points the team had over its opponent at pairing time
+         *  (negative = paired up). Every board of the match carries it. */
         pointsDiff: number;
       }
     | { kind: "team-pending"; opponent: string; opponentName: string }
@@ -313,8 +313,8 @@
     if (!score.decided) return { kind: "team-pending", opponent, opponentName };
     const wins = isFirst ? score.wins1 : score.wins2;
     const losses = isFirst ? score.wins2 : score.wins1;
-    // points_diff = points(team1) − points(team2), frozen at pairing time and
-    // stamped on every board of the match; flip it for the second team.
+    // points_diff = points(team1) − points(team2) in half-points, frozen at
+    // pairing time and stamped on every board of the match; flip it for team 2.
     const diff = round.boards[match.boards[0]]?.points_diff ?? 0;
     return {
       kind: "team-played",
@@ -434,7 +434,8 @@
     drawn: boolean;
     /** Present for a handicap game: the code, and whether this player conceded. */
     handicap?: { code: string; gave: boolean };
-    /** Points this player had over the opponent at pairing time (negative = played up). */
+    /** Half-points this player had over the opponent at pairing time
+     *  (negative = played up). */
     pointsDiff: number;
   };
 
@@ -525,8 +526,8 @@
     const handicap: PlayedCell["handicap"] = board.handicap
       ? { code: board.handicap.handicap, gave }
       : undefined;
-    // points_diff = points(player1) − points(player2), frozen at pairing time.
-    // From this player's own perspective: a positive diff for player1 means
+    // points_diff = points(player1) − points(player2) in half-points, frozen at
+    // pairing time. From this player's own perspective: a positive diff means
     // player1 outranked player2, i.e. player1 played down (▼); the sign flips
     // for player2.
     const diff = board.points_diff ?? 0;
@@ -601,11 +602,18 @@
     }
   }
 
-  /** Ascending/descending floater markers, e.g. `^`, `vv` — one per point of gap. */
+  /**
+   * Ascending/descending floater markers, e.g. `^`, `vv` — one per point of gap.
+   *
+   * `points_diff` is in **half-points** (the unit scores are kept in), so it is
+   * halved here: counting it raw gave every ordinary one-point float two
+   * markers. Rounded up, so a half-point gap — which a `0=` bye or a
+   * MacMahon half can produce — still shows as the float it is.
+   */
   function floatMarkers(pointsDiff: number): string {
     if (pointsDiff === 0) return "";
     const marker = pointsDiff < 0 ? "^" : "v";
-    return marker.repeat(Math.abs(pointsDiff));
+    return marker.repeat(Math.ceil(Math.abs(pointsDiff) / 2));
   }
 
   /** The results-cell label, e.g. `3+`, `4=−`, `3+(+4p)`, `4=+(−2p)^`. */

@@ -108,6 +108,10 @@ rather than half-parsed; re-create the tournament.
 - Marking a board as a draw after flagging it a no-show recorded a draw on a
   game nobody played, and fed it to the ELO estimate as a real ½ point. The
   draw button is now disabled on a forfeited board (clear the no-show first).
+- The float markers in the standings cross-table were doubled: a player who
+  played one point up showed `^^`, two points up `^^^^`. The gap is stored in
+  half-points and the markers counted it raw. Only the display was wrong —
+  the pairings themselves read the direction, never the count.
 
 ## [1.3.0] - 2026-08-05
 

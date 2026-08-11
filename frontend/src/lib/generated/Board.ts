@@ -27,7 +27,10 @@ outcome?: Outcome,
 handicap?: HandicapGame | null, 
 /**
  * The float for this board: `points(player1) − points(player2)` at the time
- * the round was paired. Frozen here so the float history stays correct even
+ * the round was paired, **in half-points** — the unit [`HalfPoints`] keeps
+ * scores in, so an ordinary one-point float is `±2` here. Only the sign
+ * matters to the float history; anything displaying the size has to halve
+ * it. Frozen here so the float history stays correct even
  * if MacMahon thresholds change later or an earlier result is edited — the
  * score standings are recomputed live, but *who floated* is a fact of the
  * pairing. Set for every scored board — Swiss, forced and cup alike — so a
