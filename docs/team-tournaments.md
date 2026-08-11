@@ -1,6 +1,8 @@
 # Team tournaments — design
 
-Status: **draft, under discussion**. Nothing here is implemented yet.
+Status: **draft, under discussion**. Only the [preliminary
+refactor](#preliminary-refactor-board-outcome-as-a-sum-type) has landed; nothing
+team-specific is implemented yet.
 
 A team tournament is the format that traditionally precedes European shogi
 championships (e.g. WOSC): teams of N players (usually N = 3) are the unit of
@@ -72,12 +74,12 @@ frontend.
 
 ## Preliminary refactor: board outcome as a sum type
 
-Lands as its **own commit, before any team work**. Today `Board` carries
+**Landed** (own commit, before any team work). `Board` used to carry
 `result: Option<Winner>` and `no_show: Option<NoShow>` as sibling fields, so
-"a result recorded on a forfeited board" is representable and only excluded
-by convention (mutations keep `result` at `None` on forfeits so ELO never
-sees them). Team mode adds a third concern to that product (justified
-absence), so it gets folded into a single sum first:
+"a result recorded on a forfeited board" was representable and only excluded
+by convention (mutations kept `result` at `None` on forfeits so ELO never
+saw them). Team mode adds a third concern to that product (justified
+absence), so it was folded into a single sum first:
 
 ```rust
 /// What happened on a board.
@@ -85,30 +87,43 @@ pub enum Outcome {
     /// No decision yet. `drawn` records at least one draw (sennichite)
     /// before the decisive replay still in progress — it matters for ELO.
     Pending { drawn: bool },
-    /// Played to a decision (today's `result: Some(w)`), possibly after
+    /// Played to a decision (the former `result: Some(w)`), possibly after
     /// draws.
     Won { winner: Winner, drawn: bool },
     /// Side(s) failed to appear — no game was played; the present side (if
     /// exactly one) is credited the point like a bye; never feeds ELO
-    /// (today's `no_show`).
-    Forfeit(NoShow),
+    /// (the former `no_show`).
+    Forfeit { absent: NoShow },
 }
 
 /// On Board, replacing `result` + `no_show` + `drawn`:
 pub outcome: Outcome,
 ```
 
+`Forfeit` carries a named field rather than the tuple this doc first
+sketched, so the whole sum serializes internally-tagged like
+[`PairingSource`] and reaches the frontend as a plain discriminated union on
+`kind`. The field is skipped in JSON while the board is pending, so an
+unplayed board's save shape is unchanged.
+
 `drawn` lives only in the variants where play happened: the American grid
 cannot express "forfeit after draws", so the type doesn't either. This also
 absorbs the third loose field — `result` × `no_show` × `drawn` all collapse
 into the one sum.
+
+One consequence is not mechanical: `set_board_drawn` on a forfeited board
+has nothing to write, so it now **fails loudly**
+(`TournamentError::DrawnOnForfeitedBoard`) and the round view disables the
+draw button there. That combination used to be reachable and was a real bug
+— the ELO reader tested `drawn` before the result and scored the phantom
+game ½.
 
 Touch points (mechanical): `is_decided` / `effective_winner` /
 `effective_loser` / `winner_id`, the result-entry mutations
 (`toggle_board_winner`, `set_board_no_show`, `set_board_drawn`), scoring,
 the American grid cells, the ELO reader, sim auto-fill, and the frontend
 result-entry + `boardOutcome`/`noShow` helpers with regenerated TS types.
-No legacy-save support (see Persistence).
+No legacy-save support (see Persistence); `format_version` is now 6.
 
 ## Data model
 
@@ -357,7 +372,8 @@ pub enum AbsenceKind {
     Justified,
 }
 
-/// Replaces `Forfeit(NoShow)` from the preliminary refactor:
+/// Replaces the `NoShow` payload of `Outcome::Forfeit` from the
+/// preliminary refactor:
 pub enum Forfeit {
     Player1(AbsenceKind),
     Player2(AbsenceKind),
@@ -521,8 +537,9 @@ version guard) instead of half-parsed.
 
 ## Testing
 
-- Preliminary refactor commit: outcome serde round-trips; behavioral
-  no-change pinned by the existing suites;
+- Preliminary refactor commit (done): outcome serde round-trips, the draw
+  flag surviving a winner toggle, and the forfeited-board draw rejection;
+  behavioral no-change pinned by the existing suites;
 - Core: team analogues of the pairing/scoring/standings test suites; ladder
   bound cross-checks; derivation edge cases (forfeit-tie with odd N,
   forfeit boards, team bye values, mixed forfeit kinds);
@@ -545,5 +562,5 @@ All previously open questions are resolved (discussion of 2026-08-10):
 5. **`BoardWins` default position** — immediately after match points.
 6. **Team sizes** — 2..=9, default 3.
 7. **Club rule** — graded per-edge count of same-club games created.
-8. **Board outcome sum type** — preliminary refactor, own commit, lands
+8. **Board outcome sum type** — preliminary refactor, own commit, landed
    first; no backwards compatibility anywhere (no users yet).

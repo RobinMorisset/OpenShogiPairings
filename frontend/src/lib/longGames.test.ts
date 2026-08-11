@@ -23,14 +23,13 @@ describe("longPending", () => {
   });
 
   it("is false once the long game is decided", () => {
-    expect(longPending(board({ long: true, result: "player1" }))).toBe(false);
+    expect(longPending(board({ long: true, outcome: { kind: "won", winner: "player1" } }))).toBe(false);
   });
 
-  // A forfeited long board frees its players just like a played one — the same
-  // `result`-is-null-but-decided case that the force-pairing guard got wrong.
+  // A forfeited long board frees its players just like a played one — the
+  // winnerless-but-decided case that the force-pairing guard got wrong.
   it("is false for a long board resolved by forfeit", () => {
-    const forfeited = board({ long: true, result: null, no_show: "player2" });
-    expect(forfeited.result).toBeNull();
+    const forfeited = board({ long: true, outcome: { kind: "forfeit", absent: "player2" } });
     expect(longPending(forfeited)).toBe(false);
   });
 });
@@ -61,7 +60,7 @@ describe("overrunLongRound", () => {
 
   it("ignores a long game that was finished in time", () => {
     const rounds = [
-      round(1, [board({ long: true, result: "player1" })]),
+      round(1, [board({ long: true, outcome: { kind: "won", winner: "player1" } })]),
       round(2, [board({})]),
       round(3, [board({})]),
     ];

@@ -134,6 +134,7 @@
     "carriedHint": "Click a player to record the winner of their two-round game.",
     "clickToSetWinner": "Click to set as winner",
     "drawTitle": "A draw occurred before the decisive game (recorded for ELO)",
+    "drawForfeitedTitle": "Nobody played, so nobody drew: clear the no-show first",
     "giverTitle": "The higher-rated player gives the odds",
     "giverGives": "{name} gives",
     "needsDifferentRatings": "Needs two players with different ratings",

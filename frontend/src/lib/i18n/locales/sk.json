@@ -134,6 +134,7 @@
     "carriedHint": "Kliknutím na hráča zapíšete víťaza jeho dvojkolovej partie.",
     "clickToSetWinner": "Kliknutím ho označíte za víťaza",
     "drawTitle": "Pred rozhodujúcou partiou nastala remíza (zapísaná pre ELO)",
+    "drawForfeitedTitle": "Partia sa nehrala, takže remíza nenastala: najprv zrušte nedostavenie sa",
     "giverTitle": "Hendikep dáva hráč s vyšším ratingom",
     "giverGives": "{name} dáva",
     "needsDifferentRatings": "Vyžaduje dvoch hráčov s rozdielnym ratingom",

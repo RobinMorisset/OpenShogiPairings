@@ -202,6 +202,7 @@ fn domain_payload(err: &TournamentError) -> Option<(&'static str, BTreeMap<Strin
         | TournamentError::CategoryNotFound(_)
         | TournamentError::RoundNotFound(_)
         | TournamentError::BoardNotFound { .. }
+        | TournamentError::DrawnOnForfeitedBoard { .. }
         | TournamentError::PlayerNotSittingOut { .. }
         | TournamentError::AdjustmentNotFound { .. }
         | TournamentError::DraftAlreadyExists

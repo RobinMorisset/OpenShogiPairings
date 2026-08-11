@@ -292,8 +292,8 @@ Notes:
 - **ELO stays one game.** `estimate_elos` (`crates/core/src/elo.rs`) iterates the
   decided boards once, so it already treats a long board as a single result —
   confirm it does not read `long` and does not double-weight.
-- **Pending long board:** while the game is undecided the board's `result` is
-  `None`, so the results loop `continue`s and awards nothing — the two players
+- **Pending long board:** while the game is undecided the board's outcome is
+  `Pending`, so the results loop `continue`s and awards nothing — the two players
   show their prior totals with no points from this game. That is the "padded"
   standings state. The opponents are still recorded (the earlier loop pushes them
   for any non-no-show board), so the game is visibly "in progress" but unscored.

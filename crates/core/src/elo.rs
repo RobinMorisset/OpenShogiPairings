@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::player::Player;
-use crate::round::{Handicap, Round, Winner};
+use crate::round::{Handicap, Outcome, Round, Winner};
 use crate::settings::{EloPriorShape, TournamentSettings};
 use crate::units::TournamentId;
 
@@ -506,15 +506,20 @@ pub fn estimate_elos(
                 continue; // an opponent no longer in the tournament
             };
             // Handicaps use the *actual* result (who really won), so score player1
-            // straight off `result` (and a draw as ½), not the effective winner.
-            let score_a = if board.drawn {
-                0.5
-            } else {
-                match board.result {
-                    Some(Winner::Player1) => 1.0,
-                    Some(Winner::Player2) => 0.0,
-                    None => continue, // unplayed
-                }
+            // straight off the outcome (and a draw as ½), not the effective winner.
+            // A draw counts whether or not the decisive replay has finished; a
+            // forfeit is not a game and never counts.
+            let score_a = match board.outcome {
+                Outcome::Pending { drawn: true } | Outcome::Won { drawn: true, .. } => 0.5,
+                Outcome::Won {
+                    winner: Winner::Player1,
+                    ..
+                } => 1.0,
+                Outcome::Won {
+                    winner: Winner::Player2,
+                    ..
+                } => 0.0,
+                Outcome::Pending { .. } | Outcome::Forfeit { .. } => continue,
             };
             // player1's handicap offset: −h if player1 conceded the odds, +h if it
             // received them, 0 for an even game. Needs the giver's fixed rating.
@@ -626,7 +631,7 @@ pub fn estimate_elos(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::{Board, HandicapGame, PairingSource};
+    use crate::round::{Board, HandicapGame, Outcome, PairingSource};
     use crate::settings::{Ratio, RatioAtLeastOne, UnratedK};
     use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -661,7 +666,7 @@ mod tests {
 
     fn win(a: TournamentId, b: TournamentId) -> Board {
         Board {
-            result: Some(Winner::Player1),
+            outcome: Outcome::won(Winner::Player1),
             ..Board::pending(a, b, 0, PairingSource::Swiss)
         }
     }
@@ -674,7 +679,7 @@ mod tests {
         giver: Winner,
     ) -> Board {
         Board {
-            result: Some(result),
+            outcome: Outcome::won(result),
             handicap: Some(HandicapGame { handicap, giver }),
             ..Board::pending(a, b, 0, PairingSource::Swiss)
         }
@@ -906,7 +911,10 @@ mod tests {
         let a = player(Some(1500));
         let b = player(Some(1500));
         let drawn = Board {
-            drawn: true,
+            outcome: Outcome::Won {
+                winner: Winner::Player1,
+                drawn: true,
+            },
             ..Board::pending(
                 a.tournament_id.unwrap(),
                 b.tournament_id.unwrap(),

@@ -15,7 +15,8 @@
     Winner,
   } from "../types";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
-  import { boardOutcome } from "../boardOutcome";
+  import { boardOutcome, drawnOf, forfeitOf, winnerOf } from "../boardOutcome";
+  import { absent } from "../noShow";
   import { partitionDropped } from "../tiebreak";
   import { formatScore, HALF_POINT_TIEBREAKS } from "../score";
   import { printPage } from "../platform";
@@ -314,15 +315,15 @@
     const opponentTid = isP1 ? board.player2 : board.player1;
     const opponent = String(opponentTid);
     const opponentName = nameOfTid(opponentTid);
-    if (board.no_show) {
+    const forfeit = forfeitOf(board);
+    if (forfeit) {
       // This side is a no-show for a single absence on their side, or when both
       // players were absent; otherwise they are the one who showed up.
-      const iWasAbsent = board.no_show === side || board.no_show === "both";
-      return iWasAbsent
+      return absent(forfeit, side)
         ? { kind: "no-show", opponentName }
         : { kind: "no-show-win", opponentName };
     }
-    if (!board.result) return { kind: "pending", opponent, opponentName };
+    if (!winnerOf(board)) return { kind: "pending", opponent, opponentName };
 
     const { actualWon, gave } = boardOutcome(board, side);
     // Server-computed, Wiel-rule-aware winner for this board (see
@@ -346,7 +347,7 @@
       opponentName,
       actualWon,
       effectiveWon,
-      drawn: board.drawn ?? false,
+      drawn: drawnOf(board),
       handicap,
       pointsDiff,
     };

@@ -219,8 +219,8 @@ pub fn game_elo_diffs(tournament: &Tournament, strengths: &StrengthMap) -> Vec<f
     let mut diffs = Vec::new();
     for round in &tournament.rounds {
         for board in &round.boards {
-            if board.result.is_none() {
-                continue; // unplayed — not a game yet
+            if board.outcome.winner().is_none() {
+                continue; // unplayed (or forfeited) — not a game yet
             }
             if let (Some(&a), Some(&b)) =
                 (strengths.get(&board.player1), strengths.get(&board.player2))
@@ -324,7 +324,7 @@ pub fn player_game_interest(
     let mut count: HashMap<TournamentId, u32> = HashMap::new();
     for round in &tournament.rounds {
         for board in &round.boards {
-            if board.result.is_none() {
+            if board.outcome.winner().is_none() {
                 continue;
             }
             if let (Some(&a), Some(&b)) =
@@ -524,7 +524,7 @@ fn autofill_last_round(
             .boards
             .iter()
             .enumerate()
-            .filter(|(_, b)| b.result.is_none())
+            .filter(|(_, b)| !b.is_decided())
             .map(|(i, b)| {
                 // Boards already carry the players' tournament numbers — the
                 // deterministic game-outcome key (see [`game_uniform`]).

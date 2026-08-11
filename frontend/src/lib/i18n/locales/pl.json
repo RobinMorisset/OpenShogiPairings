@@ -134,6 +134,7 @@
     "carriedHint": "Kliknij gracza, aby zapisać zwycięzcę jego dwurundowej partii.",
     "clickToSetWinner": "Kliknij, aby wskazać zwycięzcę",
     "drawTitle": "Przed partią decydującą padł remis (zapisany na potrzeby ELO)",
+    "drawForfeitedTitle": "Partia nie została rozegrana, więc nie było remisu: najpierw usuń walkower",
     "giverTitle": "Forę daje gracz o wyższym rankingu",
     "giverGives": "{name} daje",
     "needsDifferentRatings": "Wymaga dwóch graczy o różnym rankingu",

@@ -1631,7 +1631,7 @@ pub fn pair_round_weighted(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::Winner;
+    use crate::round::{Outcome, Winner};
     use crate::settings::{ClubProtection, MacMahonThreshold, RatioAtLeastOne};
     use std::num::NonZeroU32;
     use uuid::Uuid;
@@ -1703,7 +1703,7 @@ mod tests {
             boards: boards
                 .iter()
                 .map(|&(a, b, w)| Board {
-                    result: Some(w),
+                    outcome: Outcome::won(w),
                     ..Board::pending(a, b, 0, PairingSource::Swiss)
                 })
                 .collect(),
@@ -1971,7 +1971,7 @@ mod tests {
         let r1 = Round {
             number: 1,
             boards: vec![Board {
-                result: Some(Winner::Player1),
+                outcome: Outcome::won(Winner::Player1),
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),

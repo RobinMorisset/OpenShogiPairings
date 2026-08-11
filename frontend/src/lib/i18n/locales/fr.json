@@ -134,6 +134,7 @@
     "carriedHint": "Cliquez sur un joueur pour désigner le vainqueur de sa partie sur deux rondes.",
     "clickToSetWinner": "Cliquer pour désigner le vainqueur",
     "drawTitle": "Une nulle a eu lieu avant la partie décisive (enregistrée pour l'ELO)",
+    "drawForfeitedTitle": "Personne n'a joué, donc personne n'a fait nulle : retirez d'abord l'absence",
     "giverTitle": "Le joueur le mieux classé donne le handicap",
     "giverGives": "{name} donne",
     "needsDifferentRatings": "Nécessite deux joueurs de classements différents",

@@ -309,7 +309,7 @@ mod tests {
         let (status, body) = send(router(state.clone()), get(&t(id, ""))).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["tournament"]["name"], "Paris Open");
-        assert_eq!(body["tournament"]["format_version"], 5);
+        assert_eq!(body["tournament"]["format_version"], 6);
         assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
         assert_eq!(body["can_undo"], false); // nothing to undo on a fresh tournament
 
@@ -642,8 +642,8 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
-            body["tournament"]["rounds"][0]["boards"][0]["result"],
-            "player1"
+            body["tournament"]["rounds"][0]["boards"][0]["outcome"],
+            json!({ "kind": "won", "winner": "player1" })
         );
 
         // Bad board index → 404.

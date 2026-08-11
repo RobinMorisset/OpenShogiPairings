@@ -134,6 +134,7 @@
     "carriedHint": "選手をクリックすると、2回戦にまたがる対局の勝者を記録します。",
     "clickToSetWinner": "クリックで勝者に設定",
     "drawTitle": "決着局の前に千日手が発生しました（レーティング用に記録されます）",
+    "drawForfeitedTitle": "対局が行われていないため千日手はありません。先に不出場を解除してください",
     "giverTitle": "レーティング上位の選手が上手を持ちます",
     "giverGives": "{name} が上手",
     "needsDifferentRatings": "レーティングの異なる2名が必要です",

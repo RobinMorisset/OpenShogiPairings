@@ -19,9 +19,10 @@ Known limitations and future work, roughly ordered by area.
 
 - **Team tournaments** — design settled in
   [docs/team-tournaments.md](docs/team-tournaments.md): teams as the pairing
-  unit, boards as the atom, derived match outcomes. First step is the
-  preliminary board-outcome sum-type refactor (own commit), then the team
-  mode itself.
+  unit, boards as the atom, derived match outcomes. The preliminary
+  board-outcome sum-type refactor has landed; the team mode itself is next
+  (unit abstraction in the engine, then `Team` + rosters, pairing, scoring,
+  standings, UI).
 
 ## Multi-referee server
 

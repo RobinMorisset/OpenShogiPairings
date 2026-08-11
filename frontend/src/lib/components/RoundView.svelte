@@ -15,7 +15,7 @@
     type Winner,
   } from "../types";
   import { sourceBadge } from "../pairingSource";
-  import { handicapGiverId } from "../boardOutcome";
+  import { drawnOf, forfeitOf, handicapGiverId, winnerOf } from "../boardOutcome";
   import { absent, isDecided, toggledNoShow } from "../noShow";
   import { printPage } from "../platform";
   import type { HandicapChoice } from "../handicap";
@@ -88,15 +88,15 @@
     return side === "player1" ? "player2" : "player1";
   }
 
-  // A side's outcome, from the recorded result or a no-show. An opponent who
+  // A side's outcome, from the recorded result or a forfeit. An opponent who
   // failed to appear hands `side` the point, but under `"both"` nobody won —
-  // so winning compares `no_show` strictly, while losing goes through
+  // so winning compares the forfeit strictly, while losing goes through
   // `absent()`, which counts `"both"` as covering each side.
   function isWinner(board: Board, side: Winner): boolean {
-    return board.result === side || board.no_show === other(side);
+    return winnerOf(board) === side || forfeitOf(board) === other(side);
   }
   function isLoser(board: Board, side: Winner): boolean {
-    return board.result === other(side) || absent(board.no_show, side);
+    return winnerOf(board) === other(side) || absent(forfeitOf(board), side);
   }
 
   // The long checkbox is editable only on the current round; turning it *on* also
@@ -110,7 +110,7 @@
   // Toggle `side`'s no-show independently, so the two buttons together cover all
   // of none / player1 / player2 / both (each side can be a no-show at once).
   function toggleNoShow(index: number, board: Board, side: Winner) {
-    onSetNoShow(index, toggledNoShow(board.no_show, side));
+    onSetNoShow(index, toggledNoShow(forfeitOf(board), side));
   }
 
   // Resolve tournament numbers to display names.
@@ -708,14 +708,18 @@
               </button>
             </td>
             <td class="draw-col">
+              <!-- A forfeited board was never played, so it cannot have been
+                   drawn — the server rejects the request outright. -->
               <button
                 type="button"
                 class="draw"
-                class:active={board.drawn}
-                disabled={busy}
-                title={$_("roundView.drawTitle")}
-                aria-pressed={board.drawn ?? false}
-                onclick={() => onToggleDrawn(index, !board.drawn)}
+                class:active={drawnOf(board)}
+                disabled={busy || forfeitOf(board) != null}
+                title={forfeitOf(board) != null
+                  ? $_("roundView.drawForfeitedTitle")
+                  : $_("roundView.drawTitle")}
+                aria-pressed={drawnOf(board)}
+                onclick={() => onToggleDrawn(index, !drawnOf(board))}
               >
                 =
               </button>
@@ -725,9 +729,9 @@
                 <button
                   type="button"
                   class="noshow-btn"
-                  class:active={absent(board.no_show, "player1")}
+                  class:active={absent(forfeitOf(board), "player1")}
                   disabled={busy}
-                  aria-pressed={absent(board.no_show, "player1")}
+                  aria-pressed={absent(forfeitOf(board), "player1")}
                   title={$_("roundView.noShowTitle", { values: { name: name(board.player1) } })}
                   onclick={() => toggleNoShow(index, board, "player1")}
                 >
@@ -736,9 +740,9 @@
                 <button
                   type="button"
                   class="noshow-btn"
-                  class:active={absent(board.no_show, "player2")}
+                  class:active={absent(forfeitOf(board), "player2")}
                   disabled={busy}
-                  aria-pressed={absent(board.no_show, "player2")}
+                  aria-pressed={absent(forfeitOf(board), "player2")}
                   title={$_("roundView.noShowTitle", { values: { name: name(board.player2) } })}
                   onclick={() => toggleNoShow(index, board, "player2")}
                 >

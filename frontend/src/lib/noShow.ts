@@ -1,26 +1,26 @@
 // No-show bit-logic for a board's two sides.
 //
-// A board's `no_show` is a single value covering none / player1 / player2 /
-// both, but the UI toggles each side independently. These helpers convert
-// between the two per-side flags and that single value, so the two "didn't show
-// up" buttons together cover all four states. Kept as a standalone module (out
-// of RoundView) so the logic is unit-tested.
+// A board's forfeit is a single value covering none / player1 / player2 / both,
+// but the UI toggles each side independently. These helpers convert between the
+// two per-side flags and that single value, so the two "didn't show up" buttons
+// together cover all four states. Kept as a standalone module (out of RoundView)
+// so the logic is unit-tested.
 
+import { outcomeOf } from "./boardOutcome";
 import type { Board, NoShow, Winner } from "./types";
 
 /**
- * Whether a board's outcome is settled: a recorded result *or* a no-show.
+ * Whether a board's outcome is settled: a recorded result *or* a forfeit.
  *
- * Mirrors `Board::is_decided` in `crates/core/src/round.rs`. The two fields are
- * mutually exclusive by construction — `set_board_no_show` clears `result` when
- * it sets `no_show`, because no game was played — so testing `result` alone
- * silently treats every forfeited board as still open. Server-side guards
+ * Mirrors `Board::is_decided` in `crates/core/src/round.rs`. A forfeited board
+ * carries no winner — the two are variants of one sum — so testing for a winner
+ * alone silently treats every forfeited board as still open. Server-side guards
  * (re-pairing a round, flagging a long game) are written against `is_decided`,
  * so any client guard that mirrors one has to use this, or it enables a control
  * whose request the server rejects.
  */
 export function isDecided(board: Board): boolean {
-  return board.result != null || board.no_show != null;
+  return outcomeOf(board).kind !== "pending";
 }
 
 /**

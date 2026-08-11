@@ -33,6 +33,7 @@ export type { HealthStatus } from "./generated/HealthStatus";
 export type { MacMahonThreshold } from "./generated/MacMahonThreshold";
 export type { NewPlayer } from "./generated/NewPlayer";
 export type { NoShow } from "./generated/NoShow";
+export type { Outcome } from "./generated/Outcome";
 export type { PairingSource } from "./generated/PairingSource";
 export type { PairingMode } from "./generated/PairingMode";
 export type { EloEstimator } from "./generated/EloEstimator";

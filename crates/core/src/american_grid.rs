@@ -234,7 +234,7 @@ fn game_cell(
     // A no-show board renders distinctly: `0#` for a player who was absent (both,
     // under a double no-show), `0+` (a bye-equivalent free point) for the one who
     // showed up.
-    if board.no_show.is_some() {
+    if board.outcome.forfeit().is_some() {
         return if board.no_show_absent(side) {
             "0#".into()
         } else {
@@ -269,11 +269,11 @@ fn game_cell(
 /// draw occurred (the ELO computation only needs that fact), otherwise `+` for a
 /// win and `-` for a loss, following the *actual* game result.
 fn result_marker(board: &Board, is_player1: bool) -> &'static str {
-    if board.drawn {
+    if board.outcome.drawn() {
         return "=";
     }
     let won = matches!(
-        (board.result, is_player1),
+        (board.outcome.winner(), is_player1),
         (Some(Winner::Player1), true) | (Some(Winner::Player2), false)
     );
     if won {
@@ -298,7 +298,8 @@ fn pad(s: &str, width: usize) -> String {
 mod tests {
     use super::*;
     use crate::round::{
-        CupStage, Handicap, HandicapGame, NoShow, PairingSource, Sitout, SitoutKind, SitoutValue,
+        CupStage, Handicap, HandicapGame, NoShow, Outcome, PairingSource, Sitout, SitoutKind,
+        SitoutValue,
     };
 
     /// The tournament number assigned to a registered player (only valid after
@@ -341,7 +342,7 @@ mod tests {
         let p2 = tid(&t, p2);
 
         let mut board = Board {
-            result: Some(Winner::Player1),
+            outcome: Outcome::won(Winner::Player1),
             ..Board::pending(p1, p2, 0, PairingSource::Swiss)
         };
         configure(&mut board);
@@ -392,7 +393,12 @@ mod tests {
     fn draw_collapses_to_equals_for_both_sides() {
         // A draw occurred but the game was replayed to a P1 win. Both cells show
         // `=`, dropping the +/- entirely.
-        let (t, ..) = one_board(|b| b.drawn = true);
+        let (t, ..) = one_board(|b| {
+            b.outcome = Outcome::Won {
+                winner: Winner::Player1,
+                drawn: true,
+            }
+        });
         let rows = data_rows(&to_grid(&t, &t.standings()));
         assert!(rows.iter().any(|r| r.contains("[2=]")));
         assert!(rows.iter().any(|r| r.contains("[1=]")));
@@ -429,7 +435,7 @@ mod tests {
         t.rounds.push(Round {
             number: 1,
             boards: vec![Board {
-                result: Some(Winner::Player1),
+                outcome: Outcome::won(Winner::Player1),
                 long: true,
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
@@ -462,7 +468,7 @@ mod tests {
         t.rounds.push(Round {
             number: 1,
             boards: vec![Board {
-                result: Some(Winner::Player1),
+                outcome: Outcome::won(Winner::Player1),
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
             sitouts: vec![Sitout {
@@ -480,7 +486,7 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             boards: vec![Board {
-                result: Some(Winner::Player2),
+                outcome: Outcome::won(Winner::Player2),
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
             sitouts: vec![Sitout {
@@ -504,7 +510,9 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             boards: vec![Board {
-                no_show: Some(NoShow::Player2), // P2 absent
+                outcome: Outcome::Forfeit {
+                    absent: NoShow::Player2,
+                }, // P2 absent
                 ..Board::pending(p1, p2, 0, PairingSource::Swiss)
             }],
             sitouts: Vec::new(),
@@ -526,7 +534,9 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             boards: vec![Board {
-                no_show: Some(NoShow::Both),
+                outcome: Outcome::Forfeit {
+                    absent: NoShow::Both,
+                },
                 ..Board::pending(p1, p2, 0, PairingSource::Swiss)
             }],
             sitouts: Vec::new(),

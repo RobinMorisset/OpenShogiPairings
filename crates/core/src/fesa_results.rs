@@ -651,7 +651,7 @@ mod tests {
                     || (b.player1 == gamma && b.player2 == beta)
             })
             .expect("Beta vs Gamma paired in round 3");
-        assert!(win.result.is_some());
+        assert!(win.outcome.winner().is_some());
     }
 
     #[test]

@@ -384,7 +384,7 @@ fn direct_confrontation(group: &[usize], standings: &[Standing]) -> Option<HashM
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::round::{Board, PairingSource, Winner};
+    use crate::round::{Board, Outcome, PairingSource, Winner};
     use crate::settings::{MacMahonThreshold, ThresholdCriterion};
 
     fn player(tid: u32, rating: Option<u32>) -> Player {
@@ -406,7 +406,7 @@ mod tests {
 
     fn board(a: TournamentId, b: TournamentId, winner: Winner) -> Board {
         Board {
-            result: Some(winner),
+            outcome: Outcome::won(winner),
             ..Board::pending(a, b, 0, PairingSource::Swiss)
         }
     }
@@ -431,7 +431,7 @@ mod tests {
         let c = player(3, None);
         let d = player(4, None);
         let long_ab = Board {
-            result: Some(Winner::Player1),
+            outcome: Outcome::won(Winner::Player1),
             long: true,
             ..Board::pending(
                 a.tournament_id.unwrap(),

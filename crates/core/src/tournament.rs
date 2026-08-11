@@ -19,8 +19,8 @@ use crate::pairing::{
 };
 use crate::player::{NewPlayer, Player, PointAdjustment};
 use crate::round::{
-    Board, Handicap, HandicapGame, NoShow, PairingSource, Round, RoundDraft, Sitout, SitoutKind,
-    SitoutValue, Winner,
+    Board, Handicap, HandicapGame, NoShow, Outcome, PairingSource, Round, RoundDraft, Sitout,
+    SitoutKind, SitoutValue, Winner,
 };
 use crate::scoring::compute_scores;
 use crate::settings::TournamentSettings;
@@ -38,7 +38,9 @@ use crate::units::TournamentId;
 /// v4: players carry a list of manual point `adjustments`.
 /// v5: rounds carry one `sitouts` list (each with what it scores) in place of
 /// the separate `bye`, `cup_byes` and `absent` fields.
-pub const TOURNAMENT_FORMAT_VERSION: u32 = 5;
+/// v6: boards carry one `outcome` sum in place of the separate `result`,
+/// `drawn` and `no_show` fields.
+pub const TOURNAMENT_FORMAT_VERSION: u32 = 6;
 
 fn default_format_version() -> u32 {
     TOURNAMENT_FORMAT_VERSION
@@ -139,6 +141,10 @@ pub enum TournamentError {
     /// No board with the given index exists in the round.
     #[error("no board {board} in round {round}")]
     BoardNotFound { round: u32, board: usize },
+    /// A draw was recorded on a board that was forfeited — nobody played, so
+    /// nobody drew. The UI disables the control, so this is a client bug.
+    #[error("board {board} of round {round} was forfeited, so it cannot be a draw")]
+    DrawnOnForfeitedBoard { round: u32, board: usize },
     /// A sit-out's value was set for a player who played a board that round (or
     /// wasn't in it at all), so there is no sit-out to score.
     #[error("player {player} did not sit out round {round}")]
@@ -1229,16 +1235,19 @@ impl Tournament {
                 round: round_number,
                 board: board_index,
             })?;
-        board.result = if board.result == Some(clicked) {
-            None
-        } else {
-            Some(clicked)
-        };
         // Recording an actual result supersedes a no-show — the game was played
-        // after all — so the two states stay mutually exclusive.
-        if board.result.is_some() {
-            board.no_show = None;
-        }
+        // after all. A forfeited board carries no draw, so the replayed-draw flag
+        // starts fresh there; on a played board it survives the toggle, since
+        // whether a draw occurred is independent of who eventually won.
+        let drawn = board.outcome.drawn();
+        board.outcome = if board.outcome.winner() == Some(clicked) {
+            Outcome::Pending { drawn }
+        } else {
+            Outcome::Won {
+                winner: clicked,
+                drawn,
+            }
+        };
         round.completed = round.is_complete();
         Ok(&round.boards[board_index])
     }
@@ -1304,11 +1313,15 @@ impl Tournament {
                 round: round_number,
                 board: board_index,
             })?;
-        board.no_show = absent;
-        if absent.is_some() {
-            board.result = None;
-            board.drawn = false;
-        }
+        board.outcome = match absent {
+            // A forfeit isn't a played game, so it drops any recorded result and
+            // draw — states the outcome type can't even express together.
+            Some(absent) => Outcome::Forfeit { absent },
+            // Clearing only ever un-forfeits: on a board that carries a real
+            // result there is no forfeit to clear, and the result must survive.
+            None if board.outcome.forfeit().is_some() => Outcome::PENDING,
+            None => board.outcome,
+        };
         round.completed = round.is_complete();
         Ok(&round.boards[board_index])
     }
@@ -1380,6 +1393,10 @@ impl Tournament {
     /// Set (or clear) the "a draw occurred" flag on a board. The game is still
     /// replayed to a decisive [`Winner`]; this only records that the draw
     /// happened, which matters for end-of-tournament ELO.
+    ///
+    /// Nobody played, so nobody drew: a forfeited board is rejected with
+    /// [`TournamentError::DrawnOnForfeitedBoard`] rather than silently recording
+    /// a draw that would then feed the ELO estimate. Clear the forfeit first.
     pub fn set_board_drawn(
         &mut self,
         round_number: u32,
@@ -1387,7 +1404,16 @@ impl Tournament {
         drawn: bool,
     ) -> Result<&Board, TournamentError> {
         let board = self.board_mut(round_number, board_index)?;
-        board.drawn = drawn;
+        board.outcome = match board.outcome {
+            Outcome::Pending { .. } => Outcome::Pending { drawn },
+            Outcome::Won { winner, .. } => Outcome::Won { winner, drawn },
+            Outcome::Forfeit { .. } => {
+                return Err(TournamentError::DrawnOnForfeitedBoard {
+                    round: round_number,
+                    board: board_index,
+                })
+            }
+        };
         Ok(board)
     }
 
@@ -2000,18 +2026,55 @@ mod tests {
 
         // not played -> player 1 wins
         assert_eq!(
-            t.toggle_board_winner(1, 0, Winner::Player1).unwrap().result,
-            Some(Winner::Player1)
+            t.toggle_board_winner(1, 0, Winner::Player1)
+                .unwrap()
+                .outcome,
+            Outcome::won(Winner::Player1)
         );
         // click player 2 -> switch winner
         assert_eq!(
-            t.toggle_board_winner(1, 0, Winner::Player2).unwrap().result,
-            Some(Winner::Player2)
+            t.toggle_board_winner(1, 0, Winner::Player2)
+                .unwrap()
+                .outcome,
+            Outcome::won(Winner::Player2)
         );
         // click the current winner again -> back to not played
         assert_eq!(
-            t.toggle_board_winner(1, 0, Winner::Player2).unwrap().result,
-            None
+            t.toggle_board_winner(1, 0, Winner::Player2)
+                .unwrap()
+                .outcome,
+            Outcome::PENDING
+        );
+    }
+
+    /// A draw recorded before the decisive replay survives the winner toggle in
+    /// both directions: whether a draw happened is independent of who eventually
+    /// won, and clearing the winner leaves the game still to be replayed.
+    #[test]
+    fn toggling_the_winner_keeps_the_draw_flag() {
+        use crate::round::Winner;
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+
+        t.set_board_drawn(1, 0, true).unwrap();
+        assert_eq!(
+            t.toggle_board_winner(1, 0, Winner::Player1)
+                .unwrap()
+                .outcome,
+            Outcome::Won {
+                winner: Winner::Player1,
+                drawn: true
+            }
+        );
+        assert_eq!(
+            t.toggle_board_winner(1, 0, Winner::Player1)
+                .unwrap()
+                .outcome,
+            Outcome::Pending { drawn: true }
         );
     }
 
@@ -2028,23 +2091,35 @@ mod tests {
         // Marking a no-show settles the only board, so the round completes even
         // though no game was played.
         let board = t.set_board_no_show(1, 0, Some(NoShow::Player2)).unwrap();
-        assert_eq!(board.no_show, Some(NoShow::Player2));
-        assert_eq!(board.result, None);
+        assert_eq!(
+            board.outcome,
+            Outcome::Forfeit {
+                absent: NoShow::Player2
+            }
+        );
         assert!(t.rounds[0].completed);
 
         // Recording an actual winner supersedes the no-show (game was played).
         let board = t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
-        assert_eq!(board.result, Some(Winner::Player1));
-        assert_eq!(board.no_show, None);
+        assert_eq!(board.outcome, Outcome::won(Winner::Player1));
 
         // And marking a no-show again clears the recorded result.
         let board = t.set_board_no_show(1, 0, Some(NoShow::Player1)).unwrap();
-        assert_eq!(board.result, None);
-        assert_eq!(board.no_show, Some(NoShow::Player1));
+        assert_eq!(
+            board.outcome,
+            Outcome::Forfeit {
+                absent: NoShow::Player1
+            }
+        );
 
         // Both players absent settles the board too, with no winner.
         let board = t.set_board_no_show(1, 0, Some(NoShow::Both)).unwrap();
-        assert_eq!(board.no_show, Some(NoShow::Both));
+        assert_eq!(
+            board.outcome,
+            Outcome::Forfeit {
+                absent: NoShow::Both
+            }
+        );
         assert!(t.rounds[0].completed);
 
         // Clearing it reopens the round.
@@ -2453,11 +2528,33 @@ mod tests {
 
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
         let board = t.set_board_drawn(1, 0, true).unwrap();
-        assert!(board.drawn);
-        assert_eq!(board.result, Some(Winner::Player1)); // result untouched
-                                                         // Effective winner unaffected by the draw flag.
+        assert!(board.outcome.drawn());
+        // The winner is untouched, and unaffected by the draw flag.
+        assert_eq!(board.outcome.winner(), Some(Winner::Player1));
         assert_eq!(board.effective_winner(false), Some(Winner::Player1));
-        assert!(!t.set_board_drawn(1, 0, false).unwrap().drawn);
+        assert!(!t.set_board_drawn(1, 0, false).unwrap().outcome.drawn());
+    }
+
+    /// Nobody played, so nobody drew: the draw flag is rejected on a forfeited
+    /// board rather than silently recorded, where it would feed the ELO estimate
+    /// a game that never happened.
+    #[test]
+    fn set_board_drawn_rejects_a_forfeited_board() {
+        let mut t = Tournament::new("Cup").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+
+        t.set_board_no_show(1, 0, Some(NoShow::Player2)).unwrap();
+        assert!(matches!(
+            t.set_board_drawn(1, 0, true),
+            Err(TournamentError::DrawnOnForfeitedBoard { round: 1, board: 0 })
+        ));
+        // Clearing the forfeit makes the board an ordinary pending one again.
+        t.set_board_no_show(1, 0, None).unwrap();
+        assert!(t.set_board_drawn(1, 0, true).unwrap().outcome.drawn());
     }
 
     #[test]
@@ -2491,7 +2588,7 @@ mod tests {
         t.toggle_board_winner(1, 0, receiver_wins).unwrap();
 
         let board = &t.rounds[0].boards[0];
-        assert_eq!(board.result, Some(receiver_wins)); // actual result recorded
+        assert_eq!(board.outcome.winner(), Some(receiver_wins)); // actual result recorded
         let giver_side = if p1_is_high {
             Winner::Player1
         } else {
@@ -3495,6 +3592,6 @@ mod tests {
         t.confirm_round().unwrap();
         let board = find_board(&t, 1, s[0], s[7]).expect("bracket board created despite absence");
         assert!(matches!(board.source, PairingSource::Cup { .. }));
-        assert!(board.result.is_none());
+        assert!(!board.is_decided());
     }
 }

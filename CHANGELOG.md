@@ -9,9 +9,10 @@ will be explicitly mentioned in the changelog for that version though.
 
 ## [Unreleased]
 
-Save files from earlier versions load, **except** one saved mid-tournament with
-the hybrid cup enabled: the cup now records which format it was seeded under, and
-that field has no default. Re-create such a tournament rather than loading it.
+**Save files from earlier versions no longer load** (the save format version is
+now 6): a board records what happened on it as a single value instead of three
+separate flags. A stale file is rejected with a clear message rather than
+half-parsed; re-create the tournament.
 
 ### Added
 
@@ -26,6 +27,12 @@ that field has no default. Re-create such a tournament rather than loading it.
   bracket" option, unchanged and still the default.
 - `osp-sim --cup-format direct|qualifier`, so simulations can run either cup
   format (see [`docs/simulation-cli.md`](docs/simulation-cli.md)).
+
+### Fixed
+
+- Marking a board as a draw after flagging it a no-show recorded a draw on a
+  game nobody played, and fed it to the ELO estimate as a real ½ point. The
+  draw button is now disabled on a forfeited board (clear the no-show first).
 
 ## [1.3.0] - 2026-08-05
 
