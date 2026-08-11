@@ -26,8 +26,8 @@ Known limitations and future work, roughly ordered by area.
   justified/unjustified absence distinction (a partly absent team is refused
   until then), team-level draft operations, standings and tie-breaks, team
   point adjustments (per-player ones are refused in team mode meanwhile), the
-  team CRUD routes and the UI. Team standings and the `BoardWins` tie-break have
-  landed.
+  and the UI. Team standings, the `BoardWins` tie-break and the team roster
+  routes have landed — everything but the interface.
 
 ## Multi-referee server
 

@@ -45,6 +45,10 @@ clear message rather than half-parsed; re-create the tournament.
   point adjustments are refused in team mode for now, since the ranking is by
   team and a per-player bonus would move nothing visible; team-level adjustments
   are still to come.
+- **Team roster endpoints**, so a team tournament can be configured, rostered,
+  finalized and played entirely over the API: create/rename/delete a team,
+  add/remove a member, set or reset the board order, and set an unrated member's
+  pairing ELO. See the route table in the README.
 
 - **Hybrid cup: a qualification-round format** (Settings → Hybrid cup), used by
   the German Championship. The top half of the bracket is pre-qualified and

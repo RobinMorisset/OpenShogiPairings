@@ -344,6 +344,14 @@ that tournament's bearer token if it has a password (except `/login` and
 | `POST /players/{id}/category` | Add/remove membership in a referee-defined category: `{ "category_id", "member": true｜false }` (404 if the category doesn't exist). |
 | `POST /players/{id}/adjustments` | Apply a manual point bonus/penalty: `{ "delta", "reason" }` (reason mandatory). |
 | `DELETE /players/{id}/adjustments/{adjustment_id}` | Remove a point adjustment. |
+| `PUT /players/{id}/pairing-rating` | Set (or clear, with `null`) a player's pairing ELO: `{ "pairing_rating": 1400｜null }`. Team mode with MacMahon starting points only — it feeds the team average and nothing user-facing, and is never exported. |
+| `POST /teams` | Create a team: `{ "name" }` (non-empty, unique ignoring case). Team mode only, and only while registration is open — as for every team route below. |
+| `PUT /teams/{team_id}` | Rename a team: `{ "name" }`. |
+| `DELETE /teams/{team_id}` | Delete a team; its members go back to the unassigned pool (they stay registered). |
+| `POST /teams/{team_id}/members` | Add a registered player to a team, at the end of its board order: `{ "player_id" }`. A player belongs to exactly one team, and a team stops at its configured size. |
+| `DELETE /teams/{team_id}/members/{player_id}` | Take a player out of a team. |
+| `PUT /teams/{team_id}/board-order` | Set the board order (index 0 = board 1): `{ "order": [player_id, …] }`, which must be a permutation of the team's current members. |
+| `POST /teams/{team_id}/sort-by-rating` | Reset the board order to descending pairing rating (unrated last). |
 | `GET /backups` | List automatic backups, newest first (taken at every round-lifecycle transition). |
 | `POST /backups/{backup_id}/restore` | Restore a backup as the current tournament; resets undo history. |
 

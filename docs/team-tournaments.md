@@ -562,7 +562,9 @@ The store stays dumb. Additions:
 
 - routes: team CRUD (create/edit/delete team, assign/remove member, reorder
   boards, rename), team-level draft operations, team adjustments — each a
-  one-line delegation to a `Tournament` method, like everything else;
+  one-line delegation to a `Tournament` method, like everything else. The CRUD
+  half (plus the pairing-ELO endpoint) has **landed**; the draft and adjustment
+  routes wait on their core operations;
 - `TournamentView` gains `team_standings: Option<Vec<TeamStanding>>`
   (`None` outside team mode) — **landed**;
 - `Tournament` gains `teams: Vec<Team>` (empty and absent from JSON outside
