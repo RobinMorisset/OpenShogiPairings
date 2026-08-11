@@ -115,9 +115,19 @@ pub struct Standing {
     /// The player's current estimated ELO (rounded), from the Bayesian estimate
     /// (see [`crate::estimate_elos`]). `None` unless a live estimate is maintained
     /// — [`TournamentSettings::elo_estimate_live`], i.e. ELO pairing *or*
-    /// estimate-based MacMahon — since otherwise it isn't computed at all. When
-    /// present, a player with no counted games sits at their prior mean (their
-    /// registration rating, or 600 if unrated).
+    /// estimate-based MacMahon — since otherwise it isn't computed at all. Also
+    /// `None` for a *rated* player while the estimate only applies to unrated ones
+    /// ([`TournamentSettings::elo_estimate_rated_pinned`]): they are pinned to
+    /// their registration rating, so an "estimate" that never moves off the Rating
+    /// column would only read as a broken estimate. When present, a player with no
+    /// counted games sits at their prior mean (their registration rating, or 600
+    /// if unrated).
+    ///
+    /// How the Results tab surfaces it depends on the mode: ELO pairing shows it
+    /// as its own column (and can rank by it — see
+    /// [`TournamentSettings::est_elo_ranks`]), while estimate-based MacMahon shows
+    /// it only in the tooltip of the MacMahon points it produced, for the players
+    /// whose estimate differs from their registration rating.
     pub estimated_elo: Option<i32>,
 }
 
@@ -145,9 +155,17 @@ impl Standing {
             Tiebreak::Dc => self.dc.get(),
             // Ranking metrics are u32; a (non-negative) estimated ELO fits, and a
             // stray negative estimate floors at 0 for ordering. Only reached when
-            // the estimate is maintained (see the `EstElo` skip in ranking), so it
-            // is `Some`; a missing one sorts as 0.
-            Tiebreak::EstElo => self.estimated_elo.unwrap_or(0).max(0) as u32,
+            // the estimate both is maintained and estimates rated players (see the
+            // `EstElo` skip in ranking), so it is `Some` for every player; a
+            // missing one sorts as 0.
+            Tiebreak::EstElo => {
+                debug_assert!(
+                    self.estimated_elo.is_some(),
+                    "ranking by est_elo without an estimate — the `est_elo_ranks` skip should \
+                     have kept this criterion out"
+                );
+                self.estimated_elo.unwrap_or(0).max(0) as u32
+            }
         }
     }
 }
@@ -185,6 +203,12 @@ pub fn compute_standings(
     let elos = settings
         .elo_estimate_live()
         .then(|| estimate_elos(players, settings, rounds));
+    // "Apply estimates to unrated players only": a rated player's "estimate" is
+    // their registration rating, frozen there for the whole tournament. Reporting
+    // it would duplicate the Rating column and read as an estimate that never
+    // updates, so those cells stay empty and only the unrated newcomers — the ones
+    // actually being estimated — carry a value.
+    let rated_pinned = settings.elo_estimate_rated_pinned();
 
     // SOSM and SOSW first — each needed on its own for the SOSOS metrics. Indexed
     // by tournament number so the SOSOS pass (a sum over opponents, which are
@@ -235,7 +259,12 @@ pub fn compute_standings(
                 running_wins: s.running_wins.clone(),
                 estimated_elo: elos
                     .as_ref()
-                    .map(|e| e.get(&p.id).copied().unwrap_or(0.0).round() as i32),
+                    .filter(|_| !(rated_pinned && p.rating.is_some()))
+                    .map(|e| {
+                        e.get(&p.id)
+                            .expect("estimate_elos returns one entry per player")
+                            .round() as i32
+                    }),
             }
         })
         .collect();
@@ -270,11 +299,10 @@ pub fn compute_standings(
     let mut groups: Vec<Vec<usize>> = vec![start];
 
     for &tb in &settings.tiebreaks {
-        // Estimated ELO only ranks when a live estimate is maintained (ELO pairing
-        // or estimate-based MacMahon); otherwise the estimate is just the
-        // registration rating, so skip it (defends against a loaded save that
-        // predates normalization dropping it).
-        if tb == Tiebreak::EstElo && !settings.elo_estimate_live() {
+        // Estimated ELO only ranks in ELO pairing mode, and only while rated
+        // players are actually estimated (see `est_elo_ranks`); skip it otherwise
+        // (defends against a loaded save that predates normalization dropping it).
+        if tb == Tiebreak::EstElo && !settings.est_elo_ranks() {
             continue;
         }
         let mut next_groups: Vec<Vec<usize>> = Vec::new();
@@ -796,8 +824,9 @@ mod tests {
     #[test]
     fn estimated_elo_is_populated_in_macmahon_from_estimate_mode() {
         // Estimate-based MacMahon maintains a live estimate for scoring, so the
-        // standings must expose it too — not only in ELO pairing mode. (It used to
-        // be `None` here, which left the Results-tab column blank.)
+        // standings must expose it too — not only in ELO pairing mode. It gets no
+        // column of its own there; the Results tab puts it in the tooltip of the
+        // MacMahon points it produced, which needs the value all the same.
         let a = player(1, Some(1400));
         let b = player(2, Some(1800));
         let settings = TournamentSettings::default()
@@ -810,6 +839,53 @@ mod tests {
         // No games → the estimate seeds at the registration rating, and it is present.
         assert_eq!(est(a.id), Some(1400));
         assert_eq!(est(b.id), Some(1800));
+    }
+
+    #[test]
+    fn estimated_elo_is_empty_for_rated_players_when_only_unrated_are_estimated() {
+        // "Apply estimates to unrated players only" (K × 0) pins every rated player
+        // to their registration rating, so the standings report no estimate for
+        // them — repeating the Rating column would look like an estimate that never
+        // updates. The unrated newcomer, who *is* estimated, still gets one, and it
+        // moves once they play.
+        let a = player(1, Some(1400));
+        let b = player(2, Some(1800));
+        let c = player(3, None);
+        let players = vec![a.clone(), b.clone(), c.clone()];
+        let settings = TournamentSettings::elo_pairing()
+            .map_estimator(|e| e.k_multiplier = crate::settings::Ratio::from_percent(0));
+
+        let est =
+            |st: &[Standing], id| st.iter().find(|s| s.player_id == id).unwrap().estimated_elo;
+
+        let none = compute_standings(&players, &settings, &[]);
+        assert_eq!(
+            est(&none, a.id),
+            None,
+            "rated players are pinned, not estimated"
+        );
+        assert_eq!(est(&none, b.id), None);
+        let seed = est(&none, c.id).expect("the unrated newcomer is estimated");
+
+        // C beats the 1800 — their estimate must climb off the unrated prior.
+        let rounds = vec![round(
+            1,
+            vec![board(
+                c.tournament_id.unwrap(),
+                b.tournament_id.unwrap(),
+                Winner::Player1,
+            )],
+        )];
+        let after = compute_standings(&players, &settings, &rounds);
+        assert_eq!(est(&after, b.id), None, "the pinned loser stays empty");
+        assert!(
+            est(&after, c.id).expect("still estimated") > seed,
+            "the unrated winner's estimate rises off its {seed} seed"
+        );
+
+        // With rated players estimated too (the default ×1.0), everyone has one.
+        let all = compute_standings(&players, &TournamentSettings::elo_pairing(), &rounds);
+        assert!(est(&all, a.id).is_some() && est(&all, b.id).is_some());
     }
 
     #[test]

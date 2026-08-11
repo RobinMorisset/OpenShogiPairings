@@ -141,12 +141,21 @@
   const swissDisabled = $derived(eloEnabled);
   const floaterDisabled = $derived(eloEnabled);
 
-  // Whether a live ELO estimate is maintained, so the estimated-ELO tie-break is
-  // meaningful: the ELO pairing mode, or estimate-based MacMahon with an ELO
-  // threshold to compare against. Mirrors the server's normalization gate.
+  // Whether a live ELO estimate is maintained at all: the ELO pairing mode, or
+  // estimate-based MacMahon with an ELO threshold to compare against. Mirrors the
+  // server's `elo_estimate_live`.
   const eloEstimateLive = $derived(
     eloEnabled || (macmahonFromElo && hasEloThreshold),
   );
+
+  // Whether the estimated-ELO tie-break is a meaningful *ranking* criterion: only
+  // in the ELO pairing mode, where the estimate is what the tournament runs on
+  // (under estimate-based MacMahon it is an input to the MacMahon points, shown in
+  // their tooltip on the Results tab, not a column of its own), and only while
+  // rated players are actually estimated (k = 0 pins them to their registration
+  // rating, so ranking by it would just be ranking by that rating). Mirrors the
+  // server's `est_elo_ranks` normalization gate.
+  const estEloRanks = $derived(eloEnabled && eloKPercent !== 0);
 
   // The two simplified estimator controls (the only ELO knobs a referee sees).
   // "Apply estimates to": k = 0 means only unrated players are estimated (rated
@@ -161,12 +170,12 @@
   );
 
   // Metrics not yet in the ranking order — the choices for the "add" dropdown.
-  // Estimated ELO is only meaningful when a live estimate is maintained
-  // (otherwise it just sits at the registration rating), so it isn't offered
-  // otherwise.
+  // Estimated ELO is only meaningful as a ranking criterion when the estimate is
+  // maintained *and* applies to rated players (otherwise it just sits at the
+  // registration rating), so it isn't offered otherwise.
   const availableTiebreaks = $derived(
     TIEBREAKS.filter(
-      (t) => !tiebreaks.includes(t.code) && (eloEstimateLive || t.code !== "est_elo"),
+      (t) => !tiebreaks.includes(t.code) && (estEloRanks || t.code !== "est_elo"),
     ),
   );
   const labelOf = (code: Tiebreak) => tiebreakLabel(code, $_);
@@ -343,21 +352,24 @@
     }
   }
 
+  /** Drop the estimated-ELO tie-break once it stops being a valid ranking
+   * criterion — leaving the ELO pairing mode, or pinning the rated players.
+   * Mirrors the server's normalization, so our local order matches what comes
+   * back. */
+  function dropEstEloUnlessRanking() {
+    if (!estEloRanks) tiebreaks = tiebreaks.filter((c) => c !== "est_elo");
+  }
+
   function setPairingMode(mode: "swiss" | "elo") {
     eloEnabled = mode === "elo";
     if (eloEnabled) applyEstimatorDefaultsIfUnset();
-    // Estimated ELO is only a valid ranking criterion while a live estimate is
-    // maintained; drop it from the order otherwise (mirrors the server).
-    if (!eloEstimateLive) tiebreaks = tiebreaks.filter((c) => c !== "est_elo");
+    dropEstEloUnlessRanking();
     persist();
   }
 
   function setMacmahonFromElo(on: boolean) {
     macmahonFromElo = on;
     if (on) applyEstimatorDefaultsIfUnset();
-    // Turning it off (in plain Swiss) may leave no live estimate, so the
-    // estimated-ELO tie-break is no longer valid — mirror the server and drop it.
-    if (!eloEstimateLive) tiebreaks = tiebreaks.filter((c) => c !== "est_elo");
     persist();
   }
 
@@ -365,6 +377,8 @@
   // registration rating (estimate unrated only); k = 100% estimates everyone.
   function setEloApplyTo(v: "unrated" | "all") {
     eloKPercent = v === "unrated" ? 0 : 100;
+    // Pinning the rated players also retires the estimate as a ranking criterion.
+    dropEstEloUnlessRanking();
     persist();
   }
 

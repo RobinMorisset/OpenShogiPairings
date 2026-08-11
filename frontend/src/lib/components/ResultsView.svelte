@@ -51,40 +51,76 @@
     new Map(tournament.rounds.map((r, i) => [r.number, i])),
   );
 
+  // The estimated ELO gets a column of its own only in **ELO pairing mode**,
+  // where it is the quantity the tournament is actually run on. Under
+  // estimate-based MacMahon the estimate is an input to the MacMahon points, and
+  // shows up in *their* tooltip instead (see `macmahonTitle`) — a standalone
+  // column there would read like the decorative "estimated rating" other pairing
+  // software parks next to a ranking it has no effect on.
+  const eloPairingMode = $derived(tournament.settings.pairing.kind === "elo");
+
+  // "Apply estimates to unrated players only" (k = 0): rated players are pinned to
+  // their registration rating, so the server sends no estimate for them at all and
+  // the criterion stops ranking. Mirrors the server's `elo_estimate_rated_pinned`.
+  const eloRatedPinned = $derived.by(() => {
+    const pairing = tournament.settings.pairing;
+    const estimator =
+      pairing.kind === "elo"
+        ? pairing.estimator
+        : pairing.macmahon.source.kind === "from_estimate"
+          ? pairing.macmahon.source.estimator
+          : null;
+    return estimator?.k_multiplier === 0;
+  });
+
+  // Mirrors the server's `est_elo_ranks` — keep the two in sync, or the estimate
+  // the server ranks by would be hidden here (or vice versa).
+  const estEloRanks = $derived(eloPairingMode && !eloRatedPinned);
+
   // The tie-break columns to show, in the referee-chosen order — resolved from
   // the settings to their label/field/tooltip. Unknown codes (from a newer save)
   // are skipped.
-  // A live ELO estimate is maintained — so the estimate is a meaningful ranking
-  // and column — in either of the server's two cases: ELO pairing mode, or Swiss
-  // with MacMahon drawn from the estimate against at least one ELO threshold.
-  // Mirrors the server's `elo_estimate_needed() || macmahon_from_estimate_active()`
-  // (and TournamentSettingsView's `eloEstimateLive`) — keep the three in sync, or
-  // the estimate the server ranks by would be hidden here.
-  const eloEstimateNeeded = $derived.by(() => {
-    const pairing = tournament.settings.pairing;
-    if (pairing.kind === "elo") return true;
-    return (
-      pairing.macmahon.source.kind === "from_estimate" &&
-      pairing.macmahon.thresholds.some((t) => t.criterion.kind === "elo")
-    );
-  });
-
   const tiebreakColumns = $derived(
     (tournament.settings.tiebreaks ?? [])
-      // Estimated ELO only ranks when a live estimate is maintained; drop it as a
-      // column otherwise (defends against a loaded save that still lists it).
-      .filter((code) => code !== "est_elo" || eloEstimateNeeded)
+      // Estimated ELO only ranks in ELO pairing mode, and only while rated players
+      // are estimated; drop it as a column otherwise (defends against a loaded save
+      // that still lists it).
+      .filter((code) => code !== "est_elo" || estEloRanks)
       .map((code) => TIEBREAKS.find((t) => t.code === code))
       .filter((t): t is (typeof TIEBREAKS)[number] => t != null),
   );
 
-  // The estimated-ELO column is only meaningful when a live estimate is
-  // maintained. Show it as a dedicated column there — unless the referee already
-  // added it to the ranking criteria, in which case it appears as a tie-break
-  // column (with its ranking position) and this one would duplicate it.
-  const showEstimatedElo = $derived(
-    eloEstimateNeeded && !(tournament.settings.tiebreaks ?? []).includes("est_elo"),
+  // The Est. ELO tooltip. Referees meet a same-named column in chess software
+  // where it is a decorative performance rating with no effect on the pairings,
+  // so the tooltip spells out that this one *is* what pairs the tournament —
+  // plus, under "unrated players only", why the rated players' cells are empty.
+  const estEloTitle = $derived(
+    `${tiebreakTitle("est_elo", $_)}\n${$_("resultsView.estEloWhy")}` +
+      (eloRatedPinned ? `\n${$_("resultsView.estEloUnratedOnly")}` : ""),
   );
+
+  // Show the dedicated Est. ELO column — unless it already survived into
+  // `tiebreakColumns`, where it appears with its ranking position and this one
+  // would duplicate it. (Keyed off the resolved columns, not the raw settings, so
+  // a stale save that lists a non-ranking est_elo still gets the dedicated column
+  // rather than none at all.)
+  const showEstimatedElo = $derived(
+    eloPairingMode && !tiebreakColumns.some((c) => c.code === "est_elo"),
+  );
+
+  // Estimate-based MacMahon: the starting points were awarded by comparing the
+  // thresholds against the live estimate, not the registration rating. Only worth
+  // saying for the players the two disagree on — for everyone else the estimate
+  // adds nothing the Rating column doesn't already show. Mirrors the server's
+  // `macmahon_from_estimate_active`.
+  const macmahonFromEstimate = $derived.by(() => {
+    const pairing = tournament.settings.pairing;
+    return (
+      pairing.kind === "swiss" &&
+      pairing.macmahon.source.kind === "from_estimate" &&
+      pairing.macmahon.thresholds.some((t) => t.criterion.kind === "elo")
+    );
+  });
 
   // Player id → medal, from the cup podium (the table order stays pure-Swiss).
   // A place can be null when a double no-show left it undetermined (e.g. both
@@ -383,15 +419,24 @@
     return `${cell.opponent}${draw}${sign}${hc}${floatMarkers(cell)}`;
   }
 
-  /** Tooltip for the MacMahon cell: the breakdown of any manual bonus/penalty
-   * adjustments, or nothing when the player has none (the column header already
-   * says what the plain value is). */
-  function macmahonTitle(player: Player): string | undefined {
-    const adjustments = player.adjustments ?? [];
-    if (adjustments.length === 0) return undefined;
-    return adjustments
-      .map((a) => `${a.delta > 0 ? "+" : ""}${a.delta} — ${a.reason}`)
-      .join("\n");
+  /** Tooltip for the MacMahon cell: which estimated ELO these starting points
+   * were awarded from, when that isn't simply the player's registration rating,
+   * and the breakdown of any manual bonus/penalty adjustments. `undefined` when
+   * neither applies (the column header already says what the plain value is). */
+  function macmahonTitle(player: Player, standing: Standing): string | undefined {
+    const lines: string[] = [];
+    // Under estimate-based MacMahon the thresholds were compared against the live
+    // estimate. Say so only where it differs from the registration rating — an
+    // unrated player (who has none), or a rated one the estimate has moved off it.
+    // `estimated_elo` is null for the players the server didn't estimate at all.
+    const estimate = standing.estimated_elo;
+    if (macmahonFromEstimate && estimate != null && estimate !== player.rating) {
+      lines.push($_("resultsView.macmahonFromEstimate", { values: { elo: estimate } }));
+    }
+    for (const a of player.adjustments ?? []) {
+      lines.push(`${a.delta > 0 ? "+" : ""}${a.delta} — ${a.reason}`);
+    }
+    return lines.length > 0 ? lines.join("\n") : undefined;
   }
 
   /** A tie-break value, and the player who contributed it — `4 (Doe Jane)`. A
@@ -479,10 +524,16 @@
     }
   }
 
+  /** A tie-break column's header tooltip. Estimated ELO carries the extra "why
+   * is this here?" explanation; every other metric is just its description. */
+  function columnTitle(code: Tiebreak): string {
+    return code === "est_elo" ? estEloTitle : tiebreakTitle(code, $_);
+  }
+
   /** The full tooltip for a tie-break cell: the metric's description, plus its
    * per-player breakdown when one applies. */
   function tiebreakCellTitle(code: Tiebreak, standing: Standing): string {
-    const title = tiebreakTitle(code, $_);
+    const title = columnTitle(code);
     const breakdown = tiebreakBreakdown(code, standing);
     return breakdown ? `${title}\n${breakdown}` : title;
   }
@@ -565,7 +616,7 @@
         <th>{$_("resultsView.firstName")}</th>
         <th class="num">{$_("resultsView.rating")}</th>
         {#if showEstimatedElo}
-          <th class="num" data-tip={tiebreakTitle("est_elo", $_)}>{tiebreakLabel("est_elo", $_)}</th>
+          <th class="num" data-tip={estEloTitle}>{tiebreakLabel("est_elo", $_)}</th>
         {/if}
         <th>{$_("resultsView.nationality")}</th>
         <th>{$_("resultsView.club")}</th>
@@ -577,7 +628,7 @@
           <th class="num" data-tip={$_("resultsView.macmahonTitle")}>{$_("resultsView.macmahon")}</th>
         {/if}
         {#each tiebreakColumns as col (col.code)}
-          <th class="num" data-tip={tiebreakTitle(col.code, $_)}>{tiebreakLabel(col.code, $_)}</th>
+          <th class="num" data-tip={columnTitle(col.code)}>{tiebreakLabel(col.code, $_)}</th>
         {/each}
       </tr>
     </thead>
@@ -589,7 +640,7 @@
           <td>{player.first_name || "—"}</td>
           <td class="num">{player.rating ?? "—"}</td>
           {#if showEstimatedElo}
-            <td class="num est-elo">{standing.estimated_elo ?? "—"}</td>
+            <td class="num est-elo" data-tip={estEloTitle}>{standing.estimated_elo ?? "—"}</td>
           {/if}
           <td>{player.nationality ?? "—"}</td>
           <td>{player.club ?? "—"}</td>
@@ -674,7 +725,7 @@
             <td
               class="num macmahon"
               class:adjusted={(player.adjustments ?? []).length > 0}
-              data-tip={macmahonTitle(player)}>{formatScore(standing.macmahon)}</td
+              data-tip={macmahonTitle(player, standing)}>{formatScore(standing.macmahon)}</td
             >
           {/if}
           {#each tiebreakColumns as col (col.code)}

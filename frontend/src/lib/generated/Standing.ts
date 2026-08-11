@@ -97,8 +97,18 @@ running_wins: Array<Wins>,
  * The player's current estimated ELO (rounded), from the Bayesian estimate
  * (see [`crate::estimate_elos`]). `None` unless a live estimate is maintained
  * — [`TournamentSettings::elo_estimate_live`], i.e. ELO pairing *or*
- * estimate-based MacMahon — since otherwise it isn't computed at all. When
- * present, a player with no counted games sits at their prior mean (their
- * registration rating, or 600 if unrated).
+ * estimate-based MacMahon — since otherwise it isn't computed at all. Also
+ * `None` for a *rated* player while the estimate only applies to unrated ones
+ * ([`TournamentSettings::elo_estimate_rated_pinned`]): they are pinned to
+ * their registration rating, so an "estimate" that never moves off the Rating
+ * column would only read as a broken estimate. When present, a player with no
+ * counted games sits at their prior mean (their registration rating, or 600
+ * if unrated).
+ *
+ * How the Results tab surfaces it depends on the mode: ELO pairing shows it
+ * as its own column (and can rank by it — see
+ * [`TournamentSettings::est_elo_ranks`]), while estimate-based MacMahon shows
+ * it only in the tooltip of the MacMahon points it produced, for the players
+ * whose estimate differs from their registration rating.
  */
 estimated_elo: number | null, };

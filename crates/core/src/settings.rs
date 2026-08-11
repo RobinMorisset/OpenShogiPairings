@@ -847,10 +847,9 @@ impl TournamentSettings {
         // is meaningful and each metric appears at most once as a column).
         let mut seen_tb = HashSet::new();
         self.tiebreaks.retain(|&tb| seen_tb.insert(tb));
-        // The estimated-ELO tie-break is meaningless unless a live estimate is
-        // actually maintained — without one it just sits at each player's
-        // registration rating — so it is not a valid ranking criterion there.
-        if !self.elo_estimate_live() {
+        // The estimated-ELO tie-break only ranks in ELO pairing mode, and only
+        // while rated players are actually estimated — see `est_elo_ranks`.
+        if !self.est_elo_ranks() {
             self.tiebreaks.retain(|&tb| tb != Tiebreak::EstElo);
         }
 
@@ -901,12 +900,41 @@ impl TournamentSettings {
 
     /// Whether a live ELO estimate is maintained *at all* — for pairing (ELO mode)
     /// or for scoring (estimate-based MacMahon). This is the single gate for
-    /// whether the estimated-ELO value is computed, shown as a standings column,
-    /// and usable as a ranking tie-break; the frontend mirrors it as
-    /// `eloEstimateLive`. Keep those in sync — splitting this rule is what let the
-    /// estimate column diverge between the two modes.
+    /// whether the estimated-ELO value is computed and shown as a standings
+    /// column; the frontend mirrors it as `eloEstimateLive`. Keep those in sync —
+    /// splitting this rule is what let the estimate column diverge between the two
+    /// modes. Whether it also *ranks* is the narrower [`Self::est_elo_ranks`].
     pub fn elo_estimate_live(&self) -> bool {
         self.elo_estimate_needed() || self.macmahon_from_estimate_active()
+    }
+
+    /// Whether the live estimate **pins** rated players to their registration
+    /// rating — the "apply estimates to unrated players only" mode (K multiplier
+    /// 0, see [`crate::estimate_elos`]). Their estimate is then not an estimate at
+    /// all but a copy of the Rating column, so the standings leave their
+    /// `estimated_elo` empty rather than repeating it, and the estimate stops
+    /// being a ranking criterion (see [`Self::est_elo_ranks`]).
+    pub fn elo_estimate_rated_pinned(&self) -> bool {
+        self.elo_estimate_live() && self.elo_k_multiplier() == 0.0
+    }
+
+    /// Whether the estimated ELO is a meaningful **ranking** criterion — which is
+    /// also exactly when the Results tab offers it as a tie-break column. Two
+    /// conditions:
+    ///
+    /// - **ELO pairing mode only.** There the estimate *is* the quantity the
+    ///   tournament runs on, so ranking by it is the point. Under estimate-based
+    ///   MacMahon it is instead an *input* to the MacMahon points; it surfaces in
+    ///   those points' tooltip rather than as a column, so that a referee never has
+    ///   to wonder whether this is the decorative "estimated rating" other pairing
+    ///   software shows next to a ranking it has no effect on.
+    /// - **Rated players actually estimated.** With them pinned (K × 0), ranking by
+    ///   the estimate would sort them by their registration rating, and against
+    ///   unrated players holding a genuinely estimated number.
+    ///
+    /// The frontend mirrors this as `estEloRanks`; keep them in sync.
+    pub fn est_elo_ranks(&self) -> bool {
+        self.elo_estimate_needed() && !self.elo_estimate_rated_pinned()
     }
 
     /// The ELO-estimate K multiplier `m` as a float. (The `map_or` default is
@@ -1397,8 +1425,36 @@ mod tests {
             on.tiebreaks,
             vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM]
         );
-        // (Estimate-based MacMahon also keeps a live estimate; that path is covered
-        // by `estimate_based_macmahon_keeps_the_est_elo_tiebreak_valid`.)
+        // (Estimate-based MacMahon maintains a live estimate too, but does *not*
+        // make it a ranking criterion — see
+        // `estimate_based_macmahon_does_not_make_est_elo_a_tiebreak`.)
+    }
+
+    #[test]
+    fn normalizing_drops_est_elo_tiebreak_when_only_unrated_are_estimated() {
+        // ELO pairing, but "apply estimates to unrated players only" (K × 0): every
+        // rated player is pinned to their registration rating, so ranking by the
+        // "estimate" would just be ranking by that rating — not a valid criterion.
+        let pinned = TournamentSettings {
+            tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM],
+            ..TournamentSettings::elo_pairing()
+                .map_estimator(|e| e.k_multiplier = Ratio::from_percent(0))
+        };
+        assert!(pinned.elo_estimate_live(), "the estimate is still computed");
+        assert!(pinned.elo_estimate_rated_pinned());
+        assert!(!pinned.est_elo_ranks());
+        assert_eq!(
+            pinned.normalized().tiebreaks,
+            vec![Tiebreak::Points, Tiebreak::SosM]
+        );
+
+        // Same mode with rated players estimated (the default ×1.0): it survives.
+        let estimated = TournamentSettings {
+            tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo, Tiebreak::SosM],
+            ..TournamentSettings::elo_pairing()
+        };
+        assert!(estimated.est_elo_ranks());
+        assert_eq!(estimated.normalized().tiebreaks.len(), 3);
     }
 
     #[test]
@@ -1425,27 +1481,20 @@ mod tests {
     }
 
     #[test]
-    fn estimate_based_macmahon_keeps_the_est_elo_tiebreak_valid() {
-        // Plain Swiss pairing, but MacMahon is drawn from the estimate: a live
-        // estimate is maintained, so the estimated-ELO tie-break survives.
+    fn estimate_based_macmahon_does_not_make_est_elo_a_tiebreak() {
+        // Plain Swiss pairing with MacMahon drawn from the estimate: a live
+        // estimate is maintained (the standings still carry it, for the MacMahon
+        // points' tooltip), but there the estimate is an *input* to those points,
+        // not a ranking quantity of its own — so it is not a valid tie-break.
         let s = TournamentSettings {
             tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo],
             ..TournamentSettings::default()
                 .with_thresholds(vec![mmt(1500)])
                 .with_macmahon_from_estimate()
-        }
-        .normalized();
-        assert_eq!(s.tiebreaks, vec![Tiebreak::Points, Tiebreak::EstElo]);
-
-        // But with only a grade threshold the estimate isn't used, so it's dropped.
-        let grade_only = TournamentSettings {
-            tiebreaks: vec![Tiebreak::Points, Tiebreak::EstElo],
-            ..TournamentSettings::default()
-                .with_thresholds(vec![MacMahonThreshold::grade(Grade::dan(1))])
-                .with_macmahon_from_estimate()
-        }
-        .normalized();
-        assert_eq!(grade_only.tiebreaks, vec![Tiebreak::Points]);
+        };
+        assert!(s.elo_estimate_live(), "the estimate is still computed");
+        assert!(!s.est_elo_ranks());
+        assert_eq!(s.normalized().tiebreaks, vec![Tiebreak::Points]);
     }
 
     #[test]
