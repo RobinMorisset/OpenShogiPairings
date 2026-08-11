@@ -67,8 +67,6 @@ Known limitations and future work, roughly ordered by area.
   Do not import email addresses (see the non-goals in
   [docs/public-access.md](docs/public-access.md)).
 
-- **Reorganize the settings tab**. Some combinations make little sense (e.g. pure-ELO mode with any kind of cup)
-
 - Check all instances of `#[allow(clippy::too_many_arguments)]`
 
 - **Keyboard shortcut to undo** is Ctrl+Z even on Mac, maybe Command+Z would be better ?
