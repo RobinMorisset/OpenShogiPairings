@@ -5,13 +5,17 @@
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now osp-server
 #
-# The shared password lives in an EnvironmentFile (chmod 600), NOT inline here,
-# so it isn't world-readable in the unit. Create /etc/osp/osp.env with:
-#   OSP_PASSWORD=your-long-shared-referee-password
+# The admin password — which gates creating tournaments and the ratings proxy —
+# lives in an EnvironmentFile (chmod 600), NOT inline here, so it isn't
+# world-readable in the unit. Create /etc/osp/osp.env with:
+#   OSP_ADMIN_PASSWORD=your-long-admin-password
+# Each tournament's own password is set when it is created, from the app, and is
+# stored (hashed) beside that tournament under OSP_DATA_DIR.
 #
 # Assumes the binary at /opt/osp/osp-server, the built SPA at /opt/osp/dist, and
-# a writable /var/lib/osp for the persisted tournament (own them by the `osp`
-# user). Put Caddy (see Caddyfile) in front for TLS.
+# a writable /var/lib/osp for the persisted tournaments and their backups (own
+# them by the `osp` user; the server creates the two subdirectories below on
+# first use). Put Caddy (see Caddyfile) in front for TLS.
 
 [Unit]
 Description=OpenShogiPairings tournament server
@@ -24,12 +28,18 @@ Group=osp
 EnvironmentFile=/etc/osp/osp.env
 Environment=OSP_BIND=127.0.0.1:3000
 Environment=OSP_STATIC_DIR=/opt/osp/dist
-Environment=OSP_DATA_FILE=/var/lib/osp/tournament.json
+Environment=OSP_DATA_DIR=/var/lib/osp/tournaments
+# Explicit rather than defaulted: unset, backups go to the `osp` user's per-user
+# data directory ($XDG_DATA_HOME, else ~/.local/share) — outside ReadWritePaths
+# and hidden by ProtectHome below, so they would fail to be written at all (a
+# warning in the journal, and no recovery copies when you need them).
+Environment=OSP_BACKUP_DIR=/var/lib/osp/backups
 ExecStart=/opt/osp/osp-server
 Restart=on-failure
 RestartSec=2
 
-# Light hardening — the server only needs to read its dir and write the data file.
+# Light hardening — the server only needs to read its dir and write under
+# /var/lib/osp (tournaments and backups both).
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
