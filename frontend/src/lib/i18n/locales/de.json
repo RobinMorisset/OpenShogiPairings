@@ -272,7 +272,7 @@
     "removeForcedPairing": "Diese erzwungene Paarung entfernen",
     "playerEllipsis": "Spieler…",
     "vs": "gegen",
-    "forcedBye": "Erzwungene Freilose",
+    "forcedBye": "Erzwungenes Freilos",
     "forcedByeHint": "Greift nur bei einer ungeraden Anzahl anwesender Spieler — der Übriggebliebene setzt die Runde mit einem Punkt kampflos aus. Um einen Spieler bei geradem Feld aussetzen zu lassen, markieren Sie ihn stattdessen als abwesend und legen dann in der Rangliste fest, was ihm die Runde einbringt.",
     "forcedByeEvenWarning": "Das Feld ist jetzt gerade: Dieses Freilos würde einen weiteren Spieler ohne Gegner lassen, dem die Engine ebenfalls ein Freilos gäbe. Entfernen Sie es, oder markieren Sie jemanden als abwesend.",
     "removeForcedBye": "Dieses erzwungene Freilos entfernen",
@@ -284,7 +284,9 @@
     "teamEllipsis": "Mannschaft…",
     "needAtLeastTwoTeams": "Eine Runde braucht mindestens zwei anwesende Mannschaften.",
     "summaryTeams": "Runde {number} wird vorbereitet — {present} Mannschaften in der Auslosung, {absent} abwesende(r) Spieler.",
-    "absentWholeTeam": "Die ganze Mannschaft für diese Runde als abwesend markieren"
+    "absentWholeTeam": "Die ganze Mannschaft für diese Runde als abwesend markieren",
+    "forcedByeHintTeams": "Greift nur bei einer ungeraden Anzahl anwesender Mannschaften — die übriggebliebene setzt die Runde mit einem Punkt kampflos aus. Um eine Mannschaft bei geradem Feld aussetzen zu lassen, markieren Sie sie stattdessen als abwesend und legen dann in der Rangliste fest, was ihr die Runde einbringt.",
+    "forcedByeEvenWarningTeams": "Das Feld ist jetzt gerade: Dieses Freilos würde eine weitere Mannschaft ohne Gegner lassen, der die Engine ebenfalls ein Freilos gäbe. Entfernen Sie es, oder markieren Sie eine Mannschaft als abwesend."
   },
   "serverStatus": {
     "contacting": "Verbindung zum Server…",

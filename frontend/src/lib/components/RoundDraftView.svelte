@@ -284,7 +284,10 @@
   );
 
   function addForcedBye(id: number | "") {
-    if (id === "") return;
+    // One bye is all a round can use: the engine byes at most one unit, and a
+    // second would leave someone else unpaired for it to bye as well. Sitting
+    // more out is what marking them absent is for.
+    if (id === "" || forcedByeList.length > 0) return;
     const update = base();
     if (teamMode) {
       if (update.forced_team_byes.includes(id)) return;
@@ -493,7 +496,9 @@
 
   <section class:disabled={byesClosed && forcedByeList.length === 0}>
     <h3>{$_("roundDraftView.forcedBye")}</h3>
-    <p class="muted small">{$_("roundDraftView.forcedByeHint")}</p>
+    <p class="muted small">
+      {$_(teamMode ? "roundDraftView.forcedByeHintTeams" : "roundDraftView.forcedByeHint")}
+    </p>
     {#if forcedByeList.length > 0}
       <ul class="forced-list">
         {#each forcedByeList as id (id)}
@@ -511,23 +516,33 @@
       </ul>
     {/if}
     {#if byesClosed && forcedByeList.length > 0}
-      <p class="hint warning">⚠ {$_("roundDraftView.forcedByeEvenWarning")}</p>
+      <p class="hint warning">
+        ⚠ {$_(
+          teamMode
+            ? "roundDraftView.forcedByeEvenWarningTeams"
+            : "roundDraftView.forcedByeEvenWarning",
+        )}
+      </p>
     {/if}
-    <select
-      value=""
-      disabled={busy || byesClosed || (teamMode ? forceableTeams : forceable).length === 0}
-      onchange={(e) => addForcedBye(parseId(e.currentTarget.value))}
-    >
-      <option value="">{$_("roundDraftView.automaticBye")}</option>
-      {#if teamMode}
-        {#each forceableTeams as t (t.id)}
-          <option value={t.tournament_id}>{teamLabel(t.tournament_id ?? -1)}</option>
+    <!-- Gone once a bye is forced: there is only ever one to give, and the ✕
+         above takes it back. -->
+    {#if forcedByeList.length === 0}
+      <select
+        value=""
+        disabled={busy || byesClosed || (teamMode ? forceableTeams : forceable).length === 0}
+        onchange={(e) => addForcedBye(parseId(e.currentTarget.value))}
+      >
+        <option value="">{$_("roundDraftView.automaticBye")}</option>
+        {#if teamMode}
+          {#each forceableTeams as t (t.id)}
+            <option value={t.tournament_id}>{teamLabel(t.tournament_id ?? -1)}</option>
+          {/each}
+        {/if}
+        {#each teamMode ? [] : forceable as p (p.id)}
+          <option value={tid(p)}>{label(tid(p))}</option>
         {/each}
-      {/if}
-      {#each teamMode ? [] : forceable as p (p.id)}
-        <option value={tid(p)}>{label(tid(p))}</option>
-      {/each}
-    </select>
+      </select>
+    {/if}
   </section>
 
   <div class="confirm-row">

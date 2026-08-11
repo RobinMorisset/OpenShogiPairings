@@ -284,7 +284,9 @@
     "teamEllipsis": "Družstvo…",
     "needAtLeastTwoTeams": "Kolo potrebuje aspoň dve prítomné družstvá.",
     "summaryTeams": "Príprava kola {number} — družstiev v žrebovaní: {present}, neprítomných hráčov: {absent}.",
-    "absentWholeTeam": "Označiť celé družstvo ako neprítomné v tomto kole"
+    "absentWholeTeam": "Označiť celé družstvo ako neprítomné v tomto kole",
+    "forcedByeHintTeams": "Uplatní sa len pri nepárnom počte prítomných družstiev — to, ktoré zvýši, kolo vynechá a dostane bod bez boja. Ak chcete vynechať družstvo pri párnom počte, označte ho radšej ako neprítomné a potom v tabuľke nastavte, čo mu kolo prinieslo.",
+    "forcedByeEvenWarningTeams": "Počet družstiev je teraz párny, takže by toto voľno nechalo bez súpera ďalšie družstvo a program by dal voľno aj jemu. Odstráňte ho, alebo označte niektoré družstvo ako neprítomné."
   },
   "serverStatus": {
     "contacting": "Kontaktuje sa server…",

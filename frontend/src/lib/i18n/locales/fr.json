@@ -272,7 +272,7 @@
     "removeForcedPairing": "Retirer cet appariement forcé",
     "playerEllipsis": "Joueur…",
     "vs": "vs",
-    "forcedBye": "Exemptions forcées",
+    "forcedBye": "Exemption forcée",
     "forcedByeHint": "Ne s'applique qu'avec un nombre impair de joueurs présents — celui qui reste passe la ronde avec un point d'office. Pour faire passer un joueur dans un effectif pair, marquez-le plutôt absent, puis fixez ce que la ronde lui rapporte depuis le classement.",
     "forcedByeEvenWarning": "L'effectif est maintenant pair : cette exemption laisserait un autre joueur sans adversaire, que le moteur exempterait aussi. Retirez-la, ou marquez quelqu'un absent.",
     "removeForcedBye": "Retirer cette exemption forcée",
@@ -284,7 +284,9 @@
     "teamEllipsis": "Équipe…",
     "needAtLeastTwoTeams": "Une ronde demande au moins deux équipes présentes.",
     "summaryTeams": "Préparation de la ronde {number} — {present} équipes dans l'appariement, {absent} joueur(s) absent(s).",
-    "absentWholeTeam": "Marquer toute l'équipe absente pour cette ronde"
+    "absentWholeTeam": "Marquer toute l'équipe absente pour cette ronde",
+    "forcedByeHintTeams": "Ne s'applique qu'avec un nombre impair d'équipes présentes — celle qui reste passe la ronde avec un point d'office. Pour faire passer une équipe dans un effectif pair, marquez-la plutôt absente, puis fixez ce que la ronde lui rapporte depuis le classement.",
+    "forcedByeEvenWarningTeams": "L'effectif est maintenant pair : cette exemption laisserait une autre équipe sans adversaire, que le moteur exempterait aussi. Retirez-la, ou marquez une équipe absente."
   },
   "serverStatus": {
     "contacting": "Connexion au serveur…",

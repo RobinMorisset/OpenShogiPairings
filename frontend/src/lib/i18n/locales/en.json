@@ -272,7 +272,7 @@
     "removeForcedPairing": "Remove this forced pairing",
     "playerEllipsis": "Player…",
     "vs": "vs",
-    "forcedBye": "Forced byes",
+    "forcedBye": "Forced bye",
     "forcedByeHint": "Only applies with an odd number of present players — the leftover one sits out with a free point. To sit a player out of an even field, mark them absent instead, then set what the round scored them from the standings.",
     "forcedByeEvenWarning": "The field is now even, so this bye would leave another player unpaired and the engine would bye them too. Remove it, or mark someone absent.",
     "removeForcedBye": "Remove this forced bye",
@@ -284,7 +284,9 @@
     "teamEllipsis": "Team…",
     "needAtLeastTwoTeams": "A round needs at least two present teams.",
     "summaryTeams": "Preparing round {number} — {present} teams in the pairing, {absent} absent player(s).",
-    "absentWholeTeam": "Mark the whole team absent this round"
+    "absentWholeTeam": "Mark the whole team absent this round",
+    "forcedByeHintTeams": "Only applies with an odd number of present teams — the leftover one sits out with a free point. To sit a team out of an even field, mark it absent instead, then set what the round scored it from the standings.",
+    "forcedByeEvenWarningTeams": "The field is now even, so this bye would leave another team unpaired and the engine would bye it too. Remove it, or mark a team absent."
   },
   "serverStatus": {
     "contacting": "Contacting server…",

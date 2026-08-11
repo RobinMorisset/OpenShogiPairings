@@ -272,7 +272,7 @@
     "removeForcedPairing": "Usuń tę wymuszoną parę",
     "playerEllipsis": "Gracz…",
     "vs": "vs",
-    "forcedBye": "Wymuszone pauzy",
+    "forcedBye": "Wymuszona pauza",
     "forcedByeHint": "Działa tylko przy nieparzystej liczbie obecnych graczy — ten, kto zostanie bez pary, pauzuje i dostaje punkt. Aby wyłączyć gracza z gry przy parzystej liczbie uczestników, oznacz go jako nieobecnego, a następnie w tabeli wyników ustal, ile punktów przyniosła mu ta runda.",
     "forcedByeEvenWarning": "Liczba uczestników jest teraz parzysta, więc ta pauza zostawiłaby bez pary kolejnego gracza, któremu algorytm również przyznałby pauzę. Usuń ją albo oznacz kogoś jako nieobecnego.",
     "removeForcedBye": "Usuń tę wymuszoną pauzę",
@@ -284,7 +284,9 @@
     "teamEllipsis": "Drużyna…",
     "needAtLeastTwoTeams": "Runda wymaga co najmniej dwóch obecnych drużyn.",
     "summaryTeams": "Przygotowanie rundy {number} — drużyn w kojarzeniu: {present}, nieobecnych zawodników: {absent}.",
-    "absentWholeTeam": "Oznacz całą drużynę jako nieobecną w tej rundzie"
+    "absentWholeTeam": "Oznacz całą drużynę jako nieobecną w tej rundzie",
+    "forcedByeHintTeams": "Działa tylko przy nieparzystej liczbie obecnych drużyn — ta, która zostanie bez pary, pauzuje i dostaje punkt. Aby wyłączyć drużynę z gry przy parzystej liczbie, oznacz ją jako nieobecną, a następnie w tabeli wyników ustal, ile punktów przyniosła jej ta runda.",
+    "forcedByeEvenWarningTeams": "Liczba drużyn jest teraz parzysta, więc ta pauza zostawiłaby bez pary kolejną drużynę, której algorytm również przyznałby pauzę. Usuń ją albo oznacz drużynę jako nieobecną."
   },
   "serverStatus": {
     "contacting": "Łączenie z serwerem…",

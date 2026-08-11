@@ -284,7 +284,9 @@
     "teamEllipsis": "チーム…",
     "needAtLeastTwoTeams": "1ラウンドには少なくとも2チームの参加が必要です。",
     "summaryTeams": "第 {number} ラウンドの準備 — 組み合わせ対象 {present} チーム、欠席 {absent} 人。",
-    "absentWholeTeam": "このラウンドはチーム全員を欠場にする"
+    "absentWholeTeam": "このラウンドはチーム全員を欠場にする",
+    "forcedByeHintTeams": "出場チームが奇数の場合にのみ適用されます。余った1チームがその回戦を不戦勝で通過します。出場チームが偶数のときに1チームを休ませるには、代わりに欠場と指定し、その回戦の扱いを順位表から設定してください。",
+    "forcedByeEvenWarningTeams": "出場チームが偶数になりました。この指定では別の1チームが余り、そのチームも不戦勝になります。指定を解除するか、どこかのチームを欠場にしてください。"
   },
   "serverStatus": {
     "contacting": "サーバーに接続中…",
