@@ -512,5 +512,13 @@
     "pairingEloTitle": "レーティングのないメンバー用の組み合わせELO。チーム平均と盤順にのみ使われ、出力されません。他の場所では引き続き「レーティングなし」と扱われます",
     "unassigned": "チーム未所属（{count}）",
     "allAssigned": "全員がチームに所属しています。"
+  },
+  "teamStandings": {
+    "title": "団体順位",
+    "rank": "順位",
+    "team": "チーム",
+    "opponents": "対戦相手",
+    "expandTitle": "このチームの選手を表示",
+    "gamesWon": "{count} 勝"
   }
 }

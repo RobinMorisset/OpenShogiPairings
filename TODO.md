@@ -26,10 +26,12 @@ Known limitations and future work, roughly ordered by area.
   justified/unjustified absence distinction (a partly absent team is refused
   until then), team-level draft operations, standings and tie-breaks, team
   point adjustments (per-player ones are refused in team mode meanwhile), the
-  and the rest of the UI. Landed: team standings, the `BoardWins` tie-break,
-  the roster routes, and the Settings/Players half of the interface (team
-  toggle, Teams panel). Still to do in the UI: boards grouped by match in the
-  round view, and the team standings table.
+  Everything else has landed, interface included — a team tournament can be
+  configured, rostered, paired, played and read end to end. What is left is the
+  justified/unjustified absence distinction (a partly absent team is refused
+  until then), team-level draft operations (forced matches, forced byes, the
+  counterfactual probe), and team point adjustments (per-player ones are
+  refused in team mode meanwhile).
 
 ## Multi-referee server
 

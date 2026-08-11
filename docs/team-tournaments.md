@@ -10,8 +10,8 @@ team tournament can therefore be configured, rostered, finalized and played.
 
 Still to come: the justified/unjustified absence distinction (so a partly absent
 team is refused for now), team-level draft operations (forced matches, forced
-byes, the counterfactual probe), team point adjustments (per-player ones are
-refused in team mode meanwhile), the team CRUD routes, and the whole UI.
+byes, the counterfactual probe), and team point adjustments (per-player ones are
+refused in team mode meanwhile).
 
 A team tournament is the format that traditionally precedes European shogi
 championships (e.g. WOSC): teams of N players (usually N = 3) are the unit of
@@ -597,8 +597,11 @@ version guard) instead of half-parsed.
 - **Round view**: boards grouped by team match with a match header (team
   names, running match score); per-board result entry unchanged;
   `pairingSource` badges unchanged (Swiss/Forced still apply, now at match
-  granularity).
+  granularity). **Landed.**
 - **Standings**: team table + expandable member rows + team cross-table.
+  **Landed** as a table above the per-player one, which stays as the breakdown
+  (and is what the American grid exports); the opponents column carries the
+  team numbers faced.
 - **i18n**: every new string in all 9 locales (test-enforced).
 
 ## Testing

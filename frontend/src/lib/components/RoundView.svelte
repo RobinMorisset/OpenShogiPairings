@@ -12,9 +12,11 @@
     type Round,
     type RoundExplanation,
     type RuleId,
+    type Team,
     type Winner,
   } from "../types";
   import { sourceBadge } from "../pairingSource";
+  import { matchScore, teamMatches } from "../teams";
   import { drawnOf, forfeitOf, handicapGiverId, winnerOf } from "../boardOutcome";
   import { absent, isDecided, toggledNoShow } from "../noShow";
   import { printPage } from "../platform";
@@ -59,6 +61,13 @@
     carriedLongBoards?: { index: number; board: Board }[];
     /** Record the winner on a carried (previous-round) long board. */
     onCarriedWinner?: (boardIndex: number, clicked: Winner) => void;
+    /** The tournament's teams, in team mode — the boards are then grouped into
+     *  the team matches they belong to. Empty for an individual tournament. */
+    teams?: Team[];
+    /** Winner that counts for standings per board of *this* round, computed
+     *  server-side (so the Wiel rule applies); indexed like `round.boards`. Used
+     *  for the running match score. */
+    effectiveWinners?: (Winner | null)[];
     busy?: boolean;
   }
 
@@ -80,8 +89,29 @@
     onSetLong,
     carriedLongBoards = [],
     onCarriedWinner,
+    teams = [],
+    effectiveWinners = [],
     busy = false,
   }: Props = $props();
+
+  // In team mode the boards of a round are the boards of its team matches, so
+  // they are shown that way: a header per match, then its boards in board order.
+  // The grouping is derived from the rosters (see `teams.ts`), exactly as the
+  // server derives it — nothing about it is stored.
+  const matches = $derived(teams.length > 0 ? teamMatches(round, teams, players) : []);
+  /** The board table's rows: each match's header followed by its boards, or —
+   *  in an individual tournament — simply every board in order. */
+  const boardGroups = $derived(
+    matches.length > 0
+      ? matches.map((m) => ({ match: m, boards: m.boards }))
+      : [{ match: null, boards: round.boards.map((_, i) => i) }],
+  );
+
+  /** How many columns the board table has, so a match header can span them. */
+  const columnCount = $derived(
+    6 + (longEnabled ? 1 : 0) + (handicapPolicy !== "none" ? 1 : 0) +
+      (handicapPolicy === "suggested" ? 1 : 0),
+  );
 
   // The other side of a board.
   function other(side: Winner): Winner {
@@ -667,7 +697,21 @@
         </tr>
       </thead>
       <tbody>
-        {#each round.boards as board, index (index)}
+        {#each boardGroups as group (group.match?.team1.id ?? "all")}
+          {#if group.match}
+            {@const score = matchScore(round, group.match, effectiveWinners)}
+            <tr class="match-head">
+              <td colspan={columnCount}>
+                <span class="match-team">{group.match.team1.name}</span>
+                <span class="match-score" class:pending={!score.decided}>
+                  {score.wins1}–{score.wins2}
+                </span>
+                <span class="match-team">{group.match.team2.name}</span>
+              </td>
+            </tr>
+          {/if}
+        {#each group.boards as index (index)}
+          {@const board = round.boards[index]}
           <tr>
             <td
               class="src-col src-{sourceBadge($_, board.source).kind}"
@@ -839,6 +883,7 @@
             {/if}
           </tr>
         {/each}
+        {/each}
       </tbody>
     </table>
     {#if round.completed}
@@ -967,6 +1012,23 @@
 </div>
 
 <style>
+  /* A team match is one row of boards, so it gets one header naming the two
+     teams and the board wins so far — the score the match is decided on. */
+  .match-head td {
+    padding-top: 0.6rem;
+    font-weight: 600;
+  }
+  .match-team {
+    margin: 0 0.4rem;
+  }
+  .match-score {
+    font-variant-numeric: tabular-nums;
+  }
+  .match-score.pending {
+    color: var(--muted);
+    font-weight: 400;
+  }
+
   .round-toolbar {
     display: flex;
     justify-content: flex-end;

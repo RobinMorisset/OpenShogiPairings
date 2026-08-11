@@ -5,7 +5,9 @@
 // round's boards into matches without a round-trip. The server stays the
 // authority — it re-derives all of this when it pairs and when it ranks.
 
-import type { Board, Player, Round, Team } from "./types";
+import { forfeitOf } from "./boardOutcome";
+import { isDecided } from "./noShow";
+import type { Board, Player, Round, Team, Winner } from "./types";
 
 /**
  * A player's **pairing rating**: their real rating, or the referee-assigned
@@ -98,4 +100,48 @@ export function teamMatches(round: Round, teams: Team[], players: Player[]): Tea
     return kx[0] - ky[0] || kx[1] - ky[1];
   });
   return matches;
+}
+
+/** A match's board wins on each side, and whether every board of it is decided. */
+export interface MatchScore {
+  wins1: number;
+  wins2: number;
+  decided: boolean;
+}
+
+/**
+ * Count a match's board wins, from `team1`'s side first.
+ *
+ * Mirrors `match_result`: a board win is the board's **effective** winner — so
+ * the Wiel handicap rule applies exactly as it does to a player's own score,
+ * which is why the server-computed winners are passed in rather than re-derived
+ * — plus a forfeit where only one side turned up. A board nobody turned up for
+ * has no winner, which is how an odd-sized match can still end level.
+ */
+export function matchScore(
+  round: Round,
+  match: TeamMatch,
+  effectiveWinners: (Winner | null)[],
+): MatchScore {
+  const score: MatchScore = { wins1: 0, wins2: 0, decided: true };
+  for (const index of match.boards) {
+    const board = round.boards[index];
+    const forfeit = forfeitOf(board);
+    if (!isDecided(board)) {
+      score.decided = false;
+      continue;
+    }
+    // On a forfeit the point goes to whoever turned up; under `"both"` nobody
+    // did, so the board decides nothing.
+    const side: Winner | null = forfeit
+      ? forfeit === "both"
+        ? null
+        : forfeit === "player1"
+          ? "player2"
+          : "player1"
+      : (effectiveWinners[index] ?? null);
+    if (side === "player1") score.wins1 += 1;
+    else if (side === "player2") score.wins2 += 1;
+  }
+  return score;
 }

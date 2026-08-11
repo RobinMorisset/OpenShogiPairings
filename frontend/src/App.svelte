@@ -57,6 +57,7 @@
     RoundExplanation,
     SitoutValue,
     Standing,
+    TeamStanding,
     Tournament,
     TournamentResponse,
     TournamentSettings,
@@ -72,6 +73,7 @@
   import PlayerRegistration from "./lib/components/PlayerRegistration.svelte";
   import PlayerList from "./lib/components/PlayerList.svelte";
   import TeamsPanel from "./lib/components/TeamsPanel.svelte";
+  import TeamStandingsView from "./lib/components/TeamStandingsView.svelte";
   import RoundView from "./lib/components/RoundView.svelte";
   import RoundDraftView from "./lib/components/RoundDraftView.svelte";
   import ResultsView from "./lib/components/ResultsView.svelte";
@@ -83,6 +85,9 @@
 
   let tournament = $state<Tournament | null>(null);
   let standings = $state<Standing[]>([]);
+  /** Ranked team standings, in team mode only — the primary table there, with
+   *  the player standings staying as the per-player breakdown. */
+  let teamStandings = $state<TeamStanding[]>([]);
   let cupPodium = $state<CupPodium | null>(null);
   let cupBracket = $state<CupBracketView | null>(null);
   let draftCupPlayers = $state<number[]>([]);
@@ -115,6 +120,7 @@
   function apply(res: TournamentResponse) {
     tournament = res.tournament;
     standings = res.standings;
+    teamStandings = res.team_standings ?? [];
     cupPodium = res.cup_podium ?? null;
     cupBracket = res.cup_bracket ?? null;
     draftCupPlayers = res.draft_cup_players ?? [];
@@ -173,6 +179,14 @@
     if (!tournament || !activeRound) return [];
     const idx = tournament.rounds.findIndex((r) => r.number === activeRound.number);
     return idx >= 0 ? (suggestedHandicaps[idx] ?? []) : [];
+  });
+
+  // The same slice of the server-computed effective winners — what the round
+  // view's running match score counts, so the Wiel rule applies there too.
+  const activeRoundWinners = $derived.by(() => {
+    if (!tournament || !activeRound) return [];
+    const idx = tournament.rounds.findIndex((r) => r.number === activeRound.number);
+    return idx >= 0 ? (effectiveWinners[idx] ?? []) : [];
   });
 
   // Long (two-round) games started in the previous round that are still unplayed,
@@ -451,6 +465,7 @@
     // moment of stale UI from the previous one never shows.
     tournament = null;
     standings = [];
+    teamStandings = [];
     cupPodium = null;
     cupBracket = null;
     draftCupPlayers = [];
@@ -1105,6 +1120,14 @@
             />
           </div>
         {:else if activeTab === "results"}
+          {#if teamMode && teamStandings.length > 0}
+            <TeamStandingsView
+              {teamStandings}
+              {standings}
+              players={tournament.players}
+              tiebreaks={tournament.settings.tiebreaks ?? []}
+            />
+          {/if}
           <ResultsView
             {tournament}
             {standings}
@@ -1150,6 +1173,8 @@
             {carriedLongBoards}
             onCarriedWinner={(boardIndex, clicked) =>
               handleSetResult(carriedRoundNumber, boardIndex, clicked)}
+            teams={teamMode ? (tournament.teams ?? []) : []}
+            effectiveWinners={activeRoundWinners}
             {busy}
           />
         {/if}

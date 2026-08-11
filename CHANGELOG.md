@@ -56,6 +56,11 @@ clear message rather than half-parsed; re-create the tournament.
   (`2/3`) and average rating, so an incomplete roster is visible before
   finalizing rather than only in the error afterwards. The panel goes read-only
   once registration is finalized, matching the frozen rosters.
+- **Team results in the interface**: the round view groups a round's boards by
+  the match they belong to, each under a header naming the two teams and the
+  board wins so far, and the Standings tab gains a team table above the
+  per-player one — ranked by the configured criteria, with each team row
+  expanding to its players in board order and the games each of them won.
 
 - **Hybrid cup: a qualification-round format** (Settings → Hybrid cup), used by
   the German Championship. The top half of the bracket is pre-qualified and

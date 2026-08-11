@@ -512,5 +512,13 @@
     "pairingEloTitle": "Auslosungs-ELO für ein ungewertetes Mitglied: nur für den Mannschaftsdurchschnitt und die Brettreihenfolge, nie exportiert — der Spieler bleibt überall sonst ungewertet",
     "unassigned": "Ohne Mannschaft ({count})",
     "allAssigned": "Alle Spieler sind in einer Mannschaft."
+  },
+  "teamStandings": {
+    "title": "Mannschaftswertung",
+    "rank": "Pl",
+    "team": "Mannschaft",
+    "opponents": "Gegner",
+    "expandTitle": "Spieler dieser Mannschaft anzeigen",
+    "gamesWon": "{count} gewonnene Partien"
   }
 }

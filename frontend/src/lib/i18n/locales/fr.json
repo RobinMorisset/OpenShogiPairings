@@ -512,5 +512,13 @@
     "pairingEloTitle": "ELO d'appariement pour un membre non classé : sert uniquement à la moyenne de l'équipe et à l'ordre des échiquiers, jamais exporté — le joueur reste non classé partout ailleurs",
     "unassigned": "Sans équipe ({count})",
     "allAssigned": "Tous les joueurs sont dans une équipe."
+  },
+  "teamStandings": {
+    "title": "Classement par équipes",
+    "rank": "Rg",
+    "team": "Équipe",
+    "opponents": "Adversaires",
+    "expandTitle": "Afficher les joueurs de cette équipe",
+    "gamesWon": "{count} parties gagnées"
   }
 }
