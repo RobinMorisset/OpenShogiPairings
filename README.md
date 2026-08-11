@@ -416,6 +416,13 @@ alongside it — it starts its own API in-process.
 > preview) running on 5173 at the same time — the port is fixed (`strictPort`)
 > and the second one will fail with "Port 5173 is already in use".
 
+> **Rust changes need a restart.** `tauri dev` hot-reloads the frontend, but its
+> file watcher covers `frontend/src-tauri` only — `src-tauri` is its own
+> workspace (see the comment in its `Cargo.toml`) and the `crates/` it depends
+> on are outside it. Edit `crates/core` or `crates/server` and the running app
+> keeps the behaviour it was built with, silently, while the UI updates around
+> it. Stop `tauri dev` and start it again to pick the change up.
+
 ## Packaging (Windows)
 
 > To publish prebuilt Windows **and** macOS apps to the GitHub Releases page,
