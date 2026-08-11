@@ -22,10 +22,10 @@ permissions:
   contents: read
 
 jobs:
-  # Rust: formatting, lint, and the full workspace test suite. `--locked` makes a
-  # stale root Cargo.lock fail here (the lockfile-drift the pre-commit hook guards
-  # against locally). The excluded desktop crate (frontend/src-tauri) is not built
-  # here — it's covered by the release workflow.
+  # Rust: formatting, lint, docs, and the full workspace test suite. `--locked`
+  # makes a stale root Cargo.lock fail here (the lockfile-drift the pre-commit hook
+  # guards against locally). The excluded desktop crate (frontend/src-tauri) is not
+  # built here — it's covered by the release workflow.
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -40,6 +40,14 @@ jobs:
         run: cargo fmt --all --check
       - name: Lint (clippy, warnings denied)
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Rustdoc warnings don't fail a build on their own, so a link that stopped
+      # resolving is invisible until someone follows it. `--document-private-items`
+      # because much of the explanation lives on private items, and rustdoc only
+      # checks links in what it documents. Same command as the pre-push hook.
+      - name: Docs (rustdoc, warnings denied)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps --document-private-items --locked
       - name: Test
         run: cargo test --workspace --locked
 

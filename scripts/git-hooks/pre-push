@@ -6,6 +6,18 @@ set -e
 echo "== cargo test --workspace =="
 cargo test --workspace
 
+echo "== rustdoc (broken links) =="
+# Rustdoc warnings never fail a build on their own, so a doc link that stopped
+# resolving stays invisible until someone follows it — which is how two module
+# docs came to point at names that no longer existed.
+#   `-D warnings` is what makes it a gate. The `#![allow(...)]` in each crate root
+#     still wins over it, so the deliberate links into private items stay quiet.
+#   `--document-private-items` because much of the explanation here lives on
+#     private items, and rustdoc only checks links in what it documents. Both of
+#     those stale references were invisible without it.
+# ~4s after a core edit, which is why this is here and not in pre-commit.
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --quiet
+
 echo "== npm test (frontend) =="
 (cd frontend && npm test)
 

@@ -484,7 +484,10 @@ git config core.hooksPath scripts/git-hooks
   (`scripts/check-i18n-keys.mjs`, catching keys that exist in some locales but
   not all). Fast; keeps the tree clean commit by commit.
 - `pre-push` — the full test suite (`cargo test --workspace` and the frontend
-  tests, `npm test`) plus the dependency-advisory check
+  tests, `npm test`), a rustdoc pass with warnings denied (`cargo doc --workspace
+  --no-deps --document-private-items`, catching doc links that stopped
+  resolving — rustdoc never fails a build over one), plus the
+  dependency-advisory check
   (`scripts/check-advisories.py`, the same one CI runs). Slower, so it only runs
   before sharing work. The advisory check needs
   [`cargo-audit`](https://github.com/rustsec/rustsec) (`cargo install
