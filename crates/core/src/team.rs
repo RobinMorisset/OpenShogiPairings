@@ -109,17 +109,23 @@ fn by_pairing_rating(a: Option<u32>, b: Option<u32>) -> Ordering {
     }
 }
 
-/// The average pairing rating over a roster, or `None` when no member has one.
+/// The average pairing rating over a roster — `None` unless *every* member has
+/// one, and for an empty roster.
 ///
-/// Unrated members are simply left out of the average rather than dragging it
-/// down: without MacMahon starting points a team may legitimately carry unrated
-/// players, and the average then only feeds soft uses (fold order, team
-/// numbering, the default board order) where "unrated sorts last" is the same
-/// convention individual mode already uses. With MacMahon in play, finalization
-/// requires every member to have a pairing rating, so nothing is missing there.
+/// A mean over the rated members only would be a number about part of the team
+/// presented as a fact about the team: a strong pair plus an unrated third reads
+/// as a strong team, and it is the whole three that get paired. So a team with
+/// anyone unrated has no average at all, and falls where an unrated player falls
+/// in individual mode — last in the fold order and in team numbering, the only
+/// two places this feeds without MacMahon. With MacMahon starting points in use,
+/// finalization requires a pairing ELO from every member, so a team that reaches
+/// the first round always has one.
 pub fn average_pairing_rating(members: &[&Player]) -> Option<u32> {
+    if members.is_empty() {
+        return None;
+    }
     let rated: Vec<u32> = members.iter().filter_map(|p| pairing_rating(p)).collect();
-    if rated.is_empty() {
+    if rated.len() != members.len() {
         return None;
     }
     // Integer mean, rounded to nearest — a team's average is only ever compared
@@ -703,17 +709,20 @@ mod tests {
     }
 
     #[test]
-    fn the_team_average_skips_unrated_members_and_rounds_to_nearest() {
+    fn the_team_average_needs_every_member_and_rounds_to_nearest() {
         let a = player(Some(2000), None);
         let b = player(Some(1801), None);
-        let c = player(None, None);
-        // (2000 + 1801) / 2 = 1900.5 → 1901; the unrated member is left out.
-        assert_eq!(average_pairing_rating(&[&a, &b, &c]), Some(1901));
+        // (2000 + 1801) / 2 = 1900.5 → 1901.
+        assert_eq!(average_pairing_rating(&[&a, &b]), Some(1901));
         // A referee-assigned pairing rating counts like a real one.
         let d = player(None, Some(1600));
         assert_eq!(average_pairing_rating(&[&a, &d]), Some(1800));
-        // No rated member at all: no average, rather than a fake zero.
+        // One unrated member and there is no team average: a mean over the rest
+        // would describe part of the team as if it were the whole.
+        let c = player(None, None);
+        assert_eq!(average_pairing_rating(&[&a, &b, &c]), None);
         assert_eq!(average_pairing_rating(&[&c]), None);
+        assert_eq!(average_pairing_rating(&[]), None);
     }
 
     #[test]

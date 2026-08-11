@@ -216,10 +216,11 @@ and its validation — exist only when MacMahon starting points are in use:
   unofficial.
 - **Without MacMahon** (plain Swiss): unrated members are tolerated exactly
   as unrated players are in individual mode — no fake ELO is asked for. A
-  team's average is taken over its rated members (`None` if it has none),
-  feeding only the soft uses: fold order, `TeamId` numbering, and the
-  default board order (teams/members without ratings sort last, as unrated
-  players do today).
+  team's average needs *every* member rated: a mean over the rated ones
+  would describe part of the team as if it were the whole, so one unrated
+  member and the team simply has no average (`None`). It feeds only the
+  soft uses: fold order, `TeamId` numbering, and the default board order
+  (teams/members without ratings sort last, as unrated players do today).
 
 ### Point adjustments
 

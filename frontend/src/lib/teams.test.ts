@@ -30,13 +30,16 @@ describe("pairingRating", () => {
 });
 
 describe("teamAverageRating", () => {
-  it("skips unrated members and rounds to nearest", () => {
-    const members = [player("a", 1, 2000), player("b", 2, 1801), player("c", 3, null)];
-    expect(teamAverageRating(members)).toBe(1901);
+  it("rounds to nearest, counting a referee's pairing ELO", () => {
+    expect(teamAverageRating([player("a", 1, 2000), player("b", 2, 1801)])).toBe(1901);
+    expect(teamAverageRating([player("a", 1, 2000), player("b", 2, null, 1600)])).toBe(1800);
   });
 
-  it("has no average when nobody is rated — rather than a fake zero", () => {
+  it("has no average unless every member is rated", () => {
+    const members = [player("a", 1, 2000), player("b", 2, 1801), player("c", 3, null)];
+    expect(teamAverageRating(members)).toBe(null);
     expect(teamAverageRating([player("a", 1, null)])).toBe(null);
+    expect(teamAverageRating([])).toBe(null);
   });
 });
 

@@ -22,13 +22,17 @@ export function pairingRating(player: Player): number | null {
 }
 
 /**
- * The average pairing rating over a roster, rounded to nearest, or `null` when
- * no member has one. Unrated members are left out rather than dragging it down
- * (mirrors `osp_core::average_pairing_rating`).
+ * The average pairing rating over a roster, rounded to nearest — `null` unless
+ * every member has one, and for an empty roster.
+ *
+ * Mirrors `osp_core::average_pairing_rating`: a mean over the rated members only
+ * would describe part of the team as if it were the whole, so a roster with
+ * anyone unrated shows no average at all.
  */
 export function teamAverageRating(members: Player[]): number | null {
+  if (members.length === 0) return null;
   const rated = members.map(pairingRating).filter((r): r is number => r != null);
-  if (rated.length === 0) return null;
+  if (rated.length !== members.length) return null;
   const sum = rated.reduce((a, b) => a + b, 0);
   return Math.round(sum / rated.length);
 }
