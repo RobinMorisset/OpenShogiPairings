@@ -1184,8 +1184,9 @@
      header is the shaded row, and the boards under it are plain: striping every
      other row would cut across the matches instead of separating them (the
      standings table does the same). */
+  /* No extra height of its own: the shading and the rule above it already set
+     a match apart, so the header sits at the same height as its boards. */
   .match-head td {
-    padding-top: 0.6rem;
     font-weight: 600;
     border-top: 2px solid var(--border);
   }
@@ -1227,7 +1228,7 @@
   }
   th,
   td {
-    padding: 0.3rem 0.6rem;
+    padding: 0.2rem 0.6rem;
     border-bottom: 1px solid var(--border-divider);
     text-align: left;
   }
@@ -1470,7 +1471,7 @@
   .player {
     width: 100%;
     text-align: left;
-    padding: 0.3rem 0.5rem;
+    padding: 0.15rem 0.5rem;
     border: 1px solid transparent;
     border-radius: 0.4rem;
     background: transparent;
@@ -1502,12 +1503,15 @@
     text-align: center;
     width: 3.5rem;
   }
+  /* Sized to the row's text, not above it: these two are what set the height
+     of every board row, and a round of them was standing much taller than the
+     standings table for no reason. */
   .draw {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 1.9rem;
-    height: 1.9rem;
+    width: 1.7rem;
+    height: 1.5rem;
     padding: 0;
     border: 1px solid var(--border-soft);
     border-radius: 0.4rem;
@@ -1541,7 +1545,7 @@
     align-items: center;
     justify-content: center;
     width: 1.5rem;
-    height: 1.9rem;
+    height: 1.5rem;
     padding: 0;
     border: 1px solid var(--border-soft);
     border-radius: 0.4rem;
