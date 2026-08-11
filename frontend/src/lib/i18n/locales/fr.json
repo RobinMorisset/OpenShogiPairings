@@ -514,6 +514,7 @@
     "moveUp": "Monter d'un échiquier",
     "moveDown": "Descendre d'un échiquier",
     "addMember": "Ajouter un joueur…",
+    "noMemberMatch": "Aucun joueur disponible ne correspond — inscrivez-le d'abord dans l'onglet Joueurs.",
     "pairingEloTitle": "ELO d'appariement pour un membre non classé : sert uniquement à la moyenne de l'équipe et à l'ordre des échiquiers, jamais exporté — le joueur reste non classé partout ailleurs",
     "unassigned": "Sans équipe ({count})",
     "allAssigned": "Tous les joueurs sont dans une équipe.",

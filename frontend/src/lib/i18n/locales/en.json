@@ -514,6 +514,7 @@
     "moveUp": "Move up a board",
     "moveDown": "Move down a board",
     "addMember": "Add a player…",
+    "noMemberMatch": "No unassigned player matches — register them on the Players tab first.",
     "pairingEloTitle": "Pairing ELO for an unrated member: used only for the team average and the board order, never exported — the player stays unrated everywhere else",
     "unassigned": "Not in a team ({count})",
     "allAssigned": "Every player is in a team.",

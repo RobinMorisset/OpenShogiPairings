@@ -249,9 +249,12 @@ Its own tab, alongside the player list:
 - each team card shows its members **in board order** with their pairing
   ratings and the **team average**, plus a live size indicator
   (`2/3` etc.) so incomplete teams are visible at a glance;
-- an **unassigned players** pool; players move between the pool and a team
-  (a per-player team picker or equivalent — exact affordance decided at
-  implementation);
+- an **unassigned players** pool, and on each card a **combobox** over it:
+  focused it lists who is left, typing narrows it, Enter takes the
+  arrowed-to suggestion or an only match. It is a picker, never a
+  free-text field — every candidate is already registered, so text that
+  matches nothing is a typo and has no commit path (a genuinely new player
+  is registered on the Players tab);
 - **board order** defaults to descending pairing rating and is freely
   reorderable until finalization;
 - an unrated member's rating cell *is* their pairing ELO, edited in place
