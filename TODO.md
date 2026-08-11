@@ -78,3 +78,5 @@ Known limitations and future work, roughly ordered by area.
 - **Reorganize the settings tab**. Some combinations make little sense (e.g. pure-ELO mode with any kind of cup)
 
 - Check all instances of `#[allow(clippy::too_many_arguments)]`
+
+- **Keyboard shortcut to undo** is Ctrl+Z even on Mac, maybe Command+Z would be better ?
