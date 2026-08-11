@@ -9,7 +9,12 @@
 //! Public items link to the private helpers that explain them (see the note in
 //! `osp_core`'s crate docs); rustdoc renders those unlinked unless it is run with
 //! `--document-private-items`, so that warning is off here too.
+//!
+//! `unreachable_pub` and `unnameable_types` are turned on for the reason given
+//! in `osp_core`'s crate docs: between them they pin down what is really part
+//! of the API.
 #![allow(rustdoc::private_intra_doc_links)]
+#![warn(unnameable_types, unreachable_pub)]
 
 mod fesa;
 mod stats;

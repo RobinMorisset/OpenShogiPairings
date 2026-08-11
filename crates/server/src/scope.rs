@@ -27,7 +27,7 @@ struct TournamentId {
 /// Extracts the tournament addressed by the `{id}` path segment, 404-ing if it
 /// doesn't exist. Usable as a handler argument or as a leading argument to an
 /// `axum::middleware::from_fn` middleware.
-pub struct TournamentCtx(pub Arc<TournamentInstance>);
+pub(crate) struct TournamentCtx(pub Arc<TournamentInstance>);
 
 impl<S> FromRequestParts<S> for TournamentCtx
 where

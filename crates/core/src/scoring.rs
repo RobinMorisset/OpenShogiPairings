@@ -72,7 +72,7 @@ pub(crate) struct Scores {
 impl Scores {
     /// The accumulated state for a known player.
     #[cfg(test)]
-    pub fn get(&self, id: &Uuid) -> &PlayerScore {
+    pub(crate) fn get(&self, id: &Uuid) -> &PlayerScore {
         &self.by_tid[self.tid_of(id).expect("unknown player")]
     }
 
@@ -80,7 +80,7 @@ impl Scores {
     /// / [`PlayerScore::defeated`] entry, or a [`Self::tid_of`] result. A gap
     /// number resolves to a default (all-zero) score. The [`TiVec`] is indexed by
     /// the [`TournamentId`] directly — no `as usize`.
-    pub fn get_tid(&self, tid: TournamentId) -> &PlayerScore {
+    pub(crate) fn get_tid(&self, tid: TournamentId) -> &PlayerScore {
         &self.by_tid[tid]
     }
 
@@ -88,7 +88,7 @@ impl Scores {
     /// A linear scan of `ids`: the number is already known everywhere on the hot
     /// path (boards and players carry it), so this id-facing lookup is only for
     /// the [`Uuid`] boundary and tests, and isn't worth a parallel hash table.
-    pub fn tid_of(&self, id: &Uuid) -> Option<TournamentId> {
+    pub(crate) fn tid_of(&self, id: &Uuid) -> Option<TournamentId> {
         self.ids
             .iter()
             .position(|x| x == id)
@@ -96,14 +96,14 @@ impl Scores {
     }
 
     /// The player id at a tournament number (the inverse of [`Self::tid_of`]).
-    pub fn id_of(&self, tid: TournamentId) -> Uuid {
+    pub(crate) fn id_of(&self, tid: TournamentId) -> Uuid {
         self.ids[tid]
     }
 
     /// A player's total points, or zero if they aren't in the tournament (e.g. an
     /// opponent that was later removed).
     #[cfg(test)]
-    pub fn points(&self, id: &Uuid) -> HalfPoints {
+    pub(crate) fn points(&self, id: &Uuid) -> HalfPoints {
         self.tid_of(id)
             .map_or(HalfPoints::ZERO, |t| self.by_tid[t].points)
     }
@@ -111,7 +111,7 @@ impl Scores {
     /// The number of tournament-number slots, so a caller can size a parallel
     /// per-number table. Every [`TournamentId`] `t` with `usize::from(t) <
     /// tid_capacity()` is a valid [`Self::get_tid`] argument.
-    pub fn tid_capacity(&self) -> usize {
+    pub(crate) fn tid_capacity(&self) -> usize {
         self.by_tid.len()
     }
 }

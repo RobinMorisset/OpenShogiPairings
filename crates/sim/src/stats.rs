@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 /// Summary of a pooled distribution of absolute ELO differences.
 #[derive(Debug, Clone)]
-pub struct DiffStats {
+pub(crate) struct DiffStats {
     /// Number of games pooled.
     pub count: usize,
     pub mean: f64,
@@ -21,7 +21,7 @@ pub struct DiffStats {
 
 /// The `q`-quantile (0..=1) of an already-sorted slice, by linear interpolation.
 /// Returns 0.0 for an empty slice.
-pub fn quantile(sorted: &[f64], q: f64) -> f64 {
+pub(crate) fn quantile(sorted: &[f64], q: f64) -> f64 {
     if sorted.is_empty() {
         return 0.0;
     }
@@ -37,7 +37,7 @@ pub fn quantile(sorted: &[f64], q: f64) -> f64 {
 
 /// Summarise pooled absolute ELO differences, including `P(|diff| > T)` for each
 /// threshold in `thresholds`.
-pub fn diff_stats(diffs: &[f64], thresholds: &[f64]) -> DiffStats {
+pub(crate) fn diff_stats(diffs: &[f64], thresholds: &[f64]) -> DiffStats {
     let count = diffs.len();
     if count == 0 {
         return DiffStats {
@@ -72,14 +72,14 @@ pub fn diff_stats(diffs: &[f64], thresholds: &[f64]) -> DiffStats {
 /// A proportion with a 95% Wilson score interval — the honest error bar on a
 /// victory probability estimated from `n` runs.
 #[derive(Debug, Clone, Copy)]
-pub struct Proportion {
+pub(crate) struct Proportion {
     pub p: f64,
     pub lo: f64,
     pub hi: f64,
 }
 
 /// 95% Wilson score interval for `successes` out of `n`. `z = 1.96`.
-pub fn wilson(successes: usize, n: usize) -> Proportion {
+pub(crate) fn wilson(successes: usize, n: usize) -> Proportion {
     if n == 0 {
         return Proportion {
             p: 0.0,
@@ -104,7 +104,7 @@ pub fn wilson(successes: usize, n: usize) -> Proportion {
 /// Spearman rank correlation between two orderings of the **same** set of ids
 /// (each a permutation, rank 0 = first). Returns 1.0 for identical orders, -1.0
 /// for exact reverse. Falls back to 0.0 if the two don't cover the same ids.
-pub fn spearman<T: Copy + Eq + std::hash::Hash>(order_a: &[T], order_b: &[T]) -> f64 {
+pub(crate) fn spearman<T: Copy + Eq + std::hash::Hash>(order_a: &[T], order_b: &[T]) -> f64 {
     let n = order_a.len();
     if n != order_b.len() || n < 2 {
         return if n < 2 { 1.0 } else { 0.0 };
@@ -124,7 +124,7 @@ pub fn spearman<T: Copy + Eq + std::hash::Hash>(order_a: &[T], order_b: &[T]) ->
 }
 
 /// The mean of a slice, or 0.0 if empty.
-pub fn mean(values: &[f64]) -> f64 {
+pub(crate) fn mean(values: &[f64]) -> f64 {
     if values.is_empty() {
         0.0
     } else {
@@ -134,7 +134,7 @@ pub fn mean(values: &[f64]) -> f64 {
 
 /// The sample standard deviation (Bessel-corrected), or 0.0 for fewer than two
 /// values.
-pub fn std_dev(values: &[f64]) -> f64 {
+pub(crate) fn std_dev(values: &[f64]) -> f64 {
     let n = values.len();
     if n < 2 {
         return 0.0;
@@ -148,7 +148,7 @@ pub fn std_dev(values: &[f64]) -> f64 {
 /// treating the values as independent replications. The half-width is 0 for fewer
 /// than two values.
 #[derive(Debug, Clone, Copy)]
-pub struct MeanCi {
+pub(crate) struct MeanCi {
     pub mean: f64,
     /// Half-width of the 95% interval, i.e. the `±` term.
     pub ci: f64,
@@ -157,7 +157,7 @@ pub struct MeanCi {
 const Z_95: f64 = 1.959_963_984_540_054_f64;
 
 /// Mean and 95% CI half-width of `values` (normal approximation).
-pub fn mean_ci95(values: &[f64]) -> MeanCi {
+pub(crate) fn mean_ci95(values: &[f64]) -> MeanCi {
     let n = values.len();
     if n < 2 {
         return MeanCi {
@@ -178,7 +178,7 @@ pub fn mean_ci95(values: &[f64]) -> MeanCi {
 /// variation cancels. `None` if the slices differ in length or have fewer than two
 /// pairs.
 #[derive(Debug, Clone, Copy)]
-pub struct PairedDiff {
+pub(crate) struct PairedDiff {
     /// `mean(b − a)` — positive means `b` scores higher on the metric.
     pub delta: f64,
     /// Half-width of the 95% interval on `delta`.
@@ -188,7 +188,7 @@ pub struct PairedDiff {
 }
 
 /// Paired difference of `b` minus `a`, element-wise by run index.
-pub fn paired_diff(a: &[f64], b: &[f64]) -> Option<PairedDiff> {
+pub(crate) fn paired_diff(a: &[f64], b: &[f64]) -> Option<PairedDiff> {
     if a.len() != b.len() || a.len() < 2 {
         return None;
     }

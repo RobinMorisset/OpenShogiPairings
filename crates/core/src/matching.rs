@@ -7,4 +7,4 @@
 //! independently of `osp-core`). This module just gives [`crate::pairing`] its
 //! usual `crate::matching::…` path.
 
-pub use integer_blossom::{min_weight_perfect_matching, Weight};
+pub(crate) use integer_blossom::{min_weight_perfect_matching, Weight};

@@ -39,7 +39,7 @@ const NOTIFY_CAPACITY: usize = 16;
 /// rejected loudly with a clear version message rather than mis-parsed or
 /// silently dropped. Lives in the server (not `osp-core`) because it is the
 /// server that parses JSON — core has no runtime JSON dependency.
-pub fn check_format_version(bytes: &[u8]) -> Result<(), TournamentError> {
+pub(crate) fn check_format_version(bytes: &[u8]) -> Result<(), TournamentError> {
     #[derive(Deserialize)]
     struct VersionProbe {
         format_version: Option<u32>,

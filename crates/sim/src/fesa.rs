@@ -18,7 +18,7 @@ use osp_core::{decode_latin1, parse_rating_list, RatedPlayer, Tournament};
 type Ymd = (i32, u32, u32);
 
 /// Parse a `YYYY-MM-DD` date.
-pub fn parse_ymd(s: &str) -> Result<Ymd, String> {
+pub(crate) fn parse_ymd(s: &str) -> Result<Ymd, String> {
     let parts: Vec<&str> = s.trim().split('-').collect();
     if parts.len() != 3 {
         return Err(format!("date '{s}' must be YYYY-MM-DD"));
@@ -60,12 +60,12 @@ fn permanent_list_in_force(date: Ymd) -> Ymd {
 }
 
 /// The FESA rating-list URL for the list in force on `date`.
-pub fn list_url_in_force(date: Ymd) -> String {
+pub(crate) fn list_url_in_force(date: Ymd) -> String {
     list_url(permanent_list_in_force(date))
 }
 
 /// The FESA URL for a dated rating list.
-pub fn list_url(date: Ymd) -> String {
+pub(crate) fn list_url(date: Ymd) -> String {
     format!(
         "https://fesashogi.eu/old/ratinglists/{:04}-{:02}-{:02}.txt",
         date.0, date.1, date.2
@@ -109,7 +109,7 @@ pub(crate) fn fold_name(s: &str) -> String {
 /// table carries no game counts, so every player imports as provisional; filling
 /// `fesa_games` from a rating list restores the established/provisional distinction
 /// *without* touching strengths (the oracle still uses the results' post-ELO).
-pub fn match_games(rated: &[RatedPlayer], base: &Tournament) -> (HashMap<Uuid, u32>, usize) {
+pub(crate) fn match_games(rated: &[RatedPlayer], base: &Tournament) -> (HashMap<Uuid, u32>, usize) {
     let by_name: HashMap<(String, String), u32> = rated
         .iter()
         .map(|r| ((fold_name(&r.last_name), fold_name(&r.first_name)), r.games))
@@ -126,7 +126,7 @@ pub fn match_games(rated: &[RatedPlayer], base: &Tournament) -> (HashMap<Uuid, u
 
 /// Game counts from the list in force on a tournament date. Returns the map, the
 /// resolved list URL (for reporting), and the match count.
-pub fn games_before(
+pub(crate) fn games_before(
     date: &str,
     base: &Tournament,
 ) -> Result<(HashMap<Uuid, u32>, String, usize), String> {
@@ -137,7 +137,7 @@ pub fn games_before(
 }
 
 /// Game counts from a specific list (URL or local path).
-pub fn games_from_list(
+pub(crate) fn games_from_list(
     source: &str,
     base: &Tournament,
 ) -> Result<(HashMap<Uuid, u32>, usize), String> {
@@ -147,7 +147,7 @@ pub fn games_from_list(
 
 /// Fetch (http/https URL) or read (local path) a Latin-1 FESA list into decoded
 /// text. The FESA files are Latin-1, so we read raw bytes and decode explicitly.
-pub fn load_list_text(source: &str) -> Result<String, String> {
+pub(crate) fn load_list_text(source: &str) -> Result<String, String> {
     if source.starts_with("http://") || source.starts_with("https://") {
         fetch_url(source)
     } else {

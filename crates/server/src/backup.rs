@@ -20,13 +20,13 @@ use uuid::Uuid;
 
 /// How many backups are kept per tournament before the oldest are rotated out.
 /// A plain constant "for now" — easy to turn into a user-facing setting later.
-pub const MAX_BACKUPS: usize = 10;
+pub(crate) const MAX_BACKUPS: usize = 10;
 
 /// One backup's metadata, as listed to clients (the tournament body itself is
 /// only fetched on restore).
 #[derive(Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
-pub struct BackupInfo {
+pub(crate) struct BackupInfo {
     /// Opaque id used to restore this backup (its file stem).
     pub id: String,
     /// Unix seconds when the backup was taken.
@@ -45,7 +45,7 @@ pub struct BackupInfo {
 /// round-lifecycle test in this crate exercises the endpoints that call
 /// [`take`], and none of them should touch the developer's actual
 /// OpenShogiPairings data.
-pub fn default_root() -> Option<PathBuf> {
+pub(crate) fn default_root() -> Option<PathBuf> {
     if cfg!(test) {
         Some(std::env::temp_dir().join("osp-test-backups"))
     } else {
@@ -54,7 +54,7 @@ pub fn default_root() -> Option<PathBuf> {
 }
 
 /// The directory holding one tournament's backups: its own id under `root`.
-pub fn dir_for(root: &Path, tournament_id: Uuid) -> PathBuf {
+pub(crate) fn dir_for(root: &Path, tournament_id: Uuid) -> PathBuf {
     root.join(tournament_id.to_string())
 }
 
@@ -90,7 +90,7 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 /// (e.g. "round 2 started"), then rotate out the oldest backups beyond
 /// [`MAX_BACKUPS`]. Best-effort: I/O or serialization failures are logged, not
 /// propagated — a backup problem must never block the referee's actual action.
-pub fn take(dir: Option<&Path>, tournament: &Tournament, label: &str) {
+pub(crate) fn take(dir: Option<&Path>, tournament: &Tournament, label: &str) {
     let Some(dir) = dir else {
         tracing::warn!("backup: no backups directory — this tournament is not being backed up");
         return;
@@ -143,7 +143,7 @@ fn rotate(dir: &Path) {
 }
 
 /// List the backups in `dir`, newest first.
-pub fn list(dir: Option<&Path>) -> Vec<BackupInfo> {
+pub(crate) fn list(dir: Option<&Path>) -> Vec<BackupInfo> {
     let Some(dir) = dir else {
         return Vec::new();
     };
@@ -182,7 +182,7 @@ pub fn list(dir: Option<&Path>) -> Vec<BackupInfo> {
 /// failure is logged, since backups of a deleted tournament left on disk are
 /// exactly what the caller asked to be rid of. A missing directory is not a
 /// failure: a tournament deleted before its first backup never had one.
-pub fn delete_all(dir: Option<&Path>) {
+pub(crate) fn delete_all(dir: Option<&Path>) {
     if let Some(dir) = dir {
         if let Err(e) = fs::remove_dir_all(dir) {
             if e.kind() != io::ErrorKind::NotFound {
@@ -196,7 +196,7 @@ pub fn delete_all(dir: Option<&Path>) {
 /// Rejects anything that isn't a plain `<secs>-<seq>-<slug>` token
 /// (alphanumerics and dashes only), so this can never escape the backups
 /// directory.
-pub fn load(dir: Option<&Path>, id: &str) -> Option<Tournament> {
+pub(crate) fn load(dir: Option<&Path>, id: &str) -> Option<Tournament> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return None;
     }

@@ -65,7 +65,7 @@ use crate::{auth, live};
 /// Every endpoint (except login/events/the text exports) returns a
 /// [`TournamentView`] (the tournament plus whether an undo is available), so
 /// clients can refresh their view and the undo button from a single response.
-pub fn scope(state: AppState) -> Router<AppState> {
+pub(crate) fn scope(state: AppState) -> Router<AppState> {
     let public = Router::new()
         .route("/login", post(auth::tournament_login))
         .route("/events", get(live::events));
@@ -272,7 +272,7 @@ async fn undo(
 /// they can't rely on.
 #[derive(Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
-pub struct BackupList {
+pub(crate) struct BackupList {
     /// Absolute path of the directory holding this tournament's backups, as
     /// the server sees it. `None` when no backups directory could be resolved
     /// at all — nothing is being backed up, which the client says outright

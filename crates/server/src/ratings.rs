@@ -162,14 +162,14 @@ pub(crate) fn cached_ratings(state: &AppState) -> Vec<RatedPlayer> {
 }
 
 /// `GET /api/ratings` — cached FESA list (fetched once if nothing is cached yet).
-pub async fn ratings_handler(
+pub(crate) async fn ratings_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<RatedPlayer>>, ApiError> {
     get_ratings(&state).await.map(Json)
 }
 
 /// `POST /api/ratings/refresh` — re-download the list from FESA now.
-pub async fn refresh_handler(
+pub(crate) async fn refresh_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<RatedPlayer>>, ApiError> {
     refresh_from_fesa(&state).await.map(Json)

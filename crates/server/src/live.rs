@@ -54,7 +54,7 @@ fn parse_version_header(parts: &axum::http::HeaderMap) -> Result<Option<u32>, Ap
 /// for an atomic conflict check (`store.mutate(expected, …)`). A malformed value
 /// is rejected 400 — the same way [`check_version`] treats it — so the extractor
 /// itself stays lenient about the absent case only.
-pub struct ExpectedVersion(pub Option<u32>);
+pub(crate) struct ExpectedVersion(pub Option<u32>);
 
 impl<S> FromRequestParts<S> for ExpectedVersion
 where
@@ -79,7 +79,7 @@ where
 /// atomically inside `store.mutate(expected, …)` (see
 /// [`crate::state::TournamentStore::mutate`]), which closes the sub-millisecond
 /// race two edits from the same base version would otherwise slip through.
-pub async fn check_version(
+pub(crate) async fn check_version(
     TournamentCtx(instance): TournamentCtx,
     req: Request,
     next: Next,
@@ -107,7 +107,7 @@ pub async fn check_version(
 /// tournament data, and a browser's `EventSource` can't send the auth header
 /// anyway. Clients refetch the (gated) tournament when the version rises past
 /// what they hold, and ignore the echo of their own edits.
-pub async fn events(
+pub(crate) async fn events(
     TournamentCtx(instance): TournamentCtx,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let receiver = instance.read().subscribe();

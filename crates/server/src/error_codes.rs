@@ -19,7 +19,7 @@
 /// for the domain half, and the exhaustive `match` in `domain_payload` forces
 /// every new [`osp_core::TournamentError`] variant to be classified as either
 /// localized (a code here) or internal (English only).
-pub const LOCALIZED_ERROR_CODES: &[&str] = &[
+pub(crate) const LOCALIZED_ERROR_CODES: &[&str] = &[
     // Request-level
     "no_tournament",
     // CSV import

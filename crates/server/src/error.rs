@@ -16,7 +16,7 @@ use crate::state::MutateError;
 
 /// An error that can be returned from an API handler.
 #[derive(Debug)]
-pub enum ApiError {
+pub(crate) enum ApiError {
     /// A request needs a tournament to exist, but none has been created yet.
     NoTournament,
     /// The request was malformed (400) in a way no domain error describes —

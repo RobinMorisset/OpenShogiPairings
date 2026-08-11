@@ -14,7 +14,17 @@
 //! links. The warning is silenced below because the links are deliberate — a link
 //! to something that doesn't exist at all still warns, which is the case worth
 //! hearing about.
+//!
+//! Two allow-by-default lints are turned on, bracketing one question from either
+//! side: what is really part of this crate's API? `unreachable_pub` catches `pub`
+//! that reaches nothing — the item is crate-visible either way, so the marker
+//! only misleads about the answer, which is the `pub use` list below.
+//! `unnameable_types` catches the reverse, a type a caller can reach through a
+//! public signature but cannot write down. Both had drifted, in both directions
+//! at once; with CI denying warnings the markers and the exports now stay in
+//! step.
 #![allow(rustdoc::private_intra_doc_links)]
+#![warn(unnameable_types, unreachable_pub)]
 
 mod american_grid;
 mod csv_import;
