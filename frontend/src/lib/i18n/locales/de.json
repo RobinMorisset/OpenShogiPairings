@@ -392,7 +392,12 @@
     "moveDown": "Nach unten",
     "removeTiebreak": "Diese Feinwertung entfernen",
     "noTiebreaks": "Keine Feinwertungen — punktgleiche Spieler werden nach Turniernummer geordnet.",
-    "addTiebreakPlaceholder": "Feinwertung hinzufügen…"
+    "addTiebreakPlaceholder": "Feinwertung hinzufügen…",
+    "teamTitle": "Mannschaftsturnier",
+    "teamDesc": "Mannschaften statt Einzelspieler auslosen: ein Kampf zwischen zwei Mannschaften besteht aus je einem gewöhnlichen Brett pro Position, Brett 1 gegen Brett 1 und so weiter. Ergebnisse werden weiterhin pro Brett eingetragen.",
+    "teamCheckbox": "Als Mannschaftsturnier austragen",
+    "teamSize": "Spieler pro Mannschaft",
+    "teamLocked": "Mannschaftsmodus und Mannschaftsgröße sind nach Abschluss der Anmeldung fixiert."
   },
   "serverError": {
     "noTournament": "Es existiert noch kein Turnier — legen Sie zuerst eines an.",
@@ -487,5 +492,25 @@
       "label": "Brettpunkte",
       "title": "Gewonnene Partien — die des Spielers, oder die Gesamtzahl der Mannschaft über alle Bretter"
     }
+  },
+  "teams": {
+    "title": "Mannschaften",
+    "count": "{count} Mannschaften",
+    "namePlaceholder": "Mannschaftsname",
+    "add": "Mannschaft hinzufügen",
+    "none": "Noch keine Mannschaften — vor dem Abschluss muss jeder Spieler einer angehören.",
+    "clickToRename": "Zum Umbenennen klicken",
+    "averageTitle": "Durchschnittliche Auslosungswertung — daraus ergeben sich Mannschaftsnummer und MacMahon-Punkte",
+    "sortByRating": "Nach Wertung",
+    "sortByRatingTitle": "Brettreihenfolge auf stärkste zuerst zurücksetzen",
+    "removeTitle": "Diese Mannschaft löschen (ihre Spieler bleiben angemeldet)",
+    "removeMemberTitle": "Diesen Spieler aus der Mannschaft nehmen",
+    "moveUp": "Ein Brett nach oben",
+    "moveDown": "Ein Brett nach unten",
+    "addMember": "Spieler hinzufügen…",
+    "pairingEloPlaceholder": "Auslosungs-ELO",
+    "pairingEloTitle": "Auslosungs-ELO für ein ungewertetes Mitglied: nur für den Mannschaftsdurchschnitt und die Brettreihenfolge, nie exportiert — der Spieler bleibt überall sonst ungewertet",
+    "unassigned": "Ohne Mannschaft ({count})",
+    "allAssigned": "Alle Spieler sind in einer Mannschaft."
   }
 }

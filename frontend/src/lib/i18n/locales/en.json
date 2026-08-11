@@ -392,7 +392,12 @@
     "moveDown": "Move down",
     "removeTiebreak": "Remove this tie-break",
     "noTiebreaks": "No tie-breaks — players level on points are ordered by tournament number.",
-    "addTiebreakPlaceholder": "Add a tie-break…"
+    "addTiebreakPlaceholder": "Add a tie-break…",
+    "teamTitle": "Team tournament",
+    "teamDesc": "Pair teams rather than individuals: a match between two teams is one ordinary board per position, board 1 against board 1 and so on. Results are still entered per board.",
+    "teamCheckbox": "Run this as a team tournament",
+    "teamSize": "Players per team",
+    "teamLocked": "Team mode and team size are fixed once registration is finalized."
   },
   "serverError": {
     "noTournament": "No tournament exists yet — create one first.",
@@ -487,5 +492,25 @@
       "label": "Board wins",
       "title": "Games won — a player's own, or a team's total across every board"
     }
+  },
+  "teams": {
+    "title": "Teams",
+    "count": "{count} teams",
+    "namePlaceholder": "Team name",
+    "add": "Add team",
+    "none": "No teams yet — every player must be in one before you can finalize.",
+    "clickToRename": "Click to rename",
+    "averageTitle": "Average pairing rating — what the team's number and MacMahon points come from",
+    "sortByRating": "By rating",
+    "sortByRatingTitle": "Reset the board order to strongest first",
+    "removeTitle": "Delete this team (its players stay registered)",
+    "removeMemberTitle": "Take this player out of the team",
+    "moveUp": "Move up a board",
+    "moveDown": "Move down a board",
+    "addMember": "Add a player…",
+    "pairingEloPlaceholder": "Pairing ELO",
+    "pairingEloTitle": "Pairing ELO for an unrated member: used only for the team average and the board order, never exported — the player stays unrated everywhere else",
+    "unassigned": "Not in a team ({count})",
+    "allAssigned": "Every player is in a team."
   }
 }

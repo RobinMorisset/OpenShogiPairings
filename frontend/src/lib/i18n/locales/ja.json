@@ -392,7 +392,12 @@
     "moveDown": "下へ",
     "removeTiebreak": "この基準を削除",
     "noTiebreaks": "基準がありません。持ち点が同じ選手は選手番号順に並びます。",
-    "addTiebreakPlaceholder": "基準を追加…"
+    "addTiebreakPlaceholder": "基準を追加…",
+    "teamTitle": "団体戦",
+    "teamDesc": "個人ではなくチーム単位で組み合わせます。2チームの対戦は各ポジションごとの通常の対局で構成され、1番同士、2番同士と対戦します。結果はこれまでどおり各対局ごとに入力します。",
+    "teamCheckbox": "団体戦として開催する",
+    "teamSize": "1チームの人数",
+    "teamLocked": "参加登録の確定後は、団体戦の設定とチーム人数を変更できません。"
   },
   "serverError": {
     "noTournament": "大会がまだありません。先に作成してください。",
@@ -487,5 +492,25 @@
       "label": "勝局数",
       "title": "勝った対局数。個人の勝局数、または団体戦では全ての盤の合計"
     }
+  },
+  "teams": {
+    "title": "チーム",
+    "count": "{count} チーム",
+    "namePlaceholder": "チーム名",
+    "add": "チームを追加",
+    "none": "まだチームがありません。確定前に全員をどこかのチームに入れてください。",
+    "clickToRename": "クリックして名前を変更",
+    "averageTitle": "組み合わせ用レーティングの平均。チーム番号とマクマホンの持ち点はここから決まります",
+    "sortByRating": "レーティング順",
+    "sortByRatingTitle": "強い順に並べ直す",
+    "removeTitle": "このチームを削除（所属選手の登録は残ります）",
+    "removeMemberTitle": "この選手をチームから外す",
+    "moveUp": "1つ上の盤へ",
+    "moveDown": "1つ下の盤へ",
+    "addMember": "選手を追加…",
+    "pairingEloPlaceholder": "組合せELO",
+    "pairingEloTitle": "レーティングのないメンバー用の組み合わせELO。チーム平均と盤順にのみ使われ、出力されません。他の場所では引き続き「レーティングなし」と扱われます",
+    "unassigned": "チーム未所属（{count}）",
+    "allAssigned": "全員がチームに所属しています。"
   }
 }

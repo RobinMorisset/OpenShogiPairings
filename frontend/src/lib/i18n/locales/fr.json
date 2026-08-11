@@ -392,7 +392,12 @@
     "moveDown": "Descendre",
     "removeTiebreak": "Retirer ce critère",
     "noTiebreaks": "Aucun critère — les joueurs à égalité en points sont départagés par numéro de tournoi.",
-    "addTiebreakPlaceholder": "Ajouter un critère…"
+    "addTiebreakPlaceholder": "Ajouter un critère…",
+    "teamTitle": "Tournoi par équipes",
+    "teamDesc": "Apparier des équipes plutôt que des individus : une rencontre entre deux équipes est un échiquier ordinaire par position, échiquier 1 contre échiquier 1, etc. Les résultats se saisissent toujours par échiquier.",
+    "teamCheckbox": "Organiser un tournoi par équipes",
+    "teamSize": "Joueurs par équipe",
+    "teamLocked": "Le mode par équipes et la taille des équipes sont figés une fois les inscriptions clôturées."
   },
   "serverError": {
     "noTournament": "Aucun tournoi n'existe encore — créez-en un d'abord.",
@@ -487,5 +492,25 @@
       "label": "Parties gagnées",
       "title": "Parties gagnées — celles du joueur, ou le total de l'équipe sur tous les échiquiers"
     }
+  },
+  "teams": {
+    "title": "Équipes",
+    "count": "{count} équipes",
+    "namePlaceholder": "Nom de l'équipe",
+    "add": "Ajouter une équipe",
+    "none": "Aucune équipe pour l'instant — chaque joueur doit en avoir une avant la clôture.",
+    "clickToRename": "Cliquer pour renommer",
+    "averageTitle": "Classement d'appariement moyen — ce dont dépendent le numéro de l'équipe et ses points MacMahon",
+    "sortByRating": "Par classement",
+    "sortByRatingTitle": "Remettre l'ordre des échiquiers du plus fort au plus faible",
+    "removeTitle": "Supprimer cette équipe (ses joueurs restent inscrits)",
+    "removeMemberTitle": "Retirer ce joueur de l'équipe",
+    "moveUp": "Monter d'un échiquier",
+    "moveDown": "Descendre d'un échiquier",
+    "addMember": "Ajouter un joueur…",
+    "pairingEloPlaceholder": "ELO d'appariement",
+    "pairingEloTitle": "ELO d'appariement pour un membre non classé : sert uniquement à la moyenne de l'équipe et à l'ordre des échiquiers, jamais exporté — le joueur reste non classé partout ailleurs",
+    "unassigned": "Sans équipe ({count})",
+    "allAssigned": "Tous les joueurs sont dans une équipe."
   }
 }

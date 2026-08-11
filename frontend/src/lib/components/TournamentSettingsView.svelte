@@ -35,6 +35,11 @@
 
   let { settings, finalized, players, onUpdate, busy = false }: Props = $props();
 
+  // Team mode and team size are structural: they shape every roster and every
+  // board, so the server freezes them at finalization. Disabling the controls
+  // there beats letting the referee submit a change the server will reject.
+  const locked = $derived(finalized);
+
   // Download the current settings as JSON (for the simulation CLI's --configs,
   // or to share a configuration). Fire-and-forget: a cancelled dialog is a no-op.
   function exportSettings() {
@@ -109,6 +114,11 @@
   let cupEnabled = $state(false);
   let cupFormat = $state<CupFormat>("direct");
   let longBoardsEnabled = $state(false);
+  // Team mode: whether teams are the unit of pairing, and how many players each
+  // has. `teamSize` keeps its last value while the mode is off, so unticking and
+  // re-ticking doesn't lose the referee's choice.
+  let teamMode = $state(false);
+  let teamSize = $state(3);
   let handicapPolicy = $state<HandicapChoice>("allowed");
   let handicapWielRule = $state(false);
   let halfPointAbsences = $state(false);
@@ -209,6 +219,8 @@
     const sCup = settings.cup_enabled;
     const sCupFormat = settings.cup_format ?? "direct";
     const sLong = settings.long_boards_enabled ?? false;
+    const sTeamMode = settings.teams != null;
+    const sTeamSize = settings.teams?.size ?? 3;
     const sHandicap = handicapChoice(settings.handicap_policy);
     const sHandicapWiel =
       settings.handicap_policy.kind === "enabled" ? (settings.handicap_policy.wiel_rule ?? false) : false;
@@ -236,6 +248,8 @@
         cupEnabled === sCup &&
         cupFormat === sCupFormat &&
         longBoardsEnabled === sLong &&
+        teamMode === sTeamMode &&
+        teamSize === sTeamSize &&
         handicapPolicy === sHandicap &&
         handicapWielRule === sHandicapWiel &&
         halfPointAbsences === sHalfPointAbsences &&
@@ -267,6 +281,8 @@
         cupEnabled = sCup;
         cupFormat = sCupFormat;
         longBoardsEnabled = sLong;
+        teamMode = sTeamMode;
+        teamSize = sTeamSize;
         handicapPolicy = sHandicap;
         handicapWielRule = sHandicapWiel;
         halfPointAbsences = sHalfPointAbsences;
@@ -326,6 +342,7 @@
       cup_enabled: cupEnabled,
       cup_format: cupFormat,
       long_boards_enabled: longBoardsEnabled,
+      teams: teamMode ? { size: teamSize } : undefined,
       handicap_policy:
         handicapPolicy === "none"
           ? ({ kind: "none" } satisfies HandicapPolicy)
@@ -444,6 +461,32 @@
 
   function setLongBoardsEnabled(v: boolean) {
     longBoardsEnabled = v;
+    persist();
+  }
+
+  // Turning team mode on adopts the team tie-break order — match points, then
+  // board wins, then the SOS family, which is what team events use — but only
+  // while the order is still the untouched individual default. A referee who has
+  // reordered the criteria keeps their order.
+  const INDIVIDUAL_DEFAULT_TIEBREAKS: Tiebreak[] = ["points", "sos_m", "sodos_m", "sosos_m"];
+  const TEAM_DEFAULT_TIEBREAKS: Tiebreak[] = [
+    "points",
+    "board_wins",
+    "sos_m",
+    "sodos_m",
+    "sosos_m",
+  ];
+
+  function setTeamMode(v: boolean) {
+    teamMode = v;
+    if (v && eqStr(tiebreaks, INDIVIDUAL_DEFAULT_TIEBREAKS)) {
+      tiebreaks = [...TEAM_DEFAULT_TIEBREAKS];
+    }
+    persist();
+  }
+
+  function setTeamSize(v: number) {
+    teamSize = v;
     persist();
   }
 
@@ -934,6 +977,37 @@
   </div>
   </fieldset>
   </fieldset>
+
+  <div class="section">
+    <h3>{$_("settings.teamTitle")}</h3>
+    <p class="desc">
+      {$_("settings.teamDesc")}
+    </p>
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={teamMode}
+        disabled={busy || locked}
+        onchange={(e) => setTeamMode(e.currentTarget.checked)}
+      />
+      {$_("settings.teamCheckbox")}
+    </label>
+    <label class="indent">
+      {$_("settings.teamSize")}
+      <input
+        type="number"
+        min="2"
+        max="9"
+        class="num"
+        value={teamSize}
+        disabled={busy || locked || !teamMode}
+        onchange={(e) => setTeamSize(Number(e.currentTarget.value))}
+      />
+    </label>
+    {#if locked}
+      <p class="desc">{$_("settings.teamLocked")}</p>
+    {/if}
+  </div>
 
   <div class="section">
     <h3>{$_("settings.hybridCupTitle")}</h3>

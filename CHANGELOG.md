@@ -49,6 +49,13 @@ clear message rather than half-parsed; re-create the tournament.
   finalized and played entirely over the API: create/rename/delete a team,
   add/remove a member, set or reset the board order, and set an unrated member's
   pairing ELO. See the route table in the README.
+- **Team setup in the interface**: a "Team tournament" toggle and team size in
+  Settings, and a Teams panel on the Players tab — create, rename and delete
+  teams, move players in and out, reorder the boards (or reset that order by
+  rating), and give an unrated member a pairing ELO. Each card shows its size
+  (`2/3`) and average rating, so an incomplete roster is visible before
+  finalizing rather than only in the error afterwards. The panel goes read-only
+  once registration is finalized, matching the frozen rosters.
 
 - **Hybrid cup: a qualification-round format** (Settings → Hybrid cup), used by
   the German Championship. The top half of the bracket is pre-qualified and

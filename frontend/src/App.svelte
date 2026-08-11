@@ -4,6 +4,8 @@
   import {
     addPlayer,
     addPointAdjustment,
+    addTeam,
+    addTeamMember,
     ApiError,
     cancelRound,
     confirmRound,
@@ -20,15 +22,21 @@
     refreshRatings,
     removePlayer,
     removePointAdjustment,
+    removeTeam,
+    removeTeamMember,
+    renameTeam,
     restoreBackup,
     setBoardDrawn,
     setBoardHandicap,
     setBoardLong,
     setBoardNoShow,
     setBoardWinner,
+    setPairingRating,
     setPlayerEligible,
     setPlayerCategory,
     setSitoutValue,
+    setTeamBoardOrder,
+    sortTeamByRating,
     undoTournament,
     updateDraft,
     updateSettings,
@@ -63,6 +71,7 @@
   import { authRequired, currentTournamentId, initialTab } from "./lib/session";
   import PlayerRegistration from "./lib/components/PlayerRegistration.svelte";
   import PlayerList from "./lib/components/PlayerList.svelte";
+  import TeamsPanel from "./lib/components/TeamsPanel.svelte";
   import RoundView from "./lib/components/RoundView.svelte";
   import RoundDraftView from "./lib/components/RoundDraftView.svelte";
   import ResultsView from "./lib/components/ResultsView.svelte";
@@ -263,6 +272,16 @@
   // format, a bracket of `size` takes half as many players again (mirrors
   // `cup_field_size` in the backend).
   const cupEnabled = $derived(tournament?.settings.cup_enabled ?? false);
+  // Team mode: teams are the unit of pairing, so the Players tab grows a Teams
+  // panel and the rest of the app groups by match.
+  const teamMode = $derived(tournament?.settings.teams != null);
+  const teamSize = $derived(tournament?.settings.teams?.size ?? 1);
+  // MacMahon starting points in use — the one configuration where an unrated
+  // team member needs a referee-assigned pairing ELO.
+  const macmahonInUse = $derived.by(() => {
+    const pairing = tournament?.settings.pairing;
+    return pairing?.kind === "swiss" && (pairing.macmahon.thresholds ?? []).length > 0;
+  });
   const cupFormat = $derived(tournament?.settings.cup_format ?? "direct");
   const eligibleCount = $derived(
     tournament?.players.filter((p) => p.eligible).length ?? 0,
@@ -522,6 +541,60 @@
   function handleRemovePlayer(id: string) {
     run(async () => {
       apply(await removePlayer(id));
+    });
+  }
+
+  // --- Teams ---------------------------------------------------------------
+  //
+  // Each of these is a single request whose response carries the whole updated
+  // tournament, so the panel re-renders from the server's own view of the
+  // rosters rather than a local guess at them.
+
+  function handleAddTeam(name: string) {
+    run(async () => {
+      apply(await addTeam(name));
+    });
+  }
+
+  function handleRenameTeam(teamId: string, name: string) {
+    run(async () => {
+      apply(await renameTeam(teamId, name));
+    });
+  }
+
+  function handleRemoveTeam(teamId: string) {
+    run(async () => {
+      apply(await removeTeam(teamId));
+    });
+  }
+
+  function handleAddTeamMember(teamId: string, playerId: string) {
+    run(async () => {
+      apply(await addTeamMember(teamId, playerId));
+    });
+  }
+
+  function handleRemoveTeamMember(teamId: string, playerId: string) {
+    run(async () => {
+      apply(await removeTeamMember(teamId, playerId));
+    });
+  }
+
+  function handleSetTeamBoardOrder(teamId: string, order: string[]) {
+    run(async () => {
+      apply(await setTeamBoardOrder(teamId, order));
+    });
+  }
+
+  function handleSortTeamByRating(teamId: string) {
+    run(async () => {
+      apply(await sortTeamByRating(teamId));
+    });
+  }
+
+  function handleSetPairingRating(playerId: string, rating: number | null) {
+    run(async () => {
+      apply(await setPairingRating(playerId, rating));
     });
   }
 
@@ -994,6 +1067,26 @@
               {$_("playerRegistration.importCsv")}
             </button>
           </div>
+          {#if teamMode}
+            <div class="print-hide">
+              <TeamsPanel
+                teams={tournament.teams ?? []}
+                players={tournament.players}
+                size={teamSize}
+                finalized={tournament.registration_finalized}
+                {macmahonInUse}
+                onAdd={handleAddTeam}
+                onRename={handleRenameTeam}
+                onRemove={handleRemoveTeam}
+                onAddMember={handleAddTeamMember}
+                onRemoveMember={handleRemoveTeamMember}
+                onSetBoardOrder={handleSetTeamBoardOrder}
+                onSortByRating={handleSortTeamByRating}
+                onSetPairingRating={handleSetPairingRating}
+                {busy}
+              />
+            </div>
+          {/if}
           <div class="players">
             <PlayerList
               players={tournament.players}
@@ -1006,8 +1099,8 @@
               onToggleEligible={handleToggleEligible}
               onSetEligibleByNationality={handleSetEligibleByNationality}
               onToggleCategory={handleToggleCategory}
-              onAddAdjustment={handleAddPointAdjustment}
-              onRemoveAdjustment={handleRemovePointAdjustment}
+              onAddAdjustment={teamMode ? undefined : handleAddPointAdjustment}
+              onRemoveAdjustment={teamMode ? undefined : handleRemovePointAdjustment}
               {busy}
             />
           </div>

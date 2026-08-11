@@ -476,15 +476,20 @@
                 {adjustmentTotal(player) > 0 ? "+" : ""}{adjustmentTotal(player)}
               </span>
             {/if}
-            <button
-              type="button"
-              class="adjust"
-              title={$_("playerList.manualAdjustmentTitle")}
-              disabled={busy}
-              onclick={() => toggleAdjustments(player.id)}
-            >
-              ±
-            </button>
+            <!-- No adjustment control without a handler: a team tournament ranks
+                 by team, so a per-player delta moves nothing (the server refuses
+                 it), and offering the button would only lead to that error. -->
+            {#if onAddAdjustment}
+              <button
+                type="button"
+                class="adjust"
+                title={$_("playerList.manualAdjustmentTitle")}
+                disabled={busy}
+                onclick={() => toggleAdjustments(player.id)}
+              >
+                ±
+              </button>
+            {/if}
             <button
               type="button"
               class="remove"

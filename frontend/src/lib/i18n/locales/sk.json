@@ -392,7 +392,12 @@
     "moveDown": "Posunúť nadol",
     "removeTiebreak": "Odstrániť toto pomocné hodnotenie",
     "noTiebreaks": "Žiadne pomocné hodnotenia — hráči s rovnakým počtom bodov sa zoradia podľa turnajového čísla.",
-    "addTiebreakPlaceholder": "Pridať pomocné hodnotenie…"
+    "addTiebreakPlaceholder": "Pridať pomocné hodnotenie…",
+    "teamTitle": "Družstvový turnaj",
+    "teamDesc": "Žrebovanie družstiev namiesto jednotlivcov: zápas dvoch družstiev je jedna bežná partia na každej šachovnici, prvá proti prvej a tak ďalej. Výsledky sa naďalej zadávajú po partiách.",
+    "teamCheckbox": "Hrať ako družstvový turnaj",
+    "teamSize": "Hráčov v družstve",
+    "teamLocked": "Družstvový režim a veľkosť družstva sú po uzavretí registrácie pevné."
   },
   "serverError": {
     "noTournament": "Zatiaľ neexistuje žiadny turnaj — najprv nejaký vytvorte.",
@@ -487,5 +492,25 @@
       "label": "Vyhrané partie",
       "title": "Vyhrané partie — vlastné u hráča, alebo súčet družstva na všetkých šachovniciach"
     }
+  },
+  "teams": {
+    "title": "Družstvá",
+    "count": "Družstiev: {count}",
+    "namePlaceholder": "Názov družstva",
+    "add": "Pridať družstvo",
+    "none": "Zatiaľ žiadne družstvá — pred uzavretím registrácie musí byť každý hráč v niektorom.",
+    "clickToRename": "Kliknutím premenujete",
+    "averageTitle": "Priemerný žrebovací rating — z neho vychádza číslo družstva a body MacMahona",
+    "sortByRating": "Podľa ratingu",
+    "sortByRatingTitle": "Obnoviť poradie šachovníc od najsilnejšieho",
+    "removeTitle": "Zmazať družstvo (jeho hráči zostávajú prihlásení)",
+    "removeMemberTitle": "Odobrať hráča z družstva",
+    "moveUp": "O šachovnicu vyššie",
+    "moveDown": "O šachovnicu nižšie",
+    "addMember": "Pridať hráča…",
+    "pairingEloPlaceholder": "Žrebovacie ELO",
+    "pairingEloTitle": "Žrebovacie ELO pre člena bez ratingu: slúži len na priemer družstva a poradie šachovníc, nikdy sa neexportuje — inde zostáva hráč bez ratingu",
+    "unassigned": "Bez družstva ({count})",
+    "allAssigned": "Všetci hráči sú v družstvách."
   }
 }

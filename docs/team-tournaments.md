@@ -583,12 +583,15 @@ version guard) instead of half-parsed.
 ## Frontend summary
 
 - **Settings**: "Team tournament" toggle + size field (no mode-selector
-  restructure); incompatible features (cup, long games, ELO mode, categories,
-  EstElo tiebreak, grade thresholds) surfaced as validation errors when
-  conflicting, with the conflicting controls disabled while team mode is on.
+  restructure) — **landed**, with both controls disabled after finalization
+  (the server freezes them) and the team tie-break order adopted when the mode
+  is switched on, unless the referee has already reordered the criteria.
+  Incompatible features surface as the server's validation errors.
 - **Players tab**: teams panel (creation, member assignment, board reorder,
   team average ELO, unassigned pool), pairing-ELO entry for unrated members
-  (MacMahon only); finalization errors listed loudly.
+  (MacMahon only); finalization errors listed loudly. **Landed**; the panel
+  goes read-only at finalization, matching the frozen rosters, and the
+  per-player adjustment control is hidden in team mode.
 - **Draft**: team-level absence/forced-match/forced-bye controls; present-team
   count gate.
 - **Round view**: boards grouped by team match with a match header (team

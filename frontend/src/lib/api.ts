@@ -467,6 +467,88 @@ export function updateSettings(
   });
 }
 
+// --- Teams -----------------------------------------------------------------
+//
+// Roster editing for a team tournament. Every one of these is registration-time
+// only and team-mode only; the server owns those rules, so a call made outside
+// them comes back as an ordinary domain error.
+
+/** Create a team. The name must be non-empty and unique ignoring case. */
+export function addTeam(name: string): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath("/teams"), {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+/** Rename a team. */
+export function renameTeam(teamId: string, name: string): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath(`/teams/${teamId}`), {
+    method: "PUT",
+    body: JSON.stringify({ name }),
+  });
+}
+
+/** Delete a team; its members return to the unassigned pool, still registered. */
+export function removeTeam(teamId: string): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath(`/teams/${teamId}`), {
+    method: "DELETE",
+  });
+}
+
+/** Add a registered player to a team, at the end of its board order. */
+export function addTeamMember(
+  teamId: string,
+  playerId: string,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath(`/teams/${teamId}/members`), {
+    method: "POST",
+    body: JSON.stringify({ player_id: playerId }),
+  });
+}
+
+/** Take a player out of a team, back into the unassigned pool. */
+export function removeTeamMember(
+  teamId: string,
+  playerId: string,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    scopedPath(`/teams/${teamId}/members/${playerId}`),
+    { method: "DELETE" },
+  );
+}
+
+/** Set a team's board order (index 0 = board 1). Must be a permutation of the
+ *  team's current members. */
+export function setTeamBoardOrder(
+  teamId: string,
+  order: string[],
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath(`/teams/${teamId}/board-order`), {
+    method: "PUT",
+    body: JSON.stringify({ order }),
+  });
+}
+
+/** Reset a team's board order to descending pairing rating (unrated last). */
+export function sortTeamByRating(teamId: string): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    scopedPath(`/teams/${teamId}/sort-by-rating`),
+    { method: "POST" },
+  );
+}
+
+/** Set (or clear, with `null`) a player's referee-assigned pairing ELO. */
+export function setPairingRating(
+  playerId: string,
+  pairingRating: number | null,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(
+    scopedPath(`/players/${playerId}/pairing-rating`),
+    { method: "PUT", body: JSON.stringify({ pairing_rating: pairingRating }) },
+  );
+}
+
 /** Cancel the last round (or the open draft), stepping back one stage. */
 export function cancelRound(): Promise<TournamentResponse> {
   return request<TournamentResponse>(scopedPath("/cancel-round"), {
