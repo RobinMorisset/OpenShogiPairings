@@ -10,6 +10,7 @@
 //! replay from the boards, the same way the cup replays its bracket, so editing
 //! a past board result re-derives every team outcome that depends on it.
 
+use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
@@ -93,6 +94,19 @@ impl Team {
 /// user-facing.
 pub fn pairing_rating(player: &Player) -> Option<u32> {
     player.rating.or(player.pairing_rating)
+}
+
+/// Board-order comparison of two pairing ratings: stronger first, unrated last.
+///
+/// The one definition of "board order by strength", shared by the sort and by
+/// where a newcomer is inserted, so the two can't drift apart.
+fn by_pairing_rating(a: Option<u32>, b: Option<u32>) -> Ordering {
+    match (a, b) {
+        (Some(x), Some(y)) => y.cmp(&x),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
 }
 
 /// The average pairing rating over a roster, or `None` when no member has one.
@@ -217,7 +231,16 @@ impl Tournament {
         Ok(())
     }
 
-    /// Add a registered player to a team, at the end of its board order.
+    /// Add a registered player to a team, at the board their pairing rating
+    /// calls for.
+    ///
+    /// The newcomer goes in front of the first member weaker than them, so a
+    /// roster built one player at a time comes out in board order without the
+    /// referee ever pressing "sort by rating"; an unrated newcomer lands last,
+    /// as unrated sorts everywhere else. It is an *insertion*, not a re-sort:
+    /// nothing already on the roster moves relative to anything else, so a
+    /// hand-picked order survives a late arrival (and the sort button is still
+    /// there to reset one).
     ///
     /// A player belongs to exactly one team, so this rejects a player already in
     /// another (call [`remove_team_member`](Self::remove_team_member) first) and a
@@ -225,15 +248,24 @@ impl Tournament {
     /// no-op rather than a duplicate.
     pub fn add_team_member(&mut self, team: Uuid, player: Uuid) -> Result<&Team, TournamentError> {
         self.team_registration_open()?;
-        if !self.players.iter().any(|p| p.id == player) {
+        let Some(added) = self.players.iter().find(|p| p.id == player) else {
             return Err(TournamentError::PlayerNotFound(player));
-        }
+        };
+        let rating = pairing_rating(added);
         if let Some(other) = self.team_of(player) {
             if other.id != team {
                 return Err(TournamentError::PlayerAlreadyInATeam(player));
             }
         }
         let size = self.settings.team_size();
+        let roster = self.team_members(team);
+        // The first board held by someone the newcomer outranks; past the end
+        // when they outrank nobody. Equal ratings keep arrival order, matching
+        // the stable sort in `sort_team_by_rating`.
+        let at = roster
+            .iter()
+            .position(|m| by_pairing_rating(pairing_rating(m), rating) == Ordering::Greater)
+            .unwrap_or(roster.len());
         let t = self.team_mut(team)?;
         if t.members.contains(&player) {
             return Ok(t);
@@ -241,7 +273,10 @@ impl Tournament {
         if t.members.len() as u32 >= size {
             return Err(TournamentError::TeamIsFull { size });
         }
-        t.members.push(player);
+        // `at` indexes the roster read above, which is this same list minus any
+        // member whose player is gone — so it is in range here, and `insert`
+        // panics rather than mis-seating anyone if that ever stops holding.
+        t.members.insert(at, player);
         Ok(t)
     }
 
@@ -297,14 +332,9 @@ impl Tournament {
             .map(|p| (p.id, pairing_rating(p)))
             .collect();
         let mut order = ranked;
-        // Descending rating, unrated last; `sort_by` is stable, so members with
-        // no rating keep their relative order rather than being shuffled.
-        order.sort_by(|a, b| match (a.1, b.1) {
-            (Some(x), Some(y)) => y.cmp(&x),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal,
-        });
+        // `sort_by` is stable, so equally-rated members — and the unrated ones,
+        // all equal to each other — keep their relative order.
+        order.sort_by(|a, b| by_pairing_rating(a.1, b.1));
         let order: Vec<Uuid> = order.into_iter().map(|(id, _)| id).collect();
         let t = self.team_mut(team)?;
         t.members = order;
@@ -798,6 +828,42 @@ mod tests {
         // No roster may reference a player who is no longer registered.
         assert!(t.teams[0].members.is_empty());
         assert!(t.team_of(ids[0]).is_none());
+    }
+
+    #[test]
+    fn a_new_member_takes_the_board_their_rating_calls_for() {
+        let (mut t, ids) = team_tournament(4, 4);
+        let a = t.add_team("A").unwrap().id;
+        // Registered in no particular order, as a referee would.
+        for id in [ids[2], ids[0], ids[3], ids[1]] {
+            t.add_team_member(a, id).unwrap();
+        }
+        // The roster is in board order without anyone sorting it.
+        assert_eq!(t.teams[0].members, vec![ids[0], ids[1], ids[2], ids[3]]);
+    }
+
+    #[test]
+    fn adding_a_member_leaves_the_boards_below_them_alone() {
+        let (mut t, ids) = team_tournament(4, 3);
+        let unrated = t
+            .add_player(NewPlayer {
+                last_name: "U".to_string(),
+                ..Default::default()
+            })
+            .unwrap()
+            .id;
+        let a = t.add_team("A").unwrap().id;
+        t.add_team_member(a, ids[0]).unwrap();
+        t.add_team_member(a, ids[2]).unwrap();
+        // A board order the referee picked themselves: the weaker player first.
+        t.set_team_board_order(a, vec![ids[2], ids[0]]).unwrap();
+        // P1 (1990) outranks whoever is on board 1 (1980) and takes it; the two
+        // below keep the order they were put in rather than being re-sorted.
+        t.add_team_member(a, ids[1]).unwrap();
+        assert_eq!(t.teams[0].members, vec![ids[1], ids[2], ids[0]]);
+        // An unrated newcomer sorts last, whatever is above them.
+        t.add_team_member(a, unrated).unwrap();
+        assert_eq!(t.teams[0].members.last(), Some(&unrated));
     }
 
     #[test]

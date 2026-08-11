@@ -53,7 +53,9 @@ rather than half-parsed; re-create the tournament.
 - **Team setup in the interface**: a "Team tournament" toggle and team size in
   Settings, and a Teams panel on the Players tab — create, rename and delete
   teams, move players in and out, reorder the boards (or reset that order by
-  rating), and give an unrated member a pairing ELO. Each card shows its size
+  rating), and give an unrated member a pairing ELO. A player joining a team
+  takes the board their rating calls for, so a roster built one player at a
+  time is already in board order. Each card shows its size
   (`2/3`) and average rating, so an incomplete roster is visible before
   finalizing rather than only in the error afterwards. The panel goes read-only
   once registration is finalized, matching the frozen rosters.

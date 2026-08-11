@@ -48,6 +48,7 @@
   import { describeApiError } from "./lib/errorCodes";
   import { longPending, overrunLongRound } from "./lib/longGames";
   import { isDecided } from "./lib/noShow";
+  import { pairingRating } from "./lib/teams";
   import type {
     BackupInfo,
     CupBracketView,
@@ -329,10 +330,42 @@
   const overrunRound = $derived(
     overrunLongRound(tournament?.rounds ?? [], nextRoundNumber),
   );
+  // Preparing round 1 of a team tournament also finalizes the rosters, so the
+  // button carries `finalize_teams`'s guards — in the same order, and phrased as
+  // the error it would otherwise have raised. Without this it looked live and
+  // the server refused. Empty once the rosters are ready (and from round 2 on,
+  // where they are frozen and were validated here).
+  const teamsNotReady = $derived.by(() => {
+    if (!teamMode || phase !== "registration") return "";
+    const teams = tournament?.teams ?? [];
+    const players = tournament?.players ?? [];
+    if (teams.length < 2) {
+      return $_("serverError.notEnoughTeams", { values: { have: teams.length } });
+    }
+    const assigned = new Set(teams.flatMap((t) => t.members));
+    const without = players.filter((p) => !assigned.has(p.id)).length;
+    if (without > 0) {
+      return $_("serverError.playersWithoutTeam", { values: { count: without } });
+    }
+    const short = teams.find((t) => t.members.length !== teamSize);
+    if (short) {
+      return $_("serverError.incompleteTeam", {
+        values: { name: short.name, have: short.members.length, need: teamSize },
+      });
+    }
+    if (macmahonInUse) {
+      const missing = players.filter((p) => pairingRating(p) == null).length;
+      if (missing > 0) {
+        return $_("serverError.membersWithoutPairingRating", { values: { count: missing } });
+      }
+    }
+    return "";
+  });
   const startEnabled = $derived(
     !busy &&
       enoughPlayers &&
       overrunRound === null &&
+      teamsNotReady === "" &&
       ((phase === "registration" && cupReady) || phase === "ready"),
   );
   const startTitle = $derived(
@@ -340,11 +373,13 @@
       ? $_("app.startTitleNotReady")
       : !enoughPlayers
         ? $_("app.startTitleNeedPlayers")
-        : overrunRound !== null
-          ? $_("app.startTitleLongGamePending", { values: { round: overrunRound } })
-          : phase === "registration" && !cupReady
-            ? $_("app.advanceTitleNeedCup", { values: { needed: cupFieldSize(8) } })
-            : "",
+        : teamsNotReady !== ""
+          ? teamsNotReady
+          : overrunRound !== null
+            ? $_("app.startTitleLongGamePending", { values: { round: overrunRound } })
+            : phase === "registration" && !cupReady
+              ? $_("app.advanceTitleNeedCup", { values: { needed: cupFieldSize(8) } })
+              : "",
   );
 
   // "Export grid" button: available only in the "ready" phase (no draft, no

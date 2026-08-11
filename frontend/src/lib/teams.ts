@@ -33,6 +33,20 @@ export function teamAverageRating(members: Player[]): number | null {
   return Math.round(sum / rated.length);
 }
 
+/**
+ * Is this roster already in board order — descending pairing rating, unrated
+ * last?
+ *
+ * Mirrors the order `sort_team_by_rating` produces, so a team the button would
+ * leave untouched can say so by greying it out. Equal ratings are in order
+ * either way round: that sort is stable, so it wouldn't move them.
+ */
+export function sortedByRating(members: Player[]): boolean {
+  // `null` is weaker than any rating, and equal to itself.
+  const rank = (p: Player) => pairingRating(p) ?? -1;
+  return members.every((p, i) => i === 0 || rank(members[i - 1]) >= rank(p));
+}
+
 /** One team match of a round: the two teams, and the boards it is made of. */
 export interface TeamMatch {
   team1: Team;

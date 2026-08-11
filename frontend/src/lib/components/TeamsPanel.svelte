@@ -12,7 +12,7 @@
 
   import { _ } from "svelte-i18n";
   import type { Player, Team } from "../types";
-  import { pairingRating, teamAverageRating } from "../teams";
+  import { pairingRating, sortedByRating, teamAverageRating } from "../teams";
 
   interface Props {
     teams: Team[];
@@ -232,7 +232,7 @@
               <button
                 type="button"
                 class="small"
-                disabled={busy || roster.length < 2}
+                disabled={busy || roster.length < 2 || sortedByRating(roster)}
                 title={$_("teams.sortByRatingTitle")}
                 onclick={() => onSortByRating(team.id)}
               >

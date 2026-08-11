@@ -348,7 +348,7 @@ that tournament's bearer token if it has a password (except `/login` and
 | `POST /teams` | Create a team: `{ "name" }` (non-empty, unique ignoring case). Team mode only, and only while registration is open — as for every team route below. |
 | `PUT /teams/{team_id}` | Rename a team: `{ "name" }`. |
 | `DELETE /teams/{team_id}` | Delete a team; its members go back to the unassigned pool (they stay registered). |
-| `POST /teams/{team_id}/members` | Add a registered player to a team, at the end of its board order: `{ "player_id" }`. A player belongs to exactly one team, and a team stops at its configured size. |
+| `POST /teams/{team_id}/members` | Add a registered player to a team, at the board their pairing rating calls for: `{ "player_id" }`. Inserted in front of the first weaker member (unrated last), leaving the rest of the order untouched. A player belongs to exactly one team, and a team stops at its configured size. |
 | `DELETE /teams/{team_id}/members/{player_id}` | Take a player out of a team. |
 | `PUT /teams/{team_id}/board-order` | Set the board order (index 0 = board 1): `{ "order": [player_id, …] }`, which must be a permutation of the team's current members. |
 | `POST /teams/{team_id}/sort-by-rating` | Reset the board order to descending pairing rating (unrated last). |
