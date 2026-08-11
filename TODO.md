@@ -72,3 +72,9 @@ Known limitations and future work, roughly ordered by area.
 - **Keyboard shortcut to undo** is Ctrl+Z even on Mac, maybe Command+Z would be better ?
 
 - Show **predicted elo change** as the rightmost column of the Standings tab.
+
+- Print per-player small **result reporting sheets**
+
+- **Cleanup the Changelog** (tons of redundant entries were made during the team tournament sequence of commits)
+
+- **Show invalid tournaments in the picker** (those with different version numbers) so that they can be more easily deleted
