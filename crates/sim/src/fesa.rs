@@ -105,11 +105,12 @@ pub(crate) fn fold_name(s: &str) -> String {
 }
 
 /// Match base players to FESA entries by folded `(last, first)` name and return
-/// each matched player's FESA **game count** (plus how many matched). A result
-/// table carries no game counts, so every player imports as provisional; filling
-/// `fesa_games` from a rating list restores the established/provisional distinction
-/// *without* touching strengths (the oracle still uses the results' post-ELO).
-pub(crate) fn match_games(rated: &[RatedPlayer], base: &Tournament) -> (HashMap<Uuid, u32>, usize) {
+/// each matched player's FESA **game count** (so the map's length is how many
+/// matched). A result table carries no game counts, so every player imports as
+/// provisional; filling `fesa_games` from a rating list restores the
+/// established/provisional distinction *without* touching strengths (the oracle
+/// still uses the results' post-ELO).
+pub(crate) fn match_games(rated: &[RatedPlayer], base: &Tournament) -> HashMap<Uuid, u32> {
     let by_name: HashMap<(String, String), u32> = rated
         .iter()
         .map(|r| ((fold_name(&r.last_name), fold_name(&r.first_name)), r.games))
@@ -120,27 +121,25 @@ pub(crate) fn match_games(rated: &[RatedPlayer], base: &Tournament) -> (HashMap<
             map.insert(p.id, games);
         }
     }
-    let matched = map.len();
-    (map, matched)
+    map
 }
 
-/// Game counts from the list in force on a tournament date. Returns the map, the
-/// resolved list URL (for reporting), and the match count.
+/// Game counts from the list in force on a tournament date. Returns the map and
+/// the resolved list URL (for reporting).
 pub(crate) fn games_before(
     date: &str,
     base: &Tournament,
-) -> Result<(HashMap<Uuid, u32>, String, usize), String> {
+) -> Result<(HashMap<Uuid, u32>, String), String> {
     let url = list_url_in_force(parse_ymd(date)?);
     let rated = parse_rating_list(&fetch_url(&url)?);
-    let (map, matched) = match_games(&rated, base);
-    Ok((map, url, matched))
+    Ok((match_games(&rated, base), url))
 }
 
 /// Game counts from a specific list (URL or local path).
 pub(crate) fn games_from_list(
     source: &str,
     base: &Tournament,
-) -> Result<(HashMap<Uuid, u32>, usize), String> {
+) -> Result<HashMap<Uuid, u32>, String> {
     let rated = parse_rating_list(&load_list_text(source)?);
     Ok(match_games(&rated, base))
 }
@@ -262,8 +261,8 @@ mod tests {
 
         // Keyed on the folded name, yielding the FESA game count. The unmatched
         // player is simply left out (so they stay provisional).
-        let (games, matched) = match_games(&rated, &base);
-        assert_eq!(matched, 1);
+        let games = match_games(&rated, &base);
+        assert_eq!(games.len(), 1);
         assert_eq!(games[&a_id], 40);
         assert!(!games.contains_key(&b_id));
     }
@@ -292,8 +291,12 @@ mod tests {
             rated("Wietholter", "Frédérik", 42), // precomposed accents in the list
             rated("Müller", "André", 17),        // precomposed, plus an umlaut surname
         ];
-        let (games, matched) = match_games(&list, &base);
-        assert_eq!(matched, 2, "accents/composition should not block a match");
+        let games = match_games(&list, &base);
+        assert_eq!(
+            games.len(),
+            2,
+            "accents/composition should not block a match"
+        );
         assert_eq!(games[&frederik], 42);
         assert_eq!(games[&andre], 17);
     }
@@ -324,8 +327,8 @@ mod tests {
         let ghost = player(&mut base, "Ghost", "Nobody"); // absent from the list
         base.finalize_registration().unwrap();
 
-        let (games, matched) = games_from_list(path, &base).unwrap();
-        assert_eq!(matched, 2);
+        let games = games_from_list(path, &base).unwrap();
+        assert_eq!(games.len(), 2);
         assert_eq!(games[&cheymol], 60);
         assert_eq!(games[&goix], 45);
         assert!(!games.contains_key(&ghost)); // unmatched → stays provisional

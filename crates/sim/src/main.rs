@@ -286,14 +286,16 @@ fn run(args: Args) -> Result<(), String> {
     // the established/provisional reliability signal is real rather than "everyone
     // provisional". Strengths are untouched.
     if let Some(source) = &args.games_fesa_list {
-        let (games, matched) = fesa::games_from_list(source, &base)?;
+        let games = fesa::games_from_list(source, &base)?;
+        let matched = games.len();
         apply_games(&mut base, &games);
         eprintln!(
             "fesa game counts from {source} — matched {matched}/{} players",
             base.players.len()
         );
     } else if let Some(date) = &args.games_fesa_before {
-        let (games, url, matched) = fesa::games_before(date, &base)?;
+        let (games, url) = fesa::games_before(date, &base)?;
+        let matched = games.len();
         apply_games(&mut base, &games);
         eprintln!(
             "fesa game counts from the list in force on {date} ({url}) — matched \
