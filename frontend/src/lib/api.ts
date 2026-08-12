@@ -119,7 +119,11 @@ function resolveToken(authKind: AuthKind): string | null {
   if (authKind.kind === "none") return null;
   if (authKind.kind === "admin") return getAdminToken();
   const id = authKind.id ?? currentId;
-  return id ? getToken(id) : null;
+  // A tournament with no password of its own is gated by the *admin* password
+  // on a server that has one, so fall back to that token — mirroring
+  // `auth::require_tournament_auth`. Without this the referee would be sent to
+  // a login overlay for a password the tournament does not have.
+  return (id ? getToken(id) : null) ?? getAdminToken();
 }
 
 /**

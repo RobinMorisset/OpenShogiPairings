@@ -43,6 +43,13 @@ NOT backwards compatible with any earlier version.
   of a no-show.
 - The float markers in the standings table were doubled: a player who
   played one point up showed `^^`, two points up `^^^^`.
+- **A tournament created without a password of its own was writable by
+  anyone** on a server with `OSP_ADMIN_PASSWORD` set, once it was published:
+  publishing lists its id to unauthenticated callers, and having no password
+  meant having no gate, so a stranger could add players to it, unpublish it or
+  delete it outright. Such a tournament now falls back to the admin token.
+  Local and embedded servers, which have no admin password, are unchanged, and
+  the public reader page still needs only its capability key.
 - Some filesystem failures were silently swallowed; they are now surfaced
   as errors in the log.
 - The desktop app now respects `OSP_DATA_DIR` instead of putting its data in a

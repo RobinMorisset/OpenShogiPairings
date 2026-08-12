@@ -196,12 +196,12 @@ per-tournament `/login`, etc. New routes for the registry itself:
 | `POST` | `/api/admin/login` | — | `{ password }` → `{ token }`, exchanging `OSP_ADMIN_PASSWORD` for the admin bearer token. 404 if no admin password is configured. |
 | `POST` | `/api/tournaments` | admin token | `{ name, password? }` → creates, persists, returns `{ id }` (and a token immediately if a password was given, so the creator doesn't have to log in to their own tournament). See §3.1. |
 | `GET`  | `/api/ratings`, `POST /api/ratings/refresh` | admin token | The FESA ratings proxy — an instance-wide resource, not per-tournament data, so it shares the admin gate rather than any tournament's password. See §3.1. |
-| `DELETE` | `/api/tournaments/{id}` | that tournament's own token | Removes the registry entry and its persisted file. Takes a final backup and keeps the backups directory for `OSP_BACKUP_RETENTION_DAYS` (30). 404 if `id` unknown. |
+| `DELETE` | `/api/tournaments/{id}` | that tournament's own token (or the admin token, per §3.2) | Removes the registry entry and its persisted file. Takes a final backup and keeps the backups directory for `OSP_BACKUP_RETENTION_DAYS` (30). 404 if `id` unknown. |
 | `GET` | `/api/tournaments/deleted` | admin token | The bin: `{ id, name, deleted_at, has_password, backups }` per deleted tournament whose backups are still around, most recently deleted first. Admin-gated: it names tournaments somebody deliberately deleted. |
 | `POST` | `/api/tournaments/deleted/{id}/restore` | admin token + that tournament's old password | `{ backup_id?, password? }` → the tournament back under its own id, from one of its backups (newest by default). 403 (not 401) on a wrong password, so the client asks for that password rather than dropping its admin session; 409 if that tournament is live again already. |
 | `POST` | `/api/tournaments/{id}/login` | — | Existing shape, scoped. 404 if `id` unknown, no-op/200 with no token needed if that tournament has no password. |
 | `GET` | `/api/tournaments/{id}/events` | none (SSE can't send auth) | Same as today, scoped to one instance's broadcaster. |
-| everything else | `/api/tournaments/{id}/...` | per-instance token | Existing handlers, just nested + reading from the looked-up `TournamentInstance` instead of the global `AppState.store`. |
+| everything else | `/api/tournaments/{id}/...` | per-instance token, or the admin token if that tournament has no password | Existing handlers, just nested + reading from the looked-up `TournamentInstance` instead of the global `AppState.store`. See §3.2. |
 
 ### 3.1 Global admin password (creation + ratings gate)
 
@@ -225,6 +225,27 @@ singleton, not per-tournament. That token then gates both `POST
 tournament is exactly the per-tournament-password model from §0. Unset (e.g.
 local/embedded Tauri mode, or a throwaway dev server) disables the check on
 both, matching how `OSP_PASSWORD` already behaves today for the whole API.
+
+### 3.2 A tournament with no password of its own
+
+Creating a tournament without a password is allowed, and on a local or embedded
+server it is the normal case. On a server that *has* an admin password, though,
+"no password" cannot mean "no gate": the admin password is precisely this
+codebase's marker for "this host is reachable by people who are not its
+referees" — the same marker that hides unpublished tournaments from the picker.
+A password-less tournament with no gate is writable by anyone who learns its id,
+and publishing one puts that id in the reply to an unauthenticated
+`GET /api/tournaments`, so a stranger could add players to it, unpublish it, or
+`DELETE` it.
+
+So the per-tournament gate falls back to the admin token: a tournament's own
+password is the gate whenever it has one, and otherwise the admin token is,
+whenever an admin password is configured. With neither — every local and
+embedded server — nothing is gated, exactly as before.
+
+This does not touch the reader path. The public routes are merged *outside* the
+auth layer, so the public page still opens on its capability key alone, with no
+password and no token anywhere (see `docs/public-access.md`).
 
 Axum-wise: nest the protected routes under `/api/tournaments/{id}` so a
 `Path<Uuid>` extractor is available to a middleware chain applied via

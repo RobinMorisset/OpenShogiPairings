@@ -165,21 +165,41 @@ pub(crate) async fn tournament_login(
 
 /// Middleware gating the protected per-tournament routes.
 ///
-/// A no-op when the tournament has no password (local/embedded mode, or a
-/// referee chose not to set one); otherwise it requires a valid
-/// `Authorization: Bearer <token>` header for *that* tournament and answers
-/// 401 without one. 404s first if the id in the path doesn't resolve to any
-/// tournament at all (via [`TournamentCtx`]'s own rejection).
+/// A tournament's own password is the gate whenever it has one: a valid
+/// `Authorization: Bearer <token>` for *that* tournament, or 401. 404s first if
+/// the id in the path doesn't resolve to any tournament at all (via
+/// [`TournamentCtx`]'s own rejection).
+///
+/// A tournament with no password of its own falls back to the **admin** token,
+/// because an admin password configured is exactly this codebase's marker for
+/// "this host is reachable by people who are not its referees" — the same
+/// marker [`crate::state::TournamentRegistry::list`] uses to hide unpublished
+/// tournaments from strangers. Without the fallback, a password-less
+/// tournament is writable by anyone who learns its id, and publishing one
+/// hands that id to every caller of `GET /api/tournaments`: a stranger could
+/// add players to it, unpublish it, or `DELETE` it outright.
+///
+/// The reader path is unaffected — `public::scope()` is merged *outside* this
+/// layer (see [`crate::tournament::scope`]), so the public page keeps working
+/// from its capability key with no password anywhere.
+///
+/// With no admin password either — every local and embedded server, and a
+/// hosted one deliberately run open — nothing is gated, as before.
 pub(crate) async fn require_tournament_auth(
+    State(state): State<AppState>,
     TournamentCtx(instance): TournamentCtx,
     req: Request,
     next: Next,
 ) -> Response {
-    match &instance.auth {
-        // No password on this tournament: let everything through.
-        None => next.run(req).await,
-        Some(auth) if has_valid_bearer(auth, &req) => next.run(req).await,
-        Some(_) => ApiError::Unauthorized.into_response(),
+    match (&instance.auth, &state.admin_auth) {
+        // This tournament has its own password: it is the gate.
+        (Some(auth), _) if has_valid_bearer(auth, &req) => next.run(req).await,
+        (Some(_), _) => ApiError::Unauthorized.into_response(),
+        // No password of its own, on a host that has an admin password.
+        (None, Some(admin)) if has_valid_bearer(admin, &req) => next.run(req).await,
+        (None, Some(_)) => ApiError::Unauthorized.into_response(),
+        // No password anywhere: the deliberately open server.
+        (None, None) => next.run(req).await,
     }
 }
 

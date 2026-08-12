@@ -1732,6 +1732,25 @@ mod tests {
         body["key"].as_str().unwrap().to_string()
     }
 
+    /// [`publish`] for a server that has an admin password: a password-less
+    /// tournament falls back to the admin token (see `auth::require_tournament_auth`),
+    /// so publishing it needs that token rather than nothing.
+    async fn publish_as(state: &AppState, id: Uuid, token: &str) -> String {
+        let (status, body) = send(
+            router(state.clone()),
+            json_req_auth(
+                "PUT",
+                &t(id, "/publication"),
+                json!({ "published": true }),
+                token,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["published"], true);
+        body["key"].as_str().unwrap().to_string()
+    }
+
     /// A tournament with two players and round 1 under way, one board decided.
     async fn played_tournament(state: &AppState, name: &str) -> Uuid {
         let id = create(state, name).await;
@@ -1968,6 +1987,86 @@ mod tests {
         }
     }
 
+    /// The sibling of the test above, for the tournament that has *no* password
+    /// of its own. On a host with an admin password — the marker for "strangers
+    /// can reach me" — such a tournament must fall back to the admin token, or
+    /// publishing it would hand every caller of `GET /api/tournaments` an id
+    /// that opens every write route on it.
+    #[tokio::test]
+    async fn a_passwordless_tournament_on_an_admin_host_is_not_writable_by_strangers() {
+        let state = AppState {
+            admin_auth: Some(AuthConfig::new("admin-secret")),
+            ..Default::default()
+        };
+        let token = admin_login(&state, "admin-secret").await;
+
+        let (status, body) = send(
+            router(state.clone()),
+            json_req_auth(
+                "POST",
+                "/api/tournaments",
+                json!({ "name": "Paris Open" }),
+                &token,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+        let key = publish_as(&state, id, &token).await;
+
+        // Publishing is what puts the id in a stranger's hands.
+        let (_, body) = send(router(state.clone()), get("/api/tournaments")).await;
+        assert_eq!(body["tournaments"][0]["id"], id.to_string());
+
+        // Knowing the id must not be enough to read or write the tournament.
+        for (method, path) in [
+            ("GET", ""),
+            ("POST", "/players"),
+            ("POST", "/undo"),
+            ("PUT", "/publication"),
+            ("DELETE", ""),
+        ] {
+            let (status, _) = send(
+                router(state.clone()),
+                json_req(method, &t(id, path), json!({ "last_name": "Mallory" })),
+            )
+            .await;
+            assert_eq!(
+                status,
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} must demand the admin token"
+            );
+        }
+
+        // The reader path is untouched: the capability key still works, with no
+        // password and no token anywhere.
+        let (status, body) = send(
+            router(state.clone()),
+            get(&t(id, &format!("/public?k={key}"))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tournament"]["name"], "Paris Open");
+
+        // And the admin still gets in.
+        let (status, _) = send(router(state.clone()), get_with_token(&t(id, ""), &token)).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    /// The open server — every local and embedded one — keeps working with no
+    /// credentials at all. The fallback above must not gate it.
+    #[tokio::test]
+    async fn a_passwordless_tournament_on_an_open_host_stays_open() {
+        let state = AppState::default();
+        let id = create(&state, "Kitchen Table").await;
+        let (status, _) = send(
+            router(state.clone()),
+            json_req("POST", &t(id, "/players"), json!({ "last_name": "Alice" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+    }
+
     /// Phase 2's static export reads the projection through the referee's own
     /// credentials, because the deployment it exists for — the desktop app —
     /// has no reachable reader endpoint to key into.
@@ -2125,7 +2224,7 @@ mod tests {
         )
         .await;
         let published = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
-        publish(&state, published).await;
+        publish_as(&state, published, &token).await;
 
         // A stranger who found the URL sees only what opted in — and is told
         // that is what they are seeing, rather than quietly shown a short list.
