@@ -43,8 +43,30 @@
     finalized,
     players,
     onUpdate,
-    busy = false,
+    busy: appBusy = false,
   }: Props = $props();
+
+  // Every control on this page saves on `change`, and every control is disabled
+  // while that save is in flight. Greying out the instant the save starts breaks
+  // Tab: leaving the City field commits it, which disables the whole form —
+  // including the Country field the browser was about to move focus to — so the
+  // focus lands nowhere and the next keystrokes go to the page instead of the
+  // field. A settings save is a few milliseconds against the local server, so
+  // wait a beat before greying anything out: a normal save now never disables a
+  // control, and Tab walks the form as it should. A save slow enough to be worth
+  // showing still locks the form, just late; an edit that manages to race into
+  // the grace window is caught by the server's version check and comes back as a
+  // loud 409, not a silent overwrite.
+  const GREY_OUT_AFTER_MS = 250;
+  let busy = $state(false);
+  $effect(() => {
+    if (!appBusy) {
+      busy = false;
+      return;
+    }
+    const timer = setTimeout(() => (busy = true), GREY_OUT_AFTER_MS);
+    return () => clearTimeout(timer);
+  });
 
   // Team mode and team size are structural: they shape every roster and every
   // board, so the server freezes them at finalization. Disabling the controls
