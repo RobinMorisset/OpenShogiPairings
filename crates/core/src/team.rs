@@ -1334,8 +1334,12 @@ mod tests {
         let after = t.team_standings().unwrap();
         let bonused = after.iter().find(|s| s.team_id == teams[0]).unwrap();
         assert_eq!(bonused.points, HalfPoints::from_whole(1));
-        // The MacMahon start is untouched: the delta is a separate term.
-        assert_eq!(bonused.macmahon, HalfPoints::ZERO);
+        // The delta lands *in* the MacMahon start rather than beside it, so it
+        // behaves as an ordinary MacMahon point everywhere — the standings, the
+        // score-gap weight, and the airtight-groups rule alike — and the Results
+        // tab's "Wins + MacMahon points" stays a sum that adds up.
+        assert_eq!(bonused.macmahon, HalfPoints::from_whole(1));
+        assert_eq!(bonused.points, bonused.macmahon + bonused.victories.into());
         // ...and it lifts the team above the others in the ranking.
         assert_eq!(after[0].team_id, teams[0]);
 

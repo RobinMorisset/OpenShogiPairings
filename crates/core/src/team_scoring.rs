@@ -272,12 +272,15 @@ pub(crate) fn match_result(round: &Round, m: &TeamMatch, wiel_rule: bool) -> Mat
 pub(crate) struct TeamScore {
     /// MacMahon starting points (from the team average) plus match points plus
     /// whatever each round the team sat out was worth to it.
-    pub points: HalfPoints,
-    /// Match *wins* only — a drawn match scores half a point but no victory.
+    /// Match victories, in half-wins: a match won is one, a drawn match half of
+    /// one, and a whole-team sit-out whatever its cell says.
     pub victories: Wins,
-    /// Total games won by the team's players: the new team tie-break.
+    /// Total games won by the team's players: the new team tie-break. Whole
+    /// board wins — a board is won or it isn't.
     pub board_wins: Wins,
-    /// MacMahon starting points alone.
+    /// The team's starting score: MacMahon points from the team average, with
+    /// any manual bonus/malus folded in and the total floored at zero — see
+    /// [`PlayerScore::macmahon`](crate::scoring::PlayerScore::macmahon).
     pub macmahon: HalfPoints,
     /// Opposing teams faced, one entry per match.
     pub opponents: Vec<TeamId>,
@@ -291,6 +294,15 @@ pub(crate) struct TeamScore {
     pub had_bye: bool,
     pub last_ascended: Option<u32>,
     pub last_descended: Option<u32>,
+}
+
+impl TeamScore {
+    /// The team's total score — **derived**, never stored, for the reason given
+    /// on [`PlayerScore::points`](crate::scoring::PlayerScore::points): a
+    /// second counter kept in step by hand is a counter that drifts.
+    pub(crate) fn points(&self) -> HalfPoints {
+        self.macmahon + HalfPoints::from(self.victories)
+    }
 }
 
 /// Per-team scores, indexed by team number. Number 0 is a gap holding a default.
@@ -389,19 +401,18 @@ pub(crate) fn compute_team_scores(
         };
         // Grade thresholds are rejected in team mode (a team has an average
         // rating, not a grade), so there is no grade to pass.
-        let macmahon =
+        let base =
             HalfPoints::from_whole(settings.macmahon_points_at(mm_rating, None, rounds_played));
-        // Manual bonuses/maluses fold in alongside the MacMahon start, before
-        // any round is replayed, so they shape both the standings and the
-        // score-gap pairing weight from here on. They are whole-point deltas;
-        // the signed floor at zero needs raw units, so this one computation
-        // drops into halves. A team's effective score can't go below zero.
+        // Manual bonuses/maluses fold into the MacMahon start, before any round
+        // is replayed, so they act as ordinary MacMahon points from here on.
+        // They are whole-point deltas; the signed floor at zero needs raw
+        // units, so this one computation drops into halves. A team's effective
+        // start can't go below zero.
         let adjustment: i32 = team.adjustments.iter().map(|a| a.delta).sum();
-        let points =
-            HalfPoints::from_halves((macmahon.halves() as i32 + adjustment * 2).max(0) as u32);
+        let macmahon =
+            HalfPoints::from_halves((base.halves() as i32 + adjustment * 2).max(0) as u32);
         real_teams.push(number);
         by_id[number] = TeamScore {
-            points,
             macmahon,
             opponents: Vec::with_capacity(rounds_played as usize),
             defeated: Vec::with_capacity(rounds_played as usize),
@@ -450,11 +461,19 @@ pub(crate) fn compute_team_scores(
             let (Some(p1), Some(p2)) = (result.points1(), result.points2()) else {
                 continue; // an undecided board leaves the match without an outcome
             };
-            by_id[m.team1].points += p1;
-            by_id[m.team2].points += p2;
-            // Points and victories move together — a drawn match is half of
-            // each — while `defeated` records only an outright win, since a draw
-            // defeats nobody and the `…DOS` tie-breaks sum defeated opponents.
+            // Points are derived from the victories (see `TeamScore::points`),
+            // so recording the victory *is* recording the points — a drawn
+            // match is half of each. `defeated` takes only an outright win,
+            // since a draw defeats nobody and the `…DOS` tie-breaks sum
+            // defeated opponents.
+            debug_assert_eq!(
+                (p1.halves(), p2.halves()),
+                (
+                    result.victory1().unwrap_or(Wins::ZERO).halves(),
+                    result.victory2().unwrap_or(Wins::ZERO).halves()
+                ),
+                "a match's points and victories must be the same award"
+            );
             by_id[m.team1].victories += result.victory1().unwrap_or(Wins::ZERO);
             by_id[m.team2].victories += result.victory2().unwrap_or(Wins::ZERO);
             if result.is_win1() {
@@ -468,16 +487,16 @@ pub(crate) fn compute_team_scores(
         // a victory, exactly as for a player.
         for team in slots.teams() {
             if let Some((_, value)) = team_sitout(round, slots.members_of(team)) {
-                by_id[team].points += value.points();
                 by_id[team].victories += value.wins();
             }
         }
 
         for &team in &real_teams {
             let s = &mut by_id[team];
-            s.cuss_m += s.points;
+            let points = s.points();
+            s.cuss_m += points;
             s.cuss_w += s.victories;
-            s.running_points.push(s.points);
+            s.running_points.push(points);
             s.running_wins.push(s.victories);
         }
     }
@@ -526,7 +545,7 @@ pub(crate) fn team_units(
             .collect();
         let s = scores.get(number);
         units[UnitKey::from(number)] = PairingUnit {
-            points: s.points,
+            points: s.points(),
             macmahon: s.macmahon,
             opponents: s.opponents.iter().copied().map(UnitKey::from).collect(),
             had_bye: s.had_bye,
@@ -657,8 +676,8 @@ mod tests {
         );
         let s = scores(&t);
         let (one, two) = (TeamId(1), TeamId(2));
-        assert_eq!(s.get(one).points, HalfPoints::from_whole(1));
-        assert_eq!(s.get(two).points, HalfPoints::ZERO);
+        assert_eq!(s.get(one).points(), HalfPoints::from_whole(1));
+        assert_eq!(s.get(two).points(), HalfPoints::ZERO);
         assert_eq!(s.get(one).victories, Wins::from_whole(1));
         assert_eq!(s.get(two).victories, Wins::from_whole(0));
         assert_eq!(s.get(one).board_wins, Wins::from_whole(2));
@@ -684,8 +703,8 @@ mod tests {
             ],
         );
         let s = scores(&t);
-        assert_eq!(s.get(TeamId(1)).points, HalfPoints::from_halves(1));
-        assert_eq!(s.get(TeamId(2)).points, HalfPoints::from_halves(1));
+        assert_eq!(s.get(TeamId(1)).points(), HalfPoints::from_halves(1));
+        assert_eq!(s.get(TeamId(2)).points(), HalfPoints::from_halves(1));
         // Half a point *and* half a victory, on both sides: the two columns
         // describe the same match, so they may not disagree about it.
         assert_eq!(s.get(TeamId(1)).victories, Wins::from_halves(1));
@@ -751,7 +770,7 @@ mod tests {
         // 1–1: a drawn match, but each side's board win is its own.
         assert_eq!(s.get(TeamId(1)).board_wins, Wins::from_whole(1));
         assert_eq!(s.get(TeamId(2)).board_wins, Wins::from_whole(1));
-        assert_eq!(s.get(TeamId(1)).points, HalfPoints::from_halves(1));
+        assert_eq!(s.get(TeamId(1)).points(), HalfPoints::from_halves(1));
     }
 
     #[test]
@@ -786,7 +805,7 @@ mod tests {
         let slots = t.team_slots();
         let bye_team = slots.team_of(t.rounds[0].sitouts[0].player).unwrap();
         let s = scores(&t);
-        assert_eq!(s.get(bye_team).points, HalfPoints::from_whole(1));
+        assert_eq!(s.get(bye_team).points(), HalfPoints::from_whole(1));
         assert_eq!(s.get(bye_team).victories, Wins::from_whole(1));
         assert!(s.get(bye_team).had_bye);
         // ...and it doesn't count as a game: no opponent, no board win.
@@ -827,7 +846,7 @@ mod tests {
             .sitouts
             .iter()
             .all(|s| s.value == SitoutValue::Half));
-        assert_eq!(scores(&t).get(bye_key).points, HalfPoints::from_halves(1));
+        assert_eq!(scores(&t).get(bye_key).points(), HalfPoints::from_halves(1));
 
         // A team that played has no team-level cell to re-score.
         let played = t.teams.iter().find(|team| team.id != bye_team).unwrap().id;
@@ -850,7 +869,7 @@ mod tests {
         assert_eq!(s.get(TeamId(1)).macmahon, HalfPoints::from_whole(1));
         assert_eq!(s.get(TeamId(2)).macmahon, HalfPoints::ZERO);
         // ...and the starting points are already in the running total.
-        assert_eq!(s.get(TeamId(1)).points, HalfPoints::from_whole(1));
+        assert_eq!(s.get(TeamId(1)).points(), HalfPoints::from_whole(1));
     }
 
     /// The float frozen on a match's boards is the *team* difference, so the
@@ -1174,7 +1193,7 @@ pub fn compute_team_standings(
 ) -> Vec<TeamStanding> {
     let slots = TeamSlots::new(teams, players);
     let scores = compute_team_scores(teams, players, settings, rounds, &slots);
-    let score_m = |o: &TeamId| scores.get(*o).points;
+    let score_m = |o: &TeamId| scores.get(*o).points();
     let score_w = |o: &TeamId| scores.get(*o).victories;
     // Team number → its registration id, so the output can face callers by id
     // the way `Standing` does.
@@ -1209,7 +1228,7 @@ pub fn compute_team_standings(
                 victories: s.victories,
                 board_wins: s.board_wins,
                 macmahon: s.macmahon,
-                points: s.points,
+                points: s.points(),
                 sosm: sosm[number],
                 sosw: sosw[number],
                 sodosm: s.defeated.iter().map(&score_m).sum(),

@@ -1082,8 +1082,8 @@ impl Tournament {
         } else {
             let cup_scores = compute_scores(&self.players, &self.settings, &self.rounds);
             let cup_diff = |p1: TournamentId, p2: TournamentId| {
-                cup_scores.get_tid(p1).points.halves() as i32
-                    - cup_scores.get_tid(p2).points.halves() as i32
+                cup_scores.get_tid(p1).points().halves() as i32
+                    - cup_scores.get_tid(p2).points().halves() as i32
             };
             cup_pairings
                 .matches

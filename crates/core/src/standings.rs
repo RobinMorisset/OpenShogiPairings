@@ -71,11 +71,16 @@ pub struct Standing {
     pub victories: Wins,
     /// MacMahon starting points, with any manual point adjustment folded in.
     pub macmahon: HalfPoints,
-    /// Total score, and exactly `macmahon + victories`: wins and points share
-    /// the ×2 scale, and every way of scoring a round adds the same amount to
-    /// both. That identity is what the Results tab's "Wins + MacMahon points"
-    /// tooltip claims, and it did not hold while a `0=` scored half a point and
-    /// no win.
+    /// Total score. **Derived**, not accumulated: exactly `macmahon +
+    /// victories`, since the two share the ×2 scale and every way of scoring a
+    /// round adds to the start or to the wins and to nothing else (see
+    /// [`PlayerScore::points`](crate::scoring::PlayerScore::points)).
+    ///
+    /// That identity is what the Results tab's "Wins + MacMahon points" tooltip
+    /// claims. It held for nobody while a `0=` scored half a point and no win,
+    /// and for no adjusted player while the bonus sat outside the MacMahon
+    /// column; now it is true by construction rather than by agreement between
+    /// two counters.
     pub points: HalfPoints,
     /// Sum of opponents' points.
     pub sosm: HalfPoints,
@@ -205,7 +210,7 @@ pub fn compute_standings(
     let scores = compute_scores(players, settings, rounds);
     // Opponent/defeated lists hold tournament numbers, so scoring an opponent is a
     // direct table lookup — `…M` by their points, `…W` by their wins.
-    let score_m = |o: &TournamentId| scores.get_tid(*o).points;
+    let score_m = |o: &TournamentId| scores.get_tid(*o).points();
     let score_w = |o: &TournamentId| scores.get_tid(*o).victories;
 
     // The live Bayesian ELO estimate — computed whenever a live estimate is
@@ -248,7 +253,7 @@ pub fn compute_standings(
                 player_id: p.id,
                 victories: s.victories,
                 macmahon: s.macmahon,
-                points: s.points,
+                points: s.points(),
                 sosm: sosm[t],
                 sosw: sosw[t],
                 sodosm: s.defeated.iter().map(&score_m).sum(),
@@ -769,6 +774,47 @@ mod tests {
                                       // SODOSW counts only defeated opponents: B beat A, A beat nobody.
         assert_eq!(of(b.id).sodosw, 1);
         assert_eq!(of(a.id).sodosw, 0);
+    }
+
+    /// The Results tab shows Wins and MacMahon as separate columns and claims
+    /// Points is their sum. That has to be true for *every* player, including
+    /// one carrying a manual adjustment — which used to land outside the
+    /// MacMahon column, so an adjusted player's row visibly did not add up.
+    #[test]
+    fn points_are_the_starting_score_plus_the_wins_even_with_an_adjustment() {
+        use crate::player::PointAdjustment;
+        let mut a = player(1, Some(1600));
+        a.adjustments.push(PointAdjustment {
+            id: Uuid::new_v4(),
+            delta: 1,
+            reason: "fair play".into(),
+        });
+        let b = player(2, Some(1600));
+        let rounds = vec![round(
+            1,
+            vec![board(TournamentId(1), TournamentId(2), Winner::Player1)],
+        )];
+        let standings = compute_standings(
+            &[a.clone(), b.clone()],
+            &TournamentSettings::default(),
+            &rounds,
+        );
+        let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
+
+        // A: a +1 bonus and one win — the bonus is *in* the MacMahon column.
+        assert_eq!(of(a.id).macmahon, 2);
+        assert_eq!(of(a.id).victories, 2);
+        assert_eq!(of(a.id).points, 4);
+
+        // The identity the UI promises, for everyone in the table.
+        for s in &standings {
+            assert_eq!(
+                s.points,
+                s.macmahon + s.victories.into(),
+                "points must be MacMahon + wins for {:?}",
+                s.player_id
+            );
+        }
     }
 
     #[test]

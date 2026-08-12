@@ -239,7 +239,7 @@
     "roundInProgressTitle": "{number}回戦はまだ進行中です。結果は記録され次第ここに表示されますが、勝数・点数・順位決定法の列は終了した回戦のみを数えます。",
     "victories": "勝数",
     "macmahon": "MM",
-    "macmahonTitle": "マクマホンの初期点（勝数を含まない）",
+    "macmahonTitle": "MacMahonの初期持ち点。手動の調整を含む（勝ち星を加える前）",
     "macmahonFromEstimate": "登録レーティングではなく、リアルタイムの推定レート（{elo}）から与えられています。しきい値と比較されたのはこの値で、毎回戦ごとに再計算されます。",
     "victoriesPlusMacmahon": "勝数 + マクマホン点",
     "sitoutBye": "不戦勝 — 対戦相手がいませんでした",

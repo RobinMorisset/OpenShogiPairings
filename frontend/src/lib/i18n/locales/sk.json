@@ -239,7 +239,7 @@
     "roundInProgressTitle": "Kolo {number} ešte prebieha — jeho výsledky sa tu objavujú, ako sa zapisujú, ale stĺpce výhier, bodov a pomocného hodnotenia počítajú iba dokončené kolá.",
     "victories": "Výhry",
     "macmahon": "MM",
-    "macmahonTitle": "Štartovné body MacMahon (pred výhrami)",
+    "macmahonTitle": "Štartovné body MacMahon vrátane manuálnych úprav (pred výhrami)",
     "macmahonFromEstimate": "Udelené z priebežného odhadu ELO ({elo}), nie z registračného ratingu: práve s touto hodnotou sa porovnávali hranice a prepočítava sa po každom kole.",
     "victoriesPlusMacmahon": "Výhry + body MacMahon",
     "sitoutBye": "Voľno — nezostal nikto, s kým by sa dalo hrať",

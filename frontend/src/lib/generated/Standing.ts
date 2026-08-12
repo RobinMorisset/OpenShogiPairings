@@ -17,11 +17,16 @@ victories: Wins,
  */
 macmahon: HalfPoints, 
 /**
- * Total score, and exactly `macmahon + victories`: wins and points share
- * the ×2 scale, and every way of scoring a round adds the same amount to
- * both. That identity is what the Results tab's "Wins + MacMahon points"
- * tooltip claims, and it did not hold while a `0=` scored half a point and
- * no win.
+ * Total score. **Derived**, not accumulated: exactly `macmahon +
+ * victories`, since the two share the ×2 scale and every way of scoring a
+ * round adds to the start or to the wins and to nothing else (see
+ * [`PlayerScore::points`](crate::scoring::PlayerScore::points)).
+ *
+ * That identity is what the Results tab's "Wins + MacMahon points" tooltip
+ * claims. It held for nobody while a `0=` scored half a point and no win,
+ * and for no adjusted player while the bonus sat outside the MacMahon
+ * column; now it is true by construction rather than by agreement between
+ * two counters.
  */
 points: HalfPoints, 
 /**

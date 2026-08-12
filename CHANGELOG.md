@@ -15,6 +15,21 @@ separate flags — and, when it was forfeited, why each missing side missed it �
 and tournaments can carry teams. A stale file is rejected with a clear message
 rather than half-parsed; re-create the tournament.
 
+### Changed
+
+- **Points are no longer accumulated — they are derived**, as
+  `MacMahon start + wins`, and a manual bonus/malus now lands *inside* the
+  MacMahon start rather than beside it. Two consequences. The Results tab's
+  "Wins + MacMahon points" is now a sum that adds up for every row, including
+  an adjusted one: the MacMahon column previously showed the raw starting
+  points while the total quietly included the adjustment, so an adjusted
+  player's row visibly did not reconcile. And an adjustment now behaves as an
+  ordinary MacMahon point *everywhere*, including the airtight-groups pairing
+  rule — a +1 bonus puts a player in the MacMahon group their adjusted score
+  puts them in, where before it moved their total but not their group.
+  Structurally, there is no longer a points counter to keep in step with the
+  wins counter, which is how the two came to disagree in the first place.
+
 ### Fixed
 
 - **A drawn team match now counts as half a win** for each side, not none. It

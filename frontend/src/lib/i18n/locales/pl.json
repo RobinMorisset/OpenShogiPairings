@@ -239,7 +239,7 @@
     "roundInProgressTitle": "Runda {number} wciąż trwa — jej wyniki pojawiają się tutaj na bieżąco, ale kolumny zwycięstw, punktów i punktacji pomocniczej liczą tylko ukończone rundy.",
     "victories": "Zwycięstwa",
     "macmahon": "MM",
-    "macmahonTitle": "Punkty startowe MacMahon (przed zwycięstwami)",
+    "macmahonTitle": "Punkty startowe MacMahon, łącznie z ręcznymi korektami (przed wygranymi)",
     "macmahonFromEstimate": "Przyznane na podstawie bieżącej estymacji ELO ({elo}), a nie rankingu zgłoszeniowego: to z tą wartością porównywano progi i jest ona przeliczana po każdej rundzie.",
     "victoriesPlusMacmahon": "Zwycięstwa + punkty MacMahon",
     "sitoutBye": "Pauza — zabrakło przeciwnika do gry",

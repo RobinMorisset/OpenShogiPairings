@@ -239,7 +239,7 @@
     "roundInProgressTitle": "Round {number} is still in progress — its results appear here as they are recorded, but the wins, points and tie-break columns only count completed rounds.",
     "victories": "Wins",
     "macmahon": "MM",
-    "macmahonTitle": "MacMahon starting points (before wins)",
+    "macmahonTitle": "MacMahon starting points, including any manual adjustment (before wins)",
     "macmahonFromEstimate": "Awarded from the live ELO estimate ({elo}) rather than the registration rating: that is the value the thresholds were compared against, and it is recomputed after every round.",
     "victoriesPlusMacmahon": "Wins + MacMahon points",
     "sitoutBye": "Bye — no opponent left to face",

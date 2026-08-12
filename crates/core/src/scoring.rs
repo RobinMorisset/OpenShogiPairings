@@ -20,14 +20,19 @@ use crate::units::{HalfPoints, TournamentId, Wins};
 /// holds (number 0, and numbers freed by a pre-play removal).
 #[derive(Default)]
 pub(crate) struct PlayerScore {
-    /// Total score: MacMahon starting points, plus a point per victory (the
-    /// effective winner of a board), plus whatever each round the player sat out
-    /// was worth to them (a bye's `0+`, a `0=`, …).
-    pub points: HalfPoints,
-    /// Games won (effective winner). A sit-out counts as a win exactly when it
-    /// scored a full point (`0+`, the usual bye); a `0=` never does.
+    /// Games won: the effective winner of a board, plus what each round the
+    /// player sat out was worth them — a `0+` (the usual bye) a whole win, a
+    /// `0=` half of one. In half-wins, like [`Self::macmahon`] is in
+    /// half-points.
     pub victories: Wins,
-    /// MacMahon starting points.
+    /// The player's starting score: MacMahon points, with any manual
+    /// bonus/malus folded in and the total floored at zero.
+    ///
+    /// Adjustments live *inside* this rather than beside it so that they behave
+    /// as ordinary MacMahon points everywhere — including the airtight-groups
+    /// pairing rule, which forbids crossing MacMahon groups in the first rounds
+    /// and now puts an adjusted player in the group their adjusted score puts
+    /// them in.
     pub macmahon: HalfPoints,
     /// Opponents faced, one entry per game (so a rematch would count twice, e.g.
     /// in SOS), stored by tournament number — the dense key this table is indexed
@@ -57,6 +62,20 @@ pub(crate) struct PlayerScore {
     /// counts as a downfloat). `None` if never.
     pub last_ascended: Option<u32>,
     pub last_descended: Option<u32>,
+}
+
+impl PlayerScore {
+    /// The player's total score — **derived**, never stored.
+    ///
+    /// Every way of scoring a round adds the same amount to the start or to the
+    /// wins and to nothing else, so the total is exactly their sum. Keeping it
+    /// as a second counter incremented alongside `victories` is what let the
+    /// two drift: a `0=` sit-out once added half a point and no win at all, and
+    /// the Results tab showed `Points 1½` beside `Wins 0` for the same round.
+    /// There is now nothing to keep in step.
+    pub(crate) fn points(&self) -> HalfPoints {
+        self.macmahon + HalfPoints::from(self.victories)
+    }
 }
 
 /// Per-player scores, stored in a dense vector indexed by tournament number (the
@@ -105,7 +124,7 @@ impl Scores {
     #[cfg(test)]
     pub(crate) fn points(&self, id: &Uuid) -> HalfPoints {
         self.tid_of(id)
-            .map_or(HalfPoints::ZERO, |t| self.by_tid[t].points)
+            .map_or(HalfPoints::ZERO, |t| self.by_tid[t].points())
     }
 
     /// The number of tournament-number slots, so a caller can size a parallel
@@ -179,21 +198,21 @@ pub(crate) fn compute_scores(
             ),
             None => p.rating,
         };
-        let macmahon =
+        let base =
             HalfPoints::from_whole(settings.macmahon_points_at(mm_rating, p.grade, rounds_played));
-        // Manual bonuses/maluses are folded in alongside MacMahon starting points,
-        // before any round is replayed, so they shape both the standings and the
-        // score-gap pairing weight from here on. They are whole-point deltas. The
-        // signed floor at zero needs raw units, so drop into halves for this one
-        // computation. The effective score can't go below zero.
+        // Manual bonuses/maluses are folded into the MacMahon start, before any
+        // round is replayed, so they act as ordinary MacMahon points from here
+        // on — in the standings, in the score-gap weight, and in the
+        // airtight-groups rule. They are whole-point deltas, and the signed
+        // floor at zero needs raw units, so drop into halves for this one
+        // computation. The effective start can't go below zero.
         let adjustment: i32 = p.adjustments.iter().map(|a| a.delta).sum();
-        let points =
-            HalfPoints::from_halves((macmahon.halves() as i32 + adjustment * 2).max(0) as u32);
+        let macmahon =
+            HalfPoints::from_halves((base.halves() as i32 + adjustment * 2).max(0) as u32);
         let t = p.tournament_id.unwrap();
         ids[t] = p.id;
         real_tids.push(t);
         by_tid[t] = PlayerScore {
-            points,
             macmahon,
             // A player faces one opponent per completed round (twice on a long
             // board), and can't defeat more than they face. Reserving up front
@@ -279,8 +298,7 @@ pub(crate) fn compute_scores(
             // and the opponent-based tie-breaks; it stays a single game for ELO.
             let reps = if board.long { 2 } else { 1 };
             let s = &mut by_tid[winner];
-            s.points += HalfPoints::from_whole(reps); // one point per game (two for a long board)
-            s.victories += Wins::from_whole(reps);
+            s.victories += Wins::from_whole(reps); // one win per game (two for a long board)
             for _ in 0..reps {
                 s.defeated.push(loser);
             }
@@ -290,7 +308,6 @@ pub(crate) fn compute_scores(
         // chose where they overrode it. Only a full point is a victory.
         for sitout in &round.sitouts {
             let s = &mut by_tid[sitout.player];
-            s.points += sitout.value.points();
             s.victories += sitout.value.wins();
         }
         // The player who showed up on a no-show board scores the free point, as
@@ -301,8 +318,7 @@ pub(crate) fn compute_scores(
                 // (two points), unless the referee demoted it.
                 let reps = if board.long { 2 } else { 1 };
                 let s = &mut by_tid[present];
-                s.points += HalfPoints::from_whole(reps); // one point (two for a long board)
-                s.victories += Wins::from_whole(reps);
+                s.victories += Wins::from_whole(reps); // one win (two for a long board)
             }
         }
 
@@ -313,9 +329,10 @@ pub(crate) fn compute_scores(
         // players (by their numbers), never the gap slots.
         for &t in &real_tids {
             let s = &mut by_tid[t];
-            s.cuss_m += s.points;
+            let points = s.points();
+            s.cuss_m += points;
             s.cuss_w += s.victories;
-            s.running_points.push(s.points);
+            s.running_points.push(points);
             s.running_wins.push(s.victories);
         }
     }
@@ -410,13 +427,13 @@ mod tests {
             &TournamentSettings::default(),
             &[round],
         );
-        assert_eq!(scores.get(&a.id).points, 2); // 1 point = 2 half-points
+        assert_eq!(scores.get(&a.id).points(), 2); // 1 point = 2 half-points
         assert_eq!(scores.get(&a.id).victories, 2); // 1 win = 2 half-wins
         assert!(scores.get(&a.id).had_bye);
         assert_eq!(scores.get(&a.id).last_descended, Some(1));
         assert!(scores.get(&a.id).opponents.is_empty());
         // The absentee is untouched — no point, no opponent, no float.
-        assert_eq!(scores.get(&b.id).points, 0);
+        assert_eq!(scores.get(&b.id).points(), 0);
         assert_eq!(scores.get(&b.id).victories, 0);
         assert!(!scores.get(&b.id).had_bye);
         assert!(scores.get(&b.id).opponents.is_empty());
@@ -449,7 +466,7 @@ mod tests {
             &[round],
         );
         for id in [a.id, b.id] {
-            assert_eq!(scores.get(&id).points, 0);
+            assert_eq!(scores.get(&id).points(), 0);
             assert_eq!(scores.get(&id).victories, 0);
             assert!(!scores.get(&id).had_bye);
             assert!(scores.get(&id).opponents.is_empty());
@@ -476,7 +493,7 @@ mod tests {
             &TournamentSettings::default(),
             &[round],
         );
-        assert_eq!(scores.get(&a.id).points, 2); // 1 point = 2 half-points
+        assert_eq!(scores.get(&a.id).points(), 2); // 1 point = 2 half-points
         assert_eq!(scores.get(&a.id).victories, 2); // 1 win = 2 half-wins
         assert!(scores.get(&a.id).had_bye);
     }
@@ -512,7 +529,7 @@ mod tests {
                 &TournamentSettings::default(),
                 &rounds,
             );
-            assert_eq!(scores.get(&a.id).points, points, "points for {value:?}");
+            assert_eq!(scores.get(&a.id).points(), points, "points for {value:?}");
             assert_eq!(
                 scores.get(&a.id).victories,
                 victories,
@@ -542,7 +559,7 @@ mod tests {
             &TournamentSettings::default(),
             &[round],
         );
-        assert_eq!(scores.get(&a.id).points, 0);
+        assert_eq!(scores.get(&a.id).points(), 0);
         assert_eq!(scores.get(&a.id).victories, 0);
         assert!(scores.get(&a.id).had_bye);
         assert_eq!(scores.get(&a.id).last_descended, Some(1));
@@ -575,13 +592,13 @@ mod tests {
             &TournamentSettings::default(),
             &[round],
         );
-        assert_eq!(scores.get(&a.id).points, 4); // 2 points = 4 half-points
+        assert_eq!(scores.get(&a.id).points(), 4); // 2 points = 4 half-points
         assert_eq!(scores.get(&a.id).victories, 4); // 2 wins = 4 half-wins
         let (atid, btid) = (a.tournament_id.unwrap(), b.tournament_id.unwrap());
         assert_eq!(scores.get(&a.id).defeated, vec![btid, btid]); // twice
         assert_eq!(scores.get(&a.id).opponents, vec![btid, btid]);
         assert_eq!(scores.get(&b.id).opponents, vec![atid, atid]);
-        assert_eq!(scores.get(&b.id).points, 0);
+        assert_eq!(scores.get(&b.id).points(), 0);
         assert_eq!(scores.get(&b.id).victories, 0);
     }
 
@@ -610,7 +627,7 @@ mod tests {
             &TournamentSettings::default(),
             &[round],
         );
-        assert_eq!(scores.get(&a.id).points, 0);
+        assert_eq!(scores.get(&a.id).points(), 0);
         assert_eq!(scores.get(&a.id).victories, 0);
         assert_eq!(
             scores.get(&a.id).opponents,
@@ -647,9 +664,9 @@ mod tests {
             &TournamentSettings::default(),
             &[round],
         );
-        assert_eq!(scores.get(&a.id).points, 4); // 2 points
+        assert_eq!(scores.get(&a.id).points(), 4); // 2 points
         assert_eq!(scores.get(&a.id).victories, 4); // 2 wins
-        assert_eq!(scores.get(&b.id).points, 0);
+        assert_eq!(scores.get(&b.id).points(), 0);
     }
 
     #[test]
@@ -704,7 +721,7 @@ mod tests {
         );
         // The win still scores, and both are recorded as opponents faced (so a
         // later Swiss round won't re-pair them).
-        assert_eq!(scores.get(&a.id).points, 2); // 1 point = 2 half-points
+        assert_eq!(scores.get(&a.id).points(), 2); // 1 point = 2 half-points
         assert_eq!(scores.get(&a.id).opponents, vec![b.tournament_id.unwrap()]);
         assert_eq!(scores.get(&b.id).opponents, vec![a.tournament_id.unwrap()]);
         // ...and the +5 float is recorded: a downfloated, b upfloated.
@@ -752,7 +769,7 @@ mod tests {
         let on = base.clone().with_macmahon_from_estimate();
         let on = compute_scores(&all, &on, &rounds);
         assert_eq!(on.get(&a.id).macmahon, 2); // 1 MacMahon point = 2 half-points
-        assert_eq!(on.get(&a.id).points, 8); // (1 + 3) points = 8 half-points
+        assert_eq!(on.get(&a.id).points(), 8); // (1 + 3) points = 8 half-points
     }
 
     #[test]

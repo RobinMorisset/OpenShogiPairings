@@ -239,7 +239,7 @@
     "roundInProgressTitle": "Runde {number} läuft noch — ihre Ergebnisse erscheinen hier, sobald sie eingetragen werden, aber die Spalten Siege, Punkte und Feinwertung zählen nur abgeschlossene Runden.",
     "victories": "Siege",
     "macmahon": "MM",
-    "macmahonTitle": "MacMahon-Startpunkte (vor den Siegen)",
+    "macmahonTitle": "MacMahon-Startpunkte, inklusive manueller Korrekturen (vor den Siegen)",
     "macmahonFromEstimate": "Aus der laufenden ELO-Schätzung ({elo}) vergeben statt aus der Meldewertung: Mit diesem Wert wurden die Schwellen verglichen, und er wird nach jeder Runde neu berechnet.",
     "victoriesPlusMacmahon": "Siege + MacMahon-Punkte",
     "sitoutBye": "Freilos — kein Gegner mehr übrig",

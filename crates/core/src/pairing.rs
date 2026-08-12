@@ -1699,7 +1699,7 @@ pub(crate) fn player_units(
         let s = scores.get_tid(tid);
         let key = UnitKey::from(tid);
         units[key] = PairingUnit {
-            points: s.points,
+            points: s.points(),
             macmahon: s.macmahon,
             opponents: s.opponents.iter().copied().map(UnitKey::from).collect(),
             had_bye: s.had_bye,
