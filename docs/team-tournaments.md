@@ -590,6 +590,10 @@ The store stays dumb. Additions:
   routes wait on their core operations;
 - `TournamentView` gains `team_standings: Option<Vec<TeamStanding>>`
   (`None` outside team mode) — **landed**;
+- `TournamentView` gains `team_matches: Vec<Vec<TeamMatchView>>`, each round's
+  matches with their board wins, indexed like `rounds` and empty outside team
+  mode — **landed**. The grouping of boards into matches is a derivation like
+  the standings, so it is computed once here rather than by each client;
 - `Tournament` gains `teams: Vec<Team>` (empty and absent from JSON outside
   team mode).
 
@@ -618,7 +622,8 @@ version guard) instead of half-parsed.
 - **Draft**: team-level absence/forced-match/forced-bye controls; present-team
   count gate.
 - **Round view**: boards grouped by team match with a match header (team
-  names, running match score); per-board result entry unchanged;
+  names, running match score), both taken from the server's `team_matches`;
+  per-board result entry unchanged;
   `pairingSource` badges unchanged (Swiss/Forced still apply, now at match
   granularity). **Landed.**
 - **Standings**: team table + expandable member rows + team cross-table.
@@ -637,7 +642,9 @@ version guard) instead of half-parsed.
   forfeit boards, team bye values, mixed forfeit kinds);
 - serde round-trips + `export_bindings` regeneration for the new DTOs;
 - server integration tests for team routes and validation errors;
-- frontend vitest for the derived grouping and match-outcome helpers;
+- frontend vitest for the roster helpers the Teams panel derives live (pairing
+  rating, team average, board order); the grouping and the match score are the
+  server's, and are tested there;
 - sim: a test pinning the explicit "unsupported" error.
 
 ## Settled decisions

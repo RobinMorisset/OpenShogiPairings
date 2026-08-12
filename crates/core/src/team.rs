@@ -24,7 +24,7 @@ use crate::round::{
     AbsenceKind, Board, Forfeit, Outcome, PairingSource, Round, Sitout, SitoutKind, SitoutValue,
     Winner,
 };
-use crate::team_scoring::{match_boards, matches_in_round, team_units, TeamMatch, TeamSlots};
+use crate::team_scoring::{match_boards, team_match_views, team_units, TeamMatchView, TeamSlots};
 use crate::tournament::{Tournament, TournamentError, MIN_TEAMS_PER_ROUND};
 use crate::units::{TeamId, TournamentId, UnitKey};
 
@@ -454,10 +454,25 @@ impl Tournament {
         team_units(&self.teams, &self.players, &self.settings, completed, slots)
     }
 
-    /// The team matches of a round, each with its boards — the grouping the round
-    /// view renders and the standings replay.
-    pub fn team_matches(&self, round: &Round) -> Vec<TeamMatch> {
-        matches_in_round(round, &self.team_slots())
+    /// The team matches of every round, scored, indexed like [`Self::rounds`] —
+    /// empty outside team mode.
+    ///
+    /// Derived here and shipped to clients rather than re-derived by each of
+    /// them: which boards make up a match, what order they are in, and who is
+    /// credited each of them follow from the rosters and the scoring rules (the
+    /// Wiel rule included), and the round view showing a different grouping or a
+    /// different score from the standings would be a disagreement no screen
+    /// could settle.
+    pub fn team_matches(&self) -> Vec<Vec<TeamMatchView>> {
+        if !self.settings.team_mode() {
+            return Vec::new();
+        }
+        let slots = self.team_slots();
+        let wiel_rule = self.settings.handicap_wiel_rule();
+        self.rounds
+            .iter()
+            .map(|round| team_match_views(round, &slots, wiel_rule))
+            .collect()
     }
 
     /// Confirm a team round: pair the present *teams*, then expand each matched
@@ -1341,7 +1356,7 @@ mod tests {
             assert_ne!(team1, team2);
         }
         // One match, holding all three boards.
-        let matches = t.team_matches(&t.rounds[0]);
+        let matches = t.team_matches().remove(0);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].boards, vec![0, 1, 2]);
         assert_eq!(t.team_members(teams[0]).len(), 3);
@@ -1614,7 +1629,7 @@ mod tests {
         t.confirm_round().unwrap();
 
         let round = t.rounds.last().unwrap().clone();
-        let matches = t.team_matches(&round);
+        let matches = t.team_matches().pop().unwrap();
         let pairs: HashSet<(TeamId, TeamId)> = matches
             .iter()
             .map(|m| (m.team1.min(m.team2), m.team1.max(m.team2)))
@@ -1622,7 +1637,7 @@ mod tests {
         assert!(pairs.contains(&(TeamId(1), TeamId(4))), "{pairs:?}");
         assert_eq!(pairs.len(), 2);
         // The forced match's boards say so, and the engine's don't.
-        let forced: Vec<&TeamMatch> = matches
+        let forced: Vec<&TeamMatchView> = matches
             .iter()
             .filter(|m| round.boards[m.boards[0]].source == crate::round::PairingSource::Forced)
             .collect();
@@ -1745,9 +1760,7 @@ mod tests {
         t.finalize_registration().unwrap();
         start_round(&mut t, Vec::new());
 
-        let round = t.rounds[0].clone();
-        let paired: HashSet<(TeamId, TeamId)> = t
-            .team_matches(&round)
+        let paired: HashSet<(TeamId, TeamId)> = t.team_matches()[0]
             .iter()
             .map(|m| (m.team1.min(m.team2), m.team1.max(m.team2)))
             .collect();
@@ -1770,9 +1783,10 @@ mod tests {
         assert!(!cf.changed.is_empty());
         // ...and applying it really does pair them.
         t.force_pairing(UnitKey::from(a), UnitKey::from(b)).unwrap();
-        let round = t.rounds.last().unwrap().clone();
         let now: HashSet<(TeamId, TeamId)> = t
-            .team_matches(&round)
+            .team_matches()
+            .last()
+            .unwrap()
             .iter()
             .map(|m| (m.team1.min(m.team2), m.team1.max(m.team2)))
             .collect();
@@ -1814,8 +1828,7 @@ mod tests {
         let mut met: HashSet<(TeamId, TeamId)> = HashSet::new();
         for _ in 0..3 {
             start_round(&mut t, Vec::new());
-            let round = t.rounds.last().unwrap().clone();
-            for m in t.team_matches(&round) {
+            for m in t.team_matches().pop().unwrap() {
                 let key = (m.team1.min(m.team2), m.team1.max(m.team2));
                 assert!(met.insert(key), "a rematch: {key:?}");
             }

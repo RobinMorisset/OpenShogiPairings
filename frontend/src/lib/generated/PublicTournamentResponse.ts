@@ -4,6 +4,7 @@ import type { CupPodium } from "./CupPodium";
 import type { Handicap } from "./Handicap";
 import type { PublicTournament } from "./PublicTournament";
 import type { Standing } from "./Standing";
+import type { TeamMatchView } from "./TeamMatchView";
 import type { TeamStanding } from "./TeamStanding";
 import type { Winner } from "./Winner";
 
@@ -23,7 +24,14 @@ export type PublicTournamentResponse = { tournament: PublicTournament,
  * it back (there is nothing to conflict with); it drives the `ETag` and
  * lets the client ignore an out-of-order update.
  */
-version: number, standings: Array<Standing>, team_standings: Array<TeamStanding> | null, cup_podium: CupPodium | null, cup_bracket: CupBracketView | null, 
+version: number, standings: Array<Standing>, team_standings: Array<TeamStanding> | null, 
+/**
+ * The rounds' team matches, exactly as the referee sees them: the reader's
+ * round page groups its boards by match and shows each match's score, and
+ * it must be the same grouping — it is derived from the published rosters
+ * and the published boards either way.
+ */
+team_matches: Array<Array<TeamMatchView>>, cup_podium: CupPodium | null, cup_bracket: CupBracketView | null, 
 /**
  * Published only when the referee chose to *show* a suggested handicap
  * (`HandicapDisplay::Suggested`); empty otherwise. The suggestion is

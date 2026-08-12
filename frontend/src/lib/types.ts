@@ -63,6 +63,7 @@ export type { SitoutKind } from "./generated/SitoutKind";
 export type { SitoutValue } from "./generated/SitoutValue";
 export type { Standing } from "./generated/Standing";
 export type { Team } from "./generated/Team";
+export type { TeamMatchView } from "./generated/TeamMatchView";
 export type { TeamSettings } from "./generated/TeamSettings";
 export type { TeamStanding } from "./generated/TeamStanding";
 export type { ThresholdCriterion } from "./generated/ThresholdCriterion";

@@ -48,6 +48,7 @@
     teamStandings={teamMode ? (view.team_standings ?? []) : []}
     cupPodium={view.cup_podium ?? null}
     effectiveWinners={view.effective_winners ?? []}
+    teamMatches={view.team_matches ?? []}
     categories={tournament.settings.categories ?? []}
     {staticPage}
   />
@@ -66,7 +67,7 @@
     handicapPolicy={handicapChoice(tournament.settings.handicap_policy)}
     suggestedHandicaps={section.round.suggestedHandicaps}
     teams={teamMode ? (tournament.teams ?? []) : []}
-    effectiveWinners={section.round.effectiveWinners}
+    matches={section.round.teamMatches}
     longEnabled={tournament.settings.long_boards_enabled}
     readOnly
     {staticPage}

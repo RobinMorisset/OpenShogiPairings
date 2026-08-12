@@ -3,6 +3,7 @@ import type { CupBracketView } from "./CupBracketView";
 import type { CupPodium } from "./CupPodium";
 import type { Handicap } from "./Handicap";
 import type { Standing } from "./Standing";
+import type { TeamMatchView } from "./TeamMatchView";
 import type { TeamStanding } from "./TeamStanding";
 import type { Tournament } from "./Tournament";
 import type { TournamentId } from "./TournamentId";
@@ -30,6 +31,12 @@ version: number, standings: Array<Standing>,
  * the breakdown rows. `None` for an individual tournament.
  */
 team_standings: Array<TeamStanding> | null, 
+/**
+ * The team matches of each round, scored, indexed like `tournament.rounds`
+ * — the grouping the round view and the standings' round columns render
+ * (see [`osp_core::TeamMatchView`]). Empty outside team mode.
+ */
+team_matches: Array<Array<TeamMatchView>>, 
 /**
  * The cup podium once decided (champion / runner-up / third / fourth), for the
  * Results-tab medals. `None` when there is no cup or the final isn't finished.

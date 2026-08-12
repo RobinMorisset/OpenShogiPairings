@@ -30,7 +30,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use osp_core::{
     Cup, CupBracketView, CupPodium, Handicap, HandicapDisplay, HandicapPolicy, Player, Round,
-    Standing, Team, TeamStanding, Tournament, TournamentSettings, Winner,
+    Standing, Team, TeamMatchView, TeamStanding, Tournament, TournamentSettings, Winner,
 };
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
@@ -86,6 +86,12 @@ pub(crate) struct PublicTournamentView {
     standings: Vec<Standing>,
     #[serde(skip_serializing_if = "Option::is_none")]
     team_standings: Option<Vec<TeamStanding>>,
+    /// The rounds' team matches, exactly as the referee sees them: the reader's
+    /// round page groups its boards by match and shows each match's score, and
+    /// it must be the same grouping — it is derived from the published rosters
+    /// and the published boards either way.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    team_matches: Vec<Vec<TeamMatchView>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cup_podium: Option<CupPodium>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -139,6 +145,7 @@ impl From<TournamentView> for PublicTournamentView {
             version,
             standings,
             team_standings,
+            team_matches,
             cup_podium,
             cup_bracket,
             // Derived from the draft, which is not published.
@@ -185,6 +192,7 @@ impl From<TournamentView> for PublicTournamentView {
             version,
             standings,
             team_standings,
+            team_matches,
             cup_podium,
             cup_bracket,
             suggested_handicaps,

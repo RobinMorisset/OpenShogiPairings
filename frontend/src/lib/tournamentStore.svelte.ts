@@ -14,6 +14,7 @@ import type {
   CupPodium,
   Handicap,
   Standing,
+  TeamMatchView,
   TeamStanding,
   Tournament,
   TournamentResponse,
@@ -26,6 +27,9 @@ export class TournamentStore {
   /** Ranked team standings, in team mode only — the primary table there, with
    *  the player standings staying as the per-player breakdown. */
   teamStandings = $state<TeamStanding[]>([]);
+  /** Each round's team matches, scored, server-derived (see
+   *  `TournamentResponse.team_matches`), indexed like `tournament.rounds`. */
+  teamMatches = $state<TeamMatchView[][]>([]);
   cupPodium = $state<CupPodium | null>(null);
   cupBracket = $state<CupBracketView | null>(null);
   draftCupPlayers = $state<number[]>([]);
@@ -65,6 +69,7 @@ export class TournamentStore {
     this.tournament = res.tournament;
     this.standings = res.standings;
     this.teamStandings = res.team_standings ?? [];
+    this.teamMatches = res.team_matches ?? [];
     this.cupPodium = res.cup_podium ?? null;
     this.cupBracket = res.cup_bracket ?? null;
     this.draftCupPlayers = res.draft_cup_players ?? [];
@@ -100,6 +105,7 @@ export class TournamentStore {
     this.tournament = null;
     this.standings = [];
     this.teamStandings = [];
+    this.teamMatches = [];
     this.cupPodium = null;
     this.cupBracket = null;
     this.draftCupPlayers = [];

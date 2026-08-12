@@ -441,6 +441,33 @@ async fn team_rosters_are_built_and_played_over_http() {
     assert_eq!(table.len(), 2);
     assert!(table[0]["members"].as_array().unwrap().len() == 2);
 
+    // The round's boards arrive already grouped into the match they belong to,
+    // so no client re-derives that grouping. Nothing is decided yet.
+    let matches = body["team_matches"][0].as_array().unwrap();
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0]["boards"], json!([0, 1]));
+    assert_eq!(matches[0]["decided"], false);
+    assert_eq!(
+        (&matches[0]["wins1"], &matches[0]["wins2"]),
+        (&json!(0), &json!(0))
+    );
+
+    // Recording a board moves the match score with it — in half-wins, like
+    // every `Wins` on the wire, so one board win is 2.
+    let (status, body) = send(
+        router(state.clone()),
+        json_req(
+            "POST",
+            &t(id, "/rounds/1/boards/0/result"),
+            json!({ "clicked": "player1" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let played = &body["team_matches"][0][0];
+    assert_eq!((&played["wins1"], &played["wins2"]), (&json!(2), &json!(0)));
+    assert_eq!(played["decided"], false); // board 1 is still to play
+
     // A finalized team tournament takes no late registration.
     let (status, body) = send(
         router(state.clone()),

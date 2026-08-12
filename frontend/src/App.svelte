@@ -86,6 +86,7 @@
   const tournament = $derived(store.tournament);
   const standings = $derived(store.standings);
   const teamStandings = $derived(store.teamStandings);
+  const teamMatches = $derived(store.teamMatches);
   const cupPodium = $derived(store.cupPodium);
   const cupBracket = $derived(store.cupBracket);
   const draftCupPlayers = $derived(store.draftCupPlayers);
@@ -171,12 +172,13 @@
     return idx >= 0 ? (suggestedHandicaps[idx] ?? []) : [];
   });
 
-  // The same slice of the server-computed effective winners — what the round
-  // view's running match score counts, so the Wiel rule applies there too.
-  const activeRoundWinners = $derived.by(() => {
+  // The team matches of the round on screen, the grouping its board table
+  // follows — the server's own, so the round view and the standings cannot show
+  // two different matches or two different scores.
+  const activeRoundMatches = $derived.by(() => {
     if (!tournament || !activeRound) return [];
     const idx = tournament.rounds.findIndex((r) => r.number === activeRound.number);
-    return idx >= 0 ? (effectiveWinners[idx] ?? []) : [];
+    return idx >= 0 ? (teamMatches[idx] ?? []) : [];
   });
 
   // Long (two-round) games started in the previous round that are still unplayed,
@@ -1257,6 +1259,7 @@
             teamStandings={teamMode ? teamStandings : []}
             {cupPodium}
             {effectiveWinners}
+            {teamMatches}
             categories={tournament.settings.categories ?? []}
             onSetSitoutValue={handleSetSitoutValue}
             onSetTeamSitoutValue={handleSetTeamSitoutValue}
@@ -1303,7 +1306,7 @@
             onCarriedWinner={(boardIndex, clicked) =>
               handleSetResult(carriedRoundNumber, boardIndex, clicked)}
             teams={teamMode ? (tournament.teams ?? []) : []}
-            effectiveWinners={activeRoundWinners}
+            matches={activeRoundMatches}
             onPrintSheets={handlePrintSheets}
             {sheetMacMahonRow}
             {busy}

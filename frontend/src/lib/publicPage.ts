@@ -6,34 +6,40 @@
 // so the *wiring* between the projection and the leaf components lives here
 // rather than twice over. See docs/public-access.md §5.
 
-import type { Handicap, PublicTournamentResponse, Round, Winner } from "./types";
+import type { Handicap, PublicTournamentResponse, Round, TeamMatchView } from "./types";
 
-/** One round, with the two per-board arrays that belong to it. */
+/** One round, with the per-round slices of the projection that belong to it. */
 interface PublicRound {
   round: Round;
   /** Suggested handicaps for this round's boards — empty unless the referee
    *  chose to publish the suggestion at all (the server decides; see
    *  `PublicTournamentView`). */
   suggestedHandicaps: (Handicap | null)[];
-  /** Server-computed effective winners for this round's boards. */
-  effectiveWinners: (Winner | null)[];
+  /** This round's team matches, scored, as the server derived them — empty
+   *  outside team mode. */
+  teamMatches: TeamMatchView[];
 }
 
 /**
  * Pair every published round with its slice of `suggested_handicaps` and
- * `effective_winners`.
+ * `team_matches`.
  *
- * Both arrays are indexed like `tournament.rounds`, so this is a positional
- * join — and a missing or short row yields an empty slice rather than throwing:
- * the projection is allowed to omit the suggestions entirely.
+ * Both are indexed like `tournament.rounds`, so this is a positional join — and
+ * a missing or short row yields an empty slice rather than throwing: the
+ * projection is allowed to omit the suggestions entirely, and carries no team
+ * matches outside team mode.
+ *
+ * (`effective_winners` needs no slice: the round page shows each board's *own*
+ * winner, and the one view that wants the Wiel-rule winner — the standings
+ * cross-table — takes the whole array.)
  */
 export function publicRounds(view: PublicTournamentResponse): PublicRound[] {
   const suggested = view.suggested_handicaps ?? [];
-  const winners = view.effective_winners ?? [];
+  const matches = view.team_matches ?? [];
   return view.tournament.rounds.map((round, index) => ({
     round,
     suggestedHandicaps: suggested[index] ?? [],
-    effectiveWinners: winners[index] ?? [],
+    teamMatches: matches[index] ?? [],
   }));
 }
 

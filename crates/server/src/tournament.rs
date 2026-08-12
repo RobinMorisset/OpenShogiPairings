@@ -9,8 +9,8 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{
     Board, Counterfactual, CounterfactualMode, CupBracketView, CupPodium, ForcedMatch, Forfeit,
-    Handicap, NewPlayer, SitoutValue, Standing, TeamId, TeamStanding, Tournament, TournamentId,
-    TournamentSettings, UnitKey, Winner,
+    Handicap, NewPlayer, SitoutValue, Standing, TeamId, TeamMatchView, TeamStanding, Tournament,
+    TournamentId, TournamentSettings, UnitKey, Winner,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -220,6 +220,11 @@ pub(crate) struct TournamentView {
     /// the breakdown rows. `None` for an individual tournament.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) team_standings: Option<Vec<TeamStanding>>,
+    /// The team matches of each round, scored, indexed like `tournament.rounds`
+    /// — the grouping the round view and the standings' round columns render
+    /// (see [`osp_core::TeamMatchView`]). Empty outside team mode.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) team_matches: Vec<Vec<TeamMatchView>>,
     /// The cup podium once decided (champion / runner-up / third / fourth), for the
     /// Results-tab medals. `None` when there is no cup or the final isn't finished.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -254,6 +259,7 @@ pub(crate) fn build_view(store: &TournamentStore) -> Result<TournamentView, ApiE
     let tournament = store.current().cloned().ok_or(ApiError::NoTournament)?;
     let standings = tournament.standings();
     let team_standings = tournament.team_standings();
+    let team_matches = tournament.team_matches();
     let cup_podium = tournament.cup_podium();
     let cup_bracket = tournament.cup_bracket();
     let draft_cup_players = tournament.draft_cup_players();
@@ -285,6 +291,7 @@ pub(crate) fn build_view(store: &TournamentStore) -> Result<TournamentView, ApiE
         version: store.version(),
         standings,
         team_standings,
+        team_matches,
         cup_podium,
         cup_bracket,
         draft_cup_players,

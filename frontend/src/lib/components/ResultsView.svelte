@@ -10,12 +10,13 @@
     Sitout,
     SitoutValue,
     Standing,
+    TeamMatchView,
     TeamStanding,
     Tiebreak,
     Tournament,
     Winner,
   } from "../types";
-  import { matchScore, teamAverageRating, teamMatches } from "../teams";
+  import { teamAverageRating } from "../teams";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
   import { boardOutcome, drawnOf, forfeitOf, winnerOf } from "../boardOutcome";
   import { absenceKind } from "../noShow";
@@ -35,6 +36,10 @@
     /** Winner that counts for standings/pairing per board, server-computed
      *  (respects the Wiel rule), indexed like `tournament.rounds[i].boards[j]`. */
     effectiveWinners: (Winner | null)[][];
+    /** The team matches of each round, scored, as the server derived them
+     *  (`TournamentResponse.team_matches`), indexed like `tournament.rounds`.
+     *  Empty outside team mode. */
+    teamMatches?: TeamMatchView[][];
     /** Referee-defined categories, for the highlight filter and leader marks. */
     categories?: PlayerCategory[];
     /** Rendering into a static HTML file (docs/public-access.md phase 2), where
@@ -55,6 +60,7 @@
     teamStandings = [],
     cupPodium = null,
     effectiveWinners,
+    teamMatches = [],
     categories = [],
     staticPage = false,
     onSetSitoutValue,
@@ -263,12 +269,18 @@
   // row alone; a player's own identity and results stay on theirs.
   const teamMode = $derived(teamStandings.length > 0);
 
-  /** The matches of each round with a column, derived from the rosters exactly
-   *  as the round view derives them (see `teams.ts`). */
+  /** The matches of each round with a column — the server's own grouping, the
+   *  same one the round view shows. */
   const matchesByRound = $derived(
-    shownRounds.map((round) =>
-      teamMode ? teamMatches(round, tournament.teams ?? [], tournament.players) : [],
-    ),
+    shownRounds.map((round) => {
+      const index = roundIndexByNumber.get(round.number);
+      return (index != null && teamMatches[index]) || [];
+    }),
+  );
+
+  /** Team number → the team, for naming a match's opponent. */
+  const teamByNumber = $derived(
+    new Map((tournament.teams ?? []).map((t) => [t.tournament_id, t])),
   );
 
   /** How many columns describe a *player* rather than a result — last and
@@ -322,6 +334,7 @@
         opponentName: string;
         won: boolean;
         level: boolean;
+        /** Board wins on each side, in half-wins as they arrive. */
         wins: number;
         losses: number;
         /** Half-points the team had over its opponent at pairing time
@@ -337,7 +350,7 @@
   function teamCell(team: TeamStanding, i: number): TeamCell {
     const round = shownRounds[i];
     const match = matchesByRound[i].find(
-      (m) => m.team1.id === team.team_id || m.team2.id === team.team_id,
+      (m) => m.team1 === team.tournament_id || m.team2 === team.tournament_id,
     );
     if (!match) {
       // No match this round. Every member sits out the same way, so the first
@@ -348,20 +361,20 @@
       if (!sitout) return { kind: "not-in-round" };
       return { kind: "team-sitout", roundNumber: round.number, sitout };
     }
-    const isFirst = match.team1.id === team.team_id;
-    const other = isFirst ? match.team2 : match.team1;
-    const opponent = String(other.tournament_id ?? "?");
+    const isFirst = match.team1 === team.tournament_id;
+    const otherNumber = isFirst ? match.team2 : match.team1;
+    const other = teamByNumber.get(otherNumber);
+    const opponent = String(otherNumber);
     // A team reads as an opponent the way a player does (`opponentLabel`): its
     // name, and the average rating when every member of it has one.
     const elo = teamAverageRating(
-      other.members.map((id) => byId.get(id)).filter((p): p is Player => p != null),
+      (other?.members ?? []).map((id) => byId.get(id)).filter((p): p is Player => p != null),
     );
-    const opponentName = elo != null ? `${other.name} (${elo})` : other.name;
-    const roundIdx = roundIndexByNumber.get(round.number);
-    const score = matchScore(round, match, (roundIdx != null && effectiveWinners[roundIdx]) || []);
-    if (!score.decided) return { kind: "team-pending", opponent, opponentName };
-    const wins = isFirst ? score.wins1 : score.wins2;
-    const losses = isFirst ? score.wins2 : score.wins1;
+    const name = other?.name ?? `#${otherNumber}`;
+    const opponentName = elo != null ? `${name} (${elo})` : name;
+    if (!match.decided) return { kind: "team-pending", opponent, opponentName };
+    const wins = isFirst ? match.wins1 : match.wins2;
+    const losses = isFirst ? match.wins2 : match.wins1;
     // points_diff = points(team1) − points(team2) in half-points, frozen at
     // pairing time and stamped on every board of the match; flip it for team 2.
     const diff = round.boards[match.boards[0]]?.points_diff ?? 0;
@@ -418,7 +431,11 @@
 
   function teamCellTitle(cell: TeamCell & { kind: "team-played" }): string {
     return $_("resultsView.teamMatchTitle", {
-      values: { name: cell.opponentName, wins: cell.wins, losses: cell.losses },
+      values: {
+        name: cell.opponentName,
+        wins: formatScore(cell.wins),
+        losses: formatScore(cell.losses),
+      },
     });
   }
 

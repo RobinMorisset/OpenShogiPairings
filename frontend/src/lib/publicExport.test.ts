@@ -156,7 +156,7 @@ describe("publicRounds", () => {
     const sections = publicRounds(v);
     expect(sections.map((s) => s.round.number)).toEqual([1, 2]);
     expect(sections[1].suggestedHandicaps).toEqual(["h2"]);
-    expect(sections[1].effectiveWinners).toEqual(["player1"]);
+    expect(sections[1].teamMatches).toEqual([]);
   });
 
   it("gives an empty slice when the projection omits the suggestions", () => {

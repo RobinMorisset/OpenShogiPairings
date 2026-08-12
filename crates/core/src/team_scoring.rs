@@ -109,11 +109,40 @@ impl TeamSlots {
 /// `team1` is the team of every board's `player1`, so a board's frozen
 /// `points_diff` reads as `points(team1) − points(team2)` without a sign flip.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TeamMatch {
+pub(crate) struct TeamMatch {
     pub team1: TeamId,
     pub team2: TeamId,
     /// Indices into `round.boards`, in board order.
     pub boards: Vec<usize>,
+}
+
+/// One team match as a client receives it: [`TeamMatch`] with its
+/// [`MatchResult`] folded in — who played whom, which of the round's boards the
+/// match is made of, and where it stands.
+///
+/// This is shipped per round ([`Tournament::team_matches`](crate::Tournament::team_matches))
+/// precisely so no client re-derives the grouping: which boards form a match,
+/// their order, and who is credited each of them are pairing and scoring rules,
+/// and a second implementation of them is a second answer to disagree with.
+///
+/// Teams are named by their dense number, as boards name players by theirs, so a
+/// client resolves them the same way it resolves a board's players — and the
+/// number is also the key the pairing explanation uses in team mode.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct TeamMatchView {
+    pub team1: TeamId,
+    pub team2: TeamId,
+    /// Indices into `round.boards`, in board order.
+    pub boards: Vec<usize>,
+    /// Board wins for `team1`, in half-wins like every [`Wins`] on the wire (a
+    /// board is won or it isn't, so these are always whole).
+    pub wins1: Wins,
+    /// Board wins for `team2`.
+    pub wins2: Wins,
+    /// Whether every board of the match is decided. A match without one has no
+    /// result yet — see [`MatchResult::points1`].
+    pub decided: bool,
 }
 
 /// How a match stands: board wins on each side, and whether every board of it is
@@ -274,6 +303,30 @@ pub(crate) fn match_result(round: &Round, m: &TeamMatch, wiel_rule: bool) -> Mat
         }
     }
     result
+}
+
+/// A round's team matches, scored — [`matches_in_round`] and [`match_result`]
+/// in the one shape a client is given, so the grouping is derived here and
+/// nowhere else.
+pub(crate) fn team_match_views(
+    round: &Round,
+    slots: &TeamSlots,
+    wiel_rule: bool,
+) -> Vec<TeamMatchView> {
+    matches_in_round(round, slots)
+        .into_iter()
+        .map(|m| {
+            let result = match_result(round, &m, wiel_rule);
+            TeamMatchView {
+                team1: m.team1,
+                team2: m.team2,
+                boards: m.boards,
+                wins1: result.wins1,
+                wins2: result.wins2,
+                decided: result.decided,
+            }
+        })
+        .collect()
 }
 
 /// One team's accumulated state going into the next round — the team twin of

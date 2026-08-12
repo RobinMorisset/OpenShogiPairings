@@ -14,13 +14,14 @@
     type RuleId,
     type ScopeReason,
     type Team,
+    type TeamMatchView,
     type Winner,
   } from "../types";
   import { sourceBadge } from "../pairingSource";
-  import { matchScore, teamMatches, type TeamMatch } from "../teams";
   import { drawnOf, forfeitOf, handicapGiverId, winnerOf } from "../boardOutcome";
   import { absenceKind, absent, cycledForfeit, isDecided } from "../noShow";
   import { printPage } from "../platform";
+  import { formatScore } from "../score";
   import type { HandicapChoice } from "../handicap";
   import ResultSheetsButton from "./ResultSheetsButton.svelte";
 
@@ -82,10 +83,10 @@
     /** The tournament's teams, in team mode — the boards are then grouped into
      *  the team matches they belong to. Empty for an individual tournament. */
     teams?: Team[];
-    /** Winner that counts for standings per board of *this* round, computed
-     *  server-side (so the Wiel rule applies); indexed like `round.boards`. Used
-     *  for the running match score. */
-    effectiveWinners?: (Winner | null)[];
+    /** This round's team matches, scored, as the server derived them
+     *  (`TournamentResponse.team_matches[i]`). Empty for an individual
+     *  tournament. */
+    matches?: TeamMatchView[];
     /** Print the per-player result-reporting slips (see `lib/resultSheets.ts`).
      *  Absent = no button, which is how the reader page gets none. */
     onPrintSheets?: (rounds: number, blanks: number) => void;
@@ -114,7 +115,7 @@
     carriedLongBoards = [],
     onCarriedWinner,
     teams = [],
-    effectiveWinners = [],
+    matches = [],
     onPrintSheets,
     sheetMacMahonRow = false,
     readOnly: readOnlyProp = false,
@@ -135,10 +136,10 @@
 
   // In team mode the boards of a round are the boards of its team matches, so
   // they are shown that way: a header per match, then its boards in board order.
-  // The grouping is derived from the rosters (see `teams.ts`), exactly as the
-  // server derives it — nothing about it is stored.
+  // The grouping is not stored anywhere: the server derives it from the rosters
+  // and ships it (`matches`), so this page and the standings cannot show two
+  // different matches or two different scores.
   const teamMode = $derived(teams.length > 0);
-  const matches = $derived(teamMode ? teamMatches(round, teams, players) : []);
   /** Player number → their team, for the probe's unit lookups. */
   const teamOfPlayer = $derived.by(() => {
     const m = new Map<number, Team>();
@@ -314,11 +315,8 @@
     return ledgerByPair.get(pairKey(board.player1, board.player2));
   }
 
-  function matchLedger(match: TeamMatch): BoardLedger | undefined {
-    const a = match.team1.tournament_id;
-    const b = match.team2.tournament_id;
-    if (a == null || b == null) return undefined;
-    return ledgerByPair.get(pairKey(a, b));
+  function matchLedger(match: TeamMatchView): BoardLedger | undefined {
+    return ledgerByPair.get(pairKey(match.team1, match.team2));
   }
 
   // Fold deviation fires on nearly every board, so it carries no signal — a
@@ -518,8 +516,8 @@
     if (teamMode) {
       for (const m of matches) {
         if (round.boards[m.boards[0]]?.source?.kind !== "forced") {
-          if (m.team1.tournament_id != null) ids.add(m.team1.tournament_id);
-          if (m.team2.tournament_id != null) ids.add(m.team2.tournament_id);
+          ids.add(m.team1);
+          ids.add(m.team2);
         }
       }
     } else {
@@ -578,11 +576,8 @@
     if (teamMode) {
       for (const match of matches) {
         if (round.boards[match.boards[0]]?.source?.kind === "forced") continue;
-        const [a, b] = [match.team1.tournament_id, match.team2.tournament_id];
-        if (a != null && b != null) {
-          m.set(a, b);
-          m.set(b, a);
-        }
+        m.set(match.team1, match.team2);
+        m.set(match.team2, match.team1);
       }
     } else {
       for (const b of round.boards) {
@@ -937,17 +932,16 @@
         </tr>
       </thead>
       <tbody>
-        {#each boardGroups as group (group.match?.team1.id ?? "all")}
+        {#each boardGroups as group (group.match?.team1 ?? "all")}
           {#if group.match}
-            {@const score = matchScore(round, group.match, effectiveWinners)}
             {@const ledger = matchLedger(group.match)}
             <tr class="match-head">
               <td colspan={columnCount}>
-                <span class="match-team">{group.match.team1.name}</span>
-                <span class="match-score" class:pending={!score.decided}>
-                  {score.wins1}–{score.wins2}
+                <span class="match-team">{unitName(group.match.team1)}</span>
+                <span class="match-score" class:pending={!group.match.decided}>
+                  {formatScore(group.match.wins1)}–{formatScore(group.match.wins2)}
                 </span>
-                <span class="match-team">{group.match.team2.name}</span>
+                <span class="match-team">{unitName(group.match.team2)}</span>
                 {#if isNoteworthy(ledger)}
                   <span class="compromise print-hide" title={ledgerTooltip(ledger!)}>⚠</span>
                 {/if}

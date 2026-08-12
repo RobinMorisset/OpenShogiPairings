@@ -90,7 +90,9 @@ and its `tournament: Tournament` minus:
 
 Everything else is published as-is: `id`, `name`, `settings`, `players`,
 `registration_finalized`, `rounds`, `cup`, plus `version`, `standings`,
-`cup_podium`, `cup_bracket`, `effective_winners`.
+`cup_podium`, `cup_bracket`, `effective_winners`, `team_matches` (the reader's
+round page groups its boards by match exactly as the referee's does, and both
+groupings come from the server).
 
 Decided: **no field of `Player` is redacted.** Name, club, nationality,
 rating, grade, cup eligibility and categories are all tournament facts a

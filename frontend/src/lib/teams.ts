@@ -1,13 +1,19 @@
-// Team helpers shared by the Teams panel, the round view and the standings.
+// The ratings a roster is built and ordered by — what the Teams panel needs
+// while a roster is still being edited.
 //
-// These mirror `crates/core/src/team.rs` and `team_scoring.rs`: the same
-// derivations, done client-side so a panel can show a team's average or group a
-// round's boards into matches without a round-trip. The server stays the
-// authority — it re-derives all of this when it pairs and when it ranks.
+// These mirror `pairing_rating` / `average_pairing_rating` / `sort_team_by_rating`
+// in `crates/core/src/team.rs`, and they are client-side for one reason: they
+// answer questions about a roster the referee is *changing* — the average this
+// team would have with that member added, whether the sort button would move
+// anything — which the server has not been asked about and should not be, once
+// per keystroke.
+//
+// Anything derived from a roster that is already frozen comes from the server
+// instead: a round's boards arrive already grouped into their team matches, each
+// with its score (`TeamMatchView`, see `Tournament::team_matches`), so no client
+// re-derives that grouping.
 
-import { forfeitOf } from "./boardOutcome";
-import { absent, isDecided } from "./noShow";
-import type { Board, Player, Round, Team, Winner } from "./types";
+import type { Player } from "./types";
 
 /**
  * A player's **pairing rating**: their real rating, or the referee-assigned
@@ -49,117 +55,4 @@ export function sortedByRating(members: Player[]): boolean {
   // `null` is weaker than any rating, and equal to itself.
   const rank = (p: Player) => pairingRating(p) ?? -1;
   return members.every((p, i) => i === 0 || rank(members[i - 1]) >= rank(p));
-}
-
-/** One team match of a round: the two teams, and the boards it is made of. */
-export interface TeamMatch {
-  team1: Team;
-  team2: Team;
-  /** Indices into `round.boards`, in board order. */
-  boards: number[];
-}
-
-/**
- * Group a round's boards into team matches, from the rosters alone.
- *
- * Mirrors `matches_in_round`: a board's two players name their teams, and the
- * match a board belongs to needs no storage at all. `team1` is the team on
- * `player1`, matching the server's orientation. Boards whose players aren't both
- * in known teams are skipped (they belong to no match).
- */
-export function teamMatches(round: Round, teams: Team[], players: Player[]): TeamMatch[] {
-  const teamOfPlayer = new Map<number, Team>();
-  const boardOfPlayer = new Map<number, number>();
-  const tidOf = new Map<string, number>();
-  for (const p of players) if (p.tournament_id != null) tidOf.set(p.id, p.tournament_id);
-  for (const team of teams) {
-    team.members.forEach((member, board) => {
-      const tid = tidOf.get(member);
-      if (tid == null) return;
-      teamOfPlayer.set(tid, team);
-      boardOfPlayer.set(tid, board);
-    });
-  }
-
-  const byPair = new Map<string, TeamMatch>();
-  round.boards.forEach((board: Board, index: number) => {
-    const t1 = teamOfPlayer.get(board.player1);
-    const t2 = teamOfPlayer.get(board.player2);
-    if (!t1 || !t2) return;
-    const key = [t1.id, t2.id].sort().join("|");
-    let match = byPair.get(key);
-    if (!match) {
-      match = { team1: t1, team2: t2, boards: [] };
-      byPair.set(key, match);
-    }
-    match.boards.push(index);
-  });
-
-  const matches = [...byPair.values()];
-  for (const m of matches) {
-    m.boards.sort(
-      (a, b) =>
-        (boardOfPlayer.get(round.boards[a].player1) ?? 0) -
-        (boardOfPlayer.get(round.boards[b].player1) ?? 0),
-    );
-  }
-  // Stable order: by the lower team number, then the higher — the same ordering
-  // the server produces, so board numbering agrees between the two.
-  const rank = (t: Team) => t.tournament_id ?? Number.MAX_SAFE_INTEGER;
-  matches.sort((x, y) => {
-    const kx: [number, number] = [
-      Math.min(rank(x.team1), rank(x.team2)),
-      Math.max(rank(x.team1), rank(x.team2)),
-    ];
-    const ky: [number, number] = [
-      Math.min(rank(y.team1), rank(y.team2)),
-      Math.max(rank(y.team1), rank(y.team2)),
-    ];
-    return kx[0] - ky[0] || kx[1] - ky[1];
-  });
-  return matches;
-}
-
-/** A match's board wins on each side, and whether every board of it is decided. */
-interface MatchScore {
-  wins1: number;
-  wins2: number;
-  decided: boolean;
-}
-
-/**
- * Count a match's board wins, from `team1`'s side first.
- *
- * Mirrors `match_result`: a board win is the board's **effective** winner — so
- * the Wiel handicap rule applies exactly as it does to a player's own score,
- * which is why the server-computed winners are passed in rather than re-derived
- * — plus a forfeit where only one side turned up. A board nobody turned up for
- * has no winner, which is how an odd-sized match can still end level.
- */
-export function matchScore(
-  round: Round,
-  match: TeamMatch,
-  effectiveWinners: (Winner | null)[],
-): MatchScore {
-  const score: MatchScore = { wins1: 0, wins2: 0, decided: true };
-  for (const index of match.boards) {
-    const board = round.boards[index];
-    const forfeit = forfeitOf(board);
-    if (!isDecided(board)) {
-      score.decided = false;
-      continue;
-    }
-    // On a forfeit the point goes to whoever turned up, whichever reason the
-    // missing side had; under `both` nobody did, so the board decides nothing.
-    const side: Winner | null = forfeit
-      ? absent(forfeit, "player1")
-        ? absent(forfeit, "player2")
-          ? null
-          : "player2"
-        : "player1"
-      : (effectiveWinners[index] ?? null);
-    if (side === "player1") score.wins1 += 1;
-    else if (side === "player2") score.wins2 += 1;
-  }
-  return score;
 }
