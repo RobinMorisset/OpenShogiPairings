@@ -69,7 +69,10 @@
     </nav>
   {/if}
 
-  <section class="card">
+  <!-- Same reason as the app's own card: the standings table overflows on a
+       narrow screen, and the box should grow behind it rather than let it
+       hang out of the rounded corner. -->
+  <section class="card" class:wide-table={current.kind === "standings"}>
     {#if current.kind === "standings" && tournament.rounds.length === 0}
       <!-- Before round 1 there is nothing to rank: everyone sits at their
            MacMahon start. The entrant list is still worth publishing — players
@@ -160,6 +163,10 @@
     color: var(--text);
     border-color: var(--border);
     background: var(--bg-surface);
+  }
+  .card.wide-table {
+    width: max-content;
+    min-width: 100%;
   }
   .muted {
     color: var(--text-secondary);

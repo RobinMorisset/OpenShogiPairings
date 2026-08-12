@@ -76,5 +76,3 @@ Known limitations and future work, roughly ordered by area.
   played blank, so they have to be copied over by hand.
 
 - **Cleanup the Changelog** (tons of redundant entries were made during the team tournament sequence of commits)
-
-- Better UI for standings tab when it gets wider than the screen.

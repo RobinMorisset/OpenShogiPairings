@@ -1088,7 +1088,9 @@
   {:else if initialLoad === "loading"}
     <p class="muted">{$_("app.loading")}</p>
   {:else if tournament}
-    <section class="card">
+    <!-- Only the standings table is ever wider than the screen, and only there
+         is it worth letting the card grow past it — see `.card.wide-table`. -->
+    <section class="card" class:wide-table={activeTab === "results"}>
       <div class="toolbar">
         <div class="title">
           <h2>{tournament.name}</h2>
@@ -1628,6 +1630,25 @@
     color: var(--text-secondary);
     margin: 0.25rem 0 0;
   }
+  /* The standings table can be far wider than the screen — a column per round
+     plus the tie-breaks — and it is deliberately not wrapped in a scroller,
+     because that would pin its sticky header to the scroller instead of to the
+     window (see ResultsView). So it overflows, and the card grows to stay
+     behind it rather than letting the table hang out of the rounded box. */
+  .card.wide-table {
+    width: max-content;
+    min-width: 100%;
+  }
+  /* `max-content` asks every child how wide it would like to be with nothing
+     wrapped — which for the button rows is "all of them side by side", and
+     would set the card's width from the toolbar on a tournament whose table is
+     narrow. Taking them out of that measurement (`width: 0`) leaves the table
+     as the only thing that can widen the card; `min-width` then stretches them
+     back to whatever width it settled on. */
+  .card.wide-table > :not(.tab-content) {
+    width: 0;
+    min-width: 100%;
+  }
   .toolbar {
     display: flex;
     justify-content: space-between;
@@ -1903,6 +1924,16 @@
       border: none;
       background: transparent;
       padding: 0;
+    }
+    /* On screen the card grows past the viewport so the standings table has a
+       background under it. On paper there is nothing to scroll and nothing to
+       overflow *of* — a card sized to the table would simply run off the sheet
+       and be cropped, so it goes back to the page width and the table lays
+       itself out inside it. */
+    .card.wide-table,
+    .card.wide-table > :not(.tab-content) {
+      width: auto;
+      min-width: 0;
     }
 
     /* Printing the QR code for the wall is a different document from printing

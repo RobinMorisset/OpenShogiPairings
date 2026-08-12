@@ -259,9 +259,10 @@
     ),
   );
 
-  /** How many columns a team's name spans: everything that describes a
-   *  *player* rather than a result — last and first name, rating, the estimate
-   *  when it has a column, nationality and club. */
+  /** How many columns describe a *player* rather than a result — last and
+   *  first name, rating, the estimate when it has a column, nationality and
+   *  club. A team row fills that band with its name in the first of them (the
+   *  pinned one) and one empty cell for the rest. */
   const identityColumns = $derived(5 + (showEstimatedElo ? 1 : 0));
 
   type TableRow =
@@ -852,8 +853,8 @@
   <table class:teamed={teamMode} onmousemove={trackTip} onmouseleave={clearTip}>
     <thead>
       <tr>
-        <th class="num">{$_("resultsView.id")}</th>
-        <th>{$_("resultsView.lastName")}</th>
+        <th class="num pin-id">{$_("resultsView.id")}</th>
+        <th class="pin-name">{$_("resultsView.lastName")}</th>
         <th>{$_("resultsView.firstName")}</th>
         <th class="num">{$_("resultsView.rating")}</th>
         {#if showEstimatedElo}
@@ -886,10 +887,18 @@
         {#if row.kind === "team"}
           {@const team = row.team}
           <tr class="team-row">
-            <td class="num">{team.tournament_id}</td>
-            <!-- The team's name stands where its players' names are, straddling
-                 everything that describes a player rather than a result. -->
-            <td class="team-name" colspan={identityColumns}>{team.name}</td>
+            <td class="num pin-id">{team.tournament_id}</td>
+            <!-- The team's name stands where its players' names are. It sits in
+                 the *name* column rather than straddling the whole identity
+                 band, so it can be pinned by exactly the rule that pins a
+                 player's surname: a sticky element cannot leave its own cell, so
+                 a name in a cell six columns wide gets carried off-screen with
+                 it. The rest of the band is one empty cell, which keeps the row
+                 looking the same. -->
+            <td class="team-name pin-name">{team.name}</td>
+            {#if identityColumns > 1}
+              <td colspan={identityColumns - 1}></td>
+            {/if}
             {#each shownRounds as round, i (round.number)}
               {@const cell = teamCell(team, i)}
               <td class="num result">
@@ -971,8 +980,8 @@
             class:cat-highlight={filtering && isHighlighted(player)}
             class:cat-dim={filtering && !isHighlighted(player)}
           >
-          <td class="num">{player.tournament_id ?? "—"}</td>
-          <td class="last-name">{#if player.tournament_id != null && medalOf.has(player.tournament_id)}<span class="medal">{medalOf.get(player.tournament_id)}</span> {/if}{#if categoryLeaders.has(player.id)}<span class="cat-star" title={$_("resultsView.categoryLeader", { values: { categories: categoryLeaders.get(player.id)?.join(", ") } })}>⭐</span> {/if}{player.last_name}</td>
+          <td class="num pin-id">{player.tournament_id ?? "—"}</td>
+          <td class="last-name pin-name">{#if player.tournament_id != null && medalOf.has(player.tournament_id)}<span class="medal">{medalOf.get(player.tournament_id)}</span> {/if}{#if categoryLeaders.has(player.id)}<span class="cat-star" title={$_("resultsView.categoryLeader", { values: { categories: categoryLeaders.get(player.id)?.join(", ") } })}>⭐</span> {/if}{player.last_name}</td>
           <td>{player.first_name || "—"}</td>
           <td class="num">{player.rating ?? "—"}</td>
           {#if showEstimatedElo}
@@ -1130,6 +1139,14 @@
     justify-content: flex-end;
     margin-bottom: 0.5rem;
   }
+  .results {
+    /* The width of the pinned ID column, shared by the two rules that need to
+       agree on it: the column itself, and the offset the name column pins at.
+       It is a *border-box* width (see `.pin-id`), so the padding comes out of
+       it — leave room for four digits and the "ID" header inside 1.1rem of
+       padding, or the cell grows past it and the two stop agreeing again. */
+    --id-col: 4rem;
+  }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -1147,6 +1164,88 @@
     font-weight: 600;
     font-size: 0.8rem;
   }
+
+  /* --- Pinned header row and identity columns -----------------------------
+   *
+   * `position: sticky` resolves against the nearest *scrolling* ancestor, and
+   * here that is deliberately the document itself: nothing between this table
+   * and <html> establishes a scrollport. Wrapping the table in the obvious
+   * `overflow-x: auto` would pin the header to that wrapper instead of to the
+   * window, which is the opposite of what this is for — so the table is left to
+   * overflow, and `.card.wide-table` in App.svelte grows to cover it.
+   *
+   * With `border-collapse: collapse` a cell's border belongs to the *table*, so
+   * it stays behind while the sticky cell travels. The rules that separate a
+   * pinned cell from what scrolls under it are therefore inset shadows, which
+   * are painted by the cell and travel with it.
+   */
+  thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-surface);
+    box-shadow: inset 0 -1px 0 var(--border-divider);
+  }
+  .pin-id,
+  .pin-name {
+    position: sticky;
+    z-index: 1;
+    /* From the row, so a pinned cell keeps its stripe, its team-row tint or its
+       category highlight instead of punching a plain hole through them. */
+    background: inherit;
+  }
+  .pin-id {
+    left: 0;
+    /* Fixed, because the name column's offset has to be a length the stylesheet
+       knows — the table lays itself out from its content, and `left: auto` is
+       not a thing for a sticky cell. Wide enough for a four-digit number.
+
+       `border-box` is what makes the two agree. This app sets no global
+       box-sizing reset, so a cell is `content-box` by default and `width` would
+       exclude the 0.55rem of padding on each side: the column would be
+       `--id-col` *plus* 1.1rem, while the name column still pinned at
+       `--id-col` — landing on top of the last 1.1rem of the numbers. */
+    box-sizing: border-box;
+    width: var(--id-col);
+  }
+  .pin-name {
+    left: var(--id-col);
+    box-shadow: inset -1px 0 0 var(--border-divider);
+  }
+  /* The corner cells are pinned on both axes, so they must sit above both the
+     header row and the identity columns — and be opaque, which they do not get
+     from the rule above: `.pin-id` is a class and `thead th` is two element
+     selectors, so `background: inherit` wins there, and a header `tr` has no
+     background to inherit. The result is a transparent corner with the whole
+     table sliding visibly through it. */
+  thead .pin-id,
+  thead .pin-name {
+    z-index: 3;
+    background: var(--bg-surface);
+  }
+  thead .pin-name {
+    box-shadow:
+      inset 0 -1px 0 var(--border-divider),
+      inset -1px 0 0 var(--border-divider);
+  }
+  /* Below this the pinned columns would eat the screen rather than help: two
+     frozen columns leave a phone under ~384px with nothing to scroll. */
+  @media (max-width: 24rem) {
+    .pin-id,
+    .pin-name {
+      position: static;
+    }
+    .pin-name {
+      box-shadow: none;
+    }
+  }
+  /* Every row carries an explicit background, including the un-striped ones.
+     The pinned identity columns take theirs with `background: inherit`, so a
+     row left transparent would let the scrolling columns show through the
+     pinned ones. */
+  tbody tr {
+    background: var(--bg-surface);
+  }
   tbody tr:nth-child(even) {
     background: var(--bg-stripe);
   }
@@ -1154,7 +1253,7 @@
      striping every other row would cut across them. The team row is the
      separator instead. */
   table.teamed tbody tr:nth-child(even) {
-    background: none;
+    background: var(--bg-surface);
   }
   .team-row {
     background: var(--bg-stripe);
@@ -1388,6 +1487,14 @@
     }
     tbody tr:nth-child(even) {
       background: transparent !important;
+    }
+    /* Paper does not scroll, so nothing has anything to stick to — and a
+       sticky cell on a page break lands on top of the rows below it. */
+    thead th,
+    .pin-id,
+    .pin-name {
+      position: static;
+      box-shadow: none !important;
     }
     /* The sit-out token is a <button> carrying its tone class (.win/.absent),
        both of which force border-color: #000 above. Keep its border invisible

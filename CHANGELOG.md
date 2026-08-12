@@ -17,6 +17,16 @@ rather than half-parsed; re-create the tournament.
 
 ### Changed
 
+- **The standings table is readable on a phone.** The header row stays pinned
+  to the top of the window as you scroll down, and the tournament number and
+  name columns to its left as you scroll right — so a number in a round column
+  still says which round it belongs to, and still says whose row it is. The
+  cross-table names opponents by tournament number, so that column is pinned
+  alongside the name rather than instead of it. On screens under about 384px
+  the two columns unpin, leaving the whole width to scroll. Team rows pin their
+  team name the same way. The white panel behind the table now grows with it
+  instead of letting a wide table hang out of its rounded corner.
+
 - **Points are no longer accumulated — they are derived**, as
   `MacMahon start + wins`, and a manual bonus/malus now lands *inside* the
   MacMahon start rather than beside it. Two consequences. The Results tab's
