@@ -6,6 +6,31 @@ set -e
 echo "== cargo test --workspace =="
 cargo test --workspace
 
+echo "== ts-rs bindings up to date =="
+# The tests above are what write frontend/src/lib/generated/, so this costs
+# nothing but the diff — those files were rewritten a second ago by the run that
+# just finished.
+#   Here rather than in pre-commit deliberately. Regenerating at commit time
+#   means building the test binaries: ~10s on a touched core file, almost all of
+#   it compiling the ~4k lines of #[cfg(test)] code in osp-core and osp-server
+#   that clippy only ever type-checks. By this point they are already built.
+#   Nothing else catches the drift. Clippy does not regenerate; a Rust-only
+#   commit stages no frontend file, so pre-commit's frontend block is skipped;
+#   and CI type-checks a fresh checkout against the *committed* bindings, so a
+#   stale copy stays green while the wire format and the TS types disagree.
+#   `--others` as well as the diff: a newly exported type writes a file git has
+#   never seen, which `git diff` alone would not report.
+if ! git diff --quiet -- frontend/src/lib/generated ||
+   [ -n "$(git ls-files --others --exclude-standard -- frontend/src/lib/generated)" ]; then
+  echo
+  echo "pre-push: the tests just regenerated frontend/src/lib/generated/ and it does"
+  echo "  not match what you committed — a Rust type changed without its TypeScript"
+  echo "  binding following. Commit the regenerated files, then push again:"
+  echo "      git add frontend/src/lib/generated && git commit --amend --no-edit"
+  echo "  (or as its own commit, when the change that caused it is further back)."
+  exit 1
+fi
+
 echo "== rustdoc (broken links) =="
 # Rustdoc warnings never fail a build on their own, so a doc link that stopped
 # resolving stays invisible until someone follows it — which is how two module

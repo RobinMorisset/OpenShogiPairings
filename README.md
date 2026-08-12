@@ -618,7 +618,11 @@ git config core.hooksPath scripts/git-hooks
   locale-key check (`scripts/check-i18n-keys.mjs`, catching keys that exist in
   some locales but not all). Fast; keeps the tree clean commit by commit.
 - `pre-push` — the full test suite (`cargo test --workspace` and the frontend
-  tests, `npm test`), a rustdoc pass with warnings denied (`cargo doc --workspace
+  tests, `npm test`), a check that the ts-rs bindings under
+  `frontend/src/lib/generated/` match the Rust types they come from (the test
+  run above is what writes them, so this is just a diff — and nothing else
+  notices, since CI type-checks against the committed copy), a rustdoc pass with
+  warnings denied (`cargo doc --workspace
   --no-deps --document-private-items`, catching doc links that stopped
   resolving — rustdoc never fails a build over one), plus the
   dependency-advisory check
