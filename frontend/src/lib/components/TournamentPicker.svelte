@@ -10,11 +10,16 @@
     loginAdmin,
     restoreDeletedTournament,
   } from "../api";
-  import { describeApiError } from "../errorCodes";
+  import { describeApiError, describeCoded } from "../errorCodes";
   import { currentTournamentId, getToken, initialTab } from "../session";
   import { loadTournament } from "../tournamentFile";
   import CreateTournament from "./CreateTournament.svelte";
-  import type { DeletedTournament, Tournament, TournamentSummary } from "../types";
+  import type {
+    DeletedTournament,
+    Tournament,
+    TournamentProblem,
+    TournamentSummary,
+  } from "../types";
 
   let tournaments = $state<TournamentSummary[]>([]);
   let loading = $state(true);
@@ -115,6 +120,16 @@
 
   function describe(err: unknown): string {
     return describeApiError(err, $_);
+  }
+
+  // Why a listed tournament can't be opened (or restored), as one tooltip: the
+  // server's reason, translated through the same table as any error response,
+  // then `hintKey` for what that means for the referee standing in front of it —
+  // which differs between a tournament still on the server and a backup in the
+  // bin, since only one of the two has a delete button to point at.
+  function describeProblem(problem: TournamentProblem, hintKey = "picker.unopenableHint"): string {
+    const reason = describeCoded(problem.code, problem.values, $_) ?? problem.message;
+    return `${reason}\n${$_(hintKey)}`;
   }
 
   function select(id: string) {
@@ -253,11 +268,18 @@
             <button
               type="button"
               class="ghost pick"
+              class:unopenable={t.problem}
               data-testid="select-tournament"
               onclick={() => select(t.id)}
-              disabled={busy}
+              disabled={busy || !!t.problem}
+              title={t.problem ? describeProblem(t.problem) : undefined}
             >
-              {#if t.has_password}
+              {#if t.problem}
+                <!-- The tooltip is on the whole row, not just the sign: a
+                     disabled button that says nothing is the thing being fixed
+                     here. -->
+                <span class="warning" title={describeProblem(t.problem)}>⚠️</span>
+              {:else if t.has_password}
                 {#if getToken(t.id)}
                   <span class="lock" title={$_("picker.passwordUnlocked")}>🔓</span>
                 {:else}
@@ -303,8 +325,17 @@
       <ul class="tournaments">
         {#each deleted as d (d.id)}
           <li>
-            <span class="deleted-name">
-              {#if d.has_password}
+            <span
+              class="deleted-name"
+              class:unopenable={d.problem}
+              title={d.problem ? describeProblem(d.problem, "picker.unrestorableHint") : undefined}
+            >
+              {#if d.problem}
+                <span
+                  class="warning"
+                  title={describeProblem(d.problem, "picker.unrestorableHint")}>⚠️</span
+                >
+              {:else if d.has_password}
                 <span class="lock" title={$_("picker.passwordProtected")}>🔒</span>
               {/if}
               {d.name}
@@ -312,15 +343,21 @@
             <span class="muted deleted-when">
               {$_("picker.deletedWhen", { values: { when: when(d.deleted_at) } })}
             </span>
-            <button
-              type="button"
-              class="ghost small"
-              data-testid="restore-tournament"
-              onclick={() => startRestore(d)}
-              disabled={busy}
-            >
-              {$_("picker.restore")}
-            </button>
+            <!-- No Restore button at all for a backup this build cannot read: a
+                 button whose only outcome is an error is worse than none. The
+                 entry still shows, because it is on disk until it expires and
+                 an older build can still open it. -->
+            {#if !d.problem}
+              <button
+                type="button"
+                class="ghost small"
+                data-testid="restore-tournament"
+                onclick={() => startRestore(d)}
+                disabled={busy}
+              >
+                {$_("picker.restore")}
+              </button>
+            {/if}
           </li>
           {#if restoring?.id === d.id}
             <li class="restore-row">
@@ -503,8 +540,19 @@
     border: none;
     border-radius: 0.4rem;
   }
-  .lock {
+  .lock,
+  .warning {
     margin-right: 0.4rem;
+  }
+  /* Still legible, visibly not for opening: this row is a leftover to clear
+     out, not a tournament to run. */
+  .pick.unopenable,
+  .deleted-name.unopenable {
+    color: var(--text-secondary);
+    font-style: italic;
+  }
+  .pick.unopenable {
+    cursor: not-allowed;
   }
   .small {
     padding: 0.25rem 0.6rem;

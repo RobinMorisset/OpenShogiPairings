@@ -6,7 +6,7 @@
 //! [`TournamentInstance`] (live state + its own optional password). Handlers
 //! resolve the instance for a request via [`crate::scope::TournamentCtx`].
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -64,6 +64,45 @@ pub(crate) fn check_format_version(bytes: &[u8]) -> Result<(), TournamentError> 
     Ok(())
 }
 
+/// Why a tournament file on disk could not be loaded, kept so the tournament
+/// can be *listed* rather than silently vanish.
+///
+/// A save from an older format version is the ordinary case: the referee
+/// upgraded, and the tournament they ran last month is now unreadable. Hiding it
+/// and logging an error where nobody looks is how a tournament quietly stops
+/// existing — worse, its file and backups then sit on disk forever, since the
+/// only thing that deletes them is a picker entry to click.
+pub(crate) struct LoadProblem {
+    /// What is wrong, in the same vocabulary as any other rejected save — so the
+    /// picker can say "format 8, this build reads 9" in the referee's language.
+    pub error: TournamentError,
+    /// The tournament's name, probed out of the file even though the file as a
+    /// whole doesn't parse: `name` has been a plain top-level string in every
+    /// format version, and "Nancy Open 2026 can't be opened" beats a uuid.
+    pub name: Option<String>,
+}
+
+impl LoadProblem {
+    fn new(error: TournamentError, bytes: &[u8]) -> Self {
+        #[derive(Deserialize)]
+        struct NameProbe {
+            name: Option<String>,
+        }
+        let name = serde_json::from_slice::<NameProbe>(bytes)
+            .ok()
+            .and_then(|probe| probe.name)
+            .filter(|name| !name.trim().is_empty());
+        Self { error, name }
+    }
+
+    /// What to call this tournament in the picker: its own name when the probe
+    /// found one, else its id — which is the filename, and so still enough to
+    /// go and look at what is wrong.
+    fn display_name(&self, id: Uuid) -> String {
+        self.name.clone().unwrap_or_else(|| id.to_string())
+    }
+}
+
 /// The current tournament plus a linear undo history.
 ///
 /// The history is a stack of full tournament snapshots taken *before* each
@@ -97,6 +136,10 @@ pub struct TournamentStore {
     /// instance; the flag makes [`persist`](Self::persist) and [`mutate`](Self::mutate)
     /// no-op/refuse so a late write can't resurrect the deleted files on disk.
     deleted: bool,
+    /// Why `current` is `None`, when the reason is a save file this build cannot
+    /// read (see [`LoadProblem`]). Such a store is inert: `persist` needs a
+    /// `current` to write, so the unreadable file is never overwritten.
+    problem: Option<LoadProblem>,
 }
 
 impl TournamentStore {
@@ -112,20 +155,36 @@ impl TournamentStore {
             version: 0,
             notifier,
             deleted: false,
+            problem: None,
         }
     }
 
     /// Build a store backed by `path`: load any tournament already saved there,
     /// and write the current one through to it on every change.
+    ///
+    /// A file that exists but cannot be read leaves the store empty *and*
+    /// [`problem`](Self::problem)ed, which is what lets the registry keep the
+    /// tournament visible — see [`LoadProblem`].
     pub fn with_persistence(path: PathBuf) -> Self {
-        let current = Self::load_from_disk(&path);
+        let (current, problem) = match Self::load_from_disk(&path) {
+            Ok(current) => (current, None),
+            Err(problem) => (None, Some(problem)),
+        };
         if current.is_some() {
             tracing::info!("loaded the saved tournament from {}", path.display());
         }
         Self {
             current,
+            problem,
             ..Self::empty(Some(path))
         }
+    }
+
+    /// Why this store is empty, when it is empty because its file could not be
+    /// read. `None` both for a loaded tournament and for one that never had a
+    /// file — only a *broken* save sets this.
+    pub(crate) fn problem(&self) -> Option<&LoadProblem> {
+        self.problem.as_ref()
     }
 
     /// The current change version. Bumped on every state change.
@@ -164,47 +223,53 @@ impl TournamentStore {
         let _ = self.notifier.send(self.version);
     }
 
-    /// Read and parse the persisted tournament, or `None` if the file is absent
-    /// or can't be loaded.
+    /// Read and parse the persisted tournament: `Ok(None)` if the file is absent
+    /// (or unreadable at the filesystem level), `Err` if it is there but this
+    /// build cannot make a tournament of it.
     ///
     /// A file that is present but unreadable — a wrong/old format version, or
-    /// corrupt bytes — is reported loudly at `error` level and the file is left
-    /// **untouched** (the caller drops the instance instead of inserting an empty
-    /// one, so nothing ever persists over it). This is deliberate: an old file
-    /// from before an incompatible format bump must be rejected, not silently
-    /// discarded — losing an in-progress event on a routine binary upgrade would
-    /// be far worse than refusing to serve it.
-    fn load_from_disk(path: &Path) -> Option<Tournament> {
+    /// corrupt bytes — is reported loudly at `error` level and left
+    /// **untouched**, and the reason comes back so the tournament can still be
+    /// listed (see [`LoadProblem`]). This is deliberate: an old file from before
+    /// an incompatible format bump must be rejected, not silently discarded —
+    /// losing an in-progress event on a routine binary upgrade would be far
+    /// worse than refusing to serve it.
+    fn load_from_disk(path: &Path) -> Result<Option<Tournament>, LoadProblem> {
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
             Err(e) => {
                 // Genuinely absent is the normal empty-start case; anything else
-                // (permissions, I/O) is worth surfacing.
+                // (permissions, I/O) is worth surfacing. Neither is a *save*
+                // problem — there is nothing here to show the referee, and
+                // nothing they could delete from the app either.
                 if e.kind() != std::io::ErrorKind::NotFound {
                     tracing::error!("could not read {}: {e}", path.display());
                 }
-                return None;
+                return Ok(None);
             }
         };
         // Check the format version before the full parse, so an incompatible old
         // save fails with a clear version message rather than an opaque
         // field-level serde error (see [`check_format_version`]).
-        if let Err(e) = check_format_version(&bytes) {
+        if let Err(error) = check_format_version(&bytes) {
             tracing::error!(
-                "refusing to load {}: {e}. The file is left untouched — load it \
-                 with a matching build, or remove it to start fresh.",
+                "refusing to load {}: {error}. The file is left untouched — load it \
+                 with a matching build, or delete that tournament from the picker.",
                 path.display()
             );
-            return None;
+            return Err(LoadProblem::new(error, &bytes));
         }
         match serde_json::from_slice(&bytes) {
-            Ok(tournament) => Some(tournament),
+            Ok(tournament) => Ok(Some(tournament)),
             Err(e) => {
                 tracing::error!(
                     "could not parse {}: {e}. The file is left untouched.",
                     path.display()
                 );
-                None
+                Err(LoadProblem::new(
+                    TournamentError::MalformedSave(e.to_string()),
+                    &bytes,
+                ))
             }
         }
     }
@@ -529,6 +594,57 @@ impl TournamentInstance {
     }
 }
 
+/// A domain error carried outside an error *response*: what is wrong with a
+/// tournament the picker lists but cannot open (see
+/// [`TournamentSummary`]).
+///
+/// Same `code` + `values` contract as [`crate::error::ApiError`]'s own body, and the client localizes it
+/// through the same table — a broken save has to explain itself in the
+/// referee's language just as much as a failed request does. The English
+/// `message` rides along as the fallback for a client that doesn't know the
+/// code, exactly as in an error body.
+#[derive(Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct TournamentProblem {
+    /// Stable machine code, e.g. `unsupported_format_version`. Absent for the
+    /// errors that stay English (see [`crate::error::domain_payload`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<&'static str>,
+    /// Interpolation values for the translated message.
+    #[ts(type = "Record<string, string>")]
+    pub values: BTreeMap<String, String>,
+    /// The server's own English wording, for a client with no translation.
+    pub message: String,
+}
+
+impl TournamentProblem {
+    /// A problem with no machine code: shown in English, deliberately, because
+    /// it can only arise from something being broken (files disappearing from
+    /// under the server) rather than from anything the referee did. Dressing
+    /// that up as ordinary translated UI would hide what it is.
+    pub(crate) fn plain(message: String) -> Self {
+        Self {
+            code: None,
+            values: BTreeMap::new(),
+            message,
+        }
+    }
+}
+
+impl From<&TournamentError> for TournamentProblem {
+    fn from(err: &TournamentError) -> Self {
+        let (code, values) = match crate::error::domain_payload(err) {
+            Some((code, values)) => (Some(code), values),
+            None => (None, BTreeMap::new()),
+        };
+        Self {
+            code,
+            values,
+            message: err.to_string(),
+        }
+    }
+}
+
 /// Summary of a tournament for the picker list (`GET /api/tournaments`) — name
 /// and whether it's locked, never the tournament's contents.
 #[derive(Serialize, TS)]
@@ -537,6 +653,15 @@ pub struct TournamentSummary {
     pub id: Uuid,
     pub name: String,
     pub has_password: bool,
+    /// Why this one cannot be opened — a save from a format version this build
+    /// no longer reads, most often. `None` is the normal case.
+    ///
+    /// It is listed *because* it is broken, not in spite of it: a tournament
+    /// that vanishes from the picker looks deleted, and the referee has no way
+    /// to get rid of its files either. So it appears, greyed out, explaining
+    /// itself, with a delete button that works.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub problem: Option<TournamentProblem>,
 }
 
 /// What's persisted alongside a tournament file for the bits that live outside
@@ -650,7 +775,13 @@ impl TournamentRegistry {
                         continue;
                     };
                     let store = TournamentStore::with_persistence(path.clone());
-                    if store.current().is_none() {
+                    // A file this build cannot read is kept as an instance
+                    // anyway — empty, but carrying its reason (see
+                    // [`LoadProblem`]) so the picker can list it, explain
+                    // itself, and let the referee delete it. Every route but
+                    // `DELETE` finds no tournament there, which is the truth.
+                    // `None` with no problem is nothing to hold on to at all.
+                    if store.current().is_none() && store.problem().is_none() {
                         continue; // already warned inside `with_persistence`
                     }
                     // Fail closed: if the sidecar is present but unreadable we
@@ -798,11 +929,29 @@ impl TournamentRegistry {
                 // doc): one tournament whose mutation panicked must not take the
                 // whole picker down for every other tournament.
                 let store = instance.read();
-                let tournament = store.current()?;
+                let (name, problem) = match store.current() {
+                    Some(tournament) => (tournament.name.clone(), None),
+                    // A save this build cannot read: listed, but saying why, so
+                    // the referee can see it is there and delete it. Never to a
+                    // stranger, though — a published tournament that has since
+                    // become unreadable has nothing to offer a reader but a
+                    // name and a complaint.
+                    None => {
+                        let problem = store.problem()?;
+                        if published_only {
+                            return None;
+                        }
+                        (
+                            problem.display_name(*id),
+                            Some(TournamentProblem::from(&problem.error)),
+                        )
+                    }
+                };
                 Some(TournamentSummary {
                     id: *id,
-                    name: tournament.name.clone(),
+                    name,
                     has_password: instance.auth.is_some(),
+                    problem,
                 })
             })
             .collect()
@@ -962,8 +1111,8 @@ impl TournamentRegistry {
             // automatic backups are only taken at round transitions, so the
             // newest one can be many mutations old — without this, the exact
             // state someone just deleted is the one state not recoverable.
-            let name = match store.current() {
-                Some(tournament) => {
+            let name = match (store.current(), store.problem()) {
+                (Some(tournament), _) => {
                     crate::backup::take(
                         instance.backups_dir.as_deref(),
                         tournament,
@@ -971,8 +1120,31 @@ impl TournamentRegistry {
                     );
                     tournament.name.clone()
                 }
-                None => {
-                    debug_assert!(false, "a registered tournament always has a current state");
+                // A save this build cannot read (see [`LoadProblem`]). Its file
+                // is the only copy of that tournament and we are about to delete
+                // it, so it goes to the backups verbatim — unreadable to *this*
+                // build, which is not the same as worthless: the build that
+                // wrote it can still read it.
+                (None, Some(problem)) => {
+                    match self.tournament_path(id).map(fs::read) {
+                        Some(Ok(bytes)) => crate::backup::take_bytes(
+                            instance.backups_dir.as_deref(),
+                            &bytes,
+                            crate::backup::DELETED_LABEL,
+                        ),
+                        Some(Err(e)) => tracing::warn!(
+                            "deleting {id}: could not copy its unreadable save into the \
+                             backups first ({e}); deleting it anyway, as asked"
+                        ),
+                        None => {}
+                    }
+                    problem.display_name(id)
+                }
+                (None, None) => {
+                    debug_assert!(
+                        false,
+                        "a registered tournament always has a state or a problem"
+                    );
                     tracing::warn!(
                         "deleting {id}: it held no tournament, so no final backup was taken"
                     );
@@ -1095,8 +1267,13 @@ impl TournamentRegistry {
                     .id
             }
         };
-        let tournament =
-            crate::backup::load(Some(&dir), &backup_id).ok_or(RestoreError::NoSuchBackup)?;
+        let tournament = crate::backup::load(Some(&dir), &backup_id).map_err(|e| match e {
+            crate::backup::LoadError::NotFound => RestoreError::NoSuchBackup,
+            // Deleting a tournament this build could not read keeps its file
+            // verbatim, so the bin can hold backups only an older build can
+            // open. Restoring one has to say so.
+            crate::backup::LoadError::Unreadable(e) => RestoreError::Invalid(e),
+        })?;
         // A backup this server wrote should always be loadable, but it is a file
         // on disk that anything could have edited since — vet it like an import.
         tournament
@@ -1653,6 +1830,94 @@ mod tests {
         assert_eq!(
             crate::backup::list(Some(&crate::backup::dir_for(&backups_root, kept))).len(),
             1
+        );
+
+        fs::remove_dir_all(data_dir.parent().unwrap()).ok();
+    }
+
+    /// A save this build cannot read stays in the picker — listed, explaining
+    /// itself, and deletable. Hiding it is how a tournament silently stops
+    /// existing while its files sit on disk with nothing to remove them.
+    #[test]
+    fn a_save_from_an_old_format_is_listed_with_its_problem_and_can_be_deleted() {
+        let (data_dir, backups_root) = isolated_roots();
+        fs::create_dir_all(&data_dir).unwrap();
+        let id = uuid::Uuid::new_v4();
+        fs::write(
+            data_dir.join(format!("{id}.json")),
+            br#"{"format_version":4,"name":"Nancy Open 2025","players":[]}"#,
+        )
+        .unwrap();
+
+        let registry = TournamentRegistry::with_retention(
+            Some(data_dir.clone()),
+            Some(backups_root.clone()),
+            30 * DAY,
+        );
+        let listed = registry.list(false);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, id);
+        // Named from the file even though the file as a whole doesn't parse.
+        assert_eq!(listed[0].name, "Nancy Open 2025");
+        let problem = listed[0].problem.as_ref().expect("it cannot be opened");
+        assert_eq!(problem.code, Some("unsupported_format_version"));
+        assert_eq!(problem.values["found"], "4");
+
+        // It holds no tournament, so nothing can be done *with* it...
+        let instance = registry.get(id).expect("listed, therefore known");
+        assert!(instance.read().current().is_none());
+        // ...and a stranger is never shown it, whatever its sidecar says.
+        assert!(registry.list(true).is_empty());
+
+        // Deleting works, and keeps the unreadable file as a backup: this build
+        // can't read it, but the one that wrote it still can.
+        assert!(registry.remove(id));
+        assert!(!data_dir.join(format!("{id}.json")).exists());
+        assert!(registry.list(false).is_empty());
+        let deleted = registry.list_deleted();
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0].name, "Nancy Open 2025");
+        assert_eq!(deleted[0].backups.len(), 1);
+        // The bin says it too, so the picker can grey it out and offer no
+        // Restore button rather than one that always fails.
+        assert_eq!(
+            deleted[0].problem.as_ref().map(|p| p.code),
+            Some(Some("unsupported_format_version"))
+        );
+        let kept = fs::read(
+            crate::backup::dir_for(&backups_root, id)
+                .join(format!("{}.json", deleted[0].backups[0].id)),
+        )
+        .unwrap();
+        assert!(String::from_utf8_lossy(&kept).contains("Nancy Open 2025"));
+
+        // Restoring it says what is actually wrong, rather than pretending the
+        // backup isn't there.
+        assert!(matches!(
+            registry.restore_deleted(id, None, None),
+            Err(RestoreError::Invalid(
+                TournamentError::UnsupportedFormatVersion { found: 4, .. }
+            ))
+        ));
+
+        fs::remove_dir_all(data_dir.parent().unwrap()).ok();
+    }
+
+    /// A file that isn't JSON at all gets the same treatment, minus the name.
+    #[test]
+    fn a_corrupt_save_is_listed_under_its_id() {
+        let (data_dir, backups_root) = isolated_roots();
+        fs::create_dir_all(&data_dir).unwrap();
+        let id = uuid::Uuid::new_v4();
+        fs::write(data_dir.join(format!("{id}.json")), b"{ not json").unwrap();
+
+        let registry = TournamentRegistry::new(Some(data_dir.clone()), Some(backups_root));
+        let listed = registry.list(false);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, id.to_string());
+        assert_eq!(
+            listed[0].problem.as_ref().map(|p| p.code),
+            Some(Some("malformed_save"))
         );
 
         fs::remove_dir_all(data_dir.parent().unwrap()).ok();

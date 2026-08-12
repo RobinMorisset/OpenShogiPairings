@@ -381,8 +381,15 @@ async fn restore_backup(
     // The backup replaces a tournament, it doesn't conjure one: a store with
     // nothing in it (a concurrent delete) must 404 rather than be revived.
     store.current().ok_or(ApiError::NoTournament)?;
-    let restored = backup::load(instance.backups_dir.as_deref(), &params.backup_id)
-        .ok_or_else(|| ApiError::NotFound(format!("no backup {}", params.backup_id)))?;
+    let restored =
+        backup::load(instance.backups_dir.as_deref(), &params.backup_id).map_err(|e| match e {
+            backup::LoadError::NotFound => {
+                ApiError::NotFound(format!("no backup {}", params.backup_id))
+            }
+            // A backup from before a format bump: it is right there in the list,
+            // so say what is wrong with it rather than claim it isn't there.
+            backup::LoadError::Unreadable(e) => ApiError::Domain(e),
+        })?;
     store.set_current(restored);
     view(&store)
 }

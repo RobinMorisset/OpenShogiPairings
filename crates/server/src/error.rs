@@ -134,7 +134,9 @@ fn domain_status(err: &TournamentError) -> StatusCode {
 ///
 /// Values must be language-neutral (numbers, ids); the catalogues interpolate
 /// them into the translated sentence.
-fn domain_payload(err: &TournamentError) -> Option<(&'static str, BTreeMap<String, String>)> {
+pub(crate) fn domain_payload(
+    err: &TournamentError,
+) -> Option<(&'static str, BTreeMap<String, String>)> {
     /// Shorthand for a code with no interpolation values.
     fn bare(code: &'static str) -> Option<(&'static str, BTreeMap<String, String>)> {
         Some((code, BTreeMap::new()))

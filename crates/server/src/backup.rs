@@ -21,10 +21,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use osp_core::Tournament;
+use osp_core::{Tournament, TournamentError};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
+
+use crate::state::TournamentProblem;
 
 /// How many backups are kept per tournament before the oldest are rotated out.
 /// A plain constant "for now" — easy to turn into a user-facing setting later.
@@ -103,6 +105,12 @@ pub(crate) struct DeletedTournament {
     /// deleted. Sent whole so the referee can pick an earlier one rather than
     /// only ever getting the final state back.
     pub backups: Vec<BackupInfo>,
+    /// Why it cannot be restored, when it cannot — a save from a format version
+    /// this build no longer reads, which is exactly what deleting an already
+    /// unopenable tournament leaves behind. `None` is the normal case, and the
+    /// only one where restoring is offered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub problem: Option<TournamentProblem>,
 }
 
 /// Where backups go when the server was given no explicit root: the per-user
@@ -160,6 +168,17 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 /// [`MAX_BACKUPS`]. Best-effort: I/O or serialization failures are logged, not
 /// propagated — a backup problem must never block the referee's actual action.
 pub(crate) fn take(dir: Option<&Path>, tournament: &Tournament, label: &str) {
+    match serde_json::to_vec_pretty(tournament) {
+        Ok(json) => take_bytes(dir, &json, label),
+        Err(e) => tracing::warn!("backup: could not serialize the tournament: {e}"),
+    }
+}
+
+/// [`take`] for a tournament that is already serialized — which is the only way
+/// to back up a save this build cannot parse into a [`Tournament`] (an older
+/// format version, on its way to being deleted). The bytes are written
+/// verbatim: whatever wrote them can still read them.
+pub(crate) fn take_bytes(dir: Option<&Path>, bytes: &[u8], label: &str) {
     let Some(dir) = dir else {
         tracing::warn!("backup: no backups directory — this tournament is not being backed up");
         return;
@@ -170,13 +189,8 @@ pub(crate) fn take(dir: Option<&Path>, tournament: &Tournament, label: &str) {
     }
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let path = dir.join(format!("{}-{seq}-{}.json", now_secs(), slug(label)));
-    match serde_json::to_vec_pretty(tournament) {
-        Ok(json) => {
-            if let Err(e) = fs::write(&path, json) {
-                tracing::warn!("backup: could not write {}: {e}", path.display());
-            }
-        }
-        Err(e) => tracing::warn!("backup: could not serialize the tournament: {e}"),
+    if let Err(e) = fs::write(&path, bytes) {
+        tracing::warn!("backup: could not write {}: {e}", path.display());
     }
     rotate(dir);
 }
@@ -372,17 +386,51 @@ pub(crate) fn list_deleted(root: Option<&Path>) -> Vec<DeletedTournament> {
                 );
                 return None;
             };
+            let backups = list(Some(&dir));
             Some(DeletedTournament {
                 id,
                 name: marker.name,
                 deleted_at: marker.deleted_at,
                 has_password: marker.password_hash.is_some(),
-                backups: list(Some(&dir)),
+                problem: restore_problem(&dir, &backups),
+                backups,
             })
         })
         .collect();
     deleted.sort_by_key(|d| std::cmp::Reverse(d.deleted_at));
     deleted
+}
+
+/// Why restoring this deleted tournament would fail, or `None` when it would
+/// work — by actually loading the backup a restore would use, which is the only
+/// answer that can't be wrong.
+///
+/// Deleting a tournament this build could not read keeps its save verbatim, so
+/// a bin entry can hold nothing but backups from an older format version. It has
+/// to say so *in the list*: offering a Restore button that always fails is the
+/// same silent-dead-end the picker's ⚠️ entries exist to avoid.
+///
+/// Costs one file read and parse per deleted tournament per listing. The bin
+/// holds a month of deletions, so that is a handful of small files — if it ever
+/// stops being, probe the format version alone instead of parsing.
+fn restore_problem(dir: &Path, backups: &[BackupInfo]) -> Option<TournamentProblem> {
+    let Some(newest) = backups.first() else {
+        // Marked deleted, but nothing left to restore from. Not a state this
+        // server produces — deletion writes a backup first — so it stays
+        // English, as an anomaly rather than ordinary UI.
+        return Some(TournamentProblem::plain(format!(
+            "no backup left in {}",
+            dir.display()
+        )));
+    };
+    match load(Some(dir), &newest.id) {
+        Ok(_) => None,
+        Err(LoadError::Unreadable(e)) => Some(TournamentProblem::from(&e)),
+        Err(LoadError::NotFound) => Some(TournamentProblem::plain(format!(
+            "backup {} is listed but could not be read",
+            newest.id
+        ))),
+    }
 }
 
 /// Delete the backups of every tournament deleted more than `retention` ago.
@@ -465,16 +513,37 @@ pub(crate) fn sweep(root: Option<&Path>, retention: Duration, live: &HashSet<Uui
     }
 }
 
-/// Load a specific backup by id (its file stem) from `dir`, if it exists.
+/// Why [`load`] could not hand back a tournament.
+#[derive(Debug)]
+pub(crate) enum LoadError {
+    /// No backup with that id here.
+    NotFound,
+    /// The file is there, but this build cannot read it — an older format
+    /// version, most often, which is exactly what a *backup* store accumulates
+    /// across an upgrade. Carries the reason so the caller can say which.
+    Unreadable(TournamentError),
+}
+
+/// Load a specific backup by id (its file stem) from `dir`.
+///
 /// Rejects anything that isn't a plain `<secs>-<seq>-<slug>` token
 /// (alphanumerics and dashes only), so this can never escape the backups
 /// directory.
-pub(crate) fn load(dir: Option<&Path>, id: &str) -> Option<Tournament> {
+///
+/// A backup too old for this build is [`Unreadable`](LoadError::Unreadable),
+/// not missing: "no such backup" for a file the referee is looking straight at
+/// in the list is the kind of answer that sends someone hunting for a bug in
+/// the wrong place. The version is checked before the parse, for the reason
+/// spelled out on [`crate::state::check_format_version`].
+pub(crate) fn load(dir: Option<&Path>, id: &str) -> Result<Tournament, LoadError> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-        return None;
+        return Err(LoadError::NotFound);
     }
-    let bytes = fs::read(dir?.join(format!("{id}.json"))).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    let bytes = fs::read(dir.ok_or(LoadError::NotFound)?.join(format!("{id}.json")))
+        .map_err(|_| LoadError::NotFound)?;
+    crate::state::check_format_version(&bytes).map_err(LoadError::Unreadable)?;
+    serde_json::from_slice(&bytes)
+        .map_err(|e| LoadError::Unreadable(TournamentError::MalformedSave(e.to_string())))
 }
 
 #[cfg(test)]
@@ -537,8 +606,8 @@ mod tests {
         let t = Tournament::new("Traversal Test").unwrap();
         let dir = dir_of(&t);
         take(Some(&dir), &t, "only backup");
-        assert!(load(Some(&dir), "../../etc/passwd").is_none());
-        assert!(load(Some(&dir), "nonexistent-0-id").is_none());
+        assert!(load(Some(&dir), "../../etc/passwd").is_err());
+        assert!(load(Some(&dir), "nonexistent-0-id").is_err());
     }
 
     #[test]
@@ -554,7 +623,7 @@ mod tests {
         let t = Tournament::new("Homeless Test").unwrap();
         take(None, &t, "nowhere to go");
         assert!(list(None).is_empty());
-        assert!(load(None, "0-0-nowhere-to-go").is_none());
+        assert!(load(None, "0-0-nowhere-to-go").is_err());
         mark_deleted(None, "Homeless Test", None);
         sweep(None, Duration::ZERO, &HashSet::new());
     }

@@ -197,6 +197,18 @@ rather than half-parsed; re-create the tournament.
 
 ### Changed
 
+- **A tournament this version cannot open is now listed in the picker** instead
+  of vanishing from it — the usual reason being a save from an older format
+  version, after an upgrade. It appears greyed out behind a ⚠️ whose tooltip
+  says what is wrong (which format it is, which this build reads) and what to do
+  about it, it cannot be opened, and its **delete button works**. Before, the
+  server logged an error where nobody was looking and dropped the tournament, so
+  a referee saw one of their tournaments simply gone, with its file and backups
+  left on disk and nothing in the app able to remove them. Deleting one keeps
+  its save as a backup verbatim, unreadable to this build but not to the one
+  that wrote it. Restoring such a backup — or any backup older than a format
+  bump — now says which version it needs, where it used to claim the backup did
+  not exist.
 - **Deleting a tournament no longer deletes its backups**, which made it the one
   action with no way back — and an easy one to take by accident. A final backup,
   labelled *deleted*, is now taken of the exact state it was deleted in (the

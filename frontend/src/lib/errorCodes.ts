@@ -91,11 +91,25 @@ export function describeApiError(err: unknown, t: Translate): string {
   }
   if (err instanceof Error) {
     const { code, values } = err as Coded;
-    if (typeof code === "string" && ERROR_CODE_KEYS[code]) {
-      return t(ERROR_CODE_KEYS[code], {
-        values: (values as Record<string, string> | undefined) ?? {},
-      });
-    }
+    const described = describeCoded(code, values, t);
+    if (described !== null) return described;
   }
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * The translated sentence for a `{ code, values }` pair, or `null` when the
+ * code is absent or untranslated (the caller then falls back to the server's
+ * English wording).
+ *
+ * Split out of {@link describeApiError} because not every coded problem arrives
+ * as a thrown error: a tournament the picker lists but cannot open carries the
+ * same pair in its summary (`TournamentProblem`), and must read as the same
+ * sentence the corresponding failed request would have produced.
+ */
+export function describeCoded(code: unknown, values: unknown, t: Translate): string | null {
+  if (typeof code !== "string" || !ERROR_CODE_KEYS[code]) return null;
+  return t(ERROR_CODE_KEYS[code], {
+    values: (values as Record<string, string> | undefined) ?? {},
+  });
 }

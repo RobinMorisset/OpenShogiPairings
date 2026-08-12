@@ -75,5 +75,3 @@ Known limitations and future work, roughly ordered by area.
 - Print per-player small **result reporting sheets**
 
 - **Cleanup the Changelog** (tons of redundant entries were made during the team tournament sequence of commits)
-
-- **Show invalid tournaments in the picker** (those with different version numbers) so that they can be more easily deleted

@@ -42,8 +42,8 @@ pub use auth::AuthConfig;
 // type down.
 pub use ratings::CachedRatings;
 pub use state::{
-    AppState, MutateError, NoSuchTournament, TournamentInstance, TournamentRegistry,
-    TournamentStore, TournamentSummary,
+    AppState, MutateError, NoSuchTournament, TournamentInstance, TournamentProblem,
+    TournamentRegistry, TournamentStore, TournamentSummary,
 };
 
 use std::path::PathBuf;
@@ -1487,6 +1487,9 @@ mod tests {
         let backups = entries[0]["backups"].as_array().unwrap();
         assert_eq!(backups.len(), 1);
         assert_eq!(backups[0]["label"], "deleted");
+        // Nothing wrong with it, so the picker offers to restore it: `problem`
+        // is what turns that button off.
+        assert!(entries[0].get("problem").is_none());
 
         // A password for a tournament that had none is refused rather than
         // silently protecting the restored copy with something never set on it.
