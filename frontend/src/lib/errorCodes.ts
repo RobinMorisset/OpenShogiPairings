@@ -33,6 +33,8 @@ export const ERROR_CODE_KEYS: Record<string, string> = {
   registration_not_finalized: "serverError.registrationNotFinalized",
   cannot_remove_cup_player: "serverError.cannotRemoveCupPlayer",
   cannot_remove_played_player: "serverError.cannotRemovePlayedPlayer",
+  cannot_remove_team_player: "serverError.cannotRemoveTeamPlayer",
+  cannot_remove_matched_team: "serverError.cannotRemoveMatchedTeam",
 
   previous_round_not_complete: "serverError.previousRoundNotComplete",
   not_enough_present_players: "serverError.notEnoughPresentPlayers",

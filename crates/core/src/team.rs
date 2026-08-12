@@ -225,15 +225,62 @@ impl Tournament {
         Ok(t)
     }
 
-    /// Delete a team. Its members go back to the unassigned pool; they are *not*
-    /// removed from the tournament, since being in a team and being registered
-    /// are separate facts.
+    /// Delete a team.
+    ///
+    /// Allowed for as long as the team has never been paired into a match —
+    /// the team-mode reading of the rule on players, since here the team is the
+    /// pairing unit. Once it has played, every opponent's score record
+    /// references it, so it is refused with
+    /// [`TournamentError::CannotRemoveMatchedTeam`] exactly as a player who has
+    /// played is.
+    ///
+    /// What happens to the members depends on where the tournament is. Before
+    /// registration is finalized they go back to the unassigned pool, since
+    /// being in a team and being registered are separate facts. After it there
+    /// *is* no unassigned pool — [`finalize_teams`](Self::finalize_teams)
+    /// requires it to be empty, and every roster to be exactly `team_size` —
+    /// so they leave the tournament with their team.
     pub fn remove_team(&mut self, team: Uuid) -> Result<(), TournamentError> {
-        self.team_registration_open()?;
-        let before = self.teams.len();
-        self.teams.retain(|t| t.id != team);
-        if self.teams.len() == before {
+        if !self.settings.team_mode() {
+            return Err(TournamentError::NotATeamTournament);
+        }
+        let Some(t) = self.teams.iter().find(|t| t.id == team) else {
             return Err(TournamentError::TeamNotFound(team));
+        };
+        let number = t.tournament_id;
+        let members = t.members.clone();
+        // "Has been matched" reads off the boards, the same way `has_played`
+        // does for a player: in team mode a board only ever exists because two
+        // teams were paired. A team that merely byed has sit-outs and no board,
+        // and is still removable — which is the case this is for.
+        let member_tids: Vec<TournamentId> = members
+            .iter()
+            .filter_map(|m| self.players.iter().find(|p| p.id == *m))
+            .filter_map(|p| p.tournament_id)
+            .collect();
+        let has_played = self
+            .rounds
+            .iter()
+            .flat_map(|r| &r.boards)
+            .any(|b| member_tids.contains(&b.player1) || member_tids.contains(&b.player2));
+        if has_played {
+            return Err(TournamentError::CannotRemoveMatchedTeam);
+        }
+
+        self.teams.retain(|t| t.id != team);
+        // The open draft names teams by number, and confirming one that pairs a
+        // team nobody answers to would fault the same way a stale player entry
+        // does (see `remove_player`).
+        if let (Some(n), Some(draft)) = (number, &mut self.draft) {
+            draft
+                .forced_matches
+                .retain(|m| m.team1 != n && m.team2 != n);
+            draft.forced_team_byes.retain(|&b| b != n);
+        }
+        if self.registration_finalized {
+            for m in members {
+                self.remove_player_inner(m)?;
+            }
         }
         Ok(())
     }
@@ -801,6 +848,108 @@ mod tests {
                 team
             })
             .collect()
+    }
+
+    /// In team mode the team is the pairing unit, so a player is not removable
+    /// on their own once rosters are fixed: `finalize_teams` requires every team
+    /// to be exactly `team_size`, and taking one member out would leave a roster
+    /// that plays a short match.
+    #[test]
+    fn a_player_cannot_be_removed_individually_from_a_finalized_team_tournament() {
+        let (mut t, ids) = team_tournament(2, 4);
+        fill_teams(&mut t, &ids, 2, 2);
+        // Before finalization it is ordinary registration churn, and the player
+        // leaves their team on the way out.
+        let mut before = t.clone();
+        before.remove_player(ids[0]).unwrap();
+        assert!(before.team_of(ids[0]).is_none());
+        assert_eq!(before.players.len(), 3);
+
+        t.finalize_registration().unwrap();
+        assert_eq!(
+            t.remove_player(ids[0]),
+            Err(TournamentError::CannotRemoveTeamPlayer)
+        );
+        assert_eq!(t.players.len(), 4, "nobody left");
+    }
+
+    /// The team-level reading of "a player who has played cannot be removed".
+    #[test]
+    fn a_team_that_has_played_cannot_be_removed() {
+        let (mut t, ids) = team_tournament(2, 4);
+        let teams = fill_teams(&mut t, &ids, 2, 2);
+        t.finalize_registration().unwrap();
+        // Two teams, so round 1 pairs them against each other.
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        assert!(!t.rounds[0].boards.is_empty());
+
+        assert_eq!(
+            t.remove_team(teams[0]),
+            Err(TournamentError::CannotRemoveMatchedTeam)
+        );
+        assert_eq!(t.teams.len(), 2);
+    }
+
+    /// A team that only ever byed has sit-outs and no board, so it is still
+    /// removable — and after finalization its members go with it, because
+    /// finalization is what requires the unassigned pool to be empty.
+    #[test]
+    fn removing_a_team_after_finalization_takes_its_players() {
+        // Three teams: one byes each round, since teams are what get paired.
+        let (mut t, ids) = team_tournament(2, 6);
+        let teams = fill_teams(&mut t, &ids, 3, 2);
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+
+        // Whichever team byed played no board and can still go.
+        let byed = teams
+            .iter()
+            .copied()
+            .find(|&team| {
+                let members: Vec<_> = t
+                    .team_members(team)
+                    .iter()
+                    .filter_map(|p| p.tournament_id)
+                    .collect();
+                !t.rounds[0]
+                    .boards
+                    .iter()
+                    .any(|b| members.contains(&b.player1) || members.contains(&b.player2))
+            })
+            .expect("an odd number of teams byes one of them");
+        let gone: Vec<Uuid> = t.team_members(byed).iter().map(|p| p.id).collect();
+        assert_eq!(gone.len(), 2);
+
+        t.remove_team(byed).unwrap();
+
+        assert_eq!(t.teams.len(), 2);
+        assert!(
+            gone.iter().all(|g| !t.players.iter().any(|p| p.id == *g)),
+            "its members left with it — there is no pool to return them to"
+        );
+        // Their sit-outs went too, so nothing references a player who is gone.
+        assert!(t.rounds[0].sitouts.is_empty());
+        // And the tournament still scores.
+        assert_eq!(t.team_standings().expect("team mode").len(), 2);
+        assert_eq!(t.standings().len(), 4);
+    }
+
+    /// Before finalization the members stay registered: being in a team and
+    /// being in the tournament are separate facts, and there is a pool to
+    /// return them to.
+    #[test]
+    fn removing_a_team_before_finalization_only_unassigns_its_players() {
+        let (mut t, ids) = team_tournament(2, 4);
+        let teams = fill_teams(&mut t, &ids, 2, 2);
+
+        t.remove_team(teams[0]).unwrap();
+
+        assert_eq!(t.teams.len(), 1);
+        assert_eq!(t.players.len(), 4, "everyone is still registered");
+        assert!(t.team_of(ids[0]).is_none());
+        assert!(t.unassigned_players().contains(&ids[0]));
     }
 
     #[test]
@@ -1674,9 +1823,11 @@ mod tests {
         let (mut t, ids) = team_tournament(2, 4);
         let teams = fill_teams(&mut t, &ids, 2, 2);
         t.finalize_registration().unwrap();
+        // `remove_team` is deliberately *not* in this list: a team that has not
+        // been paired into a match yet is still removable, matching the rule on
+        // players. See `a_team_that_has_played_cannot_be_removed`.
         for op in [
             t.clone().add_team("Late").err(),
-            t.clone().remove_team(teams[0]).err(),
             t.clone().remove_team_member(teams[0], ids[0]).err(),
             t.clone()
                 .set_team_board_order(teams[0], vec![ids[1], ids[0]])

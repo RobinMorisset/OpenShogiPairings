@@ -92,6 +92,15 @@ NOT backwards compatible with any earlier version.
   read as one they won their way through, which gives that round away — unless
   every pre-qualified player happens to have won it, which no reading of the
   results alone can tell from a bracket of twice the size.
+- **A team could end up playing a match one board short.** Removing a player
+  who had not played took them out of their team as well, and a roster one
+  member short simply played that many fewer boards — so a three-board match
+  could be decided 2–0 over two boards and reported as an ordinary result. In a
+  team tournament the team is what gets paired, so removals now work at that
+  level: after registration a player can no longer be removed on their own, and
+  a team that has never played a match can be removed instead — before
+  registration closes its players go back to the unassigned pool, after it they
+  leave with the team, which is how a no-show team is dropped.
 - Some filesystem failures were silently swallowed; they are now surfaced
   as errors in the log.
 - The desktop app now respects `OSP_DATA_DIR` instead of putting its data in a

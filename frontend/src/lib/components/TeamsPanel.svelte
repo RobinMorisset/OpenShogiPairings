@@ -320,6 +320,23 @@
   let adjustmentDelta = $state("");
   let adjustmentReason = $state("");
 
+  /**
+   * Deleting a team means two different things either side of finalization, so
+   * ask in the words that match: before it the members go back to the
+   * unassigned pool, after it there is no pool to go back to — finalization is
+   * what requires it to be empty — and they leave the tournament with their
+   * team. A one-line "delete this team?" would be true in both and informative
+   * in neither.
+   */
+  function confirmRemove(team: Team, members: number) {
+    const message = finalized
+      ? $_("teams.confirmRemoveWithPlayers", {
+          values: { name: team.name, count: members },
+        })
+      : $_("teams.confirmRemove", { values: { name: team.name } });
+    if (window.confirm(message)) onRemove(team.id);
+  }
+
   function toggleAdjustments(teamId: string) {
     adjustingId = adjustingId === teamId ? null : teamId;
     adjustmentDelta = "";
@@ -448,16 +465,19 @@
               >
                 {$_("teams.sortByRating")}
               </button>
-              <button
-                type="button"
-                class="small danger"
-                disabled={busy}
-                title={$_("teams.removeTitle")}
-                onclick={() => onRemove(team.id)}
-              >
-                ✕
-              </button>
             {/if}
+            <!-- Not gated on `finalized` either: a team that never played a
+                 match can still be dropped, which is how a no-show team leaves.
+                 The server refuses one that has played, naming why. -->
+            <button
+              type="button"
+              class="small danger"
+              disabled={busy}
+              title={$_(finalized ? "teams.removeWithPlayersTitle" : "teams.removeTitle")}
+              onclick={() => confirmRemove(team, roster.length)}
+            >
+              ✕
+            </button>
           </span>
         </div>
 

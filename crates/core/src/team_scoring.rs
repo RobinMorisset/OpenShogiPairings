@@ -53,11 +53,21 @@ impl TeamSlots {
         let mut by_tid: TiVec<TournamentId, Option<(TeamId, u32)>> = vec![None; max_tid + 1].into();
         let mut members: TiVec<TeamId, Vec<TournamentId>> = vec![Vec::new(); max_team + 1].into();
         for team in teams {
+            // Both skips below are unreachable once registration is finalized:
+            // `finalize_teams` numbers every team, and a roster can only name a
+            // registered player (a player cannot be removed individually from a
+            // finalized team tournament, and removing a team removes its
+            // members). Before finalization they are the ordinary state of a
+            // half-built roster, so this is only an invariant once numbered.
             let Some(number) = team.tournament_id else {
                 continue;
             };
             for (board, member) in team.members.iter().enumerate() {
                 let Some(&tid) = tid_of.get(member) else {
+                    debug_assert!(
+                        false,
+                        "team {number} rosters {member}, who is not a registered player",
+                    );
                     continue;
                 };
                 by_tid[tid] = Some((number, board as u32));
@@ -585,6 +595,18 @@ pub(crate) fn match_boards(
     source: crate::round::PairingSource,
     slots: &TeamSlots,
 ) -> Vec<Board> {
+    // `zip` stops at the shorter roster, so a team one member short would play a
+    // short match — a 3-board event decided 2-0 over two boards — and be reported
+    // as an ordinary result. Rosters are fixed at `team_size` by
+    // `finalize_teams` and no live edit can shorten one afterwards (a player
+    // cannot be removed individually from a finalized team tournament, and
+    // removing a team takes its whole roster), so a mismatch here means
+    // something above is broken rather than anything a referee did.
+    debug_assert_eq!(
+        slots.members_of(team1).len(),
+        slots.members_of(team2).len(),
+        "teams {team1} and {team2} field different numbers of boards",
+    );
     slots
         .members_of(team1)
         .iter()
@@ -601,6 +623,22 @@ mod tests {
     use crate::settings::{MacMahonThreshold, TeamSettings};
     use crate::tournament::{Tournament, TournamentError};
     use uuid::Uuid;
+
+    /// No live path can shorten a roster any more — a player cannot be removed
+    /// individually from a finalized team tournament, and removing a team takes
+    /// its whole roster — so this pokes one short by hand, the shape a
+    /// hand-edited save would have. Without the guard `zip` would quietly pair
+    /// the shorter list and report a match decided over fewer boards than the
+    /// event has.
+    #[test]
+    #[should_panic(expected = "different numbers of boards")]
+    fn a_short_roster_is_caught_rather_than_played_as_a_short_match() {
+        let (mut t, _) = tournament(2, 2, TournamentSettings::default());
+        t.teams[0].members.pop();
+        // Pairing round 1 is what builds the boards from the two rosters.
+        t.prepare_round().unwrap();
+        let _ = t.confirm_round();
+    }
 
     /// A finalized team tournament of `teams` teams of `size`, players rated
     /// 2000, 1990, … in registration order.

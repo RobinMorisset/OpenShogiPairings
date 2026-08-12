@@ -250,6 +250,18 @@ pub enum TournamentError {
     /// absent for future rounds instead.
     #[error("cannot remove a player who has already played a game")]
     CannotRemovePlayedPlayer,
+    /// In team mode the pairing unit is the team, not the player. Once
+    /// registration is finalized every team holds exactly `team_size` members
+    /// and every player is in one, so removing a player on their own could only
+    /// leave a short roster — which would silently play a short match. Remove
+    /// the whole team, or mark the player absent.
+    #[error("cannot remove a player individually from a team tournament")]
+    CannotRemoveTeamPlayer,
+    /// A team that has been paired into a match cannot be removed: every
+    /// opponent's score record references it, exactly as for a player who has
+    /// played. This is [`Self::CannotRemovePlayedPlayer`] one layer up.
+    #[error("cannot remove a team that has already played a match")]
+    CannotRemoveMatchedTeam,
     /// The cup bracket referenced an earlier result that is missing (internal
     /// inconsistency — should not happen for a properly gated round).
     #[error("the cup bracket is missing an earlier result")]
@@ -468,11 +480,30 @@ impl Tournament {
     ///
     /// Returns [`TournamentError::PlayerNotFound`] if no such player exists,
     /// [`TournamentError::CannotRemoveCupPlayer`] if the player is seeded in the
-    /// cup bracket (removing them would corrupt it), or
+    /// cup bracket (removing them would corrupt it),
     /// [`TournamentError::CannotRemovePlayedPlayer`] if the player has already been
     /// paired into a game (their results are referenced by every opponent's score
-    /// record — mark them absent for future rounds instead).
+    /// record — mark them absent for future rounds instead), or
+    /// [`TournamentError::CannotRemoveTeamPlayer`] in a finalized team
+    /// tournament, where the team is the pairing unit and rosters are fixed at
+    /// `team_size` — remove the team with [`remove_team`](Self::remove_team).
     pub fn remove_player(&mut self, id: Uuid) -> Result<(), TournamentError> {
+        // Individually, that is: `remove_team` takes its members out through the
+        // same path below once the tournament is under way, because after
+        // finalization there is no unassigned pool to leave them in.
+        if self.settings.team_mode() && self.registration_finalized {
+            return Err(TournamentError::CannotRemoveTeamPlayer);
+        }
+        self.remove_player_inner(id)
+    }
+
+    /// [`remove_player`](Self::remove_player) without the team-mode guard: the
+    /// removal itself, and everything that has to go with it.
+    ///
+    /// Split out so team removal can reach it. A team that has played is refused
+    /// at *its* level, so by the time this runs for a member the same thing has
+    /// been established for them — nobody is on a board.
+    pub(crate) fn remove_player_inner(&mut self, id: Uuid) -> Result<(), TournamentError> {
         // The player's tournament number, if finalized. A not-yet-numbered player is
         // on no board and in no cup seed (both are keyed by number).
         let tid = self

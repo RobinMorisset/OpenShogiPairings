@@ -33,6 +33,8 @@ pub(crate) const LOCALIZED_ERROR_CODES: &[&str] = &[
     "registration_not_finalized",
     "cannot_remove_cup_player",
     "cannot_remove_played_player",
+    "cannot_remove_team_player",
+    "cannot_remove_matched_team",
     // Rounds
     "previous_round_not_complete",
     "not_enough_present_players",

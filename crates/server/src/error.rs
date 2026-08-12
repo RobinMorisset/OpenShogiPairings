@@ -163,6 +163,8 @@ pub(crate) fn domain_payload(
         TournamentError::RegistrationNotFinalized => bare("registration_not_finalized"),
         TournamentError::CannotRemoveCupPlayer => bare("cannot_remove_cup_player"),
         TournamentError::CannotRemovePlayedPlayer => bare("cannot_remove_played_player"),
+        TournamentError::CannotRemoveTeamPlayer => bare("cannot_remove_team_player"),
+        TournamentError::CannotRemoveMatchedTeam => bare("cannot_remove_matched_team"),
 
         // Rounds.
         TournamentError::PreviousRoundNotComplete => bare("previous_round_not_complete"),
@@ -453,6 +455,8 @@ mod tests {
             },
             TournamentError::CannotRemoveCupPlayer,
             TournamentError::CannotRemovePlayedPlayer,
+            TournamentError::CannotRemoveTeamPlayer,
+            TournamentError::CannotRemoveMatchedTeam,
             TournamentError::CupBracketInconsistent,
             TournamentError::EmptyAdjustmentReason,
             TournamentError::ZeroPointAdjustment,
