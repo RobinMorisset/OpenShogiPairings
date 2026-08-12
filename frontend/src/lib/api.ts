@@ -2,6 +2,7 @@ import type {
   BackupList,
   Counterfactual,
   CounterfactualMode,
+  DeletedTournament,
   Handicap,
   HealthStatus,
   NewPlayer,
@@ -382,9 +383,49 @@ export async function importTournament(
   return result;
 }
 
+/**
+ * The tournaments in the bin — deleted, but still holding the backups kept with
+ * them — most recently deleted first. Needs the admin token when the server has
+ * an admin password, like the other registry-level calls.
+ */
+export function fetchDeletedTournaments(): Promise<DeletedTournament[]> {
+  return request<DeletedTournament[]>("/api/tournaments/deleted", undefined, ADMIN_AUTH);
+}
+
+/**
+ * Bring a deleted tournament back, from one of the backups kept with it —
+ * `backupId` picks which, defaulting to the newest, the one taken as it was
+ * deleted.
+ *
+ * It comes back as *itself*: same id, and the backups kept with it become its
+ * own again, so it stops being listed as deleted. Restoring one that is already
+ * back is a 409 rather than a second copy.
+ *
+ * `password` is the password it had, required if it had one, and it becomes the
+ * restored tournament's own password: the bin is not a way to strip protection
+ * off a tournament. The returned token is stored so the caller can select it
+ * immediately.
+ */
+export async function restoreDeletedTournament(
+  id: string,
+  options: { backupId?: string; password?: string } = {},
+): Promise<CreateTournamentResult> {
+  const body: { backup_id?: string; password?: string } = {};
+  if (options.backupId) body.backup_id = options.backupId;
+  if (options.password) body.password = options.password;
+  const result = await request<CreateTournamentResult>(
+    `/api/tournaments/deleted/${id}/restore`,
+    { method: "POST", body: JSON.stringify(body) },
+    ADMIN_AUTH,
+  );
+  if (result.token) setToken(result.id, result.token);
+  return result;
+}
+
 /** Delete a tournament: its registry entry and persisted file. Its automatic
  *  backups are kept on the server for a month (a final one is taken as it is
- *  deleted), so this is recoverable by hand from the backups directory. */
+ *  deleted), so it can be restored from the picker's recently-deleted list —
+ *  see {@link fetchDeletedTournaments}. */
 export function deleteTournamentEntry(id: string): Promise<void> {
   return fetchOk(`/api/tournaments/${id}`, { method: "DELETE" }, { kind: "tournament", id }).then(
     () => undefined,

@@ -6,7 +6,7 @@
 //! [`TournamentInstance`] (live state + its own optional password). Handlers
 //! resolve the instance for a request via [`crate::scope::TournamentCtx`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -684,8 +684,13 @@ impl TournamentRegistry {
         }
         // Startup is the sweep that matters for the desktop app and for any
         // host restarted between tournaments; the one in `remove` covers the
-        // server that just keeps running.
-        crate::backup::sweep(backups_root.as_deref(), deleted_retention);
+        // server that just keeps running. The tournaments just loaded are the
+        // live ones, whose directories it must not touch.
+        crate::backup::sweep(
+            backups_root.as_deref(),
+            deleted_retention,
+            &instances.keys().copied().collect(),
+        );
         Self {
             instances: RwLock::new(instances),
             data_dir,
@@ -872,10 +877,23 @@ impl TournamentRegistry {
     /// not vet what it is registering.
     pub fn insert(
         &self,
+        tournament: Tournament,
+        password: Option<String>,
+    ) -> (Uuid, Option<String>) {
+        self.insert_at(Uuid::new_v4(), tournament, password)
+    }
+
+    /// [`insert`](Self::insert) under a caller-chosen `id`, for the one case
+    /// where the id is not ours to mint: restoring a deleted tournament, which
+    /// comes back as *itself* (see [`restore_deleted`](Self::restore_deleted)).
+    /// The caller must have checked the id is free — this overwrites whatever
+    /// entry it finds, which for any other caller would be a lost tournament.
+    fn insert_at(
+        &self,
+        id: Uuid,
         mut tournament: Tournament,
         password: Option<String>,
     ) -> (Uuid, Option<String>) {
-        let id = Uuid::new_v4();
         tournament.id = id;
         if let Some(dir) = &self.data_dir {
             // Nothing below can be persisted without it, and each of those
@@ -988,11 +1006,130 @@ impl TournamentRegistry {
                 instance.auth.as_ref().map(|auth| auth.password_hash()),
             );
             // Whatever expired while this server was up goes now — the other
-            // sweep is at startup, and a server can stay up for months.
-            crate::backup::sweep(self.backups_root.as_deref(), self.deleted_retention);
+            // sweep is at startup, and a server can stay up for months. This one
+            // is already out of `instances`, so its own directory is fair game.
+            crate::backup::sweep(
+                self.backups_root.as_deref(),
+                self.deleted_retention,
+                &self.live_ids(),
+            );
         }
         removed.is_some()
     }
+
+    /// The ids of every tournament this registry currently holds — what tells
+    /// [`crate::backup::sweep`] which directories belong to something live.
+    fn live_ids(&self) -> HashSet<Uuid> {
+        self.instances
+            .read()
+            .expect("registry lock poisoned")
+            .keys()
+            .copied()
+            .collect()
+    }
+
+    /// Every deleted tournament still recoverable, most recently deleted first
+    /// (see [`remove`](Self::remove)).
+    ///
+    /// Sweeps first, so nothing already past its retention is ever offered: a
+    /// server left running for months would otherwise list entries the next
+    /// restart is about to delete. A live tournament is never listed either,
+    /// however its directory is marked — the same rule the sweep follows.
+    pub(crate) fn list_deleted(&self) -> Vec<crate::backup::DeletedTournament> {
+        let live = self.live_ids();
+        crate::backup::sweep(self.backups_root.as_deref(), self.deleted_retention, &live);
+        let mut deleted = crate::backup::list_deleted(self.backups_root.as_deref());
+        deleted.retain(|d| !live.contains(&d.id));
+        deleted
+    }
+
+    /// Bring a deleted tournament back, from one of the backups kept with it:
+    /// `backup_id` names which, defaulting to the newest (the one taken as it
+    /// was deleted).
+    ///
+    /// It comes back as **itself** — same id, so the backups kept with it become
+    /// its own again, marker dropped, leaving exactly the state of a tournament
+    /// that was never deleted. That is also why it stops being listed as
+    /// deleted, and why an id that is somehow live already is refused rather
+    /// than overwritten.
+    ///
+    /// `password` is the password the tournament had — required if it had one,
+    /// refused otherwise; it also becomes the restored tournament's own
+    /// password, so a protected tournament comes back exactly as protected as it
+    /// was. Returns its id and session token, like [`insert`](Self::insert).
+    ///
+    /// Nothing is deleted here: the whole backup history moves back with the
+    /// tournament, so going further back afterwards is the ordinary restore-a-
+    /// backup flow rather than anything to do with the bin.
+    pub(crate) fn restore_deleted(
+        &self,
+        id: Uuid,
+        backup_id: Option<&str>,
+        password: Option<&str>,
+    ) -> Result<(Uuid, Option<String>), RestoreError> {
+        if self.get(id).is_some() {
+            return Err(RestoreError::AlreadyLive);
+        }
+        let dir = self.backups_dir(id).ok_or(RestoreError::NotFound)?;
+        // No marker means this is not a deleted tournament's directory — a live
+        // one's, or nothing at all. Either way there is nothing here to restore.
+        let marker = crate::backup::read_marker(&dir).ok_or(RestoreError::NotFound)?;
+        match (&marker.password_hash, password) {
+            (Some(hash), Some(presented)) if AuthConfig::hash_matches(hash, presented) => {}
+            (Some(_), _) => return Err(RestoreError::WrongPassword),
+            // Volunteering a password for a tournament that had none would
+            // silently protect the restored copy with something the referee
+            // never set on it. Say so instead.
+            (None, Some(_)) => {
+                return Err(RestoreError::PasswordNotNeeded);
+            }
+            (None, None) => {}
+        }
+        let backup_id = match backup_id {
+            Some(backup_id) => backup_id.to_string(),
+            None => {
+                crate::backup::list(Some(&dir))
+                    .into_iter()
+                    .next()
+                    .ok_or(RestoreError::NoBackups)?
+                    .id
+            }
+        };
+        let tournament =
+            crate::backup::load(Some(&dir), &backup_id).ok_or(RestoreError::NoSuchBackup)?;
+        // A backup this server wrote should always be loadable, but it is a file
+        // on disk that anything could have edited since — vet it like an import.
+        tournament
+            .validate_loaded()
+            .map_err(RestoreError::Invalid)?;
+        let restored = self.insert_at(id, tournament, password.map(str::to_string));
+        // Only now that it is registered: until this point a failure had to
+        // leave the entry in the bin, and from here on the directory is a live
+        // tournament's again. A marker that survives is loud but harmless — the
+        // sweep won't touch a live tournament's backups.
+        crate::backup::unmark_deleted(&dir);
+        Ok(restored)
+    }
+}
+
+/// Why [`TournamentRegistry::restore_deleted`] could not restore.
+#[derive(Debug)]
+pub(crate) enum RestoreError {
+    /// No deleted tournament with that id (never existed, or already swept).
+    NotFound,
+    /// A tournament with that id is already running — it has been restored
+    /// once, and restoring again would overwrite the copy in use.
+    AlreadyLive,
+    /// It is password-protected and the password presented was wrong or absent.
+    WrongPassword,
+    /// A password was presented for a tournament that had none.
+    PasswordNotNeeded,
+    /// Its directory survived but holds no backup to restore from.
+    NoBackups,
+    /// The requested backup isn't one of its backups.
+    NoSuchBackup,
+    /// The backup file itself no longer describes a valid tournament.
+    Invalid(TournamentError),
 }
 
 /// State shared across all requests.

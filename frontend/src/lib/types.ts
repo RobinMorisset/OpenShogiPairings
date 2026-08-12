@@ -24,6 +24,7 @@ export type { Cup } from "./generated/Cup";
 export type { CupFormat } from "./generated/CupFormat";
 export type { CupPodium } from "./generated/CupPodium";
 export type { CupStage } from "./generated/CupStage";
+export type { DeletedTournament } from "./generated/DeletedTournament";
 export type { EloPriorShape } from "./generated/EloPriorShape";
 export type { FloaterStyle } from "./generated/FloaterStyle";
 export type { Grade } from "./generated/Grade";

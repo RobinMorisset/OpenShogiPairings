@@ -254,10 +254,17 @@ with a `deleted.json` (when, under what name, and the password hash if it had
 one) and kept for `OSP_BACKUP_RETENTION_DAYS` — 30 by default, `0` to delete it
 outright as older versions did. Marked directories past their retention are
 removed at startup and after each deletion; a directory with no marker belongs
-to a live tournament and is never touched. Recovery is manual for now: import
-the backup file for the tournament you want back. A protected tournament's hash
-outlives its `{id}.auth.json` on purpose, so restoring one can go on demanding
-the password it had.
+to a live tournament and is never touched.
+
+The picker lists what is in there under **Recently deleted**, with a *Restore*
+button per entry, optionally naming which backup to come back at. It comes back
+as *itself*: same id, same backups directory with its whole history, marker
+dropped — indistinguishable from a tournament that was never deleted, which is
+why it leaves the list. Going further back afterwards is then the ordinary
+Backups panel, not the bin. A protected tournament's hash outlives its
+`{id}.auth.json` on purpose: restoring one demands the password it had, and
+gives it back that same password — deleting is not a way to unlock a tournament.
+Its old session tokens do not survive, since restoring builds fresh auth.
 
 ### Live multi-referee sync and conflict detection
 
@@ -397,7 +404,9 @@ Registry-level routes (not scoped to any one tournament):
 | `GET /api/tournaments` | List tournaments for the picker: `{ "tournaments": [{ "id", "name", "has_password" }], "restricted" }`. Public, since the picker has to render before anyone has logged in anywhere — but on a server that has `OSP_ADMIN_PASSWORD` set, a caller without a valid admin token gets only the *published* tournaments and `restricted: true` (which the picker turns into an admin-password prompt rather than a silently short list). A server deliberately run open lists everything, as before. |
 | `POST /api/tournaments` | Create a new tournament: `{ "name": "...", "password"? }`. Admin-gated if `OSP_ADMIN_PASSWORD` is set. Returns `{ "id", "token"? }` (a token if the new tournament has a password, so the creator needn't immediately log in to it). |
 | `POST /api/tournaments/import` | Create a tournament from a save file (what the picker's "Load from file…" does): `{ "tournament": {…the file verbatim…}, "password"? }`. Same admin gate and same `{ "id", "token"? }` response as creating one. Deliberately a *single* request: the format version and the tournament's own invariants are checked before anything is registered, so a file this build can't read leaves nothing behind. The file's own `id` is ignored — the registry mints a fresh one, so importing the same file twice can't collide. |
-| `DELETE /api/tournaments/{id}` | Delete a tournament: its registry entry, persisted file, and backups. |
+| `DELETE /api/tournaments/{id}` | Delete a tournament: its registry entry and persisted file. Its backups are kept (see below), so this is recoverable. |
+| `GET /api/tournaments/deleted` | The bin: `[{ "id", "name", "deleted_at", "has_password", "backups" }]`, most recently deleted first. Admin-gated — it names tournaments somebody deliberately deleted. |
+| `POST /api/tournaments/deleted/{id}/restore` | Bring a deleted tournament back under **its own id**: `{ "backup_id"?, "password"? }`, defaulting to the newest backup — the one taken as it was deleted. `password` is the password it had, required if it had one (403 otherwise) and given back to it. Same admin gate and `{ "id", "token"? }` response as creating one. Its backups directory becomes an ordinary live one again (marker dropped, history kept), so it leaves the bin; restoring one that is already back is a 409. |
 | `POST /api/admin/login` | Exchange the admin password for a bearer token. |
 | `GET /api/ratings` | FESA rating list (server-cached) for registration autocomplete. Admin-gated. |
 | `POST /api/ratings/refresh` | Re-download the FESA list now (manual refresh). Admin-gated. |

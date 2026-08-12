@@ -5,7 +5,7 @@
 //! picked one, and the two `POST`s are what mint new ones.
 
 use axum::body::Bytes;
-use axum::extract::{Request, State};
+use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -14,8 +14,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use uuid::Uuid;
 
+use crate::backup::DeletedTournament;
 use crate::error::ApiError;
-use crate::state::{AppState, TournamentSummary};
+use crate::state::{AppState, RestoreError, TournamentSummary};
 
 /// `GET /api/tournaments`: list tournaments. Public — needed to render the
 /// picker before anyone has logged in anywhere — but see [`list_tournaments`]
@@ -24,15 +25,25 @@ pub(crate) fn public_routes() -> Router<AppState> {
     Router::new().route("/api/tournaments", get(list_tournaments))
 }
 
-/// `POST /api/tournaments` (create a new, empty tournament) and
-/// `POST /api/tournaments/import` (create one from a save file). Callers are
-/// expected to wrap these with [`crate::auth::require_admin_auth`] (see
-/// `lib.rs`) — minting a tournament, by either route, is gated by the admin
-/// password if one is configured.
+/// `POST /api/tournaments` (create a new, empty tournament),
+/// `POST /api/tournaments/import` (create one from a save file), and the two
+/// deleted-tournament routes (list the bin, restore out of it — which mints a
+/// tournament like the other two, and whose listing names tournaments somebody
+/// deliberately deleted). Callers are expected to wrap these with
+/// [`crate::auth::require_admin_auth`] (see `lib.rs`) — minting a tournament, by
+/// any of these routes, is gated by the admin password if one is configured.
+///
+/// `deleted` is a literal path segment where `/api/tournaments/{id}` takes an
+/// id; axum matches the static segment first, so no tournament can shadow these.
 pub(crate) fn admin_routes() -> Router<AppState> {
     Router::new()
         .route("/api/tournaments", post(create_tournament))
         .route("/api/tournaments/import", post(import_tournament))
+        .route("/api/tournaments/deleted", get(list_deleted))
+        .route(
+            "/api/tournaments/deleted/{id}/restore",
+            post(restore_deleted),
+        )
 }
 
 /// What `GET /api/tournaments` answers.
@@ -144,6 +155,68 @@ async fn import_tournament(
     // The only gate between an untrusted file and the registry.
     tournament.validate_loaded()?;
     let (id, token) = state.registry.insert(tournament, req.password);
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateTournamentResponse { id, token }),
+    ))
+}
+
+/// `GET /api/tournaments/deleted`: the tournaments in the bin, most recently
+/// deleted first — what the picker's "recently deleted" section lists. See
+/// [`crate::state::TournamentRegistry::remove`] for how they get there.
+async fn list_deleted(State(state): State<AppState>) -> Json<Vec<DeletedTournament>> {
+    Json(state.registry.list_deleted())
+}
+
+/// Body of `POST /api/tournaments/deleted/{id}/restore`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RestoreRequest {
+    /// Which backup to restore; absent takes the newest, the one taken as the
+    /// tournament was deleted.
+    #[serde(default)]
+    backup_id: Option<String>,
+    /// The password the tournament had, required if it had one — and given to
+    /// the restored tournament, so it comes back as protected as it was.
+    #[serde(default)]
+    password: Option<String>,
+}
+
+/// `POST /api/tournaments/deleted/{id}/restore`: bring a deleted tournament back
+/// as a new one.
+///
+/// The backups are left where they are, so this can be repeated (with a
+/// different `backup_id`) if the first attempt restored the wrong moment.
+async fn restore_deleted(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<RestoreRequest>,
+) -> Result<(StatusCode, Json<CreateTournamentResponse>), ApiError> {
+    let (id, token) = state
+        .registry
+        .restore_deleted(id, req.backup_id.as_deref(), req.password.as_deref())
+        .map_err(|e| match e {
+            RestoreError::NotFound => {
+                ApiError::NotFound(format!("no deleted tournament {id} to restore"))
+            }
+            RestoreError::AlreadyLive => ApiError::Conflict(format!(
+                "tournament {id} is not deleted — it has already been restored"
+            )),
+            RestoreError::NoBackups => {
+                ApiError::NotFound(format!("deleted tournament {id} has no backup left"))
+            }
+            RestoreError::NoSuchBackup => ApiError::NotFound("no such backup".into()),
+            // 403, not 401: the caller's admin token (if any) was fine, so the
+            // client must ask for *this tournament's* password rather than
+            // dropping its session and showing the admin sign-in.
+            RestoreError::WrongPassword => {
+                ApiError::Forbidden("wrong password for that tournament".into())
+            }
+            RestoreError::PasswordNotNeeded => {
+                ApiError::BadRequest("that tournament had no password".into())
+            }
+            RestoreError::Invalid(e) => ApiError::Domain(e),
+        })?;
     Ok((
         StatusCode::CREATED,
         Json(CreateTournamentResponse { id, token }),

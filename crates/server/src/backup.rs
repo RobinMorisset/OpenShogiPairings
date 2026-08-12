@@ -14,6 +14,7 @@
 //! a month. A directory with no marker is a live tournament's and is never
 //! swept.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -78,6 +79,30 @@ pub(crate) struct BackupInfo {
     pub taken_at: u64,
     /// Which transition triggered it, e.g. "round 2 started".
     pub label: String,
+}
+
+/// One deleted tournament still in the bin, as offered back to a client.
+///
+/// The password itself is never sent — only `has_password`, so the picker knows
+/// to ask for it before it can restore. The whole point of keeping the hash is
+/// that a protected tournament stays protected on the way back.
+#[derive(Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub(crate) struct DeletedTournament {
+    /// Its id — the key to restore it by, and the id it comes back under: a
+    /// restored tournament is the same tournament, not a copy of it.
+    pub id: Uuid,
+    /// Its name when it was deleted.
+    pub name: String,
+    /// Unix seconds at which it was deleted.
+    #[ts(type = "number")]
+    pub deleted_at: u64,
+    /// Whether restoring it needs the password it had.
+    pub has_password: bool,
+    /// Its surviving backups, newest first — the last of them taken as it was
+    /// deleted. Sent whole so the referee can pick an earlier one rather than
+    /// only ever getting the final state back.
+    pub backups: Vec<BackupInfo>,
 }
 
 /// Where backups go when the server was given no explicit root: the per-user
@@ -263,6 +288,103 @@ pub(crate) fn mark_deleted(dir: Option<&Path>, name: &str, password_hash: Option
     }
 }
 
+/// Drop `dir`'s deleted marker: its tournament exists again, so this is an
+/// ordinary live tournament's backups directory once more — the same state as
+/// one that was never deleted, history and all.
+///
+/// Returns whether the marker is gone. A failure here leaves a live tournament's
+/// backups looking deleted, which is why [`sweep`] refuses to touch a directory
+/// whose tournament is in the registry: the worst case is a stale entry in the
+/// bin, never a live tournament's backups being swept out from under it.
+pub(crate) fn unmark_deleted(dir: &Path) -> bool {
+    let path = dir.join(DELETED_MARKER);
+    match fs::remove_file(&path) {
+        Ok(()) => true,
+        // Already gone is the state we wanted.
+        Err(e) if e.kind() == io::ErrorKind::NotFound => true,
+        Err(e) => {
+            tracing::error!(
+                "backup: could not remove {}: {e}. Its tournament is back, so these \
+                 backups are live again — delete that file by hand to stop it being \
+                 listed as deleted.",
+                path.display()
+            );
+            false
+        }
+    }
+}
+
+/// Read `dir`'s deleted marker: `Some` when the directory belongs to a deleted
+/// tournament, `None` when it belongs to a live one (no marker) or the marker
+/// can't be read. A corrupt marker is reported and treated as "not deleted",
+/// the same way [`sweep`] treats it — the directory is then neither offered for
+/// restore nor swept, which is the state that loses nothing.
+pub(crate) fn read_marker(dir: &Path) -> Option<DeletedMarker> {
+    let path = dir.join(DELETED_MARKER);
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            tracing::warn!("backup: could not read {}: {e}", path.display());
+            return None;
+        }
+    };
+    match serde_json::from_slice(&bytes) {
+        Ok(marker) => Some(marker),
+        Err(e) => {
+            tracing::warn!("backup: could not parse {}: {e}", path.display());
+            None
+        }
+    }
+}
+
+/// Every deleted tournament still in `root`, most recently deleted first.
+///
+/// A directory whose name isn't a tournament id can't be restored (the id is
+/// how a client names it), so it is skipped — loudly, because nothing this
+/// server writes produces one.
+pub(crate) fn list_deleted(root: Option<&Path>) -> Vec<DeletedTournament> {
+    let Some(root) = root else {
+        return Vec::new();
+    };
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Vec::new(),
+        Err(e) => {
+            tracing::warn!("backup: could not scan {}: {e}", root.display());
+            return Vec::new();
+        }
+    };
+    let mut deleted: Vec<DeletedTournament> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let dir = entry.path();
+            let marker = read_marker(&dir)?;
+            let Some(Ok(id)) = dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(Uuid::parse_str)
+            else {
+                tracing::warn!(
+                    "backup: {} holds a deleted tournament but is not named after one; \
+                     it cannot be restored",
+                    dir.display()
+                );
+                return None;
+            };
+            Some(DeletedTournament {
+                id,
+                name: marker.name,
+                deleted_at: marker.deleted_at,
+                has_password: marker.password_hash.is_some(),
+                backups: list(Some(&dir)),
+            })
+        })
+        .collect();
+    deleted.sort_by_key(|d| std::cmp::Reverse(d.deleted_at));
+    deleted
+}
+
 /// Delete the backups of every tournament deleted more than `retention` ago.
 ///
 /// Scans `root` for directories carrying a [`DELETED_MARKER`]; anything without
@@ -270,10 +392,17 @@ pub(crate) fn mark_deleted(dir: Option<&Path>, name: &str, password_hash: Option
 /// each deletion, which between them covers both the laptop restarted for every
 /// tournament and the server left running for months — no background task.
 ///
-/// Errs towards keeping: a marker that can't be read or parsed leaves its
-/// directory in place (loudly), because the alternative is guessing an
-/// expiry date and deleting the only copy of a tournament.
-pub(crate) fn sweep(root: Option<&Path>, retention: Duration) {
+/// `live` is every tournament id the registry currently holds, and a directory
+/// named after one of them is **never** swept whatever its marker says. The
+/// marker is supposed to be gone by then (see [`unmark_deleted`]), so this only
+/// matters when removing it failed — and the price of that failure must not be
+/// a live tournament losing its backups.
+///
+/// Errs towards keeping in every other doubtful case too: a marker that can't be
+/// read or parsed leaves its directory in place (loudly), because the
+/// alternative is guessing an expiry date and deleting the only copy of a
+/// tournament.
+pub(crate) fn sweep(root: Option<&Path>, retention: Duration, live: &HashSet<Uuid>) {
     let Some(root) = root else {
         return;
     };
@@ -295,30 +424,30 @@ pub(crate) fn sweep(root: Option<&Path>, retention: Duration) {
         if !dir.is_dir() {
             continue;
         }
-        let marker_path = dir.join(DELETED_MARKER);
-        let bytes = match fs::read(&marker_path) {
-            Ok(bytes) => bytes,
-            // No marker: a live tournament's backups.
-            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
-            Err(e) => {
-                tracing::warn!(
-                    "backup: could not read {}: {e}. Keeping these backups.",
-                    marker_path.display()
-                );
-                continue;
-            }
+        // No marker (a live tournament's backups), or one that can't be read:
+        // [`read_marker`] has already said so, and either way these backups stay
+        // — the alternative is guessing an expiry date and deleting the only
+        // copy of a tournament.
+        let Some(marker) = read_marker(&dir) else {
+            continue;
         };
-        let marker: DeletedMarker = match serde_json::from_slice(&bytes) {
-            Ok(marker) => marker,
-            Err(e) => {
-                tracing::warn!(
-                    "backup: could not parse {}: {e}. Keeping these backups rather \
-                     than guessing when they expire; fix or remove that file.",
-                    marker_path.display()
-                );
-                continue;
-            }
-        };
+        // A directory whose tournament is running: a marker left behind by a
+        // restore that could not remove it. Say so — it is also why that
+        // tournament still shows up in the bin.
+        if dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| Uuid::parse_str(n).ok())
+            .is_some_and(|id| live.contains(&id))
+        {
+            tracing::warn!(
+                "backup: {} is marked deleted but its tournament is live; keeping it. \
+                 Remove {} by hand.",
+                dir.display(),
+                DELETED_MARKER
+            );
+            continue;
+        }
         // `saturating_sub` so a marker stamped in the future (a clock moved
         // backwards) reads as age zero and is kept, never as expired.
         let age = Duration::from_secs(now.saturating_sub(marker.deleted_at));
@@ -427,7 +556,7 @@ mod tests {
         assert!(list(None).is_empty());
         assert!(load(None, "0-0-nowhere-to-go").is_none());
         mark_deleted(None, "Homeless Test", None);
-        sweep(None, Duration::ZERO);
+        sweep(None, Duration::ZERO, &HashSet::new());
     }
 
     /// A root of this test's own, so a sweep here can't see (or delete) what a
@@ -492,12 +621,58 @@ mod tests {
         backdate(&recent, 10 * DAY);
         // `live` is left unmarked: a tournament that still exists.
 
-        sweep(Some(&root), 30 * DAY);
+        sweep(Some(&root), 30 * DAY, &HashSet::new());
 
         assert!(!expired.exists(), "deleted 40 days ago, retention is 30");
         assert!(recent.exists(), "deleted 10 days ago, retention is 30");
         assert!(live.exists(), "not deleted at all");
         assert_eq!(list(Some(&recent)).len(), 1, "its backups are intact");
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    /// A restore that could not remove the marker (see [`unmark_deleted`])
+    /// leaves a live tournament's directory looking deleted. The sweep must
+    /// still not touch it: a stale bin entry is a nuisance, deleting a running
+    /// tournament's backups is not.
+    #[test]
+    fn sweep_never_touches_a_live_tournament_even_when_marked() {
+        let root = isolated_root();
+        let id = Uuid::new_v4();
+        let dir = dir_for(&root, id);
+        let t = Tournament::new("Still Live").unwrap();
+        take(Some(&dir), &t, "round 1 started");
+        mark_deleted(Some(&dir), "Still Live", None);
+
+        sweep(Some(&root), Duration::ZERO, &HashSet::from([id]));
+        assert!(dir.exists());
+        assert_eq!(list(Some(&dir)).len(), 1);
+
+        // Once it is no longer live, the same sweep clears it.
+        sweep(Some(&root), Duration::ZERO, &HashSet::new());
+        assert!(!dir.exists());
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn unmarking_makes_a_directory_ordinary_again() {
+        let root = isolated_root();
+        let dir = dir_for(&root, Uuid::new_v4());
+        let t = Tournament::new("Restored Test").unwrap();
+        take(Some(&dir), &t, "round 1 started");
+        mark_deleted(Some(&dir), "Restored Test", None);
+        assert!(unmark_deleted(&dir));
+
+        // No marker: not in the bin, not sweepable, backups intact — exactly a
+        // tournament that was never deleted.
+        assert!(read_marker(&dir).is_none());
+        assert!(list_deleted(Some(&root)).is_empty());
+        sweep(Some(&root), Duration::ZERO, &HashSet::new());
+        assert_eq!(list(Some(&dir)).len(), 1);
+
+        // And unmarking what isn't marked is the state we wanted, not an error.
+        assert!(unmark_deleted(&dir));
 
         fs::remove_dir_all(&root).ok();
     }
@@ -513,7 +688,7 @@ mod tests {
         take(Some(&dir), &t, "round 1 started");
         fs::write(dir.join(DELETED_MARKER), b"{ not json").unwrap();
 
-        sweep(Some(&root), Duration::ZERO);
+        sweep(Some(&root), Duration::ZERO, &HashSet::new());
 
         assert!(dir.exists());
         assert_eq!(list(Some(&dir)).len(), 1);

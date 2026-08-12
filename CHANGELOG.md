@@ -204,10 +204,15 @@ rather than half-parsed; re-create the tournament.
   edits old, and a tournament deleted before round 1 had none at all). Its
   backups directory is then kept for a month before being swept — set
   `OSP_BACKUP_RETENTION_DAYS` to change that, or to `0` for the old behaviour.
-  Restoring one is by hand for now: import the file from the backups directory,
-  whose path the Backups button names. A deleted tournament's password hash is
-  kept alongside its backups, so a protected tournament stays protected on the
-  way back.
+  The picker grew a **Recently deleted** section listing what is in there, each
+  entry with a *Restore* button — optionally naming which backup to come back
+  at, when there is more than one. A restored tournament comes back as *itself*:
+  same id, and its backups become its own again with their whole history, so it
+  is indistinguishable from one that was never deleted and it leaves the list.
+  Going further back afterwards is then the ordinary Backups panel. A deleted
+  tournament's password hash is kept alongside its backups, so restoring a
+  protected one asks for the password it had and gives it back that same
+  password — deleting is not a way to unlock a tournament.
 
 - **The desktop app keeps a log file**, where it previously logged only in
   development builds — so a packaged app had no way to report that it could not

@@ -164,11 +164,22 @@ app-local data directory for backups via `dirs::data_dir()` — point
 app restarts without the user ever touching a file dialog.
 
 **Deleting a tournament** (`DELETE /api/tournaments/{id}`, V1): removes the
-registry entry, deletes `{id}.json` from `OSP_DATA_DIR`, and deletes its
-backups directory (`backups/{id}/`, see `backup.rs`). Requires that
-tournament's own auth (its password, or open access if it has none) — not
-the global admin password, since the people who'd want to clear out a
-tournament are its referees, not necessarily whoever created it.
+registry entry and deletes `{id}.json` (+ its auth sidecar) from `OSP_DATA_DIR`.
+Requires that tournament's own auth (its password, or open access if it has
+none) — not the global admin password, since the people who'd want to clear out
+a tournament are its referees, not necessarily whoever created it.
+
+Its backups directory (`backups/{id}/`, see `backup.rs`) is **kept**: a final
+backup is taken first and the directory is marked deleted, to be swept once
+`OSP_BACKUP_RETENTION_DAYS` (30) have passed. Until then it is listed by
+`GET /api/tournaments/deleted` and can be restored out of — under its *own* id,
+which is what lets the same directory become its live backups directory again,
+history and all, once the marker is dropped. The registry is the authority on
+what is live: a directory named after a tournament it holds is never swept and
+never listed as deleted, whatever marker it carries, so a failure to drop the
+marker can only ever leave a stale bin entry. Restoring is admin-gated *and*,
+for a tournament that had a password, needs that password: deleting must not be
+a way to launder a protected tournament into an open one.
 
 ---
 
@@ -186,6 +197,8 @@ per-tournament `/login`, etc. New routes for the registry itself:
 | `POST` | `/api/tournaments` | admin token | `{ name, password? }` → creates, persists, returns `{ id }` (and a token immediately if a password was given, so the creator doesn't have to log in to their own tournament). See §3.1. |
 | `GET`  | `/api/ratings`, `POST /api/ratings/refresh` | admin token | The FESA ratings proxy — an instance-wide resource, not per-tournament data, so it shares the admin gate rather than any tournament's password. See §3.1. |
 | `DELETE` | `/api/tournaments/{id}` | that tournament's own token | Removes the registry entry and its persisted file. Takes a final backup and keeps the backups directory for `OSP_BACKUP_RETENTION_DAYS` (30). 404 if `id` unknown. |
+| `GET` | `/api/tournaments/deleted` | admin token | The bin: `{ id, name, deleted_at, has_password, backups }` per deleted tournament whose backups are still around, most recently deleted first. Admin-gated: it names tournaments somebody deliberately deleted. |
+| `POST` | `/api/tournaments/deleted/{id}/restore` | admin token + that tournament's old password | `{ backup_id?, password? }` → the tournament back under its own id, from one of its backups (newest by default). 403 (not 401) on a wrong password, so the client asks for that password rather than dropping its admin session; 409 if that tournament is live again already. |
 | `POST` | `/api/tournaments/{id}/login` | — | Existing shape, scoped. 404 if `id` unknown, no-op/200 with no token needed if that tournament has no password. |
 | `GET` | `/api/tournaments/{id}/events` | none (SSE can't send auth) | Same as today, scoped to one instance's broadcaster. |
 | everything else | `/api/tournaments/{id}/...` | per-instance token | Existing handlers, just nested + reading from the looked-up `TournamentInstance` instead of the global `AppState.store`. |

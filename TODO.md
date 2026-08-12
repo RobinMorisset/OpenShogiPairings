@@ -43,15 +43,6 @@ Known limitations and future work, roughly ordered by area.
   regenerated on every change, for the referee to upload wherever the club
   already has a website.
 
-- **Restore a deleted tournament from the app.** The backups now survive the
-  deletion (a final one is taken, the directory is kept for
-  `OSP_BACKUP_RETENTION_DAYS`, default 30), but getting one back means finding
-  the file on the server and importing it. Missing: `GET
-  /api/tournaments/deleted` + `POST /api/tournaments/deleted/{id}/restore`
-  (admin-gated, minting a new id like import, and demanding the password hash
-  the marker kept when the tournament had one), and a "recently deleted" section
-  in the picker.
-
 ## ELO estimator
 
 - **Glicko / Glicko v2**, they're advanced variants of ELO, look at using them once we have the full games data.

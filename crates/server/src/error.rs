@@ -26,9 +26,20 @@ pub(crate) enum ApiError {
     NotFound(String),
     /// The request lacked a valid session token (401). See [`crate::auth`].
     Unauthorized,
+    /// The caller is authenticated, but lacks a *per-resource* password: today,
+    /// restoring a deleted tournament that had one (403). Deliberately not a
+    /// 401, which the client answers by clearing its token and showing the
+    /// sign-in prompt — the wrong move when the token was fine and it is the
+    /// tournament's own password that was wrong.
+    Forbidden(String),
     /// A mutating request was based on a stale tournament version (409). See
     /// [`crate::live`].
     VersionConflict,
+    /// The request contradicts the current state (409) in a way rereading fixes
+    /// — today, restoring a tournament that is not deleted any more. Distinct
+    /// from [`VersionConflict`](Self::VersionConflict), which the client answers
+    /// by replaying its edit against the new version.
+    Conflict(String),
     /// An upstream dependency (e.g. FESA) failed and no cache is available (502).
     Upstream(String),
     /// A resource anyone may open is already at its cap (503) — today, the
@@ -344,6 +355,8 @@ impl IntoResponse for ApiError {
                 StatusCode::UNAUTHORIZED,
                 ErrorBody::message("authentication required".to_string()),
             ),
+            ApiError::Forbidden(message) => (StatusCode::FORBIDDEN, ErrorBody::message(message)),
+            ApiError::Conflict(message) => (StatusCode::CONFLICT, ErrorBody::message(message)),
             ApiError::VersionConflict => (
                 StatusCode::CONFLICT,
                 ErrorBody::message(

@@ -84,7 +84,16 @@ impl AuthConfig {
 
     /// Whether `presented` matches the password this hash was built from.
     pub fn password_matches(&self, presented: &str) -> bool {
-        bcrypt::verify(presented, &self.inner.password_hash).unwrap_or(false)
+        Self::hash_matches(&self.inner.password_hash, presented)
+    }
+
+    /// Whether `presented` matches a bare `hash` — for a password that outlives
+    /// its `AuthConfig`, as a deleted tournament's does (see
+    /// [`crate::backup::DeletedMarker`]). Same check as
+    /// [`password_matches`](Self::password_matches), without having to mint a
+    /// per-boot token for a tournament that isn't running.
+    pub fn hash_matches(hash: &str, presented: &str) -> bool {
+        bcrypt::verify(presented, hash).unwrap_or(false)
     }
 
     /// The current bearer token, e.g. to hand back immediately on creation so
