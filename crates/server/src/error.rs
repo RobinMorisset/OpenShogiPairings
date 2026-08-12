@@ -289,6 +289,12 @@ pub(crate) fn domain_payload(
         // caught by its format version, which *is* translated).
         | TournamentError::MisplacedExplanation { .. }
         | TournamentError::WatermarkPastLastRound { .. }
+        // Same class for the cup: its bracket size and seed list are frozen
+        // together at finalization, so a file where they disagree (or that seeds
+        // a player it doesn't contain) was hand-edited.
+        | TournamentError::CupSeedCountMismatch { .. }
+        | TournamentError::DuplicateCupSeed { .. }
+        | TournamentError::UnknownCupSeed { .. }
         // Deliberately English: unfinished scaffolding (the UI offers no team
         // probe yet), not a state the product is meant to have.
         // TODO: `InvalidDraft` carries a free-form English string built at ~8
@@ -434,6 +440,17 @@ mod tests {
             TournamentError::CupSizeRequired,
             TournamentError::InvalidCupSize { size: 12 },
             TournamentError::NotEnoughEligiblePlayers { needed: 8, have: 5 },
+            TournamentError::CupSeedCountMismatch {
+                size: 8,
+                expected: 8,
+                found: 3,
+            },
+            TournamentError::DuplicateCupSeed {
+                seed: TournamentId(4),
+            },
+            TournamentError::UnknownCupSeed {
+                seed: TournamentId(9),
+            },
             TournamentError::CannotRemoveCupPlayer,
             TournamentError::CannotRemovePlayedPlayer,
             TournamentError::CupBracketInconsistent,

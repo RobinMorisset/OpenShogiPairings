@@ -34,6 +34,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::round::{CupStage, Forfeit, PairingSource, Round};
+use crate::tournament::TournamentError;
 use crate::units::TournamentId;
 
 /// The valid cup **bracket** sizes, each a power of two. The qualifier format
@@ -187,6 +188,41 @@ impl Cup {
     /// How many eligible players this cup takes (see [`cup_field_size`]).
     pub fn field_size(&self) -> u32 {
         cup_field_size(self.size, self.format)
+    }
+
+    /// Re-check the shape [`Tournament::finalize_registration_with`] froze, for a
+    /// cup that arrived from a save file rather than from that constructor.
+    ///
+    /// Everything below this point takes the shape as given and *panics* if it
+    /// doesn't hold: [`Self::qualifier_split`] splits the seed list at `size / 2`,
+    /// [`Self::bracket_rounds`] reads `size` as a power of two, and both
+    /// [`Self::podium`] and [`Self::bracket_view`] index the semifinal's two
+    /// losers. [`Self::bracket_view`] is rebuilt for *every* tournament response,
+    /// so a cup that disagrees with its bracket size takes down a plain read —
+    /// which is why this runs on load, from [`Tournament::validate_loaded`].
+    ///
+    /// [`Tournament::finalize_registration_with`]: crate::Tournament::finalize_registration_with
+    /// [`Tournament::validate_loaded`]: crate::Tournament::validate_loaded
+    pub(crate) fn validate_shape(&self) -> Result<(), TournamentError> {
+        if !CUP_SIZES.contains(&self.size) {
+            return Err(TournamentError::InvalidCupSize { size: self.size });
+        }
+        let expected = self.field_size();
+        if self.seed_order.len() != expected as usize {
+            return Err(TournamentError::CupSeedCountMismatch {
+                size: self.size,
+                expected,
+                found: self.seed_order.len(),
+            });
+        }
+        // A repeated seed doesn't panic, but it puts one player in two slots of
+        // the same bracket — a fold that can pair them with themselves, and a
+        // podium that can award them two places.
+        let mut seen = HashSet::with_capacity(self.seed_order.len());
+        if let Some(&seed) = self.seed_order.iter().find(|&&s| !seen.insert(s)) {
+            return Err(TournamentError::DuplicateCupSeed { seed });
+        }
+        Ok(())
     }
 
     /// The qualifier format's two groups of seeds: `(pre-qualified,

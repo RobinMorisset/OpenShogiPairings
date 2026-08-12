@@ -227,8 +227,9 @@ impl TournamentStore {
     /// (or unreadable at the filesystem level), `Err` if it is there but this
     /// build cannot make a tournament of it.
     ///
-    /// A file that is present but unreadable — a wrong/old format version, or
-    /// corrupt bytes — is reported loudly at `error` level and left
+    /// A file that is present but unreadable — a wrong/old format version,
+    /// corrupt bytes, or a record that breaks an invariant the rest of the
+    /// program relies on — is reported loudly at `error` level and left
     /// **untouched**, and the reason comes back so the tournament can still be
     /// listed (see [`LoadProblem`]). This is deliberate: an old file from before
     /// an incompatible format bump must be rejected, not silently discarded —
@@ -259,8 +260,22 @@ impl TournamentStore {
             );
             return Err(LoadProblem::new(error, &bytes));
         }
-        match serde_json::from_slice(&bytes) {
-            Ok(tournament) => Ok(Some(tournament)),
+        match serde_json::from_slice::<Tournament>(&bytes) {
+            // Parsing proves the shape, not the invariants, and the read path
+            // trusts both: a bracket that disagrees with its cup size panics when
+            // the first `GET` derives it. So a file off the disk passes the same
+            // gate an imported one does, and a record that fails it is listed as
+            // a problem rather than served.
+            Ok(tournament) => match tournament.validate_loaded() {
+                Ok(()) => Ok(Some(tournament)),
+                Err(error) => {
+                    tracing::error!(
+                        "refusing to load {}: {error}. The file is left untouched.",
+                        path.display()
+                    );
+                    Err(LoadProblem::new(error, &bytes))
+                }
+            },
             Err(e) => {
                 tracing::error!(
                     "could not parse {}: {e}. The file is left untouched.",
@@ -1918,6 +1933,59 @@ mod tests {
         assert_eq!(
             listed[0].problem.as_ref().map(|p| p.code),
             Some(Some("malformed_save"))
+        );
+
+        fs::remove_dir_all(data_dir.parent().unwrap()).ok();
+    }
+
+    /// A save whose cup no longer matches its bracket size parses fine — the
+    /// shape is intact — and then panics the first time a response derives the
+    /// bracket from it. Only `validate_loaded` catches that, and the boot path
+    /// has to run it just as the import route does.
+    #[test]
+    fn a_save_whose_cup_fails_validation_is_listed_rather_than_loaded() {
+        use osp_core::TournamentSettings;
+
+        let (data_dir, backups_root) = isolated_roots();
+        fs::create_dir_all(&data_dir).unwrap();
+        let mut t = Tournament::new("Nancy Cup 2026").unwrap();
+        t.update_settings(TournamentSettings {
+            cup_enabled: true,
+            ..Default::default()
+        })
+        .unwrap();
+        for i in 0..8 {
+            let player = t
+                .add_player(NewPlayer {
+                    last_name: format!("E{i}"),
+                    rating: Some(2000 - i * 10),
+                    ..Default::default()
+                })
+                .unwrap()
+                .id;
+            t.set_player_eligible(player, true).unwrap();
+        }
+        t.finalize_registration_with(Some(8)).unwrap();
+        // Hand-edit the bracket size, as only a text editor can.
+        t.cup.as_mut().unwrap().size = 12;
+        let id = t.id;
+        fs::write(
+            data_dir.join(format!("{id}.json")),
+            serde_json::to_vec(&t).unwrap(),
+        )
+        .unwrap();
+
+        let registry = TournamentRegistry::new(Some(data_dir.clone()), Some(backups_root));
+        let listed = registry.list(false);
+        assert_eq!(listed.len(), 1);
+        // Listed under its own name, with the reason — not served, and not
+        // silently dropped either.
+        assert_eq!(listed[0].name, "Nancy Cup 2026");
+        let problem = listed[0].problem.as_ref().expect("listed as a problem");
+        assert!(
+            problem.message.contains("invalid cup size 12"),
+            "unexpected problem message: {}",
+            problem.message
         );
 
         fs::remove_dir_all(data_dir.parent().unwrap()).ok();

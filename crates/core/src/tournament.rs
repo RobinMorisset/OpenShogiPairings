@@ -226,6 +226,21 @@ pub enum TournamentError {
     /// Fewer eligible players than the chosen cup size.
     #[error("need at least {needed} eligible players for the cup (have {have})")]
     NotEnoughEligiblePlayers { needed: u32, have: usize },
+    /// A loaded cup's seed list is the wrong length for its bracket size — the
+    /// two are frozen together at finalization, and the bracket replay folds one
+    /// against the other without re-checking.
+    #[error("a cup bracket of {size} needs {expected} seeds (found {found})")]
+    CupSeedCountMismatch {
+        size: u32,
+        expected: u32,
+        found: usize,
+    },
+    /// A loaded cup seeds the same player into two bracket slots.
+    #[error("cup seed {seed} appears more than once")]
+    DuplicateCupSeed { seed: TournamentId },
+    /// A loaded cup seeds a tournament number no player in the file carries.
+    #[error("cup seed {seed} is not a player of this tournament")]
+    UnknownCupSeed { seed: TournamentId },
     /// A player who is seeded in the cup bracket cannot be removed.
     #[error("cannot remove a player seeded in the cup")]
     CannotRemoveCupPlayer,
@@ -2318,6 +2333,26 @@ impl Tournament {
                 mark: self.explanations_faithful_through,
                 rounds: self.rounds.len(),
             });
+        }
+        // The cup is the one part of the record whose shape is load-bearing on the
+        // *read* path: `cup_bracket()` replays the whole bracket for every
+        // tournament response, and that replay panics on a size or a seed count
+        // `finalize_registration_with` would have rejected. Only that constructor
+        // enforced them, and a file never ran it.
+        if let Some(cup) = &self.cup {
+            cup.validate_shape()?;
+            // A seed is a tournament number, and everything downstream — the
+            // boards the bracket pairs, the score tables those boards feed —
+            // resolves it against the field. One that names nobody is a corrupt
+            // file, not a player who left (removing a seeded player is refused).
+            let known: HashSet<TournamentId> = self
+                .players
+                .iter()
+                .filter_map(|p| p.tournament_id)
+                .collect();
+            if let Some(&seed) = cup.seed_order.iter().find(|s| !known.contains(s)) {
+                return Err(TournamentError::UnknownCupSeed { seed });
+            }
         }
         Ok(())
     }
@@ -4596,6 +4631,101 @@ mod tests {
         let board = find_board(&t, 1, s[0], s[7]).expect("bracket board created despite absence");
         assert!(matches!(board.source, PairingSource::Cup { .. }));
         assert!(!board.is_decided());
+    }
+
+    /// A finalized, valid cup — the starting point for the malformed-file tests
+    /// below, which break it one field at a time.
+    fn direct_cup_of_8() -> Tournament {
+        let mut t = Tournament::new("C").unwrap();
+        enable_cup(&mut t);
+        for i in 0..8 {
+            add_rated(&mut t, &format!("E{i}"), 2000 - i * 10, true);
+        }
+        t.finalize_registration_with(Some(8)).unwrap();
+        t.validate_loaded().unwrap();
+        t
+    }
+
+    /// Only `finalize_registration_with` enforced the bracket size, and a loaded
+    /// file never ran it — while `cup_bracket()` (built for *every* tournament
+    /// response) derives its round count from that size and indexes the
+    /// semifinal's two losers. A size the fold can't reach is a panic on the read
+    /// path, so `validate_loaded` has to restate the rule.
+    #[test]
+    fn validate_loaded_rejects_an_unsupported_cup_size() {
+        let t = direct_cup_of_8();
+        for size in [0, 1, 2, 7, 12, 128] {
+            let mut bad = t.clone();
+            bad.cup.as_mut().unwrap().size = size;
+            assert_eq!(
+                bad.validate_loaded(),
+                Err(TournamentError::InvalidCupSize { size }),
+                "a cup of size {size} must not import"
+            );
+        }
+    }
+
+    /// The seed list and the bracket size are frozen together; a file where they
+    /// disagree folds a short list against a full bracket (or splits it at a point
+    /// past its end, under the qualifier format).
+    #[test]
+    fn validate_loaded_rejects_a_seed_list_that_doesnt_fill_the_bracket() {
+        let t = direct_cup_of_8();
+        let mut short = t.clone();
+        short.cup.as_mut().unwrap().seed_order.truncate(3);
+        assert_eq!(
+            short.validate_loaded(),
+            Err(TournamentError::CupSeedCountMismatch {
+                size: 8,
+                expected: 8,
+                found: 3,
+            })
+        );
+        let mut long = t.clone();
+        long.cup.as_mut().unwrap().seed_order.push(TournamentId(1));
+        assert_eq!(
+            long.validate_loaded(),
+            Err(TournamentError::CupSeedCountMismatch {
+                size: 8,
+                expected: 8,
+                found: 9,
+            })
+        );
+        // Switching the stored format changes how many seeds the same bracket
+        // takes: a qualifier cup of 8 needs 12, not 8.
+        let mut requalified = t;
+        requalified.cup.as_mut().unwrap().format = CupFormat::Qualifier;
+        assert_eq!(
+            requalified.validate_loaded(),
+            Err(TournamentError::CupSeedCountMismatch {
+                size: 8,
+                expected: 12,
+                found: 8,
+            })
+        );
+    }
+
+    /// Seeds are tournament numbers, resolved against the field by everything the
+    /// bracket feeds. A repeated one puts a player in two slots; one that names
+    /// nobody has no player to resolve to at all.
+    #[test]
+    fn validate_loaded_rejects_seeds_that_dont_name_the_field() {
+        let t = direct_cup_of_8();
+        let mut twice = t.clone();
+        let top = twice.cup.as_ref().unwrap().seed_order[0];
+        twice.cup.as_mut().unwrap().seed_order[7] = top;
+        assert_eq!(
+            twice.validate_loaded(),
+            Err(TournamentError::DuplicateCupSeed { seed: top })
+        );
+        let mut phantom = t;
+        phantom.cup.as_mut().unwrap().seed_order[7] = TournamentId(99);
+        assert_eq!(
+            phantom.validate_loaded(),
+            Err(TournamentError::UnknownCupSeed {
+                seed: TournamentId(99)
+            })
+        );
     }
 
     // --- Frozen explanations and the staleness watermark ---------------------

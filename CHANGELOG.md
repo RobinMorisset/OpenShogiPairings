@@ -69,6 +69,14 @@ NOT backwards compatible with any earlier version.
   progress. Since a round only finishes when a board result is recorded, and
   there was no board to record, it stayed unfinished and no later round could
   be started.
+- **A damaged save of a cup tournament brought the server down instead of being
+  refused.** The bracket is rebuilt from the frozen seeding on every read, and
+  that rebuild trusted the bracket size and the seed list it was given — so a
+  file whose two no longer agreed (a truncated write, a hand edit) crashed the
+  moment anything looked at that tournament, taking the others with it. Such a
+  file is now checked when it is loaded, exactly as an imported one is, and
+  appears in the picker with the reason it could not be opened; the file itself
+  is left untouched.
 - Some filesystem failures were silently swallowed; they are now surfaced
   as errors in the log.
 - The desktop app now respects `OSP_DATA_DIR` instead of putting its data in a
