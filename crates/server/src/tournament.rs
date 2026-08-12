@@ -9,8 +9,8 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{
     Board, Counterfactual, CounterfactualMode, CupBracketView, CupPodium, ForcedMatch, Forfeit,
-    Handicap, NewPlayer, RoundExplanation, SitoutValue, Standing, TeamId, TeamStanding, Tournament,
-    TournamentId, TournamentSettings, UnitKey, Winner,
+    Handicap, NewPlayer, SitoutValue, Standing, TeamId, TeamStanding, Tournament, TournamentId,
+    TournamentSettings, UnitKey, Winner,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -51,7 +51,6 @@ use crate::{auth, live, public};
 /// - `POST   /rounds/prepare`         begin drafting the next round
 /// - `PUT    /draft`                  edit the draft
 /// - `POST   /rounds`                 confirm the draft (pair & start)
-/// - `GET    /rounds/{n}/explanation` explain a round's Swiss pairings
 /// - `POST   /rounds/{n}/counterfactual` explain forcing/forbidding a pairing
 /// - `POST   /rounds/force-pairing`      re-pair the round with a forced board
 /// - `POST   /rounds/{n}/boards/{i}/result`  toggle a board winner
@@ -109,7 +108,6 @@ pub(crate) fn scope(state: AppState) -> Router<AppState> {
         .route("/rounds/prepare", post(prepare_round))
         .route("/draft", put(update_draft))
         .route("/rounds", post(confirm_round))
-        .route("/rounds/{round_number}/explanation", get(round_explanation))
         .route(
             "/rounds/{round_number}/counterfactual",
             post(round_counterfactual),
@@ -583,18 +581,6 @@ async fn confirm_round(
 #[derive(Deserialize)]
 struct RoundParams {
     round_number: u32,
-}
-
-/// Explain a round's Swiss pairings: per-board rule ledger and round report.
-/// Read-only, so no backup is taken.
-async fn round_explanation(
-    TournamentCtx(instance): TournamentCtx,
-    Path(params): Path<RoundParams>,
-) -> Result<Json<RoundExplanation>, ApiError> {
-    let store = instance.read();
-    let tournament = store.current().ok_or(ApiError::NoTournament)?;
-    let explanation = tournament.explain_round(params.round_number)?;
-    Ok(Json(explanation))
 }
 
 /// Body of the counterfactual endpoint: the two players to probe and the mode —

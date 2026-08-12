@@ -175,11 +175,12 @@ service against a laptop in the middle of a tournament. The standing rule is
 that the public surface is **precomputed or cheap-derived data only**, and
 nothing that can invoke the solver.
 
-`/rounds/{n}/explanation` is *not* in that category, and since the appendix
-landed it is a plain lookup: the ledger is frozen onto the round at
-confirmation, so there is no rebuild and no faithfulness problem left. It rides
-along inside the projection's `rounds` already; what is still to do is the
-public *UI* for it, kept out of phase 1 only to keep that phase small.
+The round explanation is *not* in that category, and since the appendix landed
+it is a plain lookup: the ledger is frozen onto the round at confirmation, so
+there is no rebuild and no faithfulness problem left. It rides along inside the
+projection's `rounds` already (which is why it needs no endpoint of its own);
+what is still to do is the public *UI* for it, kept out of phase 1 only to keep
+that phase small.
 
 ### 3.1 Opting in
 

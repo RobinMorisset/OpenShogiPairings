@@ -288,17 +288,14 @@ maps `RuleId` → localized label.
 
 ## Server API
 
-All read-only (no mutation, no backup). The round explanation is a **lookup**:
-it was scored against the model that paired the round and frozen onto the round
-at confirmation (see the appendix of [public-access.md](public-access.md)), so
-it cannot drift when an earlier result or a rating is corrected. The
+All read-only (no mutation, no backup). The round explanation is not an endpoint
+at all any more: it was scored against the model that paired the round and
+frozen onto the round at confirmation (see the appendix of
+[public-access.md](public-access.md)), so it rides along with the round in every
+tournament fetch and there is nothing left to ask for separately. The
 counterfactual is still computed on demand, from current state.
 
 ```
-GET  /api/tournament/rounds/{number}/explanation
-       → 200 RoundExplanation
-       → 404 if the round doesn't exist
-
 POST /api/tournament/rounds/{number}/counterfactual
        body: { "mode": "force" | "forbid", "a": Uuid, "b": Uuid }
        → 200 Counterfactual
@@ -441,8 +438,9 @@ the probe panel returns a normal diff (cost summary + changed boards) and the
 
 ## Phasing
 
-1. **Ledger + report** — *shipped.* Core §1–3, `GET …/explanation`, frontend
-   surfaces 1–2. The always-on layer.
+1. **Ledger + report** — *shipped.* Core §1–3, frontend surfaces 1–2. The
+   always-on layer. (It shipped behind `GET …/explanation`; freezing in step 4
+   put the ledger on the round itself, and the endpoint is gone.)
 2. **Counterfactual force** — *shipped.* Core §4 force path (arithmetic stability
    tie-break), `POST …/counterfactual`, frontend surface 3. The centrepiece.
 3. **Forbid direction** and the "force this pairing" action — *shipped.* Forbid
