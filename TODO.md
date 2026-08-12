@@ -75,3 +75,5 @@ Known limitations and future work, roughly ordered by area.
 - Print per-player small **result reporting sheets**
 
 - **Cleanup the Changelog** (tons of redundant entries were made during the team tournament sequence of commits)
+
+- Better UI for standings tab when it gets wider than the screen.
