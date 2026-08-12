@@ -1024,8 +1024,10 @@ pub fn max_weight_matching<W: Weight>(weight: &[W], n: usize) -> Vec<Option<usiz
 /// `n` must be even (a perfect matching is otherwise impossible) and `cost` must
 /// have exactly `n * n` entries. Only the strict **upper triangle** (`i < j`) is
 /// read — the cost is taken as symmetric, so the diagonal and the lower triangle
-/// are ignored and a caller may leave them unset. Costs must be non-negative. On
-/// the complete graph every vertex is pairable, so a perfect matching always
+/// are ignored and a caller may leave them unset. Costs may be negative: the
+/// reduction below subtracts each one from an offset above the largest, so what
+/// must fit in `W` is that offset minus the smallest cost, not each cost's sign.
+/// On the complete graph every vertex is pairable, so a perfect matching always
 /// exists.
 ///
 /// The matrix is a flat slice, not `&[Vec<_>]`, so a caller building it touches

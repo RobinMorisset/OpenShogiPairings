@@ -1,9 +1,9 @@
 //! The tournament aggregate.
 //!
-//! For now a tournament is just a named list of players. Rounds, pairings and
-//! results will be added here later; keeping the mutation logic in this crate
-//! (rather than in the server) means the server, a future CLI, and the Tauri app
-//! all share exactly one implementation.
+//! A tournament is its players and teams, its settings, and the rounds played so
+//! far, with every mutation that moves it forward. Keeping that logic in this
+//! crate (rather than in the server) means the server, the simulator and the
+//! Tauri app all share exactly one implementation.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -634,11 +634,6 @@ impl Tournament {
         Ok(())
     }
 
-    /// The ranked standings (points and tie-breaks) from the completed rounds.
-    ///
-    /// This is the canonical ordering — used by the Results tab and, later, the
-    /// American grid — so scoring lives in one place rather than being re-derived
-    /// by each client.
     /// The ranked **team** standings, or `None` outside team mode — the team
     /// twin of [`Self::standings`], with the same safety floor (nothing to rank
     /// before finalization assigns the numbers everything is keyed by).
@@ -657,6 +652,11 @@ impl Tournament {
         ))
     }
 
+    /// The ranked standings (points and tie-breaks) from the completed rounds.
+    ///
+    /// This is the canonical ordering — used by the Results tab and by the
+    /// American grid — so scoring lives in one place rather than being
+    /// re-derived by each client.
     pub fn standings(&self) -> Vec<Standing> {
         // Scoring keys players by their tournament number, which is only assigned
         // at finalization, so there is nothing safe (or meaningful) to compute

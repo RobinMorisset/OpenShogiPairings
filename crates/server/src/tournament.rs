@@ -58,7 +58,10 @@ use crate::{auth, live, public};
 /// - `POST   /rounds/{n}/boards/{i}/no-show` set/clear a board no-show
 /// - `PUT    /rounds/{n}/boards/{i}/handicap` set/clear the handicap
 /// - `POST   /rounds/{n}/boards/{i}/long`    flag/unflag a two-round long game
+/// - `PUT    /rounds/{n}/sitouts/{player}`   re-score what a sat-out round was worth
+/// - `PUT    /rounds/{n}/team-sitouts/{team_id}` the same for a whole team
 /// - `POST   /players`       register a player
+/// - `POST   /players/import-csv` register a roster from a raw CSV body
 /// - `PUT    /players/{player_id}`  edit a player
 /// - `DELETE /players/{player_id}`  remove a player
 /// - `POST   /players/{player_id}/eligible`  set cup eligibility

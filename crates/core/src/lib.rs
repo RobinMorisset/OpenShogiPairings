@@ -1,11 +1,10 @@
 //! Core domain logic for OpenShogiPairings.
 //!
-//! At this early stage this crate carries the data types shared between the
-//! server and its clients ([`Player`], [`Tournament`], …) plus the tournament
-//! mutation logic. The pairing engine (Blossom matching over a weighted player
-//! graph, and later an ILP/CP-SAT backend) will live here too so that it can be
-//! reused unchanged by the HTTP server, a future CLI client, and the Tauri
-//! desktop app.
+//! This crate carries the data types shared between the server and its clients
+//! ([`Player`], [`Tournament`], …), the tournament mutation logic, and the
+//! pairing engine (Blossom matching over a weighted player graph, with an
+//! ILP/CP-SAT backend still to come) — so all of it is reused unchanged by the
+//! HTTP server, the simulator, and the Tauri desktop app.
 //!
 //! These docs are written to be read *in the source* as much as in rustdoc, so a
 //! public item freely links to the private one that explains it (the rule table

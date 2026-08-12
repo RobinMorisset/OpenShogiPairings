@@ -21,7 +21,7 @@ export type TeamStanding = { team_id: string,
  */
 tournament_id: TeamId, name: string, 
 /**
- * Matches won (a drawn match scores half a point but no victory).
+ * Matches won, in half-wins: a drawn match is half a victory.
  */
 victories: Wins, 
 /**

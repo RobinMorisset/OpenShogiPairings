@@ -270,8 +270,6 @@ pub(crate) fn match_result(round: &Round, m: &TeamMatch, wiel_rule: bool) -> Mat
 /// [`PairingUnit`](crate::pairing::PairingUnit)s are built from.
 #[derive(Default, Clone)]
 pub(crate) struct TeamScore {
-    /// MacMahon starting points (from the team average) plus match points plus
-    /// whatever each round the team sat out was worth to it.
     /// Match victories, in half-wins: a match won is one, a drawn match half of
     /// one, and a whole-team sit-out whatever its cell says.
     pub victories: Wins,
@@ -1109,7 +1107,7 @@ pub struct TeamStanding {
     /// Dense team number, for the cross-table's opponent column.
     pub tournament_id: TeamId,
     pub name: String,
-    /// Matches won (a drawn match scores half a point but no victory).
+    /// Matches won, in half-wins: a drawn match is half a victory.
     pub victories: Wins,
     /// Games won by the team's players — the team tie-break.
     pub board_wins: Wins,

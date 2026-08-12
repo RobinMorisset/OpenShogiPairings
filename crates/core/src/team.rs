@@ -281,8 +281,11 @@ impl Tournament {
             return Err(TournamentError::TeamIsFull { size });
         }
         // `at` indexes the roster read above, which is this same list minus any
-        // member whose player is gone — so it is in range here, and `insert`
-        // panics rather than mis-seating anyone if that ever stops holding.
+        // member whose player is gone. The two agree as long as every member has
+        // a player record; if one ever does not, `at` is an index into a shorter
+        // list, and `insert` seats the newcomer a board too early rather than
+        // failing — the roster/`players` mismatch has to be caught on load, not
+        // here.
         t.members.insert(at, player);
         Ok(t)
     }

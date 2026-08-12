@@ -589,9 +589,10 @@ impl TournamentInstance {
     /// The payoff is that one panicking mutation (e.g. an unexpected `osp-core`
     /// panic) fails only that one request, instead of poisoning the lock and
     /// turning every later request for this tournament — reads included — into a
-    /// 500 until the process restarts. The registry's own methods ([`list`],
-    /// [`remove`]) already recover the same way, so this keeps the per-tournament
-    /// handlers consistent with them.
+    /// 500 until the process restarts. The registry's own lock, over the map of
+    /// instances, takes the other line: [`list`] and [`remove`] `.expect()` on
+    /// it, since a poisoned *registry* means a panic ran while the map itself was
+    /// being reshaped, and there is no argument that it is still whole.
     ///
     /// [`mutate`]: TournamentStore::mutate
     /// [`set_current`]: TournamentStore::set_current
