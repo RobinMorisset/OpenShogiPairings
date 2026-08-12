@@ -1,6 +1,5 @@
 {
   "app": {
-    "subtitle": "Správa turnajov v šogi",
     "loading": "Načítava sa…",
     "undo": "Späť",
     "undoTitle": "Vrátiť poslednú zmenu",

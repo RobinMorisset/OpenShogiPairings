@@ -161,6 +161,20 @@
   // Which tab is open: "players", "results", or "round-{n}".
   let activeTab = $state("players");
 
+  /**
+   * Whether the open tab's content is a table that will not wrap — so the card
+   * should grow to stay behind it instead of letting it overflow the rounded
+   * panel (see `.card.wide-table`).
+   *
+   * Deliberately a list rather than "always on": the card is sized with
+   * `max-content`, which asks the content how wide it would like to be with
+   * nothing wrapped. For a table that is its natural width; for the prose on
+   * the Settings tab it would be the whole paragraph on one line.
+   */
+  const tabHasWideTable = $derived(
+    activeTab === "results" || activeTab === "players" || activeTab.startsWith("round-"),
+  );
+
   const activeRound = $derived(
     tournament?.rounds.find((r) => `round-${r.number}` === activeTab) ?? null,
   );
@@ -1063,10 +1077,7 @@
 <div class="app" class:printing-qr={printingQr} class:printing-sheets={sheetPrint !== null}>
   <header>
     <div class="header-top">
-      <div class="header-titles">
-        <h1>OpenShogiPairings</h1>
-        <p class="subtitle">{$_("app.subtitle")}</p>
-      </div>
+      <h1>OpenShogiPairings</h1>
       <div class="header-controls">
         {#if $currentTournamentId !== null}
           <ConnectionStatus />
@@ -1088,9 +1099,7 @@
   {:else if initialLoad === "loading"}
     <p class="muted">{$_("app.loading")}</p>
   {:else if tournament}
-    <!-- Only the standings table is ever wider than the screen, and only there
-         is it worth letting the card grow past it — see `.card.wide-table`. -->
-    <section class="card" class:wide-table={activeTab === "results"}>
+    <section class="card" class:wide-table={tabHasWideTable}>
       <div class="toolbar">
         <div class="title">
           <h2>{tournament.name}</h2>
@@ -1605,30 +1614,45 @@
   header {
     margin-bottom: 1.5rem;
   }
+  /* Three columns so the title is centred in the *window* while the controls
+     still occupy real space at the right. They used to be `position: absolute`,
+     which centred the title beautifully and let the controls sit on top of it
+     the moment the window was too narrow for both — and no breakpoint fixes
+     that, because the block's width depends on what is in it (the Live
+     indicator only exists once a tournament is open). Laid out in the grid they
+     cannot overlap at any width. */
   .header-top {
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 0.5rem;
   }
-  .header-titles {
-    text-align: center;
+  .header-top h1 {
+    grid-column: 2;
   }
   .header-controls {
-    position: absolute;
-    right: 0;
-    top: 0.2rem;
+    grid-column: 3;
+    justify-self: end;
     display: flex;
     align-items: center;
     gap: 0.4rem;
   }
+  /* Narrower than this the two would still fit side by side, but only by
+     squeezing the title against them. Stack instead. */
+  @media (max-width: 34rem) {
+    .header-top {
+      grid-template-columns: 1fr;
+      justify-items: center;
+    }
+    .header-top h1,
+    .header-controls {
+      grid-column: 1;
+      justify-self: center;
+    }
+  }
   h1 {
     font-size: 1.8rem;
     margin: 0;
-  }
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0.25rem 0 0;
   }
   /* The standings table can be far wider than the screen — a column per round
      plus the tie-breaks — and it is deliberately not wrapped in a scroller,

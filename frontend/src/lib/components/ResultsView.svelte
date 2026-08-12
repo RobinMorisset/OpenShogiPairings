@@ -864,21 +864,23 @@
         <th>{$_("resultsView.club")}</th>
         {#each shownRounds as round (round.number)}
           {#if round.completed}
-            <th class="num">{$_("resultsView.roundColumn", { values: { number: round.number } })}</th>
+            <th class="num mid">{$_("resultsView.roundColumn", { values: { number: round.number } })}</th>
           {:else}
             <th
-              class="num live-round"
+              class="num mid live-round"
               data-tip={$_("resultsView.roundInProgressTitle", { values: { number: round.number } })}
               >{$_("resultsView.roundColumnLive", { values: { number: round.number } })}</th
             >
           {/if}
         {/each}
-        <th class="num">{$_("resultsView.victories")}</th>
+        <th class="num mid">{$_("resultsView.victories")}</th>
         {#if showMacmahon}
-          <th class="num" data-tip={$_("resultsView.macmahonTitle")}>{$_("resultsView.macmahon")}</th>
+          <th class="num mid" data-tip={$_("resultsView.macmahonTitle")}
+            >{$_("resultsView.macmahon")}</th
+          >
         {/if}
         {#each tiebreakColumns as col (col.code)}
-          <th class="num" data-tip={columnTitle(col.code)}>{tiebreakLabel(col.code, $_)}</th>
+          <th class="num mid" data-tip={columnTitle(col.code)}>{tiebreakLabel(col.code, $_)}</th>
         {/each}
       </tr>
     </thead>
@@ -1143,9 +1145,11 @@
     /* The width of the pinned ID column, shared by the two rules that need to
        agree on it: the column itself, and the offset the name column pins at.
        It is a *border-box* width (see `.pin-id`), so the padding comes out of
-       it — leave room for four digits and the "ID" header inside 1.1rem of
-       padding, or the cell grows past it and the two stop agreeing again. */
-    --id-col: 4rem;
+       it — leave room for four digits and the "ID" header, or the cell grows
+       past it and the two stop agreeing again. The numbers are right-aligned,
+       so any slack here shows up as a gap down the left edge of the table;
+       `.pin-id` trims its left padding to keep the budget without it. */
+    --id-col: 3.25rem;
   }
   table {
     width: 100%;
@@ -1207,6 +1211,10 @@
        `--id-col` — landing on top of the last 1.1rem of the numbers. */
     box-sizing: border-box;
     width: var(--id-col);
+    /* The table starts at the card's edge, so this cell's left padding is
+       stacked on top of the card's own — and the numbers are right-aligned, so
+       all of it reads as a gap before the table begins. */
+    padding-left: 0.25rem;
   }
   .pin-name {
     left: var(--id-col);
@@ -1273,6 +1281,23 @@
   }
   .result {
     font-variant-numeric: tabular-nums;
+  }
+  /* Everything scored — the per-round results and every number derived from
+     them — is centred in its column; what merely *describes* a player (their
+     number, rating, ELO estimate) stays right-aligned, where a column of
+     figures lines up digit under digit and is easy to compare down the page.
+     Wins and the MacMahon start are centred with the tie-breaks rather than
+     against them: they sit between the rounds and the tie-break columns, and
+     one right-aligned column in the middle of centred ones reads as a mistake.
+     Placed after `.num`, whose `text-align: right` it has to beat on equal
+     specificity. */
+  .result,
+  .victories,
+  .macmahon,
+  .points,
+  .tiebreak,
+  th.mid {
+    text-align: center;
   }
   .win {
     color: var(--color-success);

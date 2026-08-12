@@ -1400,9 +1400,18 @@
   tbody tr:nth-child(even) {
     background: var(--bg-stripe);
   }
+  /* The board number, centred rather than right-aligned and no wider than it
+     needs to be. Right-aligned in a 3.5rem column, a one- or two-digit number
+     sat with most of the column empty to its left — the same void the standings
+     had in its ID column. The width cannot come down much further than this:
+     the header word ("Board", "Table", "Brett") is wider than the numbers under
+     it, so it, not the width, is what sets the column. Centring is what spends
+     the remainder evenly instead of piling it on one side. */
   .num {
-    text-align: right;
-    width: 3.5rem;
+    text-align: center;
+    width: 2.25rem;
+    padding-left: 0.3rem;
+    padding-right: 0.3rem;
     font-variant-numeric: tabular-nums;
   }
   .src-col {
@@ -1664,6 +1673,11 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    /* `display: flex` makes this a *block-level* box, which `text-align:
+       center` on the cell has no say over — so it sat against the left edge
+       while the column's header stayed centred above it. A block box of known
+       width centres on its own margins. */
+    margin-inline: auto;
     width: 1.7rem;
     height: 1.5rem;
     padding: 0;

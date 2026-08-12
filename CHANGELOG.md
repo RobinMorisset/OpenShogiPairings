@@ -25,7 +25,22 @@ rather than half-parsed; re-create the tournament.
   alongside the name rather than instead of it. On screens under about 384px
   the two columns unpin, leaving the whole width to scroll. Team rows pin their
   team name the same way. The white panel behind the table now grows with it
-  instead of letting a wide table hang out of its rounded corner.
+  instead of letting a wide table hang out of its rounded corner — and the same
+  now goes for the Players and round tabs, which hit the same edge on a small
+  enough screen.
+- **Tidier standings and pairings columns.** Results and every number derived
+  from them — the per-round cells, wins, the MacMahon start and the tie-breaks
+  — are centred in their columns; the number, rating and ELO estimate stay
+  right-aligned, where a column of figures compares digit under digit. The
+  tournament-number and board-number columns were wide enough for figures
+  nobody has, which showed as a gap down the left edge of each table, and are
+  now sized to what they hold. The draw column's `=` buttons line up with their
+  header instead of sitting to its left.
+- **The app header no longer overlaps itself.** The theme, language and live
+  indicators used to be positioned over the title rather than beside it, so on
+  a narrow window they sat on top of it; they now take their own space and
+  stack under the title when there is no room. The "Tournament management for
+  shogi" line under the title is gone.
 
 - **Points are no longer accumulated — they are derived**, as
   `MacMahon start + wins`, and a manual bonus/malus now lands *inside* the

@@ -1,6 +1,5 @@
 {
   "app": {
-    "subtitle": "Gestion de tournois de shogi",
     "loading": "Chargement…",
     "undo": "Annuler",
     "undoTitle": "Annuler la dernière modification",

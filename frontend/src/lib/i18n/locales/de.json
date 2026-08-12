@@ -1,6 +1,5 @@
 {
   "app": {
-    "subtitle": "Turnierverwaltung für Shogi",
     "loading": "Wird geladen…",
     "undo": "Rückgängig",
     "undoTitle": "Die letzte Änderung rückgängig machen",

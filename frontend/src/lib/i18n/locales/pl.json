@@ -1,6 +1,5 @@
 {
   "app": {
-    "subtitle": "Zarządzanie turniejami shogi",
     "loading": "Wczytywanie…",
     "undo": "Cofnij",
     "undoTitle": "Cofnij ostatnią zmianę",

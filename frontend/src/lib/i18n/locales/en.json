@@ -1,6 +1,5 @@
 {
   "app": {
-    "subtitle": "Tournament management for shogi",
     "loading": "Loading…",
     "undo": "Undo",
     "undoTitle": "Undo the last change",
