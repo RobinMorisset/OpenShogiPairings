@@ -35,7 +35,11 @@ rather than half-parsed; re-create the tournament.
   tournament-number and board-number columns were wide enough for figures
   nobody has, which showed as a gap down the left edge of each table, and are
   now sized to what they hold. The draw column's `=` buttons line up with their
-  header instead of sitting to its left.
+  header instead of sitting to its left. And the Wins column is dropped when
+  nobody has MacMahon starting points, since `points = MacMahon start + wins`
+  makes it a copy of the Points column in every row — the same condition that
+  already governs the MacMahon column, so a manual bonus or penalty brings both
+  back.
 - **The app header no longer overlaps itself.** The theme, language and live
   indicators used to be positioned over the title rather than beside it, so on
   a narrow window they sat on top of it; they now take their own space and

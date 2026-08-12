@@ -234,6 +234,18 @@
       : standings.some((s) => s.macmahon !== 0) ||
           tournament.players.some((p) => (p.adjustments ?? []).length > 0),
   );
+
+  // The Wins column, on the same question. `points = macmahon + victories` by
+  // construction, so when nobody has a MacMahon start every row holds the same
+  // number in both columns and one of them is furniture — which is exactly the
+  // condition `showMacmahon` already answers, manual adjustments included,
+  // since an adjustment is folded into the MacMahon start.
+  //
+  // Unless Points is not on show: the referee can drop it from the tie-break
+  // list, and then Wins is the only score in the table and has to stay.
+  const showVictories = $derived(
+    showMacmahon || !tiebreakColumns.some((col) => col.code === "points"),
+  );
   const rows = $derived(
     standings
       .map((standing) => ({ standing, player: byId.get(standing.player_id) }))
@@ -873,7 +885,9 @@
             >
           {/if}
         {/each}
-        <th class="num mid">{$_("resultsView.victories")}</th>
+        {#if showVictories}
+          <th class="num mid">{$_("resultsView.victories")}</th>
+        {/if}
         {#if showMacmahon}
           <th class="num mid" data-tip={$_("resultsView.macmahonTitle")}
             >{$_("resultsView.macmahon")}</th
@@ -957,7 +971,9 @@
             {/each}
             <!-- Matches won. A team's *games* won are its board-wins tie-break,
                  which has its own column when the referee ranks on it. -->
-            <td class="num victories">{formatScore(team.victories)}</td>
+            {#if showVictories}
+              <td class="num victories">{formatScore(team.victories)}</td>
+            {/if}
             {#if showMacmahon}
               <td
                 class="num macmahon"
@@ -1072,14 +1088,17 @@
           {#if teamMode}
             <!-- Wins counts *matches*, and the ranking criteria rank teams: a
                  player's own figures are not their team's, and lining them up
-                 under those columns would read as if they were. -->
-            <td></td>
+                 under those columns would read as if they were. One blank per
+                 column the team rows carry, so the two stay in step. -->
+            {#if showVictories}<td></td>{/if}
             {#if showMacmahon}<td></td>{/if}
             {#each tiebreakColumns as col (col.code)}
               <td></td>
             {/each}
           {:else}
-            <td class="num victories">{formatScore(standing.victories)}</td>
+            {#if showVictories}
+              <td class="num victories">{formatScore(standing.victories)}</td>
+            {/if}
             {#if showMacmahon}
               <td
                 class="num macmahon"
