@@ -1,12 +1,9 @@
 <script lang="ts">
   import { _, locale } from "svelte-i18n";
-  import { tick, untrack } from "svelte";
+  import { untrack } from "svelte";
   import {
     addPlayer,
     addPointAdjustment,
-    addTeam,
-    addTeamAdjustment,
-    addTeamMember,
     ApiError,
     cancelRound,
     confirmRound,
@@ -16,32 +13,22 @@
     fetchCounterfactual,
     forcePairing,
     fetchRatings,
-    fetchPublication,
-    fetchTournament,
     importPlayersCsv,
     prepareRound,
     publicPageUrl,
-    setPublication,
     refreshRatings,
     removePlayer,
     removePointAdjustment,
-    removeTeam,
-    removeTeamAdjustment,
-    removeTeamMember,
-    renameTeam,
     restoreBackup,
     setBoardDrawn,
     setBoardHandicap,
     setBoardLong,
     setBoardNoShow,
     setBoardWinner,
-    setPairingRating,
     setPlayerEligible,
     setPlayerCategory,
     setSitoutValue,
-    setTeamBoardOrder,
     setTeamSitoutValue,
-    sortTeamByRating,
     undoTournament,
     updateDraft,
     updateSettings,
@@ -54,17 +41,11 @@
   import { pairingRating } from "./lib/teams";
   import type {
     BackupList,
-    CupBracketView,
-    CupPodium,
     Handicap,
     NewPlayer,
     Forfeit,
-    PublicationState,
     RatedPlayer,
     SitoutValue,
-    Standing,
-    TeamStanding,
-    Tournament,
     TournamentResponse,
     TournamentSettings,
     Winner,
@@ -72,14 +53,11 @@
   import { saveAmericanGrid, saveTournament } from "./lib/tournamentFile";
   import { pickCsvFile } from "./lib/csvImport";
   import { handicapChoice } from "./lib/handicap";
-  import { isTauri, printPage } from "./lib/platform";
-  import {
-    buildSheetPlayers,
-    macMahonRowShown,
-    type SheetPlayer,
-  } from "./lib/resultSheets";
+  import { buildSheetPlayers, macMahonRowShown } from "./lib/resultSheets";
   import { publicPage } from "./lib/publicAccess";
-  import { exportPublicPage } from "./lib/publicExport";
+  import { Publication, PrintJobs } from "./lib/publication.svelte";
+  import { createTeamActions } from "./lib/teamActions";
+  import { TournamentStore } from "./lib/tournamentStore.svelte";
   import PublicView from "./lib/components/PublicView.svelte";
   import QrCode from "./lib/components/QrCode.svelte";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
@@ -99,53 +77,29 @@
   import ThemeSwitcher from "./lib/components/ThemeSwitcher.svelte";
   import ConnectionStatus from "./lib/components/ConnectionStatus.svelte";
 
-  let tournament = $state<Tournament | null>(null);
-  let standings = $state<Standing[]>([]);
-  /** Ranked team standings, in team mode only — the primary table there, with
-   *  the player standings staying as the per-player breakdown. */
-  let teamStandings = $state<TeamStanding[]>([]);
-  let cupPodium = $state<CupPodium | null>(null);
-  let cupBracket = $state<CupBracketView | null>(null);
-  let draftCupPlayers = $state<number[]>([]);
-  let suggestedHandicaps = $state<(Handicap | null)[][]>([]);
-  /** Winner that counts for standings/pairing per board, server-computed (see
-   *  `TournamentResponse.effective_winners`), indexed like `tournament.rounds`. */
-  let effectiveWinners = $state<(Winner | null)[][]>([]);
-  let canUndo = $state(false);
+  // The open tournament and the two ways it gets here (an edit's response, a
+  // resync of somebody else's) live in `tournamentStore.svelte.ts`. The aliases
+  // below are read-only views of it, so the rest of this component — and all of
+  // its markup — still names the state directly, while every write goes through
+  // one of the store's methods.
+  const store = new TournamentStore();
+  const tournament = $derived(store.tournament);
+  const standings = $derived(store.standings);
+  const teamStandings = $derived(store.teamStandings);
+  const cupPodium = $derived(store.cupPodium);
+  const cupBracket = $derived(store.cupBracket);
+  const draftCupPlayers = $derived(store.draftCupPlayers);
+  const suggestedHandicaps = $derived(store.suggestedHandicaps);
+  const effectiveWinners = $derived(store.effectiveWinners);
+  const canUndo = $derived(store.canUndo);
+  const hasUnsavedChanges = $derived(store.hasUnsavedChanges);
+  const apply = (res: TournamentResponse) => store.apply(res);
+  const refetch = (force = false) => store.refetch(force);
+
   let initialLoad = $state<"loading" | "done">("loading");
   let busy = $state(false);
   let error = $state<string | null>(null);
   let ratings = $state<RatedPlayer[]>([]);
-
-  // Whether the in-memory tournament has changes not yet written to a file —
-  // purely client-side bookkeeping (the server has no notion of "saved to
-  // disk"), and deliberately not part of the undo stack: undoing a change
-  // doesn't retroactively make the tournament "saved" again. Reset to false
-  // only by a fresh create/load or a successful save; every other mutation
-  // (including undo) sets it, via `apply`.
-  let hasUnsavedChanges = $state(false);
-
-  // The version of the tournament state currently displayed. Used to reject a
-  // background resync that resolved out of order (older than what we already
-  // show), so it can't briefly revert a just-applied edit. Reset on a tournament
-  // switch; a reconnect resync applies unconditionally (the server may have
-  // restarted with a lower counter), see `refetch`.
-  let appliedVersion: number | null = null;
-
-  /** Apply a tournament API response to local state. */
-  function apply(res: TournamentResponse) {
-    tournament = res.tournament;
-    standings = res.standings;
-    teamStandings = res.team_standings ?? [];
-    cupPodium = res.cup_podium ?? null;
-    cupBracket = res.cup_bracket ?? null;
-    draftCupPlayers = res.draft_cup_players ?? [];
-    suggestedHandicaps = res.suggested_handicaps ?? [];
-    effectiveWinners = res.effective_winners ?? [];
-    canUndo = res.can_undo;
-    appliedVersion = res.version;
-    hasUnsavedChanges = true;
-  }
 
   /** Warn before an action that discards the current tournament, if it has
    * unsaved changes. Returns whether the caller should proceed. */
@@ -454,12 +408,7 @@
       });
 
     try {
-      const res = await fetchTournament();
-      if (res) {
-        apply(res);
-        // Resuming whatever the server already had isn't a new edit made in
-        // this session — nothing to warn about losing yet.
-        hasUnsavedChanges = false;
+      if (await store.load()) {
         // Pull the backups listing now rather than when the panel is first
         // opened: its directory is what the Backups button's tooltip names, and
         // a tooltip that only becomes true after you've clicked the button is
@@ -470,15 +419,10 @@
           .catch(() => {
             /* the panel fetches it again when opened */
           });
-        // Likewise for the publication state: it is not only the panel's, it
-        // decides whether the point-adjustment form warns that its reason is
-        // now read by players — and a warning that only appears after you have
-        // opened an unrelated panel is no warning at all.
-        fetchPublication()
-          .then((state) => (publication = state))
-          .catch(() => {
-            /* the panel fetches it again when opened */
-          });
+        // Likewise for the publication state — see `Publication.load`.
+        publication.load().catch(() => {
+          /* the panel fetches it again when opened */
+        });
       } else {
         // The tournament no longer exists (e.g. deleted from another
         // client/tab) — back to the picker.
@@ -495,32 +439,6 @@
     }
   }
 
-  // Silently pull the authoritative state — after a live change pushed by
-  // another referee, on reconnect, or after a rejected (conflicting) edit. Safe
-  // because every edit already lives on the server; there is no unsaved local
-  // state to lose.
-  async function refetch(force = false) {
-    try {
-      const res = await fetchTournament();
-      // Ignore a resync that resolved out of order — older than what we already
-      // display — so a slow GET racing an in-flight mutation can't momentarily
-      // revert the just-applied edit. A reconnect passes `force`, since a
-      // restarted server may legitimately report a *lower* version.
-      if (
-        res &&
-        (force || appliedVersion === null || res.version >= appliedVersion)
-      ) {
-        // A resync/live update isn't a local edit, so don't let it flip the
-        // "unsaved changes" flag — apply() sets that for genuine local edits.
-        const wasUnsaved = hasUnsavedChanges;
-        apply(res);
-        hasUnsavedChanges = wasUnsaved;
-      }
-    } catch {
-      /* transient; the SSE stream will trigger another refetch on the next change */
-    }
-  }
-
   // (Re)load whenever the open tournament changes — including the very first
   // selection — and keep the live-sync subscription scoped to it.
   $effect(() => {
@@ -532,26 +450,11 @@
     if ($currentTournamentId === null) return;
     // Reset the view before loading the newly selected tournament, so a
     // moment of stale UI from the previous one never shows.
-    tournament = null;
-    standings = [];
-    teamStandings = [];
-    cupPodium = null;
-    cupBracket = null;
-    draftCupPlayers = [];
-    suggestedHandicaps = [];
-    effectiveWinners = [];
-    canUndo = false;
-    appliedVersion = null;
-    hasUnsavedChanges = false;
+    store.reset();
     // Each tournament has its own backups directory, so the previous one's
     // listing (and the path in the tooltip) must not carry over.
     backupListing = null;
-    // Nor its publication state — showing one tournament's capability key
-    // under another's name is exactly how a link ends up on the wrong wall.
-    publication = null;
-    showPublication = false;
-    copiedLink = false;
-    exportedPages = 0;
+    publication.reset();
     error = null;
     // Read (and clear) the requested tab *untracked*: this effect must depend
     // only on `currentTournamentId`. Subscribing to `initialTab` here would let
@@ -637,71 +540,8 @@
     });
   }
 
-  // --- Teams ---------------------------------------------------------------
-  //
-  // Each of these is a single request whose response carries the whole updated
-  // tournament, so the panel re-renders from the server's own view of the
-  // rosters rather than a local guess at them.
-
-  function handleAddTeam(name: string) {
-    run(async () => {
-      apply(await addTeam(name));
-    });
-  }
-
-  function handleRenameTeam(teamId: string, name: string) {
-    run(async () => {
-      apply(await renameTeam(teamId, name));
-    });
-  }
-
-  function handleRemoveTeam(teamId: string) {
-    run(async () => {
-      apply(await removeTeam(teamId));
-    });
-  }
-
-  function handleAddTeamMember(teamId: string, playerId: string) {
-    run(async () => {
-      apply(await addTeamMember(teamId, playerId));
-    });
-  }
-
-  function handleRemoveTeamMember(teamId: string, playerId: string) {
-    run(async () => {
-      apply(await removeTeamMember(teamId, playerId));
-    });
-  }
-
-  function handleSetTeamBoardOrder(teamId: string, order: string[]) {
-    run(async () => {
-      apply(await setTeamBoardOrder(teamId, order));
-    });
-  }
-
-  function handleSortTeamByRating(teamId: string) {
-    run(async () => {
-      apply(await sortTeamByRating(teamId));
-    });
-  }
-
-  function handleAddTeamAdjustment(teamId: string, delta: number, reason: string) {
-    run(async () => {
-      apply(await addTeamAdjustment(teamId, delta, reason));
-    });
-  }
-
-  function handleRemoveTeamAdjustment(teamId: string, adjustmentId: string) {
-    run(async () => {
-      apply(await removeTeamAdjustment(teamId, adjustmentId));
-    });
-  }
-
-  function handleSetPairingRating(playerId: string, rating: number | null) {
-    run(async () => {
-      apply(await setPairingRating(playerId, rating));
-    });
-  }
+  // The team-roster actions, as one group (see `teamActions.ts`).
+  const teams = createTeamActions({ run, apply });
 
   function handleToggleEligible(id: string, eligible: boolean) {
     run(async () => {
@@ -855,7 +695,7 @@
     const current = tournament;
     run(async () => {
       const saved = await saveTournament(current);
-      if (saved) hasUnsavedChanges = false;
+      if (saved) store.markSaved();
     });
   }
 
@@ -891,126 +731,36 @@
     if (!confirmDiscard()) return;
     run(async () => {
       apply(await restoreBackup(id));
-      hasUnsavedChanges = false; // matches what the server had at that point
+      store.markSaved(); // matches what the server had at that point
       showBackups = false;
     });
   }
 
-  // --- Public read-only access (docs/public-access.md) ----------------------
-  //
-  // Publication is per tournament and off by default. Turning it on mints a
-  // capability key; the URL built from it is what goes on the wall, and
-  // publishing again rotates the key, revoking every link already handed out.
-  //
-  // The *live link* is not offered in the desktop app: its server listens on a
-  // random loopback port, so nobody outside the laptop could reach it. What
-  // serves that deployment is the other half of this panel — the static export
-  // (phase 2), a folder of plain web pages the referee uploads to wherever the
-  // club already has a website. That half is offered everywhere, so the panel
-  // itself is too.
-  const canPublish = !isTauri();
-  let showPublication = $state(false);
-  let publication = $state<PublicationState | null>(null);
+  // The public read-only page and the two printed pages (see
+  // `publication.svelte.ts`).
+  const publication = new Publication({
+    run,
+    t: (key) => $_(key),
+    confirm: (message) => window.confirm(message),
+  });
+  const prints = new PrintJobs(run);
+
   const publicUrl = $derived(
-    publication?.key && $currentTournamentId
-      ? publicPageUrl($currentTournamentId, publication.key)
+    publication.state?.key && $currentTournamentId
+      ? publicPageUrl($currentTournamentId, publication.state.key)
       : null,
-  );
-  /** Set after a successful copy, so the button can confirm it happened. */
-  let copiedLink = $state(false);
-
-  function handleTogglePublication() {
-    showPublication = !showPublication;
-    if (!showPublication || !canPublish) return;
-    run(async () => {
-      publication = await fetchPublication();
-    });
-  }
-
-  /** How many pages the last export wrote, so the button can confirm it
-   *  happened — and say how many files to upload. `0` means never, or
-   *  cancelled. */
-  let exportedPages = $state(0);
-
-  function handleExportPublicPage() {
-    exportedPages = 0;
-    run(async () => {
-      exportedPages = await exportPublicPage();
-    });
-  }
-
-  function handleSetPublication(published: boolean) {
-    // Rotating invalidates links already on the wall, and unpublishing takes
-    // the page away from a room that may be reading it — neither is something
-    // to discover by having clicked the wrong button.
-    const confirmKey = !published
-      ? "app.confirmUnpublish"
-      : publication?.published
-        ? "app.confirmRotateKey"
-        : null;
-    if (confirmKey && !window.confirm($_(confirmKey))) return;
-    copiedLink = false;
-    run(async () => {
-      publication = await setPublication(published);
-    });
-  }
-
-  function handleCopyPublicLink() {
-    const url = publicUrl;
-    if (!url) return;
-    run(async () => {
-      await navigator.clipboard.writeText(url);
-      copiedLink = true;
-    });
-  }
-
-  // Set only for the duration of a "print the QR code" — it switches the print
-  // stylesheet from "print the pairings" to "print one sheet for the wall".
-  let printingQr = $state(false);
-
-  function handlePrintQr() {
-    run(async () => {
-      printingQr = true;
-      // `window.print()` snapshots the DOM synchronously, so the class has to
-      // have landed before it is called — without this the first print comes
-      // out as the ordinary page.
-      await tick();
-      try {
-        await printPage();
-      } finally {
-        printingQr = false;
-      }
-    });
-  }
-
-  // Set only for the duration of a "print the result sheets", like `printingQr`
-  // above: it both supplies the slips and switches the print stylesheet over to
-  // them. The slips are built here rather than derived so that a player without
-  // a tournament number or a standing — which cannot happen once registration is
-  // finalized, and the round tabs only exist then — surfaces as an error banner
-  // instead of taking the round tab down with it.
-  let sheetPrint = $state<{ players: SheetPlayer[]; rounds: number; blanks: number } | null>(
-    null,
   );
 
   const sheetMacMahonRow = $derived(!!tournament && macMahonRowShown(tournament.settings));
 
   function handlePrintSheets(rounds: number, blanks: number) {
-    run(async () => {
+    prints.printSheets(() => {
       const t = tournament!;
-      sheetPrint = {
+      return {
         players: buildSheetPlayers(t.players, t.settings, standings),
         rounds,
         blanks,
       };
-      // As for the QR code: `window.print()` snapshots the DOM synchronously, so
-      // the sheets have to be in it before the dialog opens.
-      await tick();
-      try {
-        await printPage();
-      } finally {
-        sheetPrint = null;
-      }
     });
   }
 
@@ -1049,7 +799,7 @@
        See `lib/publicAccess.ts`. -->
   <PublicView page={publicPage} />
 {:else}
-<div class="app" class:printing-qr={printingQr} class:printing-sheets={sheetPrint !== null}>
+<div class="app" class:printing-qr={prints.qr} class:printing-sheets={prints.sheets !== null}>
   <header>
     <div class="header-top">
       <h1>OpenShogiPairings</h1>
@@ -1116,9 +866,9 @@
           <button
             type="button"
             class="ghost"
-            class:active={showPublication}
+            class:active={publication.open}
             data-testid="toggle-publication"
-            onclick={handleTogglePublication}
+            onclick={() => publication.toggle()}
             disabled={busy}
             title={$_("app.publicPageTitle")}
           >
@@ -1137,16 +887,16 @@
         </div>
       </div>
 
-      {#if showPublication}
+      {#if publication.open}
         <div class="publication-panel">
-          {#if !canPublish}
+          {#if !publication.canPublish}
             <!-- The desktop app: no live link is possible from a server on a
                  random loopback port, so say so once rather than leave the
                  referee looking for a button that cannot exist here. -->
             <p class="small">{$_("app.publicPageDesktop")}</p>
-          {:else if publication === null}
+          {:else if publication.state === null}
             <p class="small">{$_("app.loading")}</p>
-          {:else if publication.published && publicUrl}
+          {:else if publication.state.published && publicUrl}
             <p class="small">{$_("app.publicPageLive")}</p>
             <!-- Only shown when printing the code for the wall: on screen the
                  tournament's name is right above, in the toolbar. -->
@@ -1165,16 +915,16 @@
                 type="button"
                 class="ghost small"
                 data-testid="copy-public-link"
-                onclick={handleCopyPublicLink}
+                onclick={() => publication.copyLink(publicUrl)}
                 disabled={busy}
               >
-                {copiedLink ? $_("app.publicLinkCopied") : $_("app.copyPublicLink")}
+                {publication.copiedLink ? $_("app.publicLinkCopied") : $_("app.copyPublicLink")}
               </button>
               <button
                 type="button"
                 class="ghost small"
                 data-testid="print-public-qr"
-                onclick={handlePrintQr}
+                onclick={() => prints.printQr()}
                 disabled={busy}
                 title={$_("app.printPublicQrTitle")}
               >
@@ -1184,7 +934,7 @@
                 type="button"
                 class="ghost small"
                 data-testid="rotate-public-key"
-                onclick={() => handleSetPublication(true)}
+                onclick={() => publication.setPublished(true)}
                 disabled={busy}
                 title={$_("app.rotatePublicKeyTitle")}
               >
@@ -1194,7 +944,7 @@
                 type="button"
                 class="ghost small danger"
                 data-testid="unpublish"
-                onclick={() => handleSetPublication(false)}
+                onclick={() => publication.setPublished(false)}
                 disabled={busy}
               >
                 {$_("app.unpublish")}
@@ -1207,7 +957,7 @@
                 type="button"
                 class="ghost small"
                 data-testid="publish"
-                onclick={() => handleSetPublication(true)}
+                onclick={() => publication.setPublished(true)}
                 disabled={busy}
               >
                 {$_("app.publish")}
@@ -1228,12 +978,12 @@
                 type="button"
                 class="ghost small"
                 data-testid="export-public-page"
-                onclick={handleExportPublicPage}
+                onclick={() => publication.exportPages()}
                 disabled={busy}
                 title={$_("app.publicExportTitle")}
               >
-                {exportedPages > 0
-                  ? $_("app.publicExportDone", { values: { count: exportedPages } })
+                {publication.exportedPages > 0
+                  ? $_("app.publicExportDone", { values: { count: publication.exportedPages } })
                   : $_("app.publicExport")}
               </button>
             </div>
@@ -1477,7 +1227,7 @@
               onToggleCategory={handleToggleCategory}
               onAddAdjustment={teamMode ? undefined : handleAddPointAdjustment}
               onRemoveAdjustment={teamMode ? undefined : handleRemovePointAdjustment}
-              published={publication?.published ?? false}
+              published={publication.state?.published ?? false}
               {busy}
             />
           </div>
@@ -1488,16 +1238,16 @@
             size={teamSize}
             finalized={tournament.registration_finalized}
             {macmahonInUse}
-            onAdd={handleAddTeam}
-            onRename={handleRenameTeam}
-            onRemove={handleRemoveTeam}
-            onAddMember={handleAddTeamMember}
-            onRemoveMember={handleRemoveTeamMember}
-            onSetBoardOrder={handleSetTeamBoardOrder}
-            onSortByRating={handleSortTeamByRating}
-            onSetPairingRating={handleSetPairingRating}
-            onAddAdjustment={handleAddTeamAdjustment}
-            onRemoveAdjustment={handleRemoveTeamAdjustment}
+            onAdd={teams.add}
+            onRename={teams.rename}
+            onRemove={teams.remove}
+            onAddMember={teams.addMember}
+            onRemoveMember={teams.removeMember}
+            onSetBoardOrder={teams.setBoardOrder}
+            onSortByRating={teams.sortByRating}
+            onSetPairingRating={teams.setPairingRating}
+            onAddAdjustment={teams.addAdjustment}
+            onRemoveAdjustment={teams.removeAdjustment}
             {busy}
           />
         {:else if activeTab === "results"}
@@ -1563,14 +1313,14 @@
     </section>
   {/if}
 
-  {#if sheetPrint && tournament}
+  {#if prints.sheets && tournament}
     <!-- A direct child of `.app`, so the print stylesheet below can hide its
          siblings and leave the slips alone whatever tab is open. -->
     <ResultSheets
       tournamentName={tournament.name}
-      players={sheetPrint.players}
-      rounds={sheetPrint.rounds}
-      blanks={sheetPrint.blanks}
+      players={prints.sheets.players}
+      rounds={prints.sheets.rounds}
+      blanks={prints.sheets.blanks}
       macMahonRow={sheetMacMahonRow}
     />
   {/if}
