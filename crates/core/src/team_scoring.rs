@@ -1180,7 +1180,7 @@ impl TeamStanding {
 /// analogue of [`compute_standings`](crate::standings::compute_standings), over
 /// the same criteria with team semantics: the SOS family sums opposing *teams'*
 /// team scores, and direct confrontation counts matches won.
-pub fn compute_team_standings(
+pub(crate) fn compute_team_standings(
     teams: &[Team],
     players: &[Player],
     settings: &TournamentSettings,

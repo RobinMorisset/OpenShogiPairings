@@ -58,7 +58,7 @@ fn default_format_version() -> u32 {
 }
 
 /// Minimum number of players required to start a round.
-pub const MIN_PLAYERS_PER_ROUND: usize = 2;
+pub(crate) const MIN_PLAYERS_PER_ROUND: usize = 2;
 
 /// Minimum number of present teams required to start a team round — the team
 /// reading of [`MIN_PLAYERS_PER_ROUND`], since teams are what get paired.

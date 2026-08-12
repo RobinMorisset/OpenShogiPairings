@@ -866,7 +866,7 @@ impl Default for TeamSettings {
 /// The team sizes a tournament may be run with. Two is the smallest thing that
 /// is still a team; nine is well past any real event and keeps a match's board
 /// count sane.
-pub const TEAM_SIZES: std::ops::RangeInclusive<u32> = 2..=9;
+pub(crate) const TEAM_SIZES: std::ops::RangeInclusive<u32> = 2..=9;
 
 /// A feature that cannot be combined with team mode (v1). Enabling team mode
 /// while one of these is on — or turning one on while team mode is — is a

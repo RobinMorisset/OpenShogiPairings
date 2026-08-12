@@ -211,7 +211,7 @@ pub(crate) fn sum_dropping_lowest<T: Ord + Copy + std::iter::Sum>(
 ///
 /// Byes and absences contribute no opponent to the tie-breaks. Rounds that are
 /// not yet completed are ignored.
-pub fn compute_standings(
+pub(crate) fn compute_standings(
     players: &[Player],
     settings: &TournamentSettings,
     rounds: &[Round],

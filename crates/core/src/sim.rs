@@ -978,7 +978,7 @@ mod tests {
         // the provisional player's true-strength spread and leave the established
         // player's untouched.
         let mut established = rated("Est", 1500);
-        established.fesa_games = Some(crate::PROVISIONAL_GAMES_THRESHOLD);
+        established.fesa_games = Some(crate::elo::PROVISIONAL_GAMES_THRESHOLD);
         let provisional = rated("Prov", 1500); // fesa_games None → provisional
         let mut t = Tournament::new("Sim").unwrap();
         t.add_player(established).unwrap();

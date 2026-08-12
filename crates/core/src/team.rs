@@ -121,7 +121,7 @@ fn by_pairing_rating(a: Option<u32>, b: Option<u32>) -> Ordering {
 /// two places this feeds without MacMahon. With MacMahon starting points in use,
 /// finalization requires a pairing ELO from every member, so a team that reaches
 /// the first round always has one.
-pub fn average_pairing_rating(members: &[&Player]) -> Option<u32> {
+pub(crate) fn average_pairing_rating(members: &[&Player]) -> Option<u32> {
     if members.is_empty() {
         return None;
     }

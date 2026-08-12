@@ -25,7 +25,7 @@ export function pairingRating(player: Player): number | null {
  * The average pairing rating over a roster, rounded to nearest — `null` unless
  * every member has one, and for an empty roster.
  *
- * Mirrors `osp_core::average_pairing_rating`: a mean over the rated members only
+ * Mirrors `average_pairing_rating` in `crates/core/src/team.rs`: a mean over the rated members only
  * would describe part of the team as if it were the whole, so a roster with
  * anyone unrated shows no average at all.
  */

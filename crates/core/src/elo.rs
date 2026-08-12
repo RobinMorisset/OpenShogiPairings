@@ -48,7 +48,7 @@ pub(crate) const UNRATED_PRIOR_DEFAULT_K: f64 = 705.0;
 /// A rated player with at least this many FESA games is treated as reliably
 /// rated; fewer (or a rating not from the FESA list) makes it *provisional*, and
 /// the referee's provisional multiplier widens its prior.
-pub const PROVISIONAL_GAMES_THRESHOLD: u32 = 18;
+pub(crate) const PROVISIONAL_GAMES_THRESHOLD: u32 = 18;
 
 /// Solver limits: coordinate-ascent sweeps and the per-sweep convergence
 /// tolerance (in ELO points). The objective is strongly concave, so this

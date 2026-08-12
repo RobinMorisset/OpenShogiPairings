@@ -53,7 +53,7 @@ pub use cup::{
     cup_field_size, knockout_champion, reconstruct_cup_from_final, BracketMatch, Cup,
     CupBracketView, CupFormat, CupMatch, CupPairings, CupPodium, CUP_SIZES,
 };
-pub use elo::{estimate_elos, PROVISIONAL_GAMES_THRESHOLD};
+pub use elo::estimate_elos;
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
 pub use fesa_results::import_fesa_results;
 pub use pairing::{
@@ -70,14 +70,12 @@ pub use settings::{
     ClubProtection, DateError, EloEstimator, EloPriorShape, FloaterStyle, HandicapDisplay,
     HandicapPolicy, IsoDate, MacMahon, MacMahonSource, MacMahonThreshold, NationalityProtection,
     PairingMode, PlayerCategory, Ratio, RatioAtLeastOne, TeamModeConflict, TeamSettings,
-    ThresholdCriterion, Tiebreak, TournamentDates, TournamentSettings, UnratedK, TEAM_SIZES,
+    ThresholdCriterion, Tiebreak, TournamentDates, TournamentSettings, UnratedK,
 };
-pub use standings::{compute_standings, Standing};
-pub use team::{average_pairing_rating, pairing_rating, Team};
-pub use team_scoring::{compute_team_standings, TeamMatch, TeamStanding};
-pub use tournament::{
-    Tournament, TournamentError, MIN_PLAYERS_PER_ROUND, TOURNAMENT_FORMAT_VERSION,
-};
+pub use standings::Standing;
+pub use team::{pairing_rating, Team};
+pub use team_scoring::{TeamMatch, TeamStanding};
+pub use tournament::{Tournament, TournamentError, TOURNAMENT_FORMAT_VERSION};
 pub use units::{HalfPoints, TeamId, TournamentId, UnitKey, Wins};
 
 use serde::{Deserialize, Serialize};
