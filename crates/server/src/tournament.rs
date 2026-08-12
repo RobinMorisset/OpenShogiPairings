@@ -59,7 +59,6 @@ use crate::{auth, live, public};
 /// - `PUT    /rounds/{n}/boards/{i}/handicap` set/clear the handicap
 /// - `POST   /rounds/{n}/boards/{i}/long`    flag/unflag a two-round long game
 /// - `POST   /players`       register a player
-/// - `POST   /players/batch` register many players as a single mutation (CSV import)
 /// - `PUT    /players/{player_id}`  edit a player
 /// - `DELETE /players/{player_id}`  remove a player
 /// - `POST   /players/{player_id}/eligible`  set cup eligibility
@@ -142,7 +141,6 @@ pub(crate) fn scope(state: AppState) -> Router<AppState> {
             put(set_team_sitout_value),
         )
         .route("/players", post(add_player))
-        .route("/players/batch", post(add_players_batch))
         .route("/players/import-csv", post(import_players_csv))
         .route(
             "/players/{player_id}",
@@ -876,31 +874,13 @@ async fn add_player(
     Ok((StatusCode::CREATED, view(&store)?))
 }
 
-/// Register many players in one request (CSV import). All-or-nothing: the
-/// whole batch is one `mutate` call, so it lands as a single history entry —
-/// one undo reverts the entire import rather than one player at a time.
-async fn add_players_batch(
-    TournamentCtx(instance): TournamentCtx,
-    ExpectedVersion(expected): ExpectedVersion,
-    Json(new_players): Json<Vec<NewPlayer>>,
-) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
-    let mut store = instance.write();
-    store.mutate(expected, |t| {
-        for new_player in new_players {
-            t.add_player(new_player)?;
-        }
-        Ok(())
-    })?;
-    Ok((StatusCode::CREATED, view(&store)?))
-}
-
 /// Register players from a raw CSV file (text body), filling missing
 /// ELO/grade/nationality from the server's cached FESA list.
 ///
 /// The CSV is parsed by `osp-core` ([`osp_core::parse_players_csv`]) so the
 /// column/format rules have a single tested implementation shared by every
-/// client. Like [`add_players_batch`] the whole roster lands as one
-/// all-or-nothing mutation (one undo reverts the entire import). Returns 400 on
+/// client. The whole roster lands as one all-or-nothing mutation, so a single
+/// undo reverts the entire import rather than one player at a time. Returns 400 on
 /// a malformed file (empty, missing name columns, or any row with no last name);
 /// enrichment is best-effort against whatever FESA list is cached.
 async fn import_players_csv(
