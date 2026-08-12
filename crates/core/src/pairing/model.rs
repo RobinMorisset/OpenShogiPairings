@@ -184,7 +184,9 @@ impl<'u> PairingModel<'u> {
         //   - the bye-only rules (`ByeGroup`, `ByeSelection`) when no phantom is in
         //     play: on an even field there is no bye vertex for them to fire on, so
         //     they would only reserve a ladder tier (and eat overflow headroom) for
-        //     nothing.
+        //     nothing;
+        //   - `CupPrequalified` unless *two* free units are prequalified, since it
+        //     fires only on an edge that is prequalified at both ends.
         let club_active = settings.club_protection_active(number);
         let nationality_active = settings.nationality_protection_active(number);
         let airtight_active = settings.airtight_groups_active(number);
@@ -195,7 +197,9 @@ impl<'u> PairingModel<'u> {
                 Rule::AirtightGroups => airtight_active,
                 Rule::Club => club_active,
                 Rule::Nationality => nationality_active,
-                Rule::CupPrequalified => free.iter().any(|&key| units[key].prequalified),
+                Rule::CupPrequalified => {
+                    free.iter().filter(|&&key| units[key].prequalified).count() >= 2
+                }
                 Rule::ByeGroup | Rule::ByeSelection => need_phantom,
                 _ => true,
             })
