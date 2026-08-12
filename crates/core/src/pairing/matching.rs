@@ -239,11 +239,11 @@ pub(crate) fn pair_round_weighted(
             }
         }
         if need_phantom {
+            // The phantom is the last vertex, so every bye edge is `(i, p)` with
+            // `i < p` — upper triangle, like the rule fills above.
             let p = k;
             for i in 0..k {
-                let c = bye_cost(&ctx, &model.rules, &model.mult, free[i]);
-                cost[i * vcount + p] = c;
-                cost[p * vcount + i] = c;
+                cost[i * vcount + p] = bye_cost(&ctx, &model.rules, &model.mult, free[i]);
             }
         }
         let mate = solve_matching(&cost, vcount);
