@@ -42,7 +42,7 @@ export function forfeitOf(board: Board): Forfeit | null {
   return outcome.kind === "forfeit" ? outcome.absent : null;
 }
 
-export interface BoardOutcome {
+interface BoardOutcome {
   /** This side actually won the game — drives the +/− sign and win/loss colour. */
   actualWon: boolean;
   /** This side conceded the odds in a handicap game. */

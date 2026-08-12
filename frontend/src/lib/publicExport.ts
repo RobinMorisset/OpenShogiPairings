@@ -209,7 +209,7 @@ const TOOLTIP_CSS = `
 `;
 
 /** What {@link buildDocument} needs beyond the rendered body. */
-export interface DocumentOptions {
+interface DocumentOptions {
   /** The tournament name — the `<title>`, and so the browser tab and bookmark. */
   title: string;
   /** BCP-47 tag for `<html lang>`: the language the body was rendered in. */

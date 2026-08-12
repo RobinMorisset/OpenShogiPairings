@@ -121,7 +121,7 @@ export function teamMatches(round: Round, teams: Team[], players: Player[]): Tea
 }
 
 /** A match's board wins on each side, and whether every board of it is decided. */
-export interface MatchScore {
+interface MatchScore {
   wins1: number;
   wins2: number;
   decided: boolean;

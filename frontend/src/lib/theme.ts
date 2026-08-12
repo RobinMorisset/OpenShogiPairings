@@ -1,7 +1,6 @@
 import { writable } from "svelte/store";
 
-export const THEMES = ["dark", "light"] as const;
-export type Theme = (typeof THEMES)[number];
+export type Theme = "dark" | "light";
 
 const STORAGE_KEY = "osp-theme";
 

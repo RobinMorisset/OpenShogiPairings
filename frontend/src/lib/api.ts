@@ -336,7 +336,7 @@ export function listTournaments(): Promise<TournamentListing> {
 }
 
 /** Result of creating a tournament: its id, and a session token if it has a password. */
-export interface CreateTournamentResult {
+interface CreateTournamentResult {
   id: string;
   token?: string;
 }
@@ -987,7 +987,7 @@ const READER_RECONNECT_MS = 1000;
 const READER_RECONNECT_MAX_MS = 30_000;
 
 /** Callbacks for {@link subscribeToPublicTournament}. */
-export interface PublicSubscription {
+interface PublicSubscription {
   /** A fresh whole-state payload — sent on connect and on every change. */
   onState: (state: PublicTournamentResponse) => void;
   /** The tournament is gone (deleted while the page was open). */

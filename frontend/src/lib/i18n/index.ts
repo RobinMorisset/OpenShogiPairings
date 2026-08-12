@@ -1,6 +1,6 @@
 import { init, register, locale, waitLocale } from "svelte-i18n";
 
-export interface LocaleOption {
+interface LocaleOption {
   code: string;
   label: string;
 }

@@ -9,7 +9,7 @@
 import type { Handicap, PublicTournamentResponse, Round, Winner } from "./types";
 
 /** One round, with the two per-board arrays that belong to it. */
-export interface PublicRound {
+interface PublicRound {
   round: Round;
   /** Suggested handicaps for this round's boards — empty unless the referee
    *  chose to publish the suggestion at all (the server decides; see
