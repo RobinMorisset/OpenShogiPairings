@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::units::{HalfPoints, TeamId, TournamentId};
+use crate::units::{HalfPoints, TeamId, TournamentId, Wins};
 
 /// Which player won a board. Colour (sente/gote) is chosen at random per game
 /// and isn't tracked, so the result is simply which of the two players won.
@@ -533,11 +533,20 @@ impl SitoutValue {
         }
     }
 
-    /// Whether this counts as a victory. Only a full point does — a `0=` is
-    /// score without a win, so it never lifts the Wins column or the
-    /// victory-based tie-breaks (SOSW, SODOSW, CUSSW).
-    pub fn is_victory(self) -> bool {
-        matches!(self, SitoutValue::Full)
+    /// What this counts as in the Wins column and the victory-based tie-breaks
+    /// (SOSW, SODOSW, SOSOSW, CUSSW).
+    ///
+    /// Deliberately the same shape as [`points`](Self::points): a `0=` is worth
+    /// half a point *and* half a win, following the EGF "number of wins"
+    /// convention. It used to be worth half a point and no win at all, which
+    /// left the Wins column reading `0` beside a Points column reading `1½` —
+    /// the two describing the same round and disagreeing about it.
+    pub fn wins(self) -> Wins {
+        match self {
+            SitoutValue::Zero => Wins::ZERO,
+            SitoutValue::Half => Wins::from_halves(1),
+            SitoutValue::Full => Wins::from_whole(1),
+        }
     }
 
     /// The cross-table / American Grid cell for this value.

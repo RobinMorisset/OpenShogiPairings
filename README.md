@@ -340,7 +340,12 @@ mode, hybrid cup),
 **Players**, **Standings** (per-round results plus Wins and total Points),
 and one tab per round. Points are each player's wins plus their MacMahon
 starting points (one per threshold they reach — an ELO rating or a dan/kyu
-grade), and the pairing engine scores by total points. The round lifecycle is
+grade), and the pairing engine scores by total points. Wins are counted in
+halves, following the EGF "number of wins" convention: a half-point sit-out
+(`0=`) is worth half a point *and* half a win, so the Wins column and the
+Points column never disagree about the same round, and the tie-breaks summed
+from wins (SOSW, SODOSW, SOSOSW, CUSSW) stay exact rather than rounding the
+half away. The round lifecycle is
 gated: **prepare round** (a draft state to mark players absent, force pairings,
 and force the bye — for round 1 this also finalizes registration in the same
 step) → **start round** (confirm) → play games → the round **completes

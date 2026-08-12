@@ -44,9 +44,29 @@ use derive_more::{Add, AddAssign, Display, Sum};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// A whole count of games won. Adds and sums with other [`Wins`]; it has no
-/// cross-type arithmetic with [`HalfPoints`] on purpose, so a win count can't be
-/// silently treated as a (doubled) point score.
+/// A count of games won, in **half-win units** (×2): a win is `2`, half a win
+/// `1` — the same doubling [`HalfPoints`] uses, and for the same reason.
+///
+/// Halves are not decoration: a `0=` sit-out is worth half a point *and* half a
+/// win (the EGF "number of wins" convention), so a whole count would have to
+/// round it, and the Wins column would disagree with the Points column beside
+/// it — which is exactly what it used to do. Everything summed *from* wins
+/// (SOSW, SODOSW, SOSOSW, CUSSW and the dropped variants) inherits the halves,
+/// so the arithmetic stays exact all the way up.
+///
+/// Still a type of its own rather than a second [`HalfPoints`]: a win count and
+/// a point score are different quantities that happen to share a scale, and
+/// mixing them up is precisely the mistake worth making impossible. Convert
+/// deliberately through [`From<Wins>`], which is the one place the (now
+/// one-to-one) relation is written.
+///
+/// The inner value is private — construct with [`from_whole`] / [`from_halves`]
+/// and read the raw units with [`halves`], so the ×2 convention lives here and
+/// nowhere else.
+///
+/// [`from_whole`]: Wins::from_whole
+/// [`from_halves`]: Wins::from_halves
+/// [`halves`]: Wins::halves
 #[derive(
     Debug,
     Clone,
@@ -60,19 +80,29 @@ use ts_rs::TS;
     Add,
     AddAssign,
     Sum,
-    Display,
     Serialize,
     Deserialize,
     TS,
 )]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
-pub struct Wins(pub u32);
+pub struct Wins(u32);
 
 impl Wins {
     pub const ZERO: Wins = Wins(0);
 
-    /// The underlying whole win count.
-    pub fn get(self) -> u32 {
+    /// `whole` whole wins (doubled into half-win units).
+    pub fn from_whole(whole: u32) -> Self {
+        Wins(whole * 2)
+    }
+
+    /// `halves` raw half-win units (already ×2).
+    pub fn from_halves(halves: u32) -> Self {
+        Wins(halves)
+    }
+
+    /// The count in raw half-win units (×2) — for the wire and for ordinal
+    /// ranking. Divide by 2 for a whole-win display.
+    pub fn halves(self) -> u32 {
         self.0
     }
 }
@@ -126,10 +156,12 @@ impl HalfPoints {
     }
 }
 
-/// A win is worth two half-points — the single place that conversion is written.
+/// A win is worth a point, and half a win half a point — the single place that
+/// conversion is written. Both are doubled, so this is a change of *quantity*,
+/// not of scale.
 impl From<Wins> for HalfPoints {
     fn from(w: Wins) -> Self {
-        HalfPoints::from_whole(w.0)
+        HalfPoints::from_halves(w.halves())
     }
 }
 
@@ -293,8 +325,8 @@ impl PartialEq<u32> for TournamentId {
 }
 
 /// Test-only convenience: compare a score against a bare integer literal in its
-/// natural unit ([`Wins`] a whole count, [`HalfPoints`] raw half-units), so the
-/// assertions in the scoring/standings tests read `standing.points == 4` rather
+/// raw unit — **half-units for both** [`Wins`] and [`HalfPoints`], so a bare `2`
+/// is one win or one point. Assertions read `standing.points == 4` rather
 /// than `standing.points.halves() == 4`. Gated on `test` so production code
 /// keeps the strict typing — you still can't compare the two units to each other
 /// or to a stray `u32` outside tests.

@@ -8,15 +8,20 @@ import type { Wins } from "./Wins";
  */
 export type Standing = { player_id: string, 
 /**
- * Games won (effective winner; a bye counts as a win).
+ * Games won (effective winner; a bye counts as a win), in half-wins — a
+ * `0=` sit-out is worth half of one, so this can be odd. See [`Wins`].
  */
 victories: Wins, 
 /**
- * MacMahon starting points.
+ * MacMahon starting points, with any manual point adjustment folded in.
  */
 macmahon: HalfPoints, 
 /**
- * Total score: `macmahon + 2·victories`, plus `1` per half-point absence.
+ * Total score, and exactly `macmahon + victories`: wins and points share
+ * the ×2 scale, and every way of scoring a round adds the same amount to
+ * both. That identity is what the Results tab's "Wins + MacMahon points"
+ * tooltip claims, and it did not hold while a `0=` scored half a point and
+ * no win.
  */
 points: HalfPoints, 
 /**

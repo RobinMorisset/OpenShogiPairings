@@ -142,8 +142,37 @@ impl MatchResult {
         .points1()
     }
 
-    /// Whether this is a match *win* (as opposed to a half) for `team1` — what
-    /// the victory-based tie-breaks count.
+    /// The match *victory* this is worth to `team1`: a whole one for more board
+    /// wins, half for a tie, none for fewer. `None` while any board is
+    /// undecided.
+    ///
+    /// Deliberately the same shape as [`points1`](Self::points1) — a drawn match
+    /// is worth half a point *and* half a victory, so the team Wins column and
+    /// the team Points column cannot describe the same match and disagree about
+    /// it. (It used to award the half point and no victory at all.)
+    pub(crate) fn victory1(self) -> Option<Wins> {
+        self.points1().map(|_| match self.wins1.cmp(&self.wins2) {
+            Ordering::Greater => Wins::from_whole(1),
+            Ordering::Equal => Wins::from_halves(1),
+            Ordering::Less => Wins::ZERO,
+        })
+    }
+
+    /// The same from `team2`'s side.
+    pub(crate) fn victory2(self) -> Option<Wins> {
+        MatchResult {
+            wins1: self.wins2,
+            wins2: self.wins1,
+            decided: self.decided,
+        }
+        .victory1()
+    }
+
+    /// Whether `team1` outright **beat** `team2` — strictly more board wins.
+    ///
+    /// Distinct from [`victory1`](Self::victory1) on purpose: a draw is half a
+    /// victory but not a defeat, and the `…DOS` tie-breaks sum the teams a side
+    /// actually *defeated*.
     pub(crate) fn is_win1(self) -> bool {
         self.decided && self.wins1 > self.wins2
     }
@@ -228,8 +257,8 @@ pub(crate) fn match_result(round: &Round, m: &TeamMatch, wiel_rule: bool) -> Mat
             None => board.effective_winner(wiel_rule),
         };
         match winner_side {
-            Some(Winner::Player1) => result.wins1 += Wins(1),
-            Some(Winner::Player2) => result.wins2 += Wins(1),
+            Some(Winner::Player1) => result.wins1 += Wins::from_whole(1),
+            Some(Winner::Player2) => result.wins2 += Wins::from_whole(1),
             None => {}
         }
     }
@@ -423,11 +452,14 @@ pub(crate) fn compute_team_scores(
             };
             by_id[m.team1].points += p1;
             by_id[m.team2].points += p2;
+            // Points and victories move together — a drawn match is half of
+            // each — while `defeated` records only an outright win, since a draw
+            // defeats nobody and the `…DOS` tie-breaks sum defeated opponents.
+            by_id[m.team1].victories += result.victory1().unwrap_or(Wins::ZERO);
+            by_id[m.team2].victories += result.victory2().unwrap_or(Wins::ZERO);
             if result.is_win1() {
-                by_id[m.team1].victories += Wins(1);
                 by_id[m.team1].defeated.push(m.team2);
             } else if result.wins2 > result.wins1 {
-                by_id[m.team2].victories += Wins(1);
                 by_id[m.team2].defeated.push(m.team1);
             }
         }
@@ -437,9 +469,7 @@ pub(crate) fn compute_team_scores(
         for team in slots.teams() {
             if let Some((_, value)) = team_sitout(round, slots.members_of(team)) {
                 by_id[team].points += value.points();
-                if value.is_victory() {
-                    by_id[team].victories += Wins(1);
-                }
+                by_id[team].victories += value.wins();
             }
         }
 
@@ -629,10 +659,10 @@ mod tests {
         let (one, two) = (TeamId(1), TeamId(2));
         assert_eq!(s.get(one).points, HalfPoints::from_whole(1));
         assert_eq!(s.get(two).points, HalfPoints::ZERO);
-        assert_eq!(s.get(one).victories, Wins(1));
-        assert_eq!(s.get(two).victories, Wins(0));
-        assert_eq!(s.get(one).board_wins, Wins(2));
-        assert_eq!(s.get(two).board_wins, Wins(1));
+        assert_eq!(s.get(one).victories, Wins::from_whole(1));
+        assert_eq!(s.get(two).victories, Wins::from_whole(0));
+        assert_eq!(s.get(one).board_wins, Wins::from_whole(2));
+        assert_eq!(s.get(two).board_wins, Wins::from_whole(1));
         assert_eq!(s.get(one).defeated, vec![two]);
         assert_eq!(s.get(one).opponents, vec![two]);
     }
@@ -656,9 +686,53 @@ mod tests {
         let s = scores(&t);
         assert_eq!(s.get(TeamId(1)).points, HalfPoints::from_halves(1));
         assert_eq!(s.get(TeamId(2)).points, HalfPoints::from_halves(1));
-        // A half is not a victory, for a team as for a player.
-        assert_eq!(s.get(TeamId(1)).victories, Wins(0));
-        assert_eq!(s.get(TeamId(1)).board_wins, Wins(1));
+        // Half a point *and* half a victory, on both sides: the two columns
+        // describe the same match, so they may not disagree about it.
+        assert_eq!(s.get(TeamId(1)).victories, Wins::from_halves(1));
+        assert_eq!(s.get(TeamId(2)).victories, Wins::from_halves(1));
+        // The board each side actually won still counts whole.
+        assert_eq!(s.get(TeamId(1)).board_wins, Wins::from_whole(1));
+        // A draw defeats nobody, so neither side enters the other's `defeated`
+        // list — which is what the `…DOS` tie-breaks sum.
+        assert!(s.get(TeamId(1)).defeated.is_empty());
+        assert!(s.get(TeamId(2)).defeated.is_empty());
+    }
+
+    /// The drawn match has to reach every metric built on victories, not just
+    /// the Points column — reported from a live 3-board match that finished
+    /// 1–1 with a double no-show on the last board.
+    #[test]
+    fn a_drawn_match_is_half_a_victory_in_the_sums_built_on_victories() {
+        let (mut t, _) = tournament(3, 2, TournamentSettings::default());
+        one_match(
+            &mut t,
+            &[
+                Outcome::won(Winner::Player1),
+                Outcome::won(Winner::Player2),
+                Outcome::Forfeit {
+                    absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
+                },
+            ],
+        );
+        let table = compute_team_standings(&t.teams, &t.players, &t.settings, &t.rounds);
+        for row in &table {
+            assert_eq!(
+                row.points,
+                HalfPoints::from_halves(1),
+                "team {:?}",
+                row.team_id
+            );
+            assert_eq!(
+                row.victories,
+                Wins::from_halves(1),
+                "team {:?}",
+                row.team_id
+            );
+            // Each faced one opponent holding half a victory.
+            assert_eq!(row.sosw, Wins::from_halves(1), "team {:?}", row.team_id);
+            // ...and defeated nobody, so the DOS flavours stay empty.
+            assert_eq!(row.sodosw, Wins::ZERO, "team {:?}", row.team_id);
+        }
     }
 
     #[test]
@@ -675,8 +749,8 @@ mod tests {
         );
         let s = scores(&t);
         // 1–1: a drawn match, but each side's board win is its own.
-        assert_eq!(s.get(TeamId(1)).board_wins, Wins(1));
-        assert_eq!(s.get(TeamId(2)).board_wins, Wins(1));
+        assert_eq!(s.get(TeamId(1)).board_wins, Wins::from_whole(1));
+        assert_eq!(s.get(TeamId(2)).board_wins, Wins::from_whole(1));
         assert_eq!(s.get(TeamId(1)).points, HalfPoints::from_halves(1));
     }
 
@@ -713,11 +787,11 @@ mod tests {
         let bye_team = slots.team_of(t.rounds[0].sitouts[0].player).unwrap();
         let s = scores(&t);
         assert_eq!(s.get(bye_team).points, HalfPoints::from_whole(1));
-        assert_eq!(s.get(bye_team).victories, Wins(1));
+        assert_eq!(s.get(bye_team).victories, Wins::from_whole(1));
         assert!(s.get(bye_team).had_bye);
         // ...and it doesn't count as a game: no opponent, no board win.
         assert!(s.get(bye_team).opponents.is_empty());
-        assert_eq!(s.get(bye_team).board_wins, Wins(0));
+        assert_eq!(s.get(bye_team).board_wins, Wins::from_whole(0));
 
         // The next round must not hand the same team the bye again.
         t.prepare_round().unwrap();
@@ -862,9 +936,9 @@ mod tests {
         assert_eq!(table.len(), 2);
         assert_eq!(table[0].tournament_id, TeamId(1));
         assert_eq!(table[0].points, HalfPoints::from_whole(1));
-        assert_eq!(table[0].board_wins, Wins(2));
-        assert_eq!(table[0].victories, Wins(1));
-        assert_eq!(table[1].board_wins, Wins(1));
+        assert_eq!(table[0].board_wins, Wins::from_whole(2));
+        assert_eq!(table[0].victories, Wins::from_whole(1));
+        assert_eq!(table[1].board_wins, Wins::from_whole(1));
         // The members come back in board order, ready for the breakdown rows.
         assert_eq!(table[0].members.len(), 3);
         // Opponents and defeated face callers by team id, as `Standing` does.
@@ -902,7 +976,7 @@ mod tests {
         // on points and split by board wins (1 each) — so the loser of the sweep
         // (0 board wins) comes last.
         assert_eq!(table[0].points, HalfPoints::from_whole(1));
-        assert_eq!(table.last().unwrap().board_wins, Wins(0));
+        assert_eq!(table.last().unwrap().board_wins, Wins::from_whole(0));
         assert!(table[1].points == table[2].points);
         assert!(table[1].board_wins >= table[2].board_wins);
     }
@@ -923,8 +997,12 @@ mod tests {
                 expected,
                 "SOSM sums opposing teams' points"
             );
-            let expected_w: u32 = s.opponents.iter().map(|o| by_id[o].victories.get()).sum();
-            assert_eq!(s.sosw.get(), expected_w);
+            let expected_w: u32 = s
+                .opponents
+                .iter()
+                .map(|o| by_id[o].victories.halves())
+                .sum();
+            assert_eq!(s.sosw.halves(), expected_w);
             // ...and the running columns have one entry per completed round.
             assert_eq!(s.running_points.len(), 3);
         }
@@ -993,7 +1071,10 @@ mod tests {
         // The giver is player1 (the stronger team is on player1 and rated above),
         // so the Wiel rule makes it 1–1 rather than 0–2.
         assert_eq!(giver, Winner::Player1);
-        assert_eq!((result.wins1, result.wins2), (Wins(1), Wins(1)));
+        assert_eq!(
+            (result.wins1, result.wins2),
+            (Wins::from_whole(1), Wins::from_whole(1))
+        );
     }
 }
 
@@ -1054,20 +1135,20 @@ impl TeamStanding {
     pub fn tiebreak(&self, tb: Tiebreak) -> u32 {
         match tb {
             Tiebreak::Points => self.points.halves(),
-            Tiebreak::BoardWins => self.board_wins.get(),
+            Tiebreak::BoardWins => self.board_wins.halves(),
             Tiebreak::SosM => self.sosm.halves(),
-            Tiebreak::SosW => self.sosw.get(),
+            Tiebreak::SosW => self.sosw.halves(),
             Tiebreak::SodosM => self.sodosm.halves(),
-            Tiebreak::SodosW => self.sodosw.get(),
+            Tiebreak::SodosW => self.sodosw.halves(),
             Tiebreak::SososM => self.sososm.halves(),
-            Tiebreak::SososW => self.sososw.get(),
+            Tiebreak::SososW => self.sososw.halves(),
             Tiebreak::SosM1 => self.sosm1.halves(),
             Tiebreak::SosM2 => self.sosm2.halves(),
-            Tiebreak::SosW1 => self.sosw1.get(),
-            Tiebreak::SosW2 => self.sosw2.get(),
+            Tiebreak::SosW1 => self.sosw1.halves(),
+            Tiebreak::SosW2 => self.sosw2.halves(),
             Tiebreak::CussM => self.cussm.halves(),
-            Tiebreak::CussW => self.cussw.get(),
-            Tiebreak::Dc => self.dc.get(),
+            Tiebreak::CussW => self.cussw.halves(),
+            Tiebreak::Dc => self.dc.halves(),
             // Rejected in team mode by settings validation, and dropped from the
             // order by `normalized`, so it never reaches the ranking.
             Tiebreak::EstElo => {
@@ -1173,7 +1254,7 @@ pub fn compute_team_standings(
         &rows,
     );
     for (i, wins) in dc.into_iter().enumerate() {
-        standings[i].dc = Wins(wins);
+        standings[i].dc = Wins::from_whole(wins);
     }
     order.into_iter().map(|i| standings[i].clone()).collect()
 }

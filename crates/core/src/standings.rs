@@ -66,11 +66,16 @@ use typed_index_collections::TiVec;
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct Standing {
     pub player_id: Uuid,
-    /// Games won (effective winner; a bye counts as a win).
+    /// Games won (effective winner; a bye counts as a win), in half-wins — a
+    /// `0=` sit-out is worth half of one, so this can be odd. See [`Wins`].
     pub victories: Wins,
-    /// MacMahon starting points.
+    /// MacMahon starting points, with any manual point adjustment folded in.
     pub macmahon: HalfPoints,
-    /// Total score: `macmahon + 2·victories`, plus `1` per half-point absence.
+    /// Total score, and exactly `macmahon + victories`: wins and points share
+    /// the ×2 scale, and every way of scoring a round adds the same amount to
+    /// both. That identity is what the Results tab's "Wins + MacMahon points"
+    /// tooltip claims, and it did not hold while a `0=` scored half a point and
+    /// no win.
     pub points: HalfPoints,
     /// Sum of opponents' points.
     pub sosm: HalfPoints,
@@ -134,25 +139,25 @@ pub struct Standing {
 impl Standing {
     /// The value of a given ranking criterion for this player, as a plain
     /// ordinal `u32`. Ranking only ever compares a metric against the *same*
-    /// metric, so the typed half-point / win distinction that the fields carry
-    /// collapses to a bare "bigger is better" integer here (half-points in raw
-    /// ×2 units, wins as whole counts — never compared across the two).
+    /// metric, so the typed point / win distinction that the fields carry
+    /// collapses to a bare "bigger is better" integer here — both in raw ×2
+    /// units, and never compared across the two.
     pub fn tiebreak(&self, tb: Tiebreak) -> u32 {
         match tb {
             Tiebreak::Points => self.points.halves(),
             Tiebreak::SosM => self.sosm.halves(),
-            Tiebreak::SosW => self.sosw.get(),
+            Tiebreak::SosW => self.sosw.halves(),
             Tiebreak::SodosM => self.sodosm.halves(),
-            Tiebreak::SodosW => self.sodosw.get(),
+            Tiebreak::SodosW => self.sodosw.halves(),
             Tiebreak::SososM => self.sososm.halves(),
-            Tiebreak::SososW => self.sososw.get(),
+            Tiebreak::SososW => self.sososw.halves(),
             Tiebreak::SosM1 => self.sosm1.halves(),
             Tiebreak::SosM2 => self.sosm2.halves(),
-            Tiebreak::SosW1 => self.sosw1.get(),
-            Tiebreak::SosW2 => self.sosw2.get(),
+            Tiebreak::SosW1 => self.sosw1.halves(),
+            Tiebreak::SosW2 => self.sosw2.halves(),
             Tiebreak::CussM => self.cussm.halves(),
-            Tiebreak::CussW => self.cussw.get(),
-            Tiebreak::Dc => self.dc.get(),
+            Tiebreak::CussW => self.cussw.halves(),
+            Tiebreak::Dc => self.dc.halves(),
             // Ranking metrics are u32; a (non-negative) estimated ELO fits, and a
             // stray negative estimate floors at 0 for ordering. Only reached when
             // the estimate both is maintained and estimates rated players (see the
@@ -161,7 +166,7 @@ impl Standing {
             // A player's board wins *are* their own game wins — same quantity,
             // one board at a time. It is a team's members' total that makes the
             // criterion interesting, but the meaning is one and the same.
-            Tiebreak::BoardWins => self.victories.get(),
+            Tiebreak::BoardWins => self.victories.halves(),
             Tiebreak::EstElo => {
                 debug_assert!(
                     self.estimated_elo.is_some(),
@@ -322,7 +327,7 @@ pub fn compute_standings(
         &rows,
     );
     for (i, wins) in dc.into_iter().enumerate() {
-        standings[i].dc = Wins(wins);
+        standings[i].dc = Wins::from_whole(wins);
     }
     order.into_iter().map(|i| standings[i].clone()).collect()
 }
@@ -519,14 +524,17 @@ mod tests {
         let players = vec![a.clone(), b.clone(), c.clone(), d.clone()];
         let standings = compute_standings(&players, &TournamentSettings::default(), &rounds);
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
-        // A: 2 points (4 halves) and 2 victories from the long win.
-        assert_eq!((of(a.id).points.halves(), of(a.id).victories.get()), (4, 2));
+        // A: 2 points and 2 victories from the long win — both in ×2 units.
+        assert_eq!(
+            (of(a.id).points.halves(), of(a.id).victories.halves()),
+            (4, 4)
+        );
         // B: beat C once (1 point = 2 halves).
         assert_eq!(of(b.id).points, 2);
         // B counted twice in A's opponent-sums.
         assert_eq!(of(a.id).sosm, 4);
         assert_eq!(of(a.id).sodosm, 4);
-        assert_eq!(of(a.id).sosw, 2); // B has 1 win, counted twice
+        assert_eq!(of(a.id).sosw, 4); // B has 1 win (2 halves), counted twice
     }
 
     #[test]
@@ -604,19 +612,20 @@ mod tests {
         let standings = compute_standings(&[a.clone(), b.clone()], &settings, &rounds);
 
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
-        // MacMahon and points are in half-point units (×2); victories are whole.
+        // MacMahon, points and victories are all in ×2 units, so A's single win
+        // reads as 2.
         assert_eq!(
             (
                 of(a.id).macmahon.halves(),
-                of(a.id).victories.get(),
+                of(a.id).victories.halves(),
                 of(a.id).points.halves()
             ),
-            (2, 1, 4)
+            (2, 2, 4)
         );
         assert_eq!(
             (
                 of(b.id).macmahon.halves(),
-                of(b.id).victories.get(),
+                of(b.id).victories.halves(),
                 of(b.id).points.halves()
             ),
             (2, 0, 2)
@@ -654,15 +663,15 @@ mod tests {
         assert_eq!(
             (
                 of(a.id).macmahon.halves(),
-                of(a.id).victories.get(),
+                of(a.id).victories.halves(),
                 of(a.id).points.halves()
             ),
-            (0, 1, 2)
+            (0, 2, 2)
         );
         assert_eq!(
             (
                 of(b.id).macmahon.halves(),
-                of(b.id).victories.get(),
+                of(b.id).victories.halves(),
                 of(b.id).points.halves()
             ),
             (0, 0, 0)
@@ -701,10 +710,65 @@ mod tests {
             TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1500)]);
         let standings = compute_standings(&[a.clone(), b.clone(), c.clone()], &settings, &rounds);
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
-        // SOSM/SODOSM are in half-point units (opponents' MacMahon = 2 halves);
-        // the W flavours are whole win counts (0 here).
-        assert_eq!((of(a.id).sosm.halves(), of(a.id).sosw.get()), (4, 0));
-        assert_eq!((of(a.id).sodosm.halves(), of(a.id).sodosw.get()), (4, 0));
+        // Both flavours are in ×2 units: the M ones sum opponents' MacMahon
+        // (2 halves each), the W ones their wins (none here).
+        assert_eq!((of(a.id).sosm.halves(), of(a.id).sosw.halves()), (4, 0));
+        assert_eq!((of(a.id).sodosm.halves(), of(a.id).sodosw.halves()), (4, 0));
+    }
+
+    /// The Wins column and the Points column describe the same round, so they
+    /// must not disagree about it.
+    ///
+    /// Reported from a live tournament: a player on a MacMahon start of 1 who
+    /// lost a game and took a `0=` sit-out showed `Points 1½` beside `Wins 0`.
+    /// A half-point sit-out is half a win (the EGF "number of wins"
+    /// convention), and everything summed from wins has to inherit that half.
+    #[test]
+    fn a_half_point_sitout_is_half_a_win_here_and_in_every_sum_built_on_wins() {
+        use crate::round::{Sitout, SitoutKind, SitoutValue};
+        let a = player(1, Some(1600));
+        let b = player(2, Some(1600));
+        let half_bye = |tid| Sitout {
+            player: TournamentId(tid),
+            kind: SitoutKind::Bye,
+            value: SitoutValue::Half,
+        };
+        let rounds = vec![
+            // B beats A.
+            round(
+                1,
+                vec![board(TournamentId(1), TournamentId(2), Winner::Player2)],
+            ),
+            // Both then take a `0=` sit-out.
+            Round {
+                number: 2,
+                boards: Vec::new(),
+                sitouts: vec![half_bye(1), half_bye(2)],
+                completed: true,
+            },
+        ];
+        let standings = compute_standings(
+            &[a.clone(), b.clone()],
+            &TournamentSettings::default(),
+            &rounds,
+        );
+        let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
+
+        // Everything below is in half-units. A lost their game and took a `0=`:
+        // half a point, and half a win — not the `0` the Wins column used to show.
+        assert_eq!(of(a.id).points, 1);
+        assert_eq!(of(a.id).victories, 1);
+        // B won a game and took the same `0=`: 1½ of each.
+        assert_eq!(of(b.id).points, 3);
+        assert_eq!(of(b.id).victories, 3);
+
+        // The sums built on wins carry the half through rather than rounding it
+        // away — each faced the other exactly once.
+        assert_eq!(of(a.id).sosw, 3); // B's 1½ wins
+        assert_eq!(of(b.id).sosw, 1); // A's ½ win
+                                      // SODOSW counts only defeated opponents: B beat A, A beat nobody.
+        assert_eq!(of(b.id).sodosw, 1);
+        assert_eq!(of(a.id).sodosw, 0);
     }
 
     #[test]
@@ -769,10 +833,10 @@ mod tests {
             &rounds,
         );
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
-        // A faced B (2 wins), C (1 win), D (0 wins) → {2, 1, 0}.
-        assert_eq!(of(a.id).sosw, 3);
-        assert_eq!(of(a.id).sosw1, 3); // drop the 0
-        assert_eq!(of(a.id).sosw2, 2); // drop the 0 and the 1
+        // A faced B (2 wins), C (1 win), D (0 wins) → {4, 2, 0} in half-wins.
+        assert_eq!(of(a.id).sosw, 6);
+        assert_eq!(of(a.id).sosw1, 6); // drop the 0
+        assert_eq!(of(a.id).sosw2, 4); // drop the 0 and the 1
     }
 
     #[test]
@@ -836,9 +900,10 @@ mod tests {
             &rounds,
         );
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
-        assert_eq!(of(a.id).cussw, 4); // 1 + 1 + 2 (whole wins)
-        assert_eq!(of(b.id).cussw, 2); // 0 + 1 + 1
-                                       // CUSSM sums points (half-units), so with no MacMahon it is twice CUSSW.
+        assert_eq!(of(a.id).cussw, 8); // (1 + 1 + 2) wins, in half-wins
+        assert_eq!(of(b.id).cussw, 4); // 0 + 1 + 1
+                                       // CUSSM sums points; with no MacMahon a win is worth exactly a
+                                       // point, so on the shared ×2 scale the two now agree.
         assert_eq!(of(a.id).cussm, 8);
     }
 
@@ -1131,7 +1196,7 @@ mod tests {
         let standings = compute_standings(&players, &settings, &rounds);
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
 
-        // Points in half-point units (2 points = 4 halves); DC is a whole count.
+        // Everything in ×2 units: 2 points reads as 4, and so does 2 DC wins.
         assert_eq!(
             (
                 of(a.id).points.halves(),
@@ -1140,9 +1205,15 @@ mod tests {
             ),
             (4, 4, 4)
         );
+        // Direct confrontation counts played games, so its halves are always
+        // even: 2, 1 and 0 wins.
         assert_eq!(
-            (of(a.id).dc.get(), of(b.id).dc.get(), of(c.id).dc.get()),
-            (2, 1, 0)
+            (
+                of(a.id).dc.halves(),
+                of(b.id).dc.halves(),
+                of(c.id).dc.halves()
+            ),
+            (4, 2, 0)
         );
 
         let pos = |id| standings.iter().position(|s| s.player_id == id).unwrap();

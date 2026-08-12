@@ -280,7 +280,7 @@ pub(crate) fn compute_scores(
             let reps = if board.long { 2 } else { 1 };
             let s = &mut by_tid[winner];
             s.points += HalfPoints::from_whole(reps); // one point per game (two for a long board)
-            s.victories += Wins(reps);
+            s.victories += Wins::from_whole(reps);
             for _ in 0..reps {
                 s.defeated.push(loser);
             }
@@ -291,9 +291,7 @@ pub(crate) fn compute_scores(
         for sitout in &round.sitouts {
             let s = &mut by_tid[sitout.player];
             s.points += sitout.value.points();
-            if sitout.value.is_victory() {
-                s.victories += Wins(1);
-            }
+            s.victories += sitout.value.wins();
         }
         // The player who showed up on a no-show board scores the free point, as
         // for a bye. The absentee scores nothing (like an absence).
@@ -304,7 +302,7 @@ pub(crate) fn compute_scores(
                 let reps = if board.long { 2 } else { 1 };
                 let s = &mut by_tid[present];
                 s.points += HalfPoints::from_whole(reps); // one point (two for a long board)
-                s.victories += Wins(reps);
+                s.victories += Wins::from_whole(reps);
             }
         }
 
@@ -413,7 +411,7 @@ mod tests {
             &[round],
         );
         assert_eq!(scores.get(&a.id).points, 2); // 1 point = 2 half-points
-        assert_eq!(scores.get(&a.id).victories, 1);
+        assert_eq!(scores.get(&a.id).victories, 2); // 1 win = 2 half-wins
         assert!(scores.get(&a.id).had_bye);
         assert_eq!(scores.get(&a.id).last_descended, Some(1));
         assert!(scores.get(&a.id).opponents.is_empty());
@@ -479,7 +477,7 @@ mod tests {
             &[round],
         );
         assert_eq!(scores.get(&a.id).points, 2); // 1 point = 2 half-points
-        assert_eq!(scores.get(&a.id).victories, 1);
+        assert_eq!(scores.get(&a.id).victories, 2); // 1 win = 2 half-wins
         assert!(scores.get(&a.id).had_bye);
     }
 
@@ -498,11 +496,14 @@ mod tests {
             }],
             completed: true,
         };
-        // (points in half-units, victories) for each value.
+        // (points, victories) for each value, both in half-units (×2) — a `0=`
+        // is worth half of each, which is the whole point of keeping wins
+        // doubled too (EGF "number of wins"). It used to score half a point and
+        // no win, leaving the Wins column disagreeing with the Points column.
         let expected = [
             (SitoutValue::Zero, 0, 0), // `0-`: nothing
-            (SitoutValue::Half, 1, 0), // `0=`: half a point, but not a win
-            (SitoutValue::Full, 2, 1), // `0+`: a full point, and a win
+            (SitoutValue::Half, 1, 1), // `0=`: half a point and half a win
+            (SitoutValue::Full, 2, 2), // `0+`: a full point and a win
         ];
         for (value, points, victories) in expected {
             let rounds = [round(value)];
@@ -575,7 +576,7 @@ mod tests {
             &[round],
         );
         assert_eq!(scores.get(&a.id).points, 4); // 2 points = 4 half-points
-        assert_eq!(scores.get(&a.id).victories, 2);
+        assert_eq!(scores.get(&a.id).victories, 4); // 2 wins = 4 half-wins
         let (atid, btid) = (a.tournament_id.unwrap(), b.tournament_id.unwrap());
         assert_eq!(scores.get(&a.id).defeated, vec![btid, btid]); // twice
         assert_eq!(scores.get(&a.id).opponents, vec![btid, btid]);
@@ -647,7 +648,7 @@ mod tests {
             &[round],
         );
         assert_eq!(scores.get(&a.id).points, 4); // 2 points
-        assert_eq!(scores.get(&a.id).victories, 2);
+        assert_eq!(scores.get(&a.id).victories, 4); // 2 wins
         assert_eq!(scores.get(&b.id).points, 0);
     }
 

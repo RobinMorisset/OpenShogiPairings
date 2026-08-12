@@ -672,13 +672,14 @@
     return lines.length > 0 ? lines.join("\n") : undefined;
   }
 
-  /** A tie-break value, and the player who contributed it — `4 (Doe Jane)`. A
-   * `half`-unit field (points, SOSM, …) is rendered `1½`; a whole one as-is. The
-   * `count` multiplies the contribution, so a two-round (long) game — which
-   * records the opponent twice — shows once with the doubled score. */
-  function opponentTerm(id: string, field: keyof Standing, half: boolean, count = 1): string {
+  /** A tie-break value, and the player who contributed it — `1½ (Doe Jane)`.
+   * Every quantity reaching here — points, wins, and the sums over them — is in
+   * ×2 units, so they all render through {@link formatScore}. The `count`
+   * multiplies the contribution, so a two-round (long) game — which records the
+   * opponent twice — shows once with the doubled score. */
+  function opponentTerm(id: string, field: keyof Standing, count = 1): string {
     const value = ((standingById.get(id)?.[field] as number | undefined) ?? 0) * count;
-    return `${half ? formatScore(value) : value} (${nameOf(id)})`;
+    return `${formatScore(value)} (${nameOf(id)})`;
   }
 
   /** Group repeated opponent ids (a long game records the same opponent twice)
@@ -696,20 +697,20 @@
   /** Join the opponents' contributions to an opponent-sum tie-break, e.g.
    * `3 (Doe Jane) + 2 (Roe Max)`; a placeholder when there are none yet. A long
    * game's opponent appears once with its score doubled. */
-  function sumTerms(ids: string[], field: keyof Standing, half: boolean): string {
+  function sumTerms(ids: string[], field: keyof Standing): string {
     if (ids.length === 0) return $_("resultsView.tiebreakNoOpponents");
     return groupIds(ids)
-      .map(({ id, count }) => opponentTerm(id, field, half, count))
+      .map(({ id, count }) => opponentTerm(id, field, count))
       .join(" + ");
   }
 
   /** Like [`sumTerms`] but for the Buchholz-cut metrics: sort the opponents by
    * their contribution, drop the `drop` lowest (noting who), and sum the rest —
    * mirroring the server's `sum_dropping_lowest`. */
-  function droppedTerms(ids: string[], field: keyof Standing, drop: number, half: boolean): string {
+  function droppedTerms(ids: string[], field: keyof Standing, drop: number): string {
     if (ids.length === 0) return $_("resultsView.tiebreakNoOpponents");
     const terms = ids.map((id) => ({
-      term: opponentTerm(id, field, half),
+      term: opponentTerm(id, field),
       value: (standingById.get(id)?.[field] as number | undefined) ?? 0,
     }));
     const { kept, dropped } = partitionDropped(terms, (t) => t.value, drop);
@@ -724,32 +725,32 @@
   function tiebreakBreakdown(code: Tiebreak, standing: Standing): string | undefined {
     switch (code) {
       case "sos_m":
-        return sumTerms(standing.opponents, "points", true);
+        return sumTerms(standing.opponents, "points");
       case "sos_w":
-        return sumTerms(standing.opponents, "victories", false);
+        return sumTerms(standing.opponents, "victories");
       case "sodos_m":
-        return sumTerms(standing.defeated, "points", true);
+        return sumTerms(standing.defeated, "points");
       case "sodos_w":
-        return sumTerms(standing.defeated, "victories", false);
+        return sumTerms(standing.defeated, "victories");
       case "sosos_m":
-        return sumTerms(standing.opponents, "sosm", true);
+        return sumTerms(standing.opponents, "sosm");
       case "sosos_w":
-        return sumTerms(standing.opponents, "sosw", false);
+        return sumTerms(standing.opponents, "sosw");
       case "sos_m1":
-        return droppedTerms(standing.opponents, "points", 1, true);
+        return droppedTerms(standing.opponents, "points", 1);
       case "sos_m2":
-        return droppedTerms(standing.opponents, "points", 2, true);
+        return droppedTerms(standing.opponents, "points", 2);
       case "sos_w1":
-        return droppedTerms(standing.opponents, "victories", 1, false);
+        return droppedTerms(standing.opponents, "victories", 1);
       case "sos_w2":
-        return droppedTerms(standing.opponents, "victories", 2, false);
+        return droppedTerms(standing.opponents, "victories", 2);
       case "cuss_m":
         return standing.running_points.length > 0
           ? standing.running_points.map((p) => formatScore(p)).join(" + ")
           : undefined;
       case "cuss_w":
         return standing.running_wins.length > 0
-          ? standing.running_wins.join(" + ")
+          ? standing.running_wins.map((w) => formatScore(w)).join(" + ")
           : undefined;
       case "points":
       case "est_elo":
@@ -938,7 +939,7 @@
             {/each}
             <!-- Matches won. A team's *games* won are its board-wins tie-break,
                  which has its own column when the referee ranks on it. -->
-            <td class="num victories">{team.victories}</td>
+            <td class="num victories">{formatScore(team.victories)}</td>
             {#if showMacmahon}
               <td
                 class="num macmahon"
@@ -1060,7 +1061,7 @@
               <td></td>
             {/each}
           {:else}
-            <td class="num victories">{standing.victories}</td>
+            <td class="num victories">{formatScore(standing.victories)}</td>
             {#if showMacmahon}
               <td
                 class="num macmahon"

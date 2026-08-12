@@ -15,6 +15,25 @@ separate flags — and, when it was forfeited, why each missing side missed it �
 and tournaments can carry teams. A stale file is rejected with a clear message
 rather than half-parsed; re-create the tournament.
 
+### Fixed
+
+- **A drawn team match now counts as half a win** for each side, not none. It
+  already scored half a *point* — the same half the Wins column was dropping,
+  so the two columns described one match and disagreed about it, and the
+  team tie-breaks summed from wins (SOSW, SODOSW, SOSOSW, CUSSW) never saw the
+  draw at all. A draw still defeats nobody, so neither side enters the other's
+  *defeated* list and the `…DOS` flavours are unchanged.
+- **A half-point sit-out now counts as half a win**, not none. A player on a
+  MacMahon start of 1 who lost a game and took a `0=` showed `Wins 0` beside
+  `Points 1½` — two columns describing the same round and disagreeing about it,
+  with the Points column's own tooltip ("Wins + MacMahon points") claiming a
+  relation that did not hold. Wins are now counted in halves like points,
+  following the EGF "number of wins" convention, and the tie-breaks summed from
+  them (SOSW, SODOSW, SOSOSW, CUSSW, SOSW-1, SOSW-2) inherit the half instead of
+  rounding it away. **This can change the final ranking** of a tournament with
+  half-point sit-outs, since those tie-breaks now separate players they used to
+  tie. Whole wins are unaffected, and the save format is unchanged.
+
 ### Added
 
 - **Nationality protection** (Settings → *Nationality protection*), club
