@@ -104,9 +104,10 @@ impl Scores {
     }
 
     /// A player's tournament number, or `None` if they aren't in the tournament.
-    /// A linear scan of `ids`: the number is already known everywhere on the hot
-    /// path (boards and players carry it), so this id-facing lookup is only for
-    /// the [`Uuid`] boundary and tests, and isn't worth a parallel hash table.
+    /// A linear scan of `ids`: the number is already known everywhere the score
+    /// table is read (boards and players carry it), so this id-facing lookup is
+    /// only for the test helpers above and isn't worth a parallel hash table.
+    #[cfg(test)]
     pub(crate) fn tid_of(&self, id: &Uuid) -> Option<TournamentId> {
         self.ids
             .iter()

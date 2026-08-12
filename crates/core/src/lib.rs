@@ -71,7 +71,7 @@ pub use settings::{
     PairingMode, PlayerCategory, Ratio, RatioAtLeastOne, TeamModeConflict, TeamSettings,
     ThresholdCriterion, Tiebreak, TournamentDates, TournamentSettings, UnratedK,
 };
-pub use standings::Standing;
+pub use standings::{Standing, Tiebreaks};
 pub use team::{pairing_rating, Team};
 pub use team_scoring::{TeamMatch, TeamStanding};
 pub use tournament::{Tournament, TournamentError, TOURNAMENT_FORMAT_VERSION};

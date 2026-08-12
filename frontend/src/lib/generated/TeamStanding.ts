@@ -36,12 +36,7 @@ macmahon: HalfPoints,
  * Total score: MacMahon start + match points + whatever the rounds the team
  * sat out were worth.
  */
-points: HalfPoints, sosm: HalfPoints, sosw: Wins, sodosm: HalfPoints, sodosw: Wins, sososm: HalfPoints, sososw: Wins, sosm1: HalfPoints, sosm2: HalfPoints, sosw1: Wins, sosw2: Wins, cussm: HalfPoints, cussw: Wins, 
-/**
- * Direct confrontation among the teams still tied on every earlier
- * criterion (see [`Tiebreak::Dc`]).
- */
-dc: Wins, 
+points: HalfPoints, 
 /**
  * Opposing teams faced, one entry per match, in round order.
  */
@@ -53,4 +48,60 @@ defeated: Array<string>, running_points: Array<HalfPoints>, running_wins: Array<
 /**
  * The team's members, by player id, in board order.
  */
-members: Array<string>, };
+members: Array<string>, 
+/**
+ * Sum of opponents' points.
+ */
+sosm: HalfPoints, 
+/**
+ * Sum of opponents' wins.
+ */
+sosw: Wins, 
+/**
+ * Sum of defeated opponents' points.
+ */
+sodosm: HalfPoints, 
+/**
+ * Sum of defeated opponents' wins.
+ */
+sodosw: Wins, 
+/**
+ * Sum of opponents' SOSM.
+ */
+sososm: HalfPoints, 
+/**
+ * Sum of opponents' SOSW.
+ */
+sososw: Wins, 
+/**
+ * SOSM dropping the single lowest-scoring opponent.
+ */
+sosm1: HalfPoints, 
+/**
+ * SOSM dropping the two lowest-scoring opponents.
+ */
+sosm2: HalfPoints, 
+/**
+ * SOSW dropping the single lowest-scoring opponent.
+ */
+sosw1: Wins, 
+/**
+ * SOSW dropping the two lowest-scoring opponents.
+ */
+sosw2: Wins, 
+/**
+ * Cumulative sum of the running points total after each round.
+ */
+cussm: HalfPoints, 
+/**
+ * Cumulative sum of the running win total after each round.
+ */
+cussw: Wins, 
+/**
+ * Direct confrontation: this unit's wins against the other units it was
+ * still tied with once every earlier configured criterion ran out (0 if
+ * that tied group never played a complete round-robin among themselves, or
+ * if `Dc` isn't configured, or wasn't reached). Filled in by the ranking,
+ * which is what decides who is tied — [`rank_groups`].
+ */
+dc: Wins, };

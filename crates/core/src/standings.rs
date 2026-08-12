@@ -82,35 +82,11 @@ pub struct Standing {
     /// column; now it is true by construction rather than by agreement between
     /// two counters.
     pub points: HalfPoints,
-    /// Sum of opponents' points.
-    pub sosm: HalfPoints,
-    /// Sum of opponents' wins.
-    pub sosw: Wins,
-    /// Sum of defeated opponents' points.
-    pub sodosm: HalfPoints,
-    /// Sum of defeated opponents' wins.
-    pub sodosw: Wins,
-    /// Sum of opponents' SOSM.
-    pub sososm: HalfPoints,
-    /// Sum of opponents' SOSW.
-    pub sososw: Wins,
-    /// SOSM dropping the single lowest-scoring opponent.
-    pub sosm1: HalfPoints,
-    /// SOSM dropping the two lowest-scoring opponents.
-    pub sosm2: HalfPoints,
-    /// SOSW dropping the single lowest-scoring opponent.
-    pub sosw1: Wins,
-    /// SOSW dropping the two lowest-scoring opponents.
-    pub sosw2: Wins,
-    /// Cumulative sum of the running points total after each round.
-    pub cussm: HalfPoints,
-    /// Cumulative sum of the running win total after each round.
-    pub cussw: Wins,
-    /// Direct confrontation: this player's wins against the other players they
-    /// were still tied with once every earlier configured criterion ran out
-    /// (0 if that tied group never played a complete round-robin among
-    /// themselves, or if `Dc` isn't configured, or wasn't reached).
-    pub dc: Wins,
+    /// Every ranking criterion computed the same way for a player and for a
+    /// team — the opponent-sums, the cumulative sums and direct confrontation.
+    /// Flattened on the wire, so a client still reads `standing.sosm`.
+    #[serde(flatten)]
+    pub tiebreaks: Tiebreaks,
     /// Opponents faced, one entry per game, in round order (a rematch appears
     /// twice). Lets the Results tab show how the opponent-sum tie-breaks were
     /// built without re-deriving who played whom.
@@ -141,15 +117,72 @@ pub struct Standing {
     pub estimated_elo: Option<i32>,
 }
 
-impl Standing {
-    /// The value of a given ranking criterion for this player, as a plain
-    /// ordinal `u32`. Ranking only ever compares a metric against the *same*
-    /// metric, so the typed point / win distinction that the fields carry
-    /// collapses to a bare "bigger is better" integer here — both in raw ×2
-    /// units, and never compared across the two.
-    pub fn tiebreak(&self, tb: Tiebreak) -> u32 {
-        match tb {
-            Tiebreak::Points => self.points.halves(),
+/// Every ranking criterion that a player's [`Standing`] and a team's
+/// [`TeamStanding`](crate::team_scoring::TeamStanding) compute the same way: the
+/// ten opponent-sum tie-breaks, the two cumulative sums and direct
+/// confrontation.
+///
+/// The two rows differ in what they rank and in the extra criterion each carries
+/// (a team has board wins, a player an ELO estimate), but every metric here is a
+/// function of the same three things — who the unit faced, which of them it
+/// beat, and what each of those is worth — so it is computed once, by
+/// [`compute_tiebreaks`], and answered once, by [`Tiebreaks::value`]. That is
+/// what keeps a change to (say) the Buchholz cut from landing in the individual
+/// copy only.
+///
+/// The **score** deliberately stays on each row rather than joining this block:
+/// it is the headline figure the cross-table, the FESA export and the result
+/// import read, not only a ranking criterion.
+///
+/// `#[serde(flatten)]` on both rows keeps the wire exactly as flat as it was
+/// before this block existed, and ts-rs inlines the fields into `Standing.ts`
+/// and `TeamStanding.ts` — which is why this type is deliberately *not* exported
+/// on its own: no client ever sees it as a nested object.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Tiebreaks {
+    /// Sum of opponents' points.
+    pub sosm: HalfPoints,
+    /// Sum of opponents' wins.
+    pub sosw: Wins,
+    /// Sum of defeated opponents' points.
+    pub sodosm: HalfPoints,
+    /// Sum of defeated opponents' wins.
+    pub sodosw: Wins,
+    /// Sum of opponents' SOSM.
+    pub sososm: HalfPoints,
+    /// Sum of opponents' SOSW.
+    pub sososw: Wins,
+    /// SOSM dropping the single lowest-scoring opponent.
+    pub sosm1: HalfPoints,
+    /// SOSM dropping the two lowest-scoring opponents.
+    pub sosm2: HalfPoints,
+    /// SOSW dropping the single lowest-scoring opponent.
+    pub sosw1: Wins,
+    /// SOSW dropping the two lowest-scoring opponents.
+    pub sosw2: Wins,
+    /// Cumulative sum of the running points total after each round.
+    pub cussm: HalfPoints,
+    /// Cumulative sum of the running win total after each round.
+    pub cussw: Wins,
+    /// Direct confrontation: this unit's wins against the other units it was
+    /// still tied with once every earlier configured criterion ran out (0 if
+    /// that tied group never played a complete round-robin among themselves, or
+    /// if `Dc` isn't configured, or wasn't reached). Filled in by the ranking,
+    /// which is what decides who is tied — [`rank_groups`].
+    pub dc: Wins,
+}
+
+impl Tiebreaks {
+    /// This block's value for a ranking criterion, as a plain ordinal `u32`, or
+    /// `None` for a criterion the block doesn't carry — the score itself and the
+    /// per-row extras, which the row answers for itself.
+    ///
+    /// Ranking only ever compares a metric against the *same* metric, so the
+    /// typed point / win distinction that the fields carry collapses to a bare
+    /// "bigger is better" integer here — both in raw ×2 units, and never
+    /// compared across the two.
+    pub fn value(&self, tb: Tiebreak) -> Option<u32> {
+        Some(match tb {
             Tiebreak::SosM => self.sosm.halves(),
             Tiebreak::SosW => self.sosw.halves(),
             Tiebreak::SodosM => self.sodosm.halves(),
@@ -163,6 +196,94 @@ impl Standing {
             Tiebreak::CussM => self.cussm.halves(),
             Tiebreak::CussW => self.cussw.halves(),
             Tiebreak::Dc => self.dc.halves(),
+            // The score, and the two criteria only one kind of row has.
+            Tiebreak::Points | Tiebreak::BoardWins | Tiebreak::EstElo => return None,
+        })
+    }
+}
+
+/// One unit's accumulated scoring state, as the tie-break pass reads it: who it
+/// faced and beat (by the dense number the score table is keyed by), what it is
+/// worth as an opponent, and its cumulative sums. The bridge from a
+/// [`PlayerScore`](crate::scoring::PlayerScore) or a
+/// [`TeamScore`](crate::team_scoring::TeamScore) to [`compute_tiebreaks`].
+pub(crate) struct ScoreRow<'a, K> {
+    pub opponents: &'a [K],
+    pub defeated: &'a [K],
+    pub points: HalfPoints,
+    pub victories: Wins,
+    pub cuss_m: HalfPoints,
+    pub cuss_w: Wins,
+}
+
+/// Compute the shared tie-break block for every unit, indexed by its dense
+/// number — players keyed by [`TournamentId`], teams by
+/// [`TeamId`](crate::units::TeamId), over the same code.
+///
+/// Two passes, because the SOSOS metrics are sums *of* SOS: the first fills SOSM
+/// and SOSW for every unit, the second reads them back through each unit's
+/// opponents. `numbers` lists the units in play; a gap number keeps the all-zero
+/// default, which is what an opponent that no longer exists is worth.
+///
+/// `capacity` sizes the tables, so every number in `numbers` must be below it.
+pub(crate) fn compute_tiebreaks<'a, K, F>(
+    capacity: usize,
+    numbers: &[K],
+    row: F,
+) -> TiVec<K, Tiebreaks>
+where
+    K: Copy + From<usize> + Into<usize> + 'a,
+    F: Fn(K) -> ScoreRow<'a, K>,
+{
+    // SOSM and SOSW first — each needed on its own for the SOSOS metrics.
+    // Indexed by number so the SOSOS pass (a sum over opponents, which are
+    // numbers) is a plain array walk with no hashing.
+    let mut sosm: TiVec<K, HalfPoints> = vec![HalfPoints::ZERO; capacity].into();
+    let mut sosw: TiVec<K, Wins> = vec![Wins::ZERO; capacity].into();
+    for &k in numbers {
+        let s = row(k);
+        sosm[k] = s.opponents.iter().map(|&o| row(o).points).sum();
+        sosw[k] = s.opponents.iter().map(|&o| row(o).victories).sum();
+    }
+
+    let mut tiebreaks: TiVec<K, Tiebreaks> = vec![Tiebreaks::default(); capacity].into();
+    for &k in numbers {
+        let s = row(k);
+        // Scoring an opponent is a direct table lookup — `…M` by their points,
+        // `…W` by their wins.
+        let opp_m: Vec<HalfPoints> = s.opponents.iter().map(|&o| row(o).points).collect();
+        let opp_w: Vec<Wins> = s.opponents.iter().map(|&o| row(o).victories).collect();
+        tiebreaks[k] = Tiebreaks {
+            sosm: sosm[k],
+            sosw: sosw[k],
+            sodosm: s.defeated.iter().map(|&o| row(o).points).sum(),
+            sodosw: s.defeated.iter().map(|&o| row(o).victories).sum(),
+            sososm: s.opponents.iter().map(|&o| sosm[o]).sum(),
+            sososw: s.opponents.iter().map(|&o| sosw[o]).sum(),
+            sosm1: sum_dropping_lowest(opp_m.clone(), 1),
+            sosm2: sum_dropping_lowest(opp_m, 2),
+            sosw1: sum_dropping_lowest(opp_w.clone(), 1),
+            sosw2: sum_dropping_lowest(opp_w, 2),
+            cussm: s.cuss_m,
+            cussw: s.cuss_w,
+            // Filled in below, while the ranking order is computed, since it
+            // depends on which units end up tied on the earlier criteria.
+            dc: Wins::ZERO,
+        };
+    }
+    tiebreaks
+}
+
+impl Standing {
+    /// The value of a given ranking criterion for this player, as a plain
+    /// ordinal `u32` (see [`Tiebreaks::value`], which answers every criterion
+    /// shared with a team row).
+    pub fn tiebreak(&self, tb: Tiebreak) -> u32 {
+        if let Some(value) = self.tiebreaks.value(tb) {
+            return value;
+        }
+        match tb {
+            Tiebreak::Points => self.points.halves(),
             // Ranking metrics are u32; a (non-negative) estimated ELO fits, and a
             // stray negative estimate floors at 0 for ordering. Only reached when
             // the estimate both is maintained and estimates rated players (see the
@@ -192,6 +313,9 @@ impl Standing {
                 );
                 self.estimated_elo.unwrap_or(0).max(0) as u32
             }
+            // Every remaining criterion is one `Tiebreaks::value` answers, so it
+            // returned above.
+            _ => unreachable!("{tb:?} is a shared criterion; `Tiebreaks::value` answers it"),
         }
     }
 }
@@ -220,10 +344,6 @@ pub(crate) fn compute_standings(
     // opponent-based tie-breaks are then sums over each player's opponents, in two
     // flavours: `…M` scores an opponent by their points, `…W` by their wins.
     let scores = compute_scores(players, settings, rounds);
-    // Opponent/defeated lists hold tournament numbers, so scoring an opponent is a
-    // direct table lookup — `…M` by their points, `…W` by their wins.
-    let score_m = |o: &TournamentId| scores.get_tid(*o).points();
-    let score_w = |o: &TournamentId| scores.get_tid(*o).victories;
 
     // The live Bayesian ELO estimate — computed whenever a live estimate is
     // maintained (ELO pairing *or* estimate-based MacMahon), which is exactly when
@@ -239,48 +359,36 @@ pub(crate) fn compute_standings(
     // actually being estimated — carry a value.
     let rated_pinned = settings.elo_estimate_rated_pinned();
 
-    // SOSM and SOSW first — each needed on its own for the SOSOS metrics. Indexed
-    // by tournament number so the SOSOS pass (a sum over opponents, which are
-    // numbers) is a plain array walk.
-    let cap = scores.tid_capacity();
-    let mut sosm: TiVec<TournamentId, HalfPoints> = vec![HalfPoints::ZERO; cap].into();
-    let mut sosw: TiVec<TournamentId, Wins> = vec![Wins::ZERO; cap].into();
-    for p in players {
-        let t = scores
-            .tid_of(&p.id)
-            .expect("player has a number when scoring runs");
+    // The opponent-sum and cumulative tie-breaks, over the same code the team
+    // standings use. Every player has a number by the time standings run
+    // (registration is finalized) — the score pass above already `expect`s it.
+    let numbers: Vec<TournamentId> = players
+        .iter()
+        .map(|p| p.tournament_id.expect("player has a number"))
+        .collect();
+    let tiebreaks = compute_tiebreaks(scores.tid_capacity(), &numbers, |t| {
         let s = scores.get_tid(t);
-        sosm[t] = s.opponents.iter().map(score_m).sum();
-        sosw[t] = s.opponents.iter().map(score_w).sum();
-    }
+        ScoreRow {
+            opponents: &s.opponents,
+            defeated: &s.defeated,
+            points: s.points(),
+            victories: s.victories,
+            cuss_m: s.cuss_m,
+            cuss_w: s.cuss_w,
+        }
+    });
 
     let mut standings: Vec<Standing> = players
         .iter()
-        .map(|p| {
-            let t = p.tournament_id.expect("player has a number");
+        .zip(&numbers)
+        .map(|(p, &t)| {
             let s = scores.get_tid(t);
-            let opp_m: Vec<HalfPoints> = s.opponents.iter().map(&score_m).collect();
-            let opp_w: Vec<Wins> = s.opponents.iter().map(&score_w).collect();
             Standing {
                 player_id: p.id,
                 victories: s.victories,
                 macmahon: s.macmahon,
                 points: s.points(),
-                sosm: sosm[t],
-                sosw: sosw[t],
-                sodosm: s.defeated.iter().map(&score_m).sum(),
-                sodosw: s.defeated.iter().map(&score_w).sum(),
-                sososm: s.opponents.iter().map(|&o| sosm[o]).sum(),
-                sososw: s.opponents.iter().map(|&o| sosw[o]).sum(),
-                sosm1: sum_dropping_lowest(opp_m.clone(), 1),
-                sosm2: sum_dropping_lowest(opp_m, 2),
-                sosw1: sum_dropping_lowest(opp_w.clone(), 1),
-                sosw2: sum_dropping_lowest(opp_w, 2),
-                cussm: s.cuss_m,
-                cussw: s.cuss_w,
-                // Filled in below, while the ranking order is computed, since it
-                // depends on which players end up tied on the earlier criteria.
-                dc: Wins::ZERO,
+                tiebreaks: tiebreaks[t],
                 // The output faces callers by id, so translate the numbers back.
                 opponents: s.opponents.iter().map(|&o| scores.id_of(o)).collect(),
                 defeated: s.defeated.iter().map(|&o| scores.id_of(o)).collect(),
@@ -315,13 +423,6 @@ pub(crate) fn compute_standings(
     // depends on which other players they're still tied with once every earlier
     // criterion has run out, so ranking proceeds by repeatedly splitting the
     // still-tied groups, criterion by criterion, rather than a single sort.
-    // Every player has a number by the time standings run (registration is
-    // finalized) — the score pass above already `expect`s it — so this shares that
-    // invariant rather than papering over a missing number with a sentinel.
-    let tnum: HashMap<Uuid, TournamentId> = players
-        .iter()
-        .map(|p| (p.id, p.tournament_id.expect("player has a number")))
-        .collect();
     let rows: Vec<DcRow> = standings
         .iter()
         .map(|s| DcRow {
@@ -330,8 +431,9 @@ pub(crate) fn compute_standings(
             defeated: s.defeated.clone(),
         })
         .collect();
+    // `standings` is in `players` order, so `numbers` indexes it directly.
     let mut seed_order: Vec<usize> = (0..standings.len()).collect();
-    seed_order.sort_by_key(|&i| tnum[&standings[i].player_id]);
+    seed_order.sort_by_key(|&i| numbers[i]);
 
     let (order, dc) = rank_groups(
         seed_order,
@@ -344,7 +446,7 @@ pub(crate) fn compute_standings(
         &rows,
     );
     for (i, wins) in dc.into_iter().enumerate() {
-        standings[i].dc = Wins::from_whole(wins);
+        standings[i].tiebreaks.dc = Wins::from_whole(wins);
     }
     order.into_iter().map(|i| standings[i].clone()).collect()
 }
@@ -551,9 +653,9 @@ mod tests {
         // B: beat C once (1 point = 2 halves).
         assert_eq!(of(b.id).points, 2);
         // B counted twice in A's opponent-sums.
-        assert_eq!(of(a.id).sosm, 4);
-        assert_eq!(of(a.id).sodosm, 4);
-        assert_eq!(of(a.id).sosw, 4); // B has 1 win (2 halves), counted twice
+        assert_eq!(of(a.id).tiebreaks.sosm, 4);
+        assert_eq!(of(a.id).tiebreaks.sodosm, 4);
+        assert_eq!(of(a.id).tiebreaks.sosw, 4); // B has 1 win (2 halves), counted twice
     }
 
     #[test]
@@ -606,9 +708,18 @@ mod tests {
 
         // Points and SOSM are in half-point units (×2).
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
-        assert_eq!((of(a.id).points.halves(), of(a.id).sosm.halves()), (4, 2));
-        assert_eq!((of(d.id).points.halves(), of(d.id).sosm.halves()), (2, 6)); // faced A(4)+B(2)
-        assert_eq!((of(b.id).points.halves(), of(b.id).sosm.halves()), (2, 2)); // faced D(2)+C(0)
+        assert_eq!(
+            (of(a.id).points.halves(), of(a.id).tiebreaks.sosm.halves()),
+            (4, 2)
+        );
+        assert_eq!(
+            (of(d.id).points.halves(), of(d.id).tiebreaks.sosm.halves()),
+            (2, 6)
+        ); // faced A(4)+B(2)
+        assert_eq!(
+            (of(b.id).points.halves(), of(b.id).tiebreaks.sosm.halves()),
+            (2, 2)
+        ); // faced D(2)+C(0)
         assert_eq!(of(c.id).points, 0);
     }
 
@@ -649,8 +760,8 @@ mod tests {
             ),
             (2, 0, 2)
         );
-        assert_eq!(of(a.id).sosm, 2); // opponent B has 1 point (2 halves)
-        assert_eq!(of(a.id).sodosm, 2); // defeated B (1 point = 2 halves)
+        assert_eq!(of(a.id).tiebreaks.sosm, 2); // opponent B has 1 point (2 halves)
+        assert_eq!(of(a.id).tiebreaks.sodosm, 2); // defeated B (1 point = 2 halves)
         assert_eq!(standings[0].player_id, a.id); // A ranks first
     }
 
@@ -731,8 +842,20 @@ mod tests {
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
         // Both flavours are in ×2 units: the M ones sum opponents' MacMahon
         // (2 halves each), the W ones their wins (none here).
-        assert_eq!((of(a.id).sosm.halves(), of(a.id).sosw.halves()), (4, 0));
-        assert_eq!((of(a.id).sodosm.halves(), of(a.id).sodosw.halves()), (4, 0));
+        assert_eq!(
+            (
+                of(a.id).tiebreaks.sosm.halves(),
+                of(a.id).tiebreaks.sosw.halves()
+            ),
+            (4, 0)
+        );
+        assert_eq!(
+            (
+                of(a.id).tiebreaks.sodosm.halves(),
+                of(a.id).tiebreaks.sodosw.halves()
+            ),
+            (4, 0)
+        );
     }
 
     /// The Wins column and the Points column describe the same round, so they
@@ -784,11 +907,11 @@ mod tests {
 
         // The sums built on wins carry the half through rather than rounding it
         // away — each faced the other exactly once.
-        assert_eq!(of(a.id).sosw, 3); // B's 1½ wins
-        assert_eq!(of(b.id).sosw, 1); // A's ½ win
-                                      // SODOSW counts only defeated opponents: B beat A, A beat nobody.
-        assert_eq!(of(b.id).sodosw, 1);
-        assert_eq!(of(a.id).sodosw, 0);
+        assert_eq!(of(a.id).tiebreaks.sosw, 3); // B's 1½ wins
+        assert_eq!(of(b.id).tiebreaks.sosw, 1); // A's ½ win
+                                                // SODOSW counts only defeated opponents: B beat A, A beat nobody.
+        assert_eq!(of(b.id).tiebreaks.sodosw, 1);
+        assert_eq!(of(a.id).tiebreaks.sodosw, 0);
     }
 
     /// The Results tab shows Wins and MacMahon as separate columns and claims
@@ -895,9 +1018,9 @@ mod tests {
         );
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
         // A faced B (2 wins), C (1 win), D (0 wins) → {4, 2, 0} in half-wins.
-        assert_eq!(of(a.id).sosw, 6);
-        assert_eq!(of(a.id).sosw1, 6); // drop the 0
-        assert_eq!(of(a.id).sosw2, 4); // drop the 0 and the 1
+        assert_eq!(of(a.id).tiebreaks.sosw, 6);
+        assert_eq!(of(a.id).tiebreaks.sosw1, 6); // drop the 0
+        assert_eq!(of(a.id).tiebreaks.sosw2, 4); // drop the 0 and the 1
     }
 
     #[test]
@@ -961,11 +1084,11 @@ mod tests {
             &rounds,
         );
         let of = |id| standings.iter().find(|s| s.player_id == id).unwrap();
-        assert_eq!(of(a.id).cussw, 8); // (1 + 1 + 2) wins, in half-wins
-        assert_eq!(of(b.id).cussw, 4); // 0 + 1 + 1
-                                       // CUSSM sums points; with no MacMahon a win is worth exactly a
-                                       // point, so on the shared ×2 scale the two now agree.
-        assert_eq!(of(a.id).cussm, 8);
+        assert_eq!(of(a.id).tiebreaks.cussw, 8); // (1 + 1 + 2) wins, in half-wins
+        assert_eq!(of(b.id).tiebreaks.cussw, 4); // 0 + 1 + 1
+                                                 // CUSSM sums points; with no MacMahon a win is worth exactly a
+                                                 // point, so on the shared ×2 scale the two now agree.
+        assert_eq!(of(a.id).tiebreaks.cussm, 8);
     }
 
     #[test]
@@ -1270,9 +1393,9 @@ mod tests {
         // even: 2, 1 and 0 wins.
         assert_eq!(
             (
-                of(a.id).dc.halves(),
-                of(b.id).dc.halves(),
-                of(c.id).dc.halves()
+                of(a.id).tiebreaks.dc.halves(),
+                of(b.id).tiebreaks.dc.halves(),
+                of(c.id).tiebreaks.dc.halves()
             ),
             (4, 2, 0)
         );
@@ -1335,7 +1458,7 @@ mod tests {
 
         for id in [a.id, b.id, c.id, d.id] {
             assert_eq!(of(id).points, 2); // 1 point = 2 half-points
-            assert_eq!(of(id).dc, 0);
+            assert_eq!(of(id).tiebreaks.dc, 0);
         }
         let order: Vec<Uuid> = standings.iter().map(|s| s.player_id).collect();
         assert_eq!(order, vec![a.id, b.id, c.id, d.id]); // tournament number order
