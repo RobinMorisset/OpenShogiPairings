@@ -77,6 +77,13 @@ NOT backwards compatible with any earlier version.
   file is now checked when it is loaded, exactly as an imported one is, and
   appears in the picker with the reason it could not be opened; the file itself
   is left untouched.
+- The simulator's `--cup-final` reconstructed twice the bracket it should from a
+  hybrid cup of the German type. Walking backward from the final, the round the
+  pre-qualified players spend in the open looked exactly like a bracket round, so
+  their opponents were taken for cup players. A game a player *lost* is no longer
+  read as one they won their way through, which gives that round away — unless
+  every pre-qualified player happens to have won it, which no reading of the
+  results alone can tell from a bracket of twice the size.
 - Some filesystem failures were silently swallowed; they are now surfaced
   as errors in the log.
 - The desktop app now respects `OSP_DATA_DIR` instead of putting its data in a

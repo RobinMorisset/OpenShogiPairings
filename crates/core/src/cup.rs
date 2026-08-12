@@ -721,6 +721,20 @@ pub fn knockout_champion(rounds: &[Round], seeds: &[TournamentId]) -> Option<Tou
 /// borderline nationalities that make a top-`size`-by-rating guess unreliable —
 /// all that's needed is who reached the final. Long-game gap rounds (where the
 /// alive players are mid-game and record no new pairing) are skipped automatically.
+///
+/// # What it cannot tell apart
+///
+/// A **qualifier-format** cup of `size` and a **direct** cup of `2 × size` have
+/// the same number of rounds and double identically going backward, and an
+/// imported results table keeps no record of which board was a bracket game (see
+/// `PairingSource::Forced` in [`crate::result_import`]). The one thing that
+/// separates them is that the pre-qualified play the *open* in round 1: a game
+/// they can lose and stay in the cup, which [`frontier_predecessors`] refuses to
+/// treat as a bracket game. That catches the qualifier format whenever a single
+/// pre-qualified player fails to win their first round — but a field where every
+/// one of them wins it is genuinely indistinguishable from a bracket of twice the
+/// size, and is reported as one. Pass the bracket size explicitly if you need
+/// certainty on such an event.
 pub fn reconstruct_cup_from_final(
     rounds: &[Round],
     gold: TournamentId,
@@ -767,9 +781,17 @@ fn played(rounds: &[Round], r: u32, a: TournamentId, b: TournamentId) -> bool {
     })
 }
 
-/// The beaten predecessors if, in round `r`, every `frontier` player has a board
-/// against a distinct opponent *outside* the frontier; else `None` (a gap round, or
-/// a round where the field played itself or someone twice).
+/// The beaten predecessors if, in round `r`, every `frontier` player **won** a
+/// board against a distinct opponent *outside* the frontier; else `None` (a gap
+/// round, or a round where the field played itself, played someone twice, or
+/// didn't play its way in).
+///
+/// The win is what makes the opponent a *predecessor* rather than merely an
+/// opponent: a knockout survivor is there because they beat the player whose
+/// slot they took. Without it any distinct outside opponent counts, which is how
+/// the walk used to swallow a whole extra round of a qualifier-format cup — the
+/// pre-qualified play the open in round 1, and an ordinary Swiss game looks just
+/// like a bracket game from the outside (see [`reconstruct_cup_from_final`]).
 fn frontier_predecessors(
     rounds: &[Round],
     r: u32,
@@ -790,6 +812,12 @@ fn frontier_predecessors(
         };
         if frontier.contains(&opp) || !seen.insert(opp) {
             return None;
+        }
+        // A game they lost or drew (or that nobody turned up for) can't be the
+        // one that put them through.
+        match decide(rounds, r, p, opp)? {
+            CupResult::Winner { winner, .. } if winner == p => {}
+            _ => return None,
         }
         opps.push(opp);
     }
@@ -1083,6 +1111,67 @@ mod tests {
         );
         // Two players who never met can't be a final.
         assert!(reconstruct_cup_from_final(&rounds, s[0], s[4]).is_none());
+    }
+
+    /// A qualifier-format event: 4 pre-qualified (1-4) play the open in round 1
+    /// while 5-12 play the qualification round, and the bracket of 8 runs from
+    /// round 2. Walking back from the final, round 1 offers every alive player a
+    /// distinct outside opponent — the qualifiers their beaten qualifier, the
+    /// pre-qualified their Swiss opponent — so the frontier used to double one
+    /// time too many and report a 16-cup containing four players who were never
+    /// in it. A pre-qualified player who *didn't win* that Swiss game is what
+    /// gives the round away.
+    #[test]
+    fn reconstruct_stops_at_a_swiss_round_a_prequalified_player_lost() {
+        let p = ids(16);
+        let qualification = [
+            (p[4], p[11], CupStage::Qualification),
+            (p[5], p[10], CupStage::Qualification),
+            (p[6], p[9], CupStage::Qualification),
+            (p[7], p[8], CupStage::Qualification),
+        ];
+        // The pre-qualified players' round-1 open games. Seed 1 loses theirs,
+        // which no bracket game can be — the rest win.
+        let open = [
+            (p[12], p[0], CupStage::Qualification),
+            (p[1], p[13], CupStage::Qualification),
+            (p[2], p[14], CupStage::Qualification),
+            (p[3], p[15], CupStage::Qualification),
+        ];
+        let rounds = [
+            cup_round(1, &[qualification.as_slice(), open.as_slice()].concat()),
+            cup_round(
+                2,
+                &[
+                    (p[0], p[7], CupStage::Quarterfinal),
+                    (p[1], p[6], CupStage::Quarterfinal),
+                    (p[2], p[5], CupStage::Quarterfinal),
+                    (p[3], p[4], CupStage::Quarterfinal),
+                ],
+            ),
+            cup_round(
+                3,
+                &[
+                    (p[0], p[3], CupStage::Semifinal),
+                    (p[1], p[2], CupStage::Semifinal),
+                ],
+            ),
+            cup_round(
+                4,
+                &[
+                    (p[0], p[1], CupStage::Final),
+                    (p[3], p[2], CupStage::SmallFinal),
+                ],
+            ),
+        ];
+        // The walk stops before round 1: the bracket is the 8 who played it —
+        // the four pre-qualified and the four qualification winners.
+        let (size, roster) = reconstruct_cup_from_final(&rounds, p[0], p[1]).unwrap();
+        assert_eq!(size, 8);
+        assert_eq!(
+            roster.into_iter().collect::<HashSet<_>>(),
+            p[..8].iter().copied().collect::<HashSet<_>>()
+        );
     }
 
     #[test]
