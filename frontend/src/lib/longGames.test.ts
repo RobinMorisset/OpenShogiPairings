@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { longPending, overrunLongRound } from "./longGames";
+import { busyOnLongGame, longPending, overrunLongRound } from "./longGames";
 import type { Board, Round } from "./types";
 
 /** Only the fields these predicates read; the rest of `Board` is irrelevant. */
@@ -26,8 +26,9 @@ describe("longPending", () => {
     expect(longPending(board({ long: true, outcome: { kind: "won", winner: "player1" } }))).toBe(false);
   });
 
-  // A forfeited long board frees its players just like a played one — the
-  // winnerless-but-decided case that the force-pairing guard got wrong.
+  // A forfeited long board is decided, so there is no result left to record —
+  // the winnerless-but-decided case that the force-pairing guard got wrong. It
+  // does *not* free its players for the next round: see `busyOnLongGame`.
   it("is false for a long board resolved by forfeit", () => {
     const forfeited = board({ long: true, outcome: { kind: "forfeit", absent: { player2: "no_show" } } });
     expect(longPending(forfeited)).toBe(false);
@@ -69,5 +70,40 @@ describe("overrunLongRound", () => {
 
   it("is null before any round exists", () => {
     expect(overrunLongRound([], 1)).toBeNull();
+  });
+});
+
+describe("busyOnLongGame", () => {
+  it("keeps the previous round's long players out of this one", () => {
+    const rounds = [round(1, [pendingLong(), board({ player1: 3, player2: 4 })])];
+    expect(busyOnLongGame(rounds, 2)).toEqual([1, 2]);
+  });
+
+  // The bug this predicate exists to prevent: a long board is worth two points,
+  // so freeing its players once it is decided lets them take three wins out of
+  // two rounds. It occupies both rounds whichever round it finished in.
+  it("still excludes them when the long game was decided early", () => {
+    const decided = board({ long: true, outcome: { kind: "won", winner: "player1" } });
+    expect(busyOnLongGame([round(1, [decided])], 2)).toEqual([1, 2]);
+  });
+
+  it("still excludes them when the long game ended in a no-show", () => {
+    const forfeited = board({
+      long: true,
+      outcome: { kind: "forfeit", absent: { player2: "no_show" } },
+    });
+    expect(busyOnLongGame([round(1, [forfeited])], 2)).toEqual([1, 2]);
+  });
+
+  it("frees them again the round after", () => {
+    const rounds = [round(1, [pendingLong()]), round(2, [board({ player1: 3, player2: 4 })])];
+    expect(busyOnLongGame(rounds, 3)).toEqual([]);
+  });
+
+  it("ignores ordinary boards and rounds that are not the previous one", () => {
+    const rounds = [round(1, [pendingLong()]), round(2, [board({ player1: 3, player2: 4 })])];
+    expect(busyOnLongGame(rounds, 2)).toEqual([1, 2]);
+    expect(busyOnLongGame([round(1, [board({})])], 2)).toEqual([]);
+    expect(busyOnLongGame([], 1)).toEqual([]);
   });
 });

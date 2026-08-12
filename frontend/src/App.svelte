@@ -37,7 +37,7 @@
     type DraftUpdate,
   } from "./lib/api";
   import { describeApiError } from "./lib/errorCodes";
-  import { longPending, overrunLongRound } from "./lib/longGames";
+  import { busyOnLongGame, longPending, overrunLongRound } from "./lib/longGames";
   import { isDecided } from "./lib/noShow";
   import { pairingRating } from "./lib/teams";
   import type {
@@ -197,20 +197,19 @@
       .filter(({ board }) => longPending(board));
   });
 
-  // Players still busy on an unresolved long game (a two-round board from an
-  // earlier round). They can't be paired or customized in the next round's draft
-  // — the server excludes them from pairing — so keep them out of the draft UI
-  // too (alongside cup players), which also stops a gap round accidentally
-  // carrying them into the next round as absentees.
+  // Players a long game from the previous round keeps out of this draft. They
+  // can't be paired or customized — the server excludes them from pairing — so
+  // keep them out of the draft UI too (alongside cup players), which also stops a
+  // gap round accidentally carrying them into the next round as absentees.
+  //
+  // The rule lives in `lib/longGames.ts` so this mirrors `busy_long` in
+  // `confirm_round_inner` rather than restating it; note it keys on `long`, not
+  // `longPending` — a long game takes both its rounds even when it finished in
+  // the first.
   const busyLongPlayers = $derived.by(() => {
     if (!tournament) return [];
-    const out: number[] = [];
-    for (const r of tournament.rounds) {
-      for (const b of r.boards) {
-        if (longPending(b)) out.push(b.player1, b.player2);
-      }
-    }
-    return out;
+    const number = tournament.draft?.number ?? tournament.rounds.length + 1;
+    return busyOnLongGame(tournament.rounds, number);
   });
 
   // Why the engine chose the active round's pairings. Frozen onto the round when

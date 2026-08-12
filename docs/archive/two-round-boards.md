@@ -4,6 +4,10 @@
 > was implemented and not maintained since, so it has drifted from the code. It
 > is kept for the rationale it records; for how the software actually behaves,
 > see [`docs/reference/`](../reference) and the code.
+>
+> Superseded outright by [`long-boards-v2.md`](../long-boards-v2.md), which
+> replaced this model. Its "Long game finishes early" edge case was not merely
+> stale but wrong, and the code implemented that error — see the note there.
 
 ## The rule
 
@@ -518,9 +522,28 @@ when flagging the last-undecided board long tips the round into `completed`.
 ## Edge cases
 
 - **Long game finishes early (within round N)** or **resolves by forfeit /
-  no-show.** No special scoring rule (decision #4): the board is decided, so it is
+  no-show.**
+
+  > **This decision is wrong, and the code that implements it is a scoring bug.**
+  > See [`long-boards-v2.md`](long-boards-v2.md). The paragraph below is kept as a
+  > record of what was decided and shipped; do not treat it as the intended rule.
+  >
+  > It contradicts this document's own opening rule: a long game's players play
+  > **one** game across **two** rounds, which is precisely why the winner scores
+  > two points. Freeing them to play round N+1 as well means they played two games
+  > across two rounds and can score **three points**, while the rest of the field
+  > can score at most two — a wrong final standing, not a cosmetic oddity. The
+  > likeliest way to hit it is a no-show on a long board: the player who turned up
+  > banks two free points *and* a normal game the following round.
+  >
+  > The rule should be that a long game occupies rounds N and N+1 whichever round
+  > it finishes in, with unticking-before-the-round-advances as the only escape
+  > hatch. `long_pending()` should not exist: the round N+1 exclusion must key on
+  > `board.long`, not on whether the board is decided.
+
+  ~~No special scoring rule (decision #4): the board is decided, so it is
   no longer `long_pending` and its players are *not* excluded from round N+1; it
-  scores its `long` weight (two points). If the referee decides it should *not*
+  scores its `long` weight (two points).~~ If the referee decides it should *not*
   count as a long game after all (it really only took one round, or a forfeit
   shouldn't be worth two), they simply **untick the box** on the current round,
   demoting it to an ordinary one-point board. This is why the toggle-off guard

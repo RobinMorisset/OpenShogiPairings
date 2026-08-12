@@ -12,11 +12,35 @@ import type { Board, Round } from "./types";
  * A long board whose game hasn't finished yet. Mirrors `Board::long_pending` in
  * `crates/core/src/round.rs`.
  *
- * A long board that was decided early — finished ahead of time, or resolved by
- * forfeit — is *not* pending, and its players are free again.
+ * Use this for "is there still a result to record" — the carried-games widget,
+ * the `0-` placeholder, the overrun guard below. It is *not* what decides who
+ * sits out the next round: see {@link busyOnLongGame}.
  */
 export function longPending(board: Board): boolean {
   return board.long === true && !isDecided(board);
+}
+
+/**
+ * The players a long game keeps out of round `roundNumber`'s pairing — those on
+ * a long board in the immediately preceding round. Mirrors `busy_long` in
+ * `confirm_round_inner` (`crates/core/src/tournament.rs`).
+ *
+ * Keyed on `long`, not {@link longPending}: a long game is one game played
+ * across two rounds — which is why its winner scores two points — so it occupies
+ * both rounds whichever round it actually finishes in. A referee who wants those
+ * players paired here unticks the box before the round advances, demoting the
+ * board to an ordinary one-point game.
+ *
+ * Only the previous round is scanned, matching the server: a long game can never
+ * be two rounds behind and unresolved, because `prepare_round` refuses to advance
+ * past R+1 while one is pending.
+ */
+export function busyOnLongGame(rounds: Round[], roundNumber: number): number[] {
+  const previous = rounds.find((r) => r.number + 1 === roundNumber);
+  if (!previous) return [];
+  return previous.boards
+    .filter((b) => b.long === true)
+    .flatMap((b) => [b.player1, b.player2]);
 }
 
 /**

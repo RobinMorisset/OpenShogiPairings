@@ -444,10 +444,15 @@ impl Board {
         self.outcome.is_decided()
     }
 
-    /// A long board whose game hasn't finished yet — the state that makes its two
-    /// players sit out the next round's pairing and shows the `0-` placeholder in
-    /// the cross-table. A long board that is already decided (finished early, or
-    /// resolved by forfeit) is not pending, so its players are free again.
+    /// A long board whose game hasn't finished yet — the state that shows the
+    /// `0-` placeholder in the cross-table, and that blocks advancing past the
+    /// round after the one it started in.
+    ///
+    /// **Not** what decides who sits out the next round's pairing: that is
+    /// [`long`](Self::long) alone, because a long game occupies two rounds
+    /// whichever round it finishes in. Keying the exclusion on this predicate is
+    /// what once let a player who finished early — or whose opponent never turned
+    /// up — take three wins out of two rounds.
     pub fn long_pending(&self) -> bool {
         self.long && !self.is_decided()
     }

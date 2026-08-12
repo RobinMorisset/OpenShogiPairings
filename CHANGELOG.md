@@ -122,6 +122,16 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   name.
 - If `OSP_ADMIN_PASSWORD` is set, only published tournaments are visible to
   anyone without that password.
+- **A long game that finished early handed its players a third point.** A long
+  board is one game played across two rounds, which is why its winner scores
+  two points — but if it was decided inside its own round, or resolved by a
+  no-show, its players were freed for the next round and could win there too,
+  ending two rounds with three wins where the rest of the field could have at
+  most two. The likeliest way to hit it was an opponent who never turned up:
+  two free points, then a normal game. A long game now takes both of its rounds
+  whichever round it finishes in; a referee who decides it really only took one
+  unticks the box before the round advances, demoting it to an ordinary
+  one-point board, exactly as before.
 
 ## [1.3.0] - 2026-08-05
 

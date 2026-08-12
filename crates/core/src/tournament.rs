@@ -1347,14 +1347,31 @@ impl Tournament {
             .chain(cup_byes.iter().map(|&(p, _)| p))
             .collect();
 
-        // Players still busy on an unresolved long game (a two-round board started
-        // in an earlier round). They sit out this round's pairing entirely — like
-        // cup players — while their long game finishes.
+        // Players on a long game started in the previous round. They sit out this
+        // round's pairing entirely — like cup players — because a long game *is*
+        // one game played across two rounds, which is exactly why its winner
+        // scores two points.
+        //
+        // Deliberately keyed on `long`, not `long_pending`: a long game that
+        // finished early (or resolved by a no-show) still took both rounds. It
+        // used to free its players the moment it was decided, which let them take
+        // three wins out of two rounds — two from the long board, one from the
+        // round they should not have been in. The referee who wants them paired
+        // here unticks the box before the round advances, demoting the board to an
+        // ordinary one-point game; that is the only escape hatch.
+        //
+        // Only the immediately previous round is scanned, since that is the whole
+        // reach of a long game: `prepare_round` refuses to advance past R+1 while
+        // one is still pending, so a long board can never be two rounds behind and
+        // unresolved. Scanning every round (as this once did) would be wrong now
+        // that the predicate no longer clears itself when the game is decided —
+        // the players would be excluded from every subsequent round forever.
         let busy_long: HashSet<TournamentId> = self
             .rounds
             .iter()
+            .filter(|r| r.number + 1 == draft.number)
             .flat_map(|r| &r.boards)
-            .filter(|b| b.long_pending())
+            .filter(|b| b.long)
             .flat_map(|b| [b.player1, b.player2])
             .collect();
 
@@ -2803,6 +2820,93 @@ mod tests {
         // Enter the long result; now the next round can be prepared.
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
         assert!(t.prepare_round().is_ok());
+    }
+
+    /// A long game is *one* game played across *two* rounds — which is exactly
+    /// why its winner scores two points. So it occupies rounds N and N+1
+    /// whichever round it actually finishes in. Finishing early (a quick
+    /// resignation, or a no-show) does not hand its players a second game.
+    ///
+    /// The referee who decides it was really a one-round game unticks the box
+    /// before the round advances, demoting it to an ordinary one-point board;
+    /// that is the escape hatch, and the only one.
+    #[test]
+    fn a_long_game_decided_early_still_occupies_the_next_round() {
+        let mut t = four_players_round1_with_long_enabled();
+        t.set_board_long(1, 0, true).unwrap();
+        let long_players = [t.rounds[0].boards[0].player1, t.rounds[0].boards[0].player2];
+
+        // The long game ends inside round 1, and so does the ordinary board.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+        assert!(t.rounds[0].completed);
+
+        start_next_round(&mut t);
+        let r2 = t.rounds.last().unwrap();
+        for b in &r2.boards {
+            assert!(
+                !long_players.contains(&b.player1) && !long_players.contains(&b.player2),
+                "a long game takes rounds N and N+1 even when it finishes in N"
+            );
+        }
+        assert!(r2.byes().all(|x| !long_players.contains(&x)));
+    }
+
+    /// The scoring consequence of the rule above, and the reason it matters:
+    /// a long board is worth two points, so freeing its players for the next
+    /// round lets them take three wins out of two rounds while the rest of the
+    /// field can take at most two. That is a wrong final standing.
+    ///
+    /// Uses a no-show, which is the likeliest way to reach it in practice: the
+    /// player who turned up banks the long weight without playing a move.
+    #[test]
+    fn a_long_board_cannot_buy_three_wins_in_two_rounds() {
+        let mut t = four_players_round1_with_long_enabled();
+        t.set_board_long(1, 0, true).unwrap();
+        let winner = t.rounds[0].boards[0].player1;
+
+        // Player 2 doesn't turn up: the long board resolves at its long weight.
+        t.set_board_no_show(1, 0, Some(Forfeit::Player2(AbsenceKind::NoShow)))
+            .unwrap();
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+        assert!(t.rounds[0].completed);
+
+        // Round 2. If the winner is (wrongly) paired again, let them win that too.
+        start_next_round(&mut t);
+        let number = t.rounds.last().unwrap().number;
+        let seat = t
+            .rounds
+            .last()
+            .unwrap()
+            .boards
+            .iter()
+            .position(|b| b.player1 == winner || b.player2 == winner)
+            .map(|i| {
+                let side = if t.rounds.last().unwrap().boards[i].player1 == winner {
+                    Winner::Player1
+                } else {
+                    Winner::Player2
+                };
+                (i, side)
+            });
+        if let Some((i, side)) = seat {
+            t.toggle_board_winner(number, i, side).unwrap();
+        }
+
+        let standing = t
+            .standings()
+            .into_iter()
+            .find(|s| {
+                t.players
+                    .iter()
+                    .any(|p| p.id == s.player_id && p.tournament_id == Some(winner))
+            })
+            .expect("the long winner is in the standings");
+        assert!(
+            standing.victories <= crate::Wins::from_whole(2),
+            "two completed rounds cannot yield more than two wins, got {:?}",
+            standing.victories
+        );
     }
 
     #[test]
