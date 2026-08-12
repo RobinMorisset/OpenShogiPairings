@@ -223,6 +223,18 @@ pub(crate) fn compute_scores(
         };
     }
 
+    // Every sit-out must name a player who is still here. `remove_player` drops
+    // a departing player's sit-outs for exactly this reason, so a survivor means
+    // a dangling reference — which lands in a gap slot and quietly scores points
+    // to nobody when the number is below `max_tid`, and panics when it is not.
+    debug_assert!(
+        rounds
+            .iter()
+            .flat_map(|r| &r.sitouts)
+            .all(|s| ids.get(s.player).is_some_and(|id| !id.is_nil())),
+        "a sit-out names a tournament number no current player holds",
+    );
+
     for round in rounds.iter().filter(|r| r.completed) {
         // A float is judged on the points going *into* the round, so record
         // opponents and floats before applying this round's results.

@@ -494,6 +494,47 @@ impl Tournament {
         for team in &mut self.teams {
             team.members.retain(|&m| m != id);
         }
+        if let Some(t) = tid {
+            // Their sit-outs go with them. This is the point of allowing the
+            // removal at all: someone who said they would miss round 1 and then
+            // never came should leave no trace — no standings row, no column in
+            // the american grid, not listed absent in a round they were never
+            // really part of.
+            //
+            // It is also what keeps the score tables sound. Numbers are never
+            // reused or reassigned (that would dangle every other player's board
+            // references), so removing a player leaves a hole, which
+            // `compute_scores` is built to tolerate — but only *below* the
+            // highest number in play, since that is what sizes the table. A
+            // left-behind sit-out naming the highest number, freed by this very
+            // removal, indexes past the end.
+            //
+            // An *engine* bye is named in that round's frozen explanation, so
+            // dropping it leaves the ledger citing a player who is gone. A
+            // referee-forced bye and a cup bye are not the engine's choices and
+            // appear in no ledger (see `explain_pairing`), so they leave every
+            // explanation as faithful as it was.
+            let had_engine_bye = self
+                .rounds
+                .iter()
+                .flat_map(|r| &r.sitouts)
+                .any(|s| s.player == t && s.kind == SitoutKind::Bye);
+            for round in &mut self.rounds {
+                round.sitouts.retain(|s| s.player != t);
+            }
+            // The open draft names them too, and confirming it would pair a
+            // number no player answers to.
+            if let Some(draft) = &mut self.draft {
+                draft.absent.retain(|&a| a != t);
+                draft.forced_byes.retain(|&b| b != t);
+                draft
+                    .forced_boards
+                    .retain(|b| b.player1 != t && b.player2 != t);
+            }
+            if had_engine_bye {
+                self.explanations_all_stale();
+            }
+        }
         Ok(())
     }
 
@@ -2541,6 +2582,154 @@ mod tests {
             Err(TournamentError::CannotRemovePlayedPlayer)
         );
         assert_eq!(t.players.len(), 3, "the played player is still present");
+    }
+
+    /// Five players, round 1 confirmed with `absent_name` marked absent, every
+    /// board decided. Returns the tournament and that player's id — the "said
+    /// they would be late, then never came" case.
+    fn five_players_with_an_absentee(absent_name: &str) -> (Tournament, Uuid) {
+        let mut t = Tournament::new("Open").unwrap();
+        // Distinctive names: the grid is matched as text below, and a
+        // single-letter name collides with its column headers.
+        for n in ["Alpha", "Bravo", "Charlie", "Delta", "Echo"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        let who = t
+            .players
+            .iter()
+            .find(|p| p.last_name == absent_name)
+            .unwrap();
+        let (id, tid) = (who.id, who.tournament_id.unwrap());
+        t.prepare_round().unwrap();
+        t.update_draft(vec![tid], Vec::new(), Vec::new()).unwrap();
+        t.confirm_round().unwrap();
+        for i in 0..t.rounds[0].boards.len() {
+            t.toggle_board_winner(1, i, Winner::Player1).unwrap();
+        }
+        (t, id)
+    }
+
+    /// A player who never played can be removed mid-tournament and leaves no
+    /// trace. The number they held is *not* reused, so the score table keeps a
+    /// hole where they were — which is fine below the highest number in play,
+    /// and used to index past the end when the removal freed that highest
+    /// number itself.
+    #[test]
+    fn removing_an_absentee_leaves_no_dangling_sitout() {
+        // "Charlie" holds a middle number, "Echo" the highest one — the case
+        // that used to panic, because the highest number is what sizes the
+        // table it was still referenced from.
+        for name in ["Charlie", "Echo"] {
+            let (mut t, who) = five_players_with_an_absentee(name);
+            assert!(t.rounds[0]
+                .sitouts
+                .iter()
+                .any(|s| s.kind == SitoutKind::Absent
+                    && Some(s.player)
+                        == t.players
+                            .iter()
+                            .find(|p| p.id == who)
+                            .unwrap()
+                            .tournament_id));
+
+            t.remove_player(who).unwrap();
+
+            assert!(
+                t.rounds[0].sitouts.is_empty(),
+                "{name}: their sit-out went with them"
+            );
+            let standings = t.standings();
+            assert_eq!(standings.len(), 4, "{name}: four players left");
+            assert!(
+                standings.iter().all(|s| s.player_id != who),
+                "{name}: and none of them is the one who never came"
+            );
+            // The american grid is built from the same records, and no longer
+            // has a line for them.
+            let grid = crate::american_grid::to_grid(&t, &standings);
+            assert!(
+                !grid.contains(name),
+                "{name}: gone from the american grid too"
+            );
+        }
+    }
+
+    /// The open draft names the absent player too, and confirming it would pair
+    /// a number no player answers to.
+    #[test]
+    fn removing_a_player_clears_them_from_the_open_draft() {
+        let (mut t, who) = five_players_with_an_absentee("Echo");
+        let tid = t
+            .players
+            .iter()
+            .find(|p| p.id == who)
+            .unwrap()
+            .tournament_id
+            .unwrap();
+        t.prepare_round().unwrap();
+        t.update_draft(vec![tid], Vec::new(), Vec::new()).unwrap();
+        assert_eq!(t.draft.as_ref().unwrap().absent, vec![tid]);
+
+        t.remove_player(who).unwrap();
+
+        assert!(t.draft.as_ref().unwrap().absent.is_empty());
+        t.confirm_round().expect("round 2 confirms without them");
+    }
+
+    /// The engine's bye is named in that round's frozen explanation, so removing
+    /// the player who took it drops the faithfulness watermark. A referee-forced
+    /// bye is not the engine's choice and appears in no ledger, so it does not.
+    #[test]
+    fn only_an_engine_bye_stales_the_explanations_when_its_player_leaves() {
+        // Odd field, nobody absent: the engine hands out the bye itself.
+        let mut t = Tournament::new("Open").unwrap();
+        for n in ["A", "B", "C"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+        let bye = t.rounds[0]
+            .sitouts
+            .iter()
+            .find(|s| s.kind == SitoutKind::Bye)
+            .unwrap()
+            .player;
+        let bye_id = t
+            .players
+            .iter()
+            .find(|p| p.tournament_id == Some(bye))
+            .unwrap()
+            .id;
+        assert_eq!(t.explanations_faithful_through, 1);
+        t.remove_player(bye_id).unwrap();
+        assert_eq!(
+            t.explanations_faithful_through, 0,
+            "the ledger named them, so it can no longer be trusted"
+        );
+
+        // Same shape, but the referee fixed the bye by hand.
+        let mut t = Tournament::new("Open").unwrap();
+        for n in ["A", "B", "C"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        let forced = t.players[2].tournament_id.unwrap();
+        let forced_id = t.players[2].id;
+        t.prepare_round().unwrap();
+        t.update_draft(Vec::new(), Vec::new(), vec![forced])
+            .unwrap();
+        t.confirm_round().unwrap();
+        assert_eq!(
+            t.rounds[0].sitout(forced).unwrap().kind,
+            SitoutKind::ForcedBye
+        );
+        assert_eq!(t.explanations_faithful_through, 1);
+        t.remove_player(forced_id).unwrap();
+        assert_eq!(
+            t.explanations_faithful_through, 1,
+            "no ledger mentioned a bye the engine did not choose"
+        );
     }
 
     #[test]

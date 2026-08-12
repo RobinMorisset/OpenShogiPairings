@@ -55,6 +55,14 @@ NOT backwards compatible with any earlier version.
   server — so a page on an unrelated site can no longer read the API's replies.
   This matters most on a server with no admin password, where every route is
   open by design and `osp-server` listens on the well-known `127.0.0.1:3000`.
+- **Removing a player who never played could break the tournament.** Someone
+  who says they will miss the first round and then never comes should be
+  removable, and mostly was — but their sit-outs stayed behind, pointing at a
+  number nobody held any more. If they were the last player registered, the
+  standings then failed outright; and an open round draft kept them too, so
+  confirming it failed the same way. They are now removed from the rounds and
+  the draft along with everything else, leaving no row in the standings and no
+  line in the american grid.
 - Some filesystem failures were silently swallowed; they are now surfaced
   as errors in the log.
 - The desktop app now respects `OSP_DATA_DIR` instead of putting its data in a
