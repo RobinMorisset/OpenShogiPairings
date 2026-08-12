@@ -27,6 +27,12 @@ thiserror = "2"
 ts-rs = { version = "12", features = ["uuid-impl"] }
 derive_more = { version = "1", features = ["add", "add_assign", "sum", "display"] }
 typed-index-collections = "3"
-rand = "0.8"
+# Default features off so `std_rng` — and with it `rand_chacha` and `ppv-lite86`
+# — stay out of the graph of anything that doesn't ask for them. The server takes
+# `getrandom` back for `OsRng`; osp-core's simulation needs only the `Rng` trait,
+# and osp-sim depends on rand_chacha directly for its seeded replay RNG. Each
+# consumer names what it uses, so a crate that stops needing a generator stops
+# building it.
+rand = { version = "0.8", default-features = false }
 rand_chacha = "0.3"
 tracing = "0.1"

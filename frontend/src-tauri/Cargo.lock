@@ -2481,7 +2481,6 @@ dependencies = [
  "derive_more 1.0.0",
  "integer-blossom",
  "rand 0.8.6",
- "rand_chacha",
  "serde",
  "thiserror 2.0.18",
  "ts-rs",

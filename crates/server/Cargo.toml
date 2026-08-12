@@ -37,7 +37,9 @@ constant_time_eq = "0.3"
 # Hashing per-tournament passwords before they touch disk (see `auth.rs`).
 bcrypt = "0.15"
 # The OS CSPRNG behind the public reader page's capability key (see `state.rs`).
-rand = { workspace = true }
+# `getrandom` is what `rand::rngs::OsRng` lives behind, and it is the only part
+# of `rand` this crate touches — the workspace turns the default features off.
+rand = { workspace = true, features = ["getrandom"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

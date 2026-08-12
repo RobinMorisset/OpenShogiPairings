@@ -13,7 +13,10 @@ ts-rs = { workspace = true }
 derive_more = { workspace = true }
 typed-index-collections = { workspace = true }
 rand = { workspace = true }
-rand_chacha = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+# Test-only: the seeded RNG the sim tests replay a run with. Every use is inside
+# a `#[cfg(test)]` module, so as a normal dependency it was compiled into the
+# server and desktop builds for nothing.
+rand_chacha = { workspace = true }
