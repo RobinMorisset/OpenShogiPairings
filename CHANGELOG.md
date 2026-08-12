@@ -77,6 +77,14 @@ NOT backwards compatible with any earlier version.
   file is now checked when it is loaded, exactly as an imported one is, and
   appears in the picker with the reason it could not be opened; the file itself
   is left untouched.
+- **The public page and its exported copy showed different things once a cup was
+  drawn but round 1 had not started.** The bracket is frozen when registration is
+  finalized, and in the gap before the first round the live page showed the
+  bracket and no entrant list, while the exported pages showed the entrant list
+  and no bracket — so a player looking at their phone in the room and one
+  looking at the club's website saw two different tournaments, neither of them
+  complete. Both now show both, and which sections a public page has is decided
+  in one place for the two of them.
 - The simulator's `--cup-final` reconstructed twice the bracket it should from a
   hybrid cup of the German type. Walking backward from the final, the round the
   pre-qualified players spend in the open looked exactly like a bracket round, so

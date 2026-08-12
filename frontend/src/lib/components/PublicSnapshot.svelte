@@ -19,13 +19,9 @@
   // transport: the referee re-exports after every round, and a reader who cannot
   // tell an old file from a live one will trust the wrong standings.
   import { _ } from "svelte-i18n";
-  import { handicapChoice } from "../handicap";
-  import { sectionLabel, type PublicSection } from "../publicPage";
+  import { sectionFile, sectionId, sectionLabel, type PublicSection } from "../publicPage";
   import type { PublicTournamentResponse } from "../types";
-  import CupBracket from "./CupBracket.svelte";
-  import EntrantList from "./EntrantList.svelte";
-  import ResultsView from "./ResultsView.svelte";
-  import RoundView from "./RoundView.svelte";
+  import PublicSectionBody from "./PublicSectionBody.svelte";
 
   interface Props {
     view: PublicTournamentResponse;
@@ -33,16 +29,18 @@
     sections: PublicSection[];
     /** The one this file is. */
     current: PublicSection;
+    /** The export's shared file-name stem, which the links between its pages
+     *  are built from — every page of one export must sit in one directory. */
+    slug: string;
     /** When the snapshot was taken, already formatted for the reader's locale
      *  by the caller — the exporter knows the locale, and a `Date` formatted
      *  here would be re-formatted on every render for no reason. */
     generatedAt: string;
   }
 
-  let { view, sections, current, generatedAt }: Props = $props();
+  let { view, sections, current, slug, generatedAt }: Props = $props();
 
   const tournament = $derived(view.tournament);
-  const teamMode = $derived(tournament.settings.teams != null);
 </script>
 
 <div class="app">
@@ -56,14 +54,14 @@
 
   {#if sections.length > 1}
     <nav class="tabs">
-      {#each sections as section (section.file)}
-        {#if section.file === current.file}
+      {#each sections as section (sectionId(section))}
+        {#if sectionId(section) === sectionId(current)}
           <!-- The page you are on is not a link to itself. It still looks like
                the selected tab; it just does not offer to reload the page you
                are already reading. -->
           <span class="tab active" aria-current="page">{sectionLabel(section, $_)}</span>
         {:else}
-          <a class="tab" href={section.file}>{sectionLabel(section, $_)}</a>
+          <a class="tab" href={sectionFile(section, slug)}>{sectionLabel(section, $_)}</a>
         {/if}
       {/each}
     </nav>
@@ -73,40 +71,7 @@
        narrow screen, and the box should grow behind it rather than let it
        hang out of the rounded corner. -->
   <section class="card" class:wide-table={current.kind === "standings"}>
-    {#if current.kind === "standings" && tournament.rounds.length === 0}
-      <!-- Before round 1 there is nothing to rank: everyone sits at their
-           MacMahon start. The entrant list is still worth publishing — players
-           check that they are registered. -->
-      <p class="muted">{$_("publicView.notStarted")}</p>
-      <EntrantList players={tournament.players} />
-    {:else if current.kind === "standings"}
-      <ResultsView
-        tournament={{ ...tournament, draft: null }}
-        standings={view.standings}
-        teamStandings={teamMode ? (view.team_standings ?? []) : []}
-        cupPodium={view.cup_podium ?? null}
-        effectiveWinners={view.effective_winners ?? []}
-        categories={tournament.settings.categories ?? []}
-        staticPage
-      />
-    {:else if current.kind === "cup" && tournament.cup && view.cup_bracket}
-      <CupBracket
-        bracket={view.cup_bracket}
-        cup={tournament.cup}
-        players={tournament.players}
-      />
-    {:else if current.kind === "round"}
-      <RoundView
-        round={current.round.round}
-        players={tournament.players}
-        handicapPolicy={handicapChoice(tournament.settings.handicap_policy)}
-        suggestedHandicaps={current.round.suggestedHandicaps}
-        teams={teamMode ? (tournament.teams ?? []) : []}
-        effectiveWinners={current.round.effectiveWinners}
-        longEnabled={tournament.settings.long_boards_enabled}
-        staticPage
-      />
-    {/if}
+    <PublicSectionBody {view} section={current} staticPage />
   </section>
 </div>
 
@@ -167,10 +132,6 @@
   .card.wide-table {
     width: max-content;
     min-width: 100%;
-  }
-  .muted {
-    color: var(--text-secondary);
-    text-align: center;
   }
 
   @media print {

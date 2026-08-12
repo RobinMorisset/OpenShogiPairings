@@ -14,7 +14,7 @@ import {
   renderPublicPages,
   renderSnapshotBody,
 } from "./publicExport";
-import { publicRounds, publicSections } from "./publicPage";
+import { publicRounds, publicSections, sectionFile } from "./publicPage";
 // The real catalogue, so a key this page uses but nobody translated shows up
 // here as a missing string. `lib/i18n` itself is not imported: it reads
 // `localStorage` and `navigator` to guess a language, which is browser
@@ -22,6 +22,7 @@ import { publicRounds, publicSections } from "./publicPage";
 import en from "./i18n/locales/en.json";
 import type {
   Board,
+  BracketMatch,
   Player,
   PublicTournamentResponse,
   Round,
@@ -109,6 +110,39 @@ function view(rounds: Round[]): PublicTournamentResponse {
   } as unknown as PublicTournamentResponse;
 }
 
+/**
+ * The same tournament with a four-player cup seeded and nothing played yet —
+ * the state between finalization (which freezes the bracket) and the first
+ * confirmed round, which is where the live page and the export used to disagree.
+ */
+function withCup(v: PublicTournamentResponse): PublicTournamentResponse {
+  const pending = (stage: BracketMatch["stage"]): BracketMatch => ({
+    player1: null,
+    player2: null,
+    winner: null,
+    stage,
+  });
+  v.tournament.players = [
+    ...v.tournament.players,
+    player(3, "Berger", 1900),
+    player(4, "Nakada", 1800),
+  ];
+  v.tournament.cup = { size: 4, format: "direct", seed_order: [1, 2, 3, 4] };
+  v.cup_bracket = {
+    size: 4,
+    qualification: null,
+    rounds: [
+      [
+        { player1: 1, player2: 4, winner: null, stage: "semifinal" },
+        { player1: 2, player2: 3, winner: null, stage: "semifinal" },
+      ],
+      [pending("final")],
+    ],
+    small_final: pending("small_final"),
+  };
+  return v;
+}
+
 beforeAll(async () => {
   addMessages("en", en);
   init({ fallbackLocale: "en", initialLocale: "en" });
@@ -134,8 +168,8 @@ describe("publicRounds", () => {
 
 describe("publicSections", () => {
   it("is one page per tab, standings first", () => {
-    const sections = publicSections(view([round(1, [board(1, 2)]), round(2, [board(2, 1)])]), "cup");
-    expect(sections.map((s) => [s.kind, s.file])).toEqual([
+    const sections = publicSections(view([round(1, [board(1, 2)]), round(2, [board(2, 1)])]));
+    expect(sections.map((s) => [s.kind, sectionFile(s, "cup")])).toEqual([
       ["standings", "cup.html"],
       ["round", "cup-round-1.html"],
       ["round", "cup-round-2.html"],
@@ -145,15 +179,38 @@ describe("publicSections", () => {
   it("is the standings page alone before round 1", () => {
     // Nothing to rank yet, and no round to look at: a navigation strip of one
     // link would be furniture.
-    expect(publicSections(view([]), "cup")).toEqual([{ kind: "standings", file: "cup.html" }]);
+    expect(publicSections(view([]))).toEqual([{ kind: "standings" }]);
+  });
+
+  it("has the cup page before round 1, alongside the entrant list", () => {
+    // The bracket is frozen at finalization, so a cup with no round behind it is
+    // what the room looks at while round 1 is being paired. Both sections are
+    // reachable: the live page used to show only the bracket and the export only
+    // the entrants, so neither reader saw what the other did.
+    expect(publicSections(withCup(view([])))).toEqual([
+      { kind: "standings" },
+      { kind: "cup" },
+    ]);
+  });
+
+  it("has no cup page when the projection carries no bracket", () => {
+    // A cup with no `cup_bracket` would render an empty page; the section is
+    // gated on both, which is what lets `PublicSectionBody` narrow to the props.
+    const v = withCup(view([round(1, [board(1, 2)])]));
+    v.cup_bracket = null;
+    expect(publicSections(v).map((s) => s.kind)).toEqual(["standings", "round"]);
   });
 });
 
 /** Render one page of an export of `rounds`, by default the standings. */
 function page(rounds: Round[], index = 0, when = "12 August 2026"): string {
-  const v = view(rounds);
-  const sections = publicSections(v, "cup");
-  return renderSnapshotBody(v, sections, sections[index], when);
+  return pageOf(view(rounds), index, when);
+}
+
+/** Render one page of an export of `v`. */
+function pageOf(v: PublicTournamentResponse, index = 0, when = "12 August 2026"): string {
+  const sections = publicSections(v);
+  return renderSnapshotBody(v, sections, sections[index], "cup", when);
 }
 
 describe("renderSnapshotBody", () => {
@@ -224,6 +281,22 @@ describe("renderSnapshotBody", () => {
     // The entrant list, not an empty standings table.
     expect(html).toContain("Miyamoto");
     expect(html).toContain("entrants");
+  });
+
+  it("publishes the bracket and the entrant list both, before round 1", () => {
+    // The whole of C8: a cup exists from finalization, so at this moment there
+    // are two things to look at and a reader must be able to reach either. The
+    // export used to stop at the entrant list and the live page used to show
+    // only the bracket.
+    const cup = withCup(view([]));
+    const entrants = pageOf(cup, 0);
+    const bracket = pageOf(cup, 1);
+    expect(entrants).toContain("entrants");
+    expect(entrants).toContain('href="cup-cup.html"');
+    // The bracket is drawn empty — every first-round pairing known, no winner
+    // anywhere — and links back to the entrant list.
+    expect(bracket).toContain("Nakada");
+    expect(bracket).toContain('href="cup.html"');
   });
 
   it("leaves no host element behind in the document", () => {

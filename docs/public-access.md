@@ -370,9 +370,20 @@ that serves the laptop deployment without new infrastructure.
 
 Landed in `frontend/src/lib/publicExport.ts` (the renderer and the document
 assembly), `frontend/src/lib/components/PublicSnapshot.svelte` (one page of it),
-`frontend/src/lib/publicPage.ts` (the projection-to-props wiring and the page
-list, shared with the live reader page), and one referee-side route,
-`GET /public-snapshot`, in [`crates/server/src/public.rs`](../crates/server/src/public.rs).
+and one referee-side route, `GET /public-snapshot`, in
+[`crates/server/src/public.rs`](../crates/server/src/public.rs).
+
+Two pieces are shared with the live reader page rather than written twice, and
+between them they are the whole of what a "section" is:
+`frontend/src/lib/publicPage.ts` decides **which** sections a tournament has
+(standings — the entrant list before round 1 — then the cup, then the rounds),
+and `frontend/src/lib/components/PublicSectionBody.svelte` renders **what** each
+one shows, differing only by `staticPage`. They were two decisions made
+separately once, and the two pages promptly disagreed: a cup is frozen at
+finalization, so between then and the first confirmed round the live page showed
+the bracket and no entrant list while the export showed the entrant list and no
+bracket. Neither reader saw a superset of the other, which is precisely the
+failure §5 exists to prevent.
 
 Six decisions inside it are worth recording, three of them deviations from the
 sketch above:
@@ -390,14 +401,15 @@ sketch above:
   obvious way to emit static HTML is a string-building renderer, and it is the
   thing §5 argues hardest against: a second renderer drifts, and the day it
   drifts the club's website disagrees with the referee's screen and neither
-  side knows. So the export mounts `PublicSnapshot` — which composes the very
-  same `ResultsView`, `RoundView` and `CupBracket` the live page uses — into an
-  off-screen host, flushes, and reads back the DOM. What the components gained
-  is a `staticPage` prop that drops the controls (toolbars, filters, pickers)
-  that would otherwise sit in the file looking clickable; a test asserts the
-  output contains no `<button>`, `<input>` or `<select>` at all. The stylesheet
-  is collected from the live document the same way and for the same reason, so
-  a rule added to any component is in the export without anyone remembering.
+  side knows. So the export mounts `PublicSnapshot` — which renders its one
+  section through the same `PublicSectionBody`, and so the same `ResultsView`,
+  `RoundView` and `CupBracket`, as the live page — into an off-screen host,
+  flushes, and reads back the DOM. What the components gained is a `staticPage`
+  prop that drops the controls (toolbars, filters, pickers) that would otherwise
+  sit in the file looking clickable; a test asserts the output contains no
+  `<button>`, `<input>` or `<select>` at all. The stylesheet is collected from
+  the live document the same way and for the same reason, so a rule added to any
+  component is in the export without anyone remembering.
 - **Tabs become one file per tab, linked to each other.** The first attempt
   stacked every section into one document, on the grounds that a tab strip is a
   script. At 45 players and two rounds that is unreadable, and it is not what a

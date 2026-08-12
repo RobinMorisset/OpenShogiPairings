@@ -32,7 +32,7 @@ import { _, locale } from "svelte-i18n";
 
 import { fetchPublicSnapshot } from "./api";
 import PublicSnapshot from "./components/PublicSnapshot.svelte";
-import { publicSections, sectionLabel, type PublicSection } from "./publicPage";
+import { publicSections, sectionFile, sectionLabel, type PublicSection } from "./publicPage";
 import { savePublicPages, slugify, type ExportedFile } from "./tournamentFile";
 import type { PublicTournamentResponse } from "./types";
 
@@ -109,6 +109,7 @@ export function renderSnapshotBody(
   view: PublicTournamentResponse,
   sections: PublicSection[],
   current: PublicSection,
+  slug: string,
   generatedAt: string,
 ): string {
   const host = document.createElement("div");
@@ -117,7 +118,7 @@ export function renderSnapshotBody(
   try {
     const app = mount(PublicSnapshot, {
       target: host,
-      props: { view, sections, current, generatedAt },
+      props: { view, sections, current, slug, generatedAt },
     });
     flushSync();
     // Serialise a *copy*, so the rewrite below cannot disturb the DOM Svelte
@@ -273,7 +274,8 @@ export function renderPublicPages(
   when: Date,
 ): ExportedFile[] {
   const t = get(_);
-  const sections = publicSections(view, `${slugify(view.tournament.name)}-public`);
+  const slug = `${slugify(view.tournament.name)}-public`;
+  const sections = publicSections(view);
   const generatedAt = formatGeneratedAt(when, lang);
   return sections.map((current) => {
     const label = sectionLabel(current, t);
@@ -283,12 +285,12 @@ export function renderPublicPages(
     const title =
       current.kind === "standings" ? view.tournament.name : `${view.tournament.name} — ${label}`;
     return {
-      fileName: current.file,
+      fileName: sectionFile(current, slug),
       contents: buildDocument({
         title,
         lang,
         css,
-        body: renderSnapshotBody(view, sections, current, generatedAt),
+        body: renderSnapshotBody(view, sections, current, slug, generatedAt),
       }),
     };
   });

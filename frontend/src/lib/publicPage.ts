@@ -38,48 +38,72 @@ export function publicRounds(view: PublicTournamentResponse): PublicRound[] {
 }
 
 /**
- * One page of the static export: what the live page shows in one tab.
+ * One section of the public page: a tab on the live page, a file in the export.
  *
- * `file` is both the file name written to disk and the `href` the other pages
- * link to it by, so every page in an export must be saved side by side in one
- * directory for the navigation between them to work.
+ * The two readers build their section list from the same {@link publicSections},
+ * and render each one through the same `PublicSectionBody` — so a section cannot
+ * exist on one and be missing from the other, and cannot show two different
+ * things. They used to decide separately, and disagreed: a cup seeded before
+ * round 1 gave the live page a bracket and no entrant list, and the export an
+ * entrant list and no bracket.
  */
 export type PublicSection =
-  | { kind: "standings"; file: string }
-  | { kind: "cup"; file: string }
-  | { kind: "round"; file: string; round: PublicRound };
+  | { kind: "standings" }
+  | { kind: "cup" }
+  | { kind: "round"; round: PublicRound };
 
 /**
- * The pages one export writes, in the order the live page's tabs appear.
+ * The sections a public page has, in the order they are shown — the live page's
+ * tabs, and the pages one export writes.
  *
- * Standings first — it is the entry point, so it gets the plain `<slug>` name
- * a referee would link to, and the others hang off it. Rounds ascend, as they
- * do in the app; nothing here reorders what the referee is used to.
+ * Standings first: it is the live page's first tab and the export's entry point,
+ * the file a referee links to. It is always there, because it is also the page
+ * that answers "am I registered?" — before round 1 there is nothing to rank and
+ * it shows the entrant list instead (docs/public-access.md §2). Then the cup, if
+ * there is one; then the rounds, ascending, as in the app.
  *
- * Before round 1 the standings page is the *only* page: it shows the entrant
- * list, and there is nothing else to look at yet.
+ * A cup with no round behind it is not an odd state to guard against: the
+ * bracket is frozen at finalization, *before* round 1 is confirmed, so it is
+ * exactly what the room has to look at while the first round is being paired.
  */
-export function publicSections(
-  view: PublicTournamentResponse,
-  slug: string,
-): PublicSection[] {
-  const rounds = publicRounds(view);
-  if (rounds.length === 0) return [{ kind: "standings", file: `${slug}.html` }];
+export function publicSections(view: PublicTournamentResponse): PublicSection[] {
   const cup: PublicSection[] =
-    view.tournament.cup && view.cup_bracket
-      ? [{ kind: "cup", file: `${slug}-cup.html` }]
-      : [];
+    view.tournament.cup && view.cup_bracket ? [{ kind: "cup" }] : [];
   return [
-    { kind: "standings", file: `${slug}.html` },
+    { kind: "standings" },
     ...cup,
-    ...rounds.map(
-      (round): PublicSection => ({
-        kind: "round",
-        file: `${slug}-round-${round.round.number}.html`,
-        round,
-      }),
-    ),
+    ...publicRounds(view).map((round): PublicSection => ({ kind: "round", round })),
   ];
+}
+
+/**
+ * A section's identity: the live page's tab id, and what tells the export's
+ * "you are here" tab from the links around it.
+ */
+export function sectionId(section: PublicSection): string {
+  switch (section.kind) {
+    case "standings":
+      return "standings";
+    case "cup":
+      return "cup";
+    case "round":
+      return `round-${section.round.round.number}`;
+  }
+}
+
+/**
+ * The file a section is written to in a static export — both the name on disk
+ * and the `href` the other pages link to it by, so every page of one export must
+ * be saved side by side in a single directory.
+ *
+ * The standings page gets the bare `<slug>` name: it is the entry point, so it
+ * is the one a referee pastes into their club's website, and the others hang
+ * off it.
+ */
+export function sectionFile(section: PublicSection, slug: string): string {
+  return section.kind === "standings"
+    ? `${slug}.html`
+    : `${slug}-${sectionId(section)}.html`;
 }
 
 /**

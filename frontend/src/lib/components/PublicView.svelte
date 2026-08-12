@@ -14,16 +14,12 @@
   import { _ } from "svelte-i18n";
   import { fetchPublicTournament, subscribeToPublicTournament } from "../api";
   import { describeApiError } from "../errorCodes";
-  import { handicapChoice } from "../handicap";
   import type { PublicPage } from "../publicAccess";
-  import { publicRounds } from "../publicPage";
-  import type { PublicTournamentResponse, Round } from "../types";
+  import { publicSections, sectionId, sectionLabel } from "../publicPage";
+  import type { PublicTournamentResponse } from "../types";
   import ConnectionStatus from "./ConnectionStatus.svelte";
-  import CupBracket from "./CupBracket.svelte";
-  import EntrantList from "./EntrantList.svelte";
   import LocaleSwitcher from "./LocaleSwitcher.svelte";
-  import ResultsView from "./ResultsView.svelte";
-  import RoundView from "./RoundView.svelte";
+  import PublicSectionBody from "./PublicSectionBody.svelte";
   import ThemeSwitcher from "./ThemeSwitcher.svelte";
 
   interface Props {
@@ -42,37 +38,26 @@
   let revoked = $state(false);
 
   const tournament = $derived(view?.tournament ?? null);
-  const rounds = $derived<Round[]>(tournament?.rounds ?? []);
-  const teamMode = $derived(tournament?.settings.teams != null);
-  const showResults = $derived(rounds.length > 0);
-  const showCup = $derived(tournament?.cup != null);
 
-  let activeTab = $state("results");
-  const tabOrder = $derived([
-    ...(showResults ? ["results"] : []),
-    ...(showCup ? ["cup"] : []),
-    ...rounds.map((r) => `round-${r.number}`),
-  ]);
-  const activeRound = $derived(
-    rounds.find((r) => `round-${r.number}` === activeTab) ?? null,
-  );
+  // The tabs, and what each one shows, come from the same place as the static
+  // export's pages — a tab this page has and that export lacks (or shows
+  // differently) is a disagreement between two readers of the same tournament.
+  const sections = $derived(view ? publicSections(view) : []);
 
-  // Each round with its slice of the per-board arrays, joined by position —
-  // shared with the static export so the two pages cannot disagree about which
-  // handicap belongs to which board.
-  const sections = $derived(view ? publicRounds(view) : []);
+  let activeTab = $state("standings");
   const activeSection = $derived(
-    sections.find((s) => s.round.number === activeRound?.number) ?? null,
+    sections.find((s) => sectionId(s) === activeTab) ?? sections.at(-1) ?? null,
   );
 
-  // Land on the newest round — what someone in the room is looking for — and
-  // keep the selection valid as rounds come and go (an undo or a backup restore
-  // moves the public state *backwards*, which is correct: the referee has
-  // decided the earlier state is the true one).
+  // Keep the selection valid as sections come and go: an undo or a backup
+  // restore moves the public state *backwards*, which is correct — the referee
+  // has decided the earlier state is the true one — and can take the round
+  // being read out from under the reader. Standings is always there, so nobody
+  // is ever left facing a page with no sections at all.
   $effect(() => {
-    if (tabOrder.length === 0) return;
-    if (!tabOrder.includes(activeTab)) {
-      activeTab = tabOrder.at(-1) ?? "results";
+    if (sections.length === 0) return;
+    if (!sections.some((s) => sectionId(s) === activeTab)) {
+      activeTab = sectionId(sections[sections.length - 1]);
     }
   });
 
@@ -165,83 +150,30 @@
     <section class="card">
       <p class="muted">{$_("publicView.unavailable")}</p>
     </section>
-  {:else if tournament}
+  {:else if tournament && activeSection}
     <section class="card">
-      {#if tabOrder.length === 0}
-        <!-- Before round 1 there is nothing to rank: everyone sits at their
-             MacMahon start. The entrant list is still worth showing — players
-             check that they are registered. -->
-        <p class="muted">{$_("publicView.notStarted")}</p>
-        <EntrantList players={tournament.players} />
-      {:else}
+      <!-- One section is the whole page: before round 1 with no cup there is
+           only the entrant list, and a tab strip of one tab is furniture. The
+           export hides its navigation on the same condition. -->
+      {#if sections.length > 1}
         <div class="tabs" role="tablist">
-          {#if showResults}
+          {#each sections as section (sectionId(section))}
             <button
               type="button"
               class="tab"
-              class:active={activeTab === "results"}
-              data-testid="public-tab-results"
-              onclick={() => (activeTab = "results")}
+              class:active={sectionId(section) === sectionId(activeSection)}
+              data-testid={`public-tab-${sectionId(section)}`}
+              onclick={() => (activeTab = sectionId(section))}
             >
-              {$_("app.tabResults")}
-            </button>
-          {/if}
-          {#if showCup}
-            <button
-              type="button"
-              class="tab"
-              class:active={activeTab === "cup"}
-              data-testid="public-tab-cup"
-              onclick={() => (activeTab = "cup")}
-            >
-              {$_("app.tabCup")}
-            </button>
-          {/if}
-          {#each rounds as round (round.number)}
-            <button
-              type="button"
-              class="tab"
-              class:active={activeTab === `round-${round.number}`}
-              data-testid={`public-tab-round-${round.number}`}
-              onclick={() => (activeTab = `round-${round.number}`)}
-            >
-              {round.completed
-                ? $_("app.tabRoundCompleted", { values: { number: round.number } })
-                : $_("app.tabRound", { values: { number: round.number } })}
+              {sectionLabel(section, $_)}
             </button>
           {/each}
         </div>
-
-        <div class="tab-content">
-          {#if activeTab === "results"}
-            <ResultsView
-              tournament={{ ...tournament, draft: null }}
-              standings={view.standings}
-              teamStandings={teamMode ? (view.team_standings ?? []) : []}
-              cupPodium={view.cup_podium ?? null}
-              effectiveWinners={view.effective_winners ?? []}
-              categories={tournament.settings.categories ?? []}
-            />
-          {:else if activeTab === "cup" && tournament.cup && view.cup_bracket}
-            <CupBracket
-              bracket={view.cup_bracket}
-              cup={tournament.cup}
-              players={tournament.players}
-            />
-          {:else if activeSection}
-            <RoundView
-              round={activeSection.round}
-              players={tournament.players}
-              handicapPolicy={handicapChoice(tournament.settings.handicap_policy)}
-              suggestedHandicaps={activeSection.suggestedHandicaps}
-              teams={teamMode ? (tournament.teams ?? []) : []}
-              effectiveWinners={activeSection.effectiveWinners}
-              longEnabled={tournament.settings.long_boards_enabled}
-              readOnly
-            />
-          {/if}
-        </div>
       {/if}
+
+      <div class="tab-content">
+        <PublicSectionBody {view} section={activeSection} />
+      </div>
     </section>
   {/if}
 </div>
