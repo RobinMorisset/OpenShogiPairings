@@ -154,6 +154,15 @@ pub struct ServerConfig {
     /// and putting them on another disk (or a synced folder) is exactly what a
     /// recovery copy is for.
     pub backup_dir: Option<PathBuf>,
+    /// How long the backups of a *deleted* tournament are kept before they are
+    /// swept (see [`state::TournamentRegistry::remove`]); `None` =
+    /// [`backup::DEFAULT_DELETED_RETENTION`] (a month). `Duration::ZERO` deletes
+    /// them with the tournament, as every release before this one did.
+    ///
+    /// An `Option` rather than a plain `Duration` precisely so that
+    /// `ServerConfig::default()` cannot mean "keep nothing": the default here
+    /// has to be the safe end, not the zero value.
+    pub backup_retention: Option<std::time::Duration>,
 }
 
 /// Where automatic backups go when [`ServerConfig::backup_dir`] is left unset:
@@ -171,7 +180,13 @@ pub async fn serve_with_config(
     config: ServerConfig,
 ) -> std::io::Result<()> {
     let state = AppState {
-        registry: Arc::new(TournamentRegistry::new(config.data_dir, config.backup_dir)),
+        registry: Arc::new(TournamentRegistry::with_retention(
+            config.data_dir,
+            config.backup_dir,
+            config
+                .backup_retention
+                .unwrap_or(backup::DEFAULT_DELETED_RETENTION),
+        )),
         admin_auth: config.admin_password.map(AuthConfig::new),
         ..Default::default()
     };

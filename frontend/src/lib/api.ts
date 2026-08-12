@@ -382,7 +382,9 @@ export async function importTournament(
   return result;
 }
 
-/** Delete a tournament: its registry entry, persisted file, and backups. */
+/** Delete a tournament: its registry entry and persisted file. Its automatic
+ *  backups are kept on the server for a month (a final one is taken as it is
+ *  deleted), so this is recoverable by hand from the backups directory. */
 export function deleteTournamentEntry(id: string): Promise<void> {
   return fetchOk(`/api/tournaments/${id}`, { method: "DELETE" }, { kind: "tournament", id }).then(
     () => undefined,

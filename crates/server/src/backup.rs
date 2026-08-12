@@ -6,21 +6,65 @@
 //! referee can recover from a multi-step mistake (or a server restart)
 //! without needing a manual save. One rotating directory per tournament id;
 //! the oldest backups beyond [`MAX_BACKUPS`] are deleted after each write.
+//!
+//! Deleting a tournament does **not** delete its backups. Instead the directory
+//! gets a [`DELETED_MARKER`] file recording when (and what) was deleted, and
+//! [`sweep`] removes marked directories once they are older than the retention
+//! period — so the one irreversible operation in the app stays recoverable for
+//! a month. A directory with no marker is a live tournament's and is never
+//! swept.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use osp_core::Tournament;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
 /// How many backups are kept per tournament before the oldest are rotated out.
 /// A plain constant "for now" — easy to turn into a user-facing setting later.
 pub(crate) const MAX_BACKUPS: usize = 10;
+
+/// How long a deleted tournament's backups are kept before [`sweep`] removes
+/// them, unless the host overrides it (`OSP_BACKUP_RETENTION_DAYS`). A month:
+/// long enough that an accidental deletion is noticed — the usual way being the
+/// next time someone looks for that tournament — without keeping every
+/// tournament a club ever ran.
+pub(crate) const DEFAULT_DELETED_RETENTION: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
+/// Marker file written into a tournament's backups directory when the
+/// tournament itself is deleted; see [`DeletedMarker`]. Its *presence* is what
+/// makes a directory eligible for the retention sweep, so a live tournament's
+/// backups can never be swept by accident.
+pub(crate) const DELETED_MARKER: &str = "deleted.json";
+
+/// The label of the extra backup taken at deletion time.
+pub(crate) const DELETED_LABEL: &str = "deleted";
+
+/// What [`DELETED_MARKER`] holds: when the tournament was deleted, and enough
+/// about it to offer the backups back later without reading them all.
+///
+/// The password hash is kept deliberately: a password-protected tournament must
+/// not become readable to everyone merely by passing through the bin, so
+/// whatever restores it later can demand the same password it had. It is a
+/// bcrypt hash, exactly as in the `{id}.auth.json` sidecar this replaces — no
+/// more sensitive than the file that was just deleted, and in the same
+/// per-user directory.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DeletedMarker {
+    /// Unix seconds at which the tournament was deleted.
+    pub deleted_at: u64,
+    /// The tournament's name when it was deleted — what a "recently deleted"
+    /// list has to show, and the backups themselves only give up on parse.
+    pub name: String,
+    /// bcrypt hash of the tournament's own password, if it had one.
+    pub password_hash: Option<String>,
+}
 
 /// One backup's metadata, as listed to clients (the tournament body itself is
 /// only fetched on restore).
@@ -177,17 +221,117 @@ pub(crate) fn list(dir: Option<&Path>) -> Vec<BackupInfo> {
     infos.into_iter().map(|(_, _, info)| info).collect()
 }
 
-/// Delete every backup in `dir` (the whole directory), when the tournament it
-/// belongs to is deleted. Best-effort, like every other write here — but a
-/// failure is logged, since backups of a deleted tournament left on disk are
-/// exactly what the caller asked to be rid of. A missing directory is not a
-/// failure: a tournament deleted before its first backup never had one.
-pub(crate) fn delete_all(dir: Option<&Path>) {
-    if let Some(dir) = dir {
-        if let Err(e) = fs::remove_dir_all(dir) {
-            if e.kind() != io::ErrorKind::NotFound {
-                tracing::warn!("backup: could not delete {}: {e}", dir.display());
+/// Mark `dir` as belonging to a deleted tournament, so [`sweep`] removes it
+/// once the retention period has passed. The backups themselves are left
+/// exactly as they are — that is the point: deletion is the one referee action
+/// with no undo, and until the sweep catches up these files are the way back.
+///
+/// A directory that doesn't exist is left alone rather than created: nothing was
+/// ever backed up for that tournament, so there is nothing to keep and no
+/// reason to leave an empty marked directory behind.
+///
+/// Best-effort like the rest of this module, but a failure is an **error**, not
+/// a warning: an unmarked directory is never swept, so this is how a backups
+/// root grows without bound.
+pub(crate) fn mark_deleted(dir: Option<&Path>, name: &str, password_hash: Option<&str>) {
+    let Some(dir) = dir else {
+        return;
+    };
+    if !dir.is_dir() {
+        return;
+    }
+    let marker = DeletedMarker {
+        deleted_at: now_secs(),
+        name: name.to_string(),
+        password_hash: password_hash.map(str::to_string),
+    };
+    let path = dir.join(DELETED_MARKER);
+    let json = match serde_json::to_vec_pretty(&marker) {
+        Ok(json) => json,
+        Err(e) => {
+            tracing::error!("backup: could not serialize {}: {e}", path.display());
+            return;
+        }
+    };
+    if let Err(e) = fs::write(&path, json) {
+        tracing::error!(
+            "backup: could not write {}: {e}. These backups are kept, but nothing \
+             will ever clean them up — delete {} by hand once you no longer want them.",
+            path.display(),
+            dir.display()
+        );
+    }
+}
+
+/// Delete the backups of every tournament deleted more than `retention` ago.
+///
+/// Scans `root` for directories carrying a [`DELETED_MARKER`]; anything without
+/// one belongs to a live tournament and is skipped. Called at startup and after
+/// each deletion, which between them covers both the laptop restarted for every
+/// tournament and the server left running for months — no background task.
+///
+/// Errs towards keeping: a marker that can't be read or parsed leaves its
+/// directory in place (loudly), because the alternative is guessing an
+/// expiry date and deleting the only copy of a tournament.
+pub(crate) fn sweep(root: Option<&Path>, retention: Duration) {
+    let Some(root) = root else {
+        return;
+    };
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        // Nothing has ever been backed up here; nothing to sweep.
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return,
+        Err(e) => {
+            tracing::warn!(
+                "backup: could not scan {} for expired backups: {e}",
+                root.display()
+            );
+            return;
+        }
+    };
+    let now = now_secs();
+    for entry in entries.filter_map(Result::ok) {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let marker_path = dir.join(DELETED_MARKER);
+        let bytes = match fs::read(&marker_path) {
+            Ok(bytes) => bytes,
+            // No marker: a live tournament's backups.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                tracing::warn!(
+                    "backup: could not read {}: {e}. Keeping these backups.",
+                    marker_path.display()
+                );
+                continue;
             }
+        };
+        let marker: DeletedMarker = match serde_json::from_slice(&bytes) {
+            Ok(marker) => marker,
+            Err(e) => {
+                tracing::warn!(
+                    "backup: could not parse {}: {e}. Keeping these backups rather \
+                     than guessing when they expire; fix or remove that file.",
+                    marker_path.display()
+                );
+                continue;
+            }
+        };
+        // `saturating_sub` so a marker stamped in the future (a clock moved
+        // backwards) reads as age zero and is kept, never as expired.
+        let age = Duration::from_secs(now.saturating_sub(marker.deleted_at));
+        if age < retention {
+            continue;
+        }
+        match fs::remove_dir_all(&dir) {
+            Ok(()) => tracing::info!(
+                "backup: removed the backups of \"{}\", deleted {} days ago",
+                marker.name,
+                age.as_secs() / 86_400
+            ),
+            Err(e) => tracing::warn!("backup: could not remove {}: {e}", dir.display()),
         }
     }
 }
@@ -282,6 +426,98 @@ mod tests {
         take(None, &t, "nowhere to go");
         assert!(list(None).is_empty());
         assert!(load(None, "0-0-nowhere-to-go").is_none());
-        delete_all(None);
+        mark_deleted(None, "Homeless Test", None);
+        sweep(None, Duration::ZERO);
+    }
+
+    /// A root of this test's own, so a sweep here can't see (or delete) what a
+    /// concurrently-running test is doing under the shared test root.
+    fn isolated_root() -> PathBuf {
+        std::env::temp_dir().join(format!("osp-sweep-{}", Uuid::new_v4()))
+    }
+
+    /// Backdate a marker that [`mark_deleted`] just stamped with "now", so a
+    /// sweep can be tested against a realistic retention instead of zero.
+    fn backdate(dir: &Path, age: Duration) {
+        let path = dir.join(DELETED_MARKER);
+        let mut marker: DeletedMarker =
+            serde_json::from_slice(&fs::read(&path).expect("a marker")).expect("a valid marker");
+        marker.deleted_at -= age.as_secs();
+        fs::write(&path, serde_json::to_vec_pretty(&marker).unwrap()).unwrap();
+    }
+
+    const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+
+    #[test]
+    fn marking_deleted_keeps_the_backups_and_records_the_password_hash() {
+        let t = Tournament::new("Deleted Test").unwrap();
+        let dir = dir_of(&t);
+        take(Some(&dir), &t, "round 1 started");
+        mark_deleted(Some(&dir), "Deleted Test", Some("$2b$hash"));
+
+        // The backups are still there, and the marker is not one of them.
+        let backups = list(Some(&dir));
+        assert_eq!(backups.len(), 1);
+        assert_eq!(backups[0].label, "round 1 started");
+
+        let marker: DeletedMarker =
+            serde_json::from_slice(&fs::read(dir.join(DELETED_MARKER)).unwrap()).unwrap();
+        assert_eq!(marker.name, "Deleted Test");
+        assert_eq!(marker.password_hash.as_deref(), Some("$2b$hash"));
+        assert!(marker.deleted_at > 0);
+    }
+
+    /// A tournament deleted before it was ever backed up has nothing to keep —
+    /// don't leave an empty marked directory behind.
+    #[test]
+    fn marking_deleted_does_not_create_a_directory() {
+        let dir = isolated_root().join("never-backed-up");
+        mark_deleted(Some(&dir), "Never Backed Up", None);
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn sweep_removes_expired_backups_and_keeps_the_rest() {
+        let root = isolated_root();
+        let expired = dir_for(&root, Uuid::new_v4());
+        let recent = dir_for(&root, Uuid::new_v4());
+        let live = dir_for(&root, Uuid::new_v4());
+        let t = Tournament::new("Sweep Test").unwrap();
+        for dir in [&expired, &recent, &live] {
+            take(Some(dir), &t, "round 1 started");
+        }
+        mark_deleted(Some(&expired), "Expired", None);
+        backdate(&expired, 40 * DAY);
+        mark_deleted(Some(&recent), "Recent", None);
+        backdate(&recent, 10 * DAY);
+        // `live` is left unmarked: a tournament that still exists.
+
+        sweep(Some(&root), 30 * DAY);
+
+        assert!(!expired.exists(), "deleted 40 days ago, retention is 30");
+        assert!(recent.exists(), "deleted 10 days ago, retention is 30");
+        assert!(live.exists(), "not deleted at all");
+        assert_eq!(list(Some(&recent)).len(), 1, "its backups are intact");
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    /// The marker is the only thing that makes a directory sweepable — an
+    /// unreadable one keeps its backups rather than costing someone a
+    /// tournament.
+    #[test]
+    fn sweep_keeps_a_directory_whose_marker_is_corrupt() {
+        let root = isolated_root();
+        let dir = dir_for(&root, Uuid::new_v4());
+        let t = Tournament::new("Corrupt Marker Test").unwrap();
+        take(Some(&dir), &t, "round 1 started");
+        fs::write(dir.join(DELETED_MARKER), b"{ not json").unwrap();
+
+        sweep(Some(&root), Duration::ZERO);
+
+        assert!(dir.exists());
+        assert_eq!(list(Some(&dir)).len(), 1);
+
+        fs::remove_dir_all(&root).ok();
     }
 }

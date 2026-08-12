@@ -333,7 +333,7 @@
     "passwordProtected": "Passwortgeschützt",
     "passwordUnlocked": "Passwortgeschützt — bereits entsperrt",
     "delete": "Löschen",
-    "confirmDelete": "„{name}“ löschen? Das Turnier und seine Sicherungen werden vom Server entfernt. Das lässt sich nicht rückgängig machen.",
+    "confirmDelete": "„{name}“ löschen? Das Turnier wird vom Server entfernt. Seine automatischen Sicherungen bleiben etwa einen Monat erhalten, es lässt sich also noch von Hand aus dem Sicherungsordner wiederherstellen.",
     "adminPasswordTitle": "Administrator-Anmeldung erforderlich",
     "adminPasswordPrompt": "Dieser Server verlangt das Administrator-Passwort, um Turniere anzulegen.",
     "restrictedToPublished": "Hier werden nur veröffentlichte Turniere aufgelistet.",

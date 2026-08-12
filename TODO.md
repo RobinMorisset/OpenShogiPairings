@@ -43,7 +43,14 @@ Known limitations and future work, roughly ordered by area.
   regenerated on every change, for the referee to upload wherever the club
   already has a website.
 
-- **Keep one backup on tournament deletion for a while** 1 month before losing a tournament backup sounds good
+- **Restore a deleted tournament from the app.** The backups now survive the
+  deletion (a final one is taken, the directory is kept for
+  `OSP_BACKUP_RETENTION_DAYS`, default 30), but getting one back means finding
+  the file on the server and importing it. Missing: `GET
+  /api/tournaments/deleted` + `POST /api/tournaments/deleted/{id}/restore`
+  (admin-gated, minting a new id like import, and demanding the password hash
+  the marker kept when the tournament had one), and a "recently deleted" section
+  in the picker.
 
 ## ELO estimator
 

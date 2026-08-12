@@ -333,7 +333,7 @@
     "passwordProtected": "Password-protected",
     "passwordUnlocked": "Password-protected — already unlocked",
     "delete": "Delete",
-    "confirmDelete": "Delete \"{name}\"? This removes it and its backups from the server. This cannot be undone.",
+    "confirmDelete": "Delete \"{name}\"? The tournament is removed from the server. Its automatic backups are kept for about a month, so it can still be recovered by hand from the backups directory.",
     "adminPasswordTitle": "Admin sign-in required",
     "adminPasswordPrompt": "This server requires the admin password to create tournaments.",
     "restrictedToPublished": "Only published tournaments are listed here.",

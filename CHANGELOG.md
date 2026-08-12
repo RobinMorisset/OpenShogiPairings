@@ -197,6 +197,18 @@ rather than half-parsed; re-create the tournament.
 
 ### Changed
 
+- **Deleting a tournament no longer deletes its backups**, which made it the one
+  action with no way back — and an easy one to take by accident. A final backup,
+  labelled *deleted*, is now taken of the exact state it was deleted in (the
+  automatic ones are only taken at round transitions, so the newest could be many
+  edits old, and a tournament deleted before round 1 had none at all). Its
+  backups directory is then kept for a month before being swept — set
+  `OSP_BACKUP_RETENTION_DAYS` to change that, or to `0` for the old behaviour.
+  Restoring one is by hand for now: import the file from the backups directory,
+  whose path the Backups button names. A deleted tournament's password hash is
+  kept alongside its backups, so a protected tournament stays protected on the
+  way back.
+
 - **The desktop app keeps a log file**, where it previously logged only in
   development builds — so a packaged app had no way to report that it could not
   save. It lives beside the app's other data (`~/Library/Logs/…` on macOS,

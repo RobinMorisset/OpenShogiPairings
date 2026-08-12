@@ -25,6 +25,7 @@ The server is configured entirely through the environment:
 | `OSP_STATIC_DIR`      | Directory of the built SPA to serve same-origin.                                           | *(unset = API only)* |
 | `OSP_DATA_DIR`        | Directory holding one `{id}.json` (+ `{id}.auth.json`) per tournament.                     | *(unset = in-memory)* |
 | `OSP_BACKUP_DIR`      | Directory holding one folder of rotating automatic backups per tournament.                 | the per-user data dir |
+| `OSP_BACKUP_RETENTION_DAYS` | How long a *deleted* tournament's backups are kept before they are swept. `0` deletes them with it. | `30` |
 
 ### Who can do what
 
@@ -50,7 +51,11 @@ Don't put anything confidential in a tournament's name.
 `OSP_BACKUP_DIR` is worth setting explicitly on a server: unset, backups go to
 the service user's per-user data directory, which under a `systemd` unit or in a
 container is usually not where you look for them — and not on the volume you
-back up.
+back up. That directory also holds deleted tournaments for
+`OSP_BACKUP_RETENTION_DAYS`: deleting one keeps a final backup of the state it
+was deleted in, and only a sweep past the retention (at startup and after each
+deletion) removes it. Size the volume for a month of them, or lower the
+retention.
 
 ## Building the SPA for same-origin
 

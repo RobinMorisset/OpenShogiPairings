@@ -333,7 +333,7 @@
     "passwordProtected": "パスワードで保護されています",
     "passwordUnlocked": "パスワードで保護されています（ロック解除済み）",
     "delete": "削除",
-    "confirmDelete": "「{name}」を削除しますか？ 大会とそのバックアップがサーバーから削除されます。この操作は元に戻せません。",
+    "confirmDelete": "「{name}」を削除しますか？ 大会はサーバーから削除されますが、自動バックアップは約1か月保持されるため、バックアップ用のフォルダーから手動で復元できます。",
     "adminPasswordTitle": "管理者ログインが必要です",
     "adminPasswordPrompt": "このサーバーで大会を作成するには管理者パスワードが必要です。",
     "restrictedToPublished": "ここには公開中の大会のみが表示されます。",

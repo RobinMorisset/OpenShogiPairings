@@ -248,6 +248,17 @@ reverse) is a reasonable thing to want. Both are logged at startup, and the
 backups path is also shown in the app — in the Backups button's tooltip and at
 the top of its panel.
 
+**Deleting a tournament does not delete its backups.** A final backup, labelled
+*deleted*, is taken of the state it was deleted in; the directory is then marked
+with a `deleted.json` (when, under what name, and the password hash if it had
+one) and kept for `OSP_BACKUP_RETENTION_DAYS` — 30 by default, `0` to delete it
+outright as older versions did. Marked directories past their retention are
+removed at startup and after each deletion; a directory with no marker belongs
+to a live tournament and is never touched. Recovery is manual for now: import
+the backup file for the tournament you want back. A protected tournament's hash
+outlives its `{id}.auth.json` on purpose, so restoring one can go on demanding
+the password it had.
+
 ### Live multi-referee sync and conflict detection
 
 Several referees can edit the same tournament from different machines at

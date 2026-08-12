@@ -12,6 +12,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::time::Duration;
 
 use axum::body::Bytes;
 use constant_time_eq::constant_time_eq;
@@ -587,6 +588,9 @@ pub struct TournamentRegistry {
     /// store, and a referee may well want them on a different disk from the
     /// live tournaments. `None` = keep no backups at all.
     backups_root: Option<PathBuf>,
+    /// How long the backups of a *deleted* tournament are kept before
+    /// [`crate::backup::sweep`] removes them (see [`remove`](Self::remove)).
+    deleted_retention: Duration,
 }
 
 impl Default for TournamentRegistry {
@@ -604,8 +608,27 @@ impl TournamentRegistry {
     ///
     /// `backups_root` overrides where the automatic backups go; `None` falls
     /// back to [`crate::backup::default_root`] (the per-user data directory),
-    /// which is what every release before it was configurable used.
+    /// which is what every release before it was configurable used. Deleted
+    /// tournaments' backups are kept for
+    /// [`DEFAULT_DELETED_RETENTION`](crate::backup::DEFAULT_DELETED_RETENTION);
+    /// use [`with_retention`](Self::with_retention) to say otherwise.
     pub fn new(data_dir: Option<PathBuf>, backups_root: Option<PathBuf>) -> Self {
+        Self::with_retention(
+            data_dir,
+            backups_root,
+            crate::backup::DEFAULT_DELETED_RETENTION,
+        )
+    }
+
+    /// As [`new`](Self::new), but with an explicit retention for the backups of
+    /// deleted tournaments (see [`remove`](Self::remove)). `Duration::ZERO`
+    /// deletes them immediately, which is the behaviour every release before
+    /// this one had.
+    pub fn with_retention(
+        data_dir: Option<PathBuf>,
+        backups_root: Option<PathBuf>,
+        deleted_retention: Duration,
+    ) -> Self {
         let backups_root = backups_root.or_else(crate::backup::default_root);
         let mut instances = HashMap::new();
         if let Some(dir) = &data_dir {
@@ -659,10 +682,15 @@ impl TournamentRegistry {
                 }
             }
         }
+        // Startup is the sweep that matters for the desktop app and for any
+        // host restarted between tournaments; the one in `remove` covers the
+        // server that just keeps running.
+        crate::backup::sweep(backups_root.as_deref(), deleted_retention);
         Self {
             instances: RwLock::new(instances),
             data_dir,
             backups_root,
+            deleted_retention,
         }
     }
 
@@ -891,7 +919,13 @@ impl TournamentRegistry {
     }
 
     /// Remove a tournament: its registry entry, its persisted file (+ auth
-    /// sidecar), and its backups directory. Returns whether it existed.
+    /// sidecar). Returns whether it existed.
+    ///
+    /// Its **backups are kept** — a final one is taken first, and the directory
+    /// is marked deleted so [`crate::backup::sweep`] removes it once
+    /// `deleted_retention` has passed. Deleting is the only referee action with
+    /// no undo, and the easiest to do by accident; for that month, the backups
+    /// are the way back.
     pub fn remove(&self, id: Uuid) -> bool {
         let removed = self
             .instances
@@ -905,7 +939,30 @@ impl TournamentRegistry {
             // flipping `deleted` guarantees any such write either ran before this
             // point (and is now deleted) or sees the tombstone and refuses to
             // persist — so a late write can't resurrect the file on disk.
-            instance.write().mark_deleted();
+            let mut store = instance.write();
+            // The final backup, under that same lock and before the tombstone:
+            // automatic backups are only taken at round transitions, so the
+            // newest one can be many mutations old — without this, the exact
+            // state someone just deleted is the one state not recoverable.
+            let name = match store.current() {
+                Some(tournament) => {
+                    crate::backup::take(
+                        instance.backups_dir.as_deref(),
+                        tournament,
+                        crate::backup::DELETED_LABEL,
+                    );
+                    tournament.name.clone()
+                }
+                None => {
+                    debug_assert!(false, "a registered tournament always has a current state");
+                    tracing::warn!(
+                        "deleting {id}: it held no tournament, so no final backup was taken"
+                    );
+                    String::new()
+                }
+            };
+            store.mark_deleted();
+            drop(store);
             // A file that was never written is already in the state we want, so
             // `NotFound` is success; anything else means a deleted tournament is
             // still on disk and will come back at the next start — worth saying.
@@ -922,7 +979,17 @@ impl TournamentRegistry {
             if let Some(path) = self.auth_path(id) {
                 delete(path);
             }
-            crate::backup::delete_all(instance.backups_dir.as_deref());
+            // The password hash outlives the sidecar it was just deleted with:
+            // a protected tournament must not become readable to anyone who
+            // fishes it out of the bin later.
+            crate::backup::mark_deleted(
+                instance.backups_dir.as_deref(),
+                &name,
+                instance.auth.as_ref().map(|auth| auth.password_hash()),
+            );
+            // Whatever expired while this server was up goes now — the other
+            // sweep is at startup, and a server can stay up for months.
+            crate::backup::sweep(self.backups_root.as_deref(), self.deleted_retention);
         }
         removed.is_some()
     }
@@ -1340,6 +1407,118 @@ mod tests {
             Err(MutateError::NoTournament)
         ));
         assert!(instance.store.read().unwrap().is_deleted());
+    }
+
+    /// Roots of this test's own, so a sweep in one test can't see another's.
+    fn isolated_roots() -> (PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join(format!("osp-retention-{}", uuid::Uuid::new_v4()));
+        (base.join("tournaments"), base.join("backups"))
+    }
+
+    const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+
+    #[test]
+    fn removing_a_tournament_keeps_its_backups_and_its_password_hash() {
+        let (data_dir, backups_root) = isolated_roots();
+        let registry = TournamentRegistry::with_retention(
+            Some(data_dir.clone()),
+            Some(backups_root.clone()),
+            30 * DAY,
+        );
+        let (id, _) = registry
+            .create("Doomed Cup", Some("secret".into()))
+            .unwrap();
+
+        assert!(registry.remove(id));
+
+        // The tournament and its auth sidecar are gone...
+        assert!(!data_dir.join(format!("{id}.json")).exists());
+        assert!(!data_dir.join(format!("{id}.auth.json")).exists());
+
+        // ...but a backup of the state it was deleted in is not, even though
+        // this tournament never reached a round transition.
+        let dir = crate::backup::dir_for(&backups_root, id);
+        let backups = crate::backup::list(Some(&dir));
+        assert_eq!(backups.len(), 1);
+        assert_eq!(backups[0].label, crate::backup::DELETED_LABEL);
+        let restored = crate::backup::load(Some(&dir), &backups[0].id).expect("the final backup");
+        assert_eq!(restored.name, "Doomed Cup");
+
+        // And the marker carries the password hash the sidecar took to its
+        // grave: restoring this must not hand it over unprotected.
+        let marker: crate::backup::DeletedMarker = serde_json::from_slice(
+            &fs::read(dir.join(crate::backup::DELETED_MARKER)).expect("a marker"),
+        )
+        .expect("a valid marker");
+        assert_eq!(marker.name, "Doomed Cup");
+        assert!(marker
+            .password_hash
+            .expect("the hash outlives the sidecar")
+            .starts_with("$2"));
+
+        fs::remove_dir_all(data_dir.parent().unwrap()).ok();
+    }
+
+    /// Zero retention is the pre-retention behaviour, and the sweep in `remove`
+    /// is what applies it: the backups go with the tournament.
+    #[test]
+    fn zero_retention_deletes_the_backups_with_the_tournament() {
+        let (data_dir, backups_root) = isolated_roots();
+        let registry = TournamentRegistry::with_retention(
+            Some(data_dir.clone()),
+            Some(backups_root.clone()),
+            Duration::ZERO,
+        );
+        let (id, _) = registry.create("Doomed Cup", None).unwrap();
+
+        assert!(registry.remove(id));
+        assert!(!crate::backup::dir_for(&backups_root, id).exists());
+
+        fs::remove_dir_all(data_dir.parent().unwrap()).ok();
+    }
+
+    /// The other sweep: a host restarted after the retention has run out clears
+    /// what it finds, without needing another deletion to trigger it.
+    #[test]
+    fn startup_sweeps_backups_whose_retention_has_run_out() {
+        let (data_dir, backups_root) = isolated_roots();
+        let (deleted, kept) = {
+            let registry = TournamentRegistry::with_retention(
+                Some(data_dir.clone()),
+                Some(backups_root.clone()),
+                30 * DAY,
+            );
+            let (deleted, _) = registry.create("Doomed Cup", None).unwrap();
+            let (kept, _) = registry.create("Live Cup", None).unwrap();
+            // Give the survivor a backup of its own, so the sweep has something
+            // it must *not* touch.
+            let instance = registry.get(kept).expect("just created");
+            crate::backup::take(
+                instance.backups_dir.as_deref(),
+                instance.read().current().unwrap(),
+                "round 1 started",
+            );
+            assert!(registry.remove(deleted));
+            (deleted, kept)
+        };
+        assert!(crate::backup::dir_for(&backups_root, deleted).exists());
+
+        // Restart with a retention that has already elapsed for that deletion.
+        let reloaded = TournamentRegistry::with_retention(
+            Some(data_dir.clone()),
+            Some(backups_root.clone()),
+            Duration::ZERO,
+        );
+        assert!(!crate::backup::dir_for(&backups_root, deleted).exists());
+        // The live tournament reloaded, and kept every backup it had: only a
+        // marked directory is ever swept.
+        assert!(reloaded.get(kept).is_some());
+        assert_eq!(
+            crate::backup::list(Some(&crate::backup::dir_for(&backups_root, kept))).len(),
+            1
+        );
+
+        fs::remove_dir_all(data_dir.parent().unwrap()).ok();
     }
 
     #[test]

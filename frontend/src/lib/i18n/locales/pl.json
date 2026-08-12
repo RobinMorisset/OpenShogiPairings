@@ -333,7 +333,7 @@
     "passwordProtected": "Chroniony hasłem",
     "passwordUnlocked": "Chroniony hasłem — już odblokowany",
     "delete": "Usuń",
-    "confirmDelete": "Usunąć turniej „{name}”? Zostanie on wraz ze swoimi kopiami zapasowymi usunięty z serwera. Tej operacji nie można cofnąć.",
+    "confirmDelete": "Usunąć turniej „{name}”? Zostanie usunięty z serwera, ale jego automatyczne kopie zapasowe są przechowywane przez około miesiąc, więc można go jeszcze ręcznie odtworzyć z katalogu kopii zapasowych.",
     "adminPasswordTitle": "Wymagane logowanie administratora",
     "adminPasswordPrompt": "Ten serwer wymaga hasła administratora do tworzenia turniejów.",
     "restrictedToPublished": "Wymienione są tylko opublikowane turnieje.",

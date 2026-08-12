@@ -333,7 +333,7 @@
     "passwordProtected": "Chránené heslom",
     "passwordUnlocked": "Chránené heslom — už odomknuté",
     "delete": "Odstrániť",
-    "confirmDelete": "Odstrániť turnaj „{name}“? Odstráni sa zo servera spolu so svojimi zálohami. Túto akciu nemožno vrátiť späť.",
+    "confirmDelete": "Odstrániť turnaj „{name}“? Odstráni sa zo servera, ale jeho automatické zálohy sa uchovávajú približne mesiac, takže sa dá ešte ručne obnoviť z priečinka so zálohami.",
     "adminPasswordTitle": "Vyžaduje sa prihlásenie správcu",
     "adminPasswordPrompt": "Tento server vyžaduje na vytváranie turnajov heslo správcu.",
     "restrictedToPublished": "Uvedené sú len zverejnené turnaje.",

@@ -21,14 +21,40 @@
 //! - `OSP_DATA_DIR`        — directory holding one file per tournament, loaded
 //!   on boot and written through to on every change. Unset keeps everything in
 //!   memory (lost on restart).
+//! - `OSP_BACKUP_RETENTION_DAYS` — how long a *deleted* tournament's backups are
+//!   kept before they are swept (default 30). `0` deletes them along with the
+//!   tournament, which is unrecoverable.
 
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use osp_server::ServerConfig;
 
 /// Default listen address when `OSP_BIND` is unset. Kept here so clients and
 /// docs agree.
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:3000";
+
+/// `OSP_BACKUP_RETENTION_DAYS` as a number of days, or `None` when it is unset
+/// (the library's own default, a month, then applies).
+///
+/// A value that isn't a whole number of days is fatal rather than ignored:
+/// silently falling back to the default would leave a host that asked for one
+/// week keeping a month, or — worse, had the default been the other way — a
+/// host that asked for a year keeping nothing.
+fn backup_retention_days() -> Option<u64> {
+    let raw = std::env::var("OSP_BACKUP_RETENTION_DAYS").ok()?;
+    let days: u64 = raw.trim().parse().unwrap_or_else(|e| {
+        panic!("OSP_BACKUP_RETENTION_DAYS must be a whole number of days, got {raw:?}: {e}")
+    });
+    match days {
+        0 => tracing::warn!(
+            "OSP_BACKUP_RETENTION_DAYS=0: deleting a tournament deletes its backups too, \
+             with no way back"
+        ),
+        days => tracing::info!("keeping deleted tournaments' backups for {days} days"),
+    }
+    Some(days)
+}
 
 #[tokio::main]
 async fn main() {
@@ -55,6 +81,7 @@ async fn main() {
         static_dir: std::env::var_os("OSP_STATIC_DIR").map(Into::into),
         data_dir: std::env::var_os("OSP_DATA_DIR").map(Into::into),
         backup_dir: std::env::var_os("OSP_BACKUP_DIR").map(Into::into),
+        backup_retention: backup_retention_days().map(|days| Duration::from_secs(days * 86_400)),
     };
 
     match &config.admin_password {

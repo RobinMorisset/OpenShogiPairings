@@ -185,7 +185,7 @@ per-tournament `/login`, etc. New routes for the registry itself:
 | `POST` | `/api/admin/login` | — | `{ password }` → `{ token }`, exchanging `OSP_ADMIN_PASSWORD` for the admin bearer token. 404 if no admin password is configured. |
 | `POST` | `/api/tournaments` | admin token | `{ name, password? }` → creates, persists, returns `{ id }` (and a token immediately if a password was given, so the creator doesn't have to log in to their own tournament). See §3.1. |
 | `GET`  | `/api/ratings`, `POST /api/ratings/refresh` | admin token | The FESA ratings proxy — an instance-wide resource, not per-tournament data, so it shares the admin gate rather than any tournament's password. See §3.1. |
-| `DELETE` | `/api/tournaments/{id}` | that tournament's own token | Removes the registry entry, its persisted file, and its backups directory. 404 if `id` unknown. |
+| `DELETE` | `/api/tournaments/{id}` | that tournament's own token | Removes the registry entry and its persisted file. Takes a final backup and keeps the backups directory for `OSP_BACKUP_RETENTION_DAYS` (30). 404 if `id` unknown. |
 | `POST` | `/api/tournaments/{id}/login` | — | Existing shape, scoped. 404 if `id` unknown, no-op/200 with no token needed if that tournament has no password. |
 | `GET` | `/api/tournaments/{id}/events` | none (SSE can't send auth) | Same as today, scoped to one instance's broadcaster. |
 | everything else | `/api/tournaments/{id}/...` | per-instance token | Existing handlers, just nested + reading from the looked-up `TournamentInstance` instead of the global `AppState.store`. |

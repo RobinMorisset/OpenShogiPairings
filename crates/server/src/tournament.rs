@@ -305,7 +305,8 @@ async fn get_tournament(
     view(&store)
 }
 
-/// Delete the tournament: its registry entry, persisted file, and backups.
+/// Delete the tournament: its registry entry and persisted file. Its backups
+/// are kept for the retention period (see [`crate::state::TournamentRegistry::remove`]).
 async fn delete_tournament(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
