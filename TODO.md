@@ -60,5 +60,3 @@ Known limitations and future work, roughly ordered by area.
 - **Pre-fill the earlier rounds on the result sheets**: printing them mid-tournament
   (for a late arrival, or to replace a lost slip) currently leaves rounds already
   played blank, so they have to be copied over by hand.
-
-- **Cleanup the Changelog** (tons of redundant entries were made during the team tournament sequence of commits)
