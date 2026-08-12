@@ -162,7 +162,7 @@ impl Scores {
     }
 
     /// The accumulated state at a tournament number — an [`PlayerScore::opponents`]
-    /// / [`PlayerScore::defeated`] entry, or a [`Self::tid_of`] result. A gap
+    /// / [`PlayerScore::defeated`] entry, or a `tid_of` result. A gap
     /// number resolves to a default (all-zero) score. The [`TiVec`] is indexed by
     /// the [`TournamentId`] directly — no `as usize`.
     pub(crate) fn get_tid(&self, tid: TournamentId) -> &PlayerScore {
@@ -181,7 +181,7 @@ impl Scores {
             .map(TournamentId::from)
     }
 
-    /// The player id at a tournament number (the inverse of [`Self::tid_of`]).
+    /// The player id at a tournament number (the inverse of `tid_of`).
     pub(crate) fn id_of(&self, tid: TournamentId) -> Uuid {
         self.ids[tid]
     }

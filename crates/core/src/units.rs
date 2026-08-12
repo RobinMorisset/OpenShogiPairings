@@ -20,7 +20,7 @@
 //!
 //! `u16` looks tempting — a player's own score maxes at roughly `2·rounds`
 //! half-points, tiny. But these units also hold the tie-break sums, and the
-//! deepest of those, SOSOS ([`crate::standings::Standing::sososm`] /
+//! deepest of those, SOSOS ([`crate::standings::Tiebreaks::sososm`] /
 //! `sososw`), is a *sum of opponents' SOS*, i.e. a third-order sum that grows as
 //! ~`rounds³`:
 //!
