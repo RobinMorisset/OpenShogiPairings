@@ -10,7 +10,7 @@ use std::cmp::Ordering;
 use typed_index_collections::TiVec;
 use uuid::Uuid;
 
-use crate::player::Player;
+use crate::player::{Grade, Player, PointAdjustment};
 use crate::round::{Round, Winner};
 use crate::settings::TournamentSettings;
 use crate::units::{HalfPoints, TournamentId, Wins};
@@ -43,18 +43,8 @@ pub(crate) struct PlayerScore {
     /// Opponents defeated (effective winner), one entry per game, by tournament
     /// number (see [`Self::opponents`]).
     pub defeated: Vec<TournamentId>,
-    /// Cumulative sum of the player's running points total, added up after each
-    /// completed round (the "cumulative" tie-break, MacMahon-inclusive).
-    pub cuss_m: HalfPoints,
-    /// Cumulative sum of the player's running win total, added up after each
-    /// completed round (the "cumulative" tie-break, wins only).
-    pub cuss_w: Wins,
-    /// The player's running points total as it stood after each completed round
-    /// (one entry per round) — the sequence CUSSM sums, kept for the breakdown.
-    pub running_points: Vec<HalfPoints>,
-    /// The player's running win total after each completed round — the sequence
-    /// CUSSW sums.
-    pub running_wins: Vec<Wins>,
+    /// The cumulative ("CUSS") tie-breaks, round by round.
+    pub cumulative: Cumulative,
     /// Whether the player has taken a bye (of any kind, whatever it scored) or
     /// been handed the equivalent free point by an opponent's no-show.
     pub had_bye: bool,
@@ -62,6 +52,82 @@ pub(crate) struct PlayerScore {
     /// counts as a downfloat). `None` if never.
     pub last_ascended: Option<u32>,
     pub last_descended: Option<u32>,
+}
+
+/// The cumulative ("CUSS") tie-break state of one unit: the two running sums,
+/// and the sequences they are sums over.
+///
+/// Shared by [`PlayerScore`] and [`TeamScore`](crate::team_scoring::TeamScore)
+/// because it is one rule for both: after each *completed* round, the unit's
+/// totals as they then stand are added to the sum — a round it sat out still
+/// contributes its (unchanged) total, which is the classic "cumulative"
+/// definition, and exactly the kind of detail a second copy drifts on.
+#[derive(Default, Clone)]
+pub(crate) struct Cumulative {
+    /// Cumulative sum of the running points total (the MacMahon-inclusive
+    /// flavour of the tie-break).
+    pub cuss_m: HalfPoints,
+    /// Cumulative sum of the running win total (the wins-only flavour).
+    pub cuss_w: Wins,
+    /// The points total as it stood after each completed round (one entry per
+    /// round) — the sequence CUSSM sums, kept for the breakdown.
+    pub running_points: Vec<HalfPoints>,
+    /// The win total after each completed round — the sequence CUSSW sums.
+    pub running_wins: Vec<Wins>,
+}
+
+impl Cumulative {
+    /// Fold in the unit's totals as they stand at the end of a completed round.
+    pub(crate) fn push_round(&mut self, points: HalfPoints, victories: Wins) {
+        self.cuss_m += points;
+        self.cuss_w += victories;
+        self.running_points.push(points);
+        self.running_wins.push(victories);
+    }
+}
+
+/// A unit's starting score: the MacMahon points its rating (and grade) earn
+/// against the thresholds in effect *now*, with any manual bonus/malus folded in
+/// and the total floored at zero.
+///
+/// Shared by players and teams because the fold is the rule, not the input. An
+/// adjustment lives *inside* the MacMahon start rather than beside it so that it
+/// behaves as ordinary MacMahon points everywhere — the standings, the score-gap
+/// weight, and the airtight-groups pairing rule, which now puts an adjusted unit
+/// in the group its adjusted score puts it in. What differs between the two
+/// modes is only what the thresholds are shown: a player's own rating and grade,
+/// a team's average rating and no grade (grade thresholds are rejected in team
+/// mode).
+pub(crate) fn starting_macmahon(
+    settings: &TournamentSettings,
+    rating: Option<u32>,
+    grade: Option<Grade>,
+    rounds_played: u32,
+    adjustments: &[PointAdjustment],
+) -> HalfPoints {
+    let base = HalfPoints::from_whole(settings.macmahon_points_at(rating, grade, rounds_played));
+    // The deltas are whole points, and the signed floor at zero needs raw units,
+    // so this one computation drops into halves. The effective start can't go
+    // below zero.
+    let adjustment: i32 = adjustments.iter().map(|a| a.delta).sum();
+    HalfPoints::from_halves((base.halves() as i32 + adjustment * 2).max(0) as u32)
+}
+
+/// Which way a pairing floated its two sides, read from the **frozen** points
+/// difference the pairing recorded (`points(first) − points(second)`): the side
+/// that came in with more points floated *down* onto the other, which floated
+/// up. `None` when they were level — no float either way. Returns
+/// `(downfloater, upfloater)`, so a caller only writes the round stamps.
+///
+/// One rule for a player's board and a team's match, and for every pairing
+/// source, cup included: a bracket pairing that crosses score groups floats its
+/// units just like a Swiss one, so it should curb re-floating them later.
+pub(crate) fn float_direction<K: Copy>(points_diff: i32, first: K, second: K) -> Option<(K, K)> {
+    match points_diff.cmp(&0) {
+        Ordering::Greater => Some((first, second)),
+        Ordering::Less => Some((second, first)),
+        Ordering::Equal => None,
+    }
 }
 
 impl PlayerScore {
@@ -194,17 +260,10 @@ pub(crate) fn compute_scores(
             Some(est) => Some(crate::elo::estimate_or_prior(est, p.id).round() as u32),
             None => p.rating,
         };
-        let base =
-            HalfPoints::from_whole(settings.macmahon_points_at(mm_rating, p.grade, rounds_played));
         // Manual bonuses/maluses are folded into the MacMahon start, before any
-        // round is replayed, so they act as ordinary MacMahon points from here
-        // on — in the standings, in the score-gap weight, and in the
-        // airtight-groups rule. They are whole-point deltas, and the signed
-        // floor at zero needs raw units, so drop into halves for this one
-        // computation. The effective start can't go below zero.
-        let adjustment: i32 = p.adjustments.iter().map(|a| a.delta).sum();
+        // round is replayed, so they act as ordinary MacMahon points from here on.
         let macmahon =
-            HalfPoints::from_halves((base.halves() as i32 + adjustment * 2).max(0) as u32);
+            starting_macmahon(settings, mm_rating, p.grade, rounds_played, &p.adjustments);
         let t = p.tournament_id.unwrap();
         ids[t] = p.id;
         real_tids.push(t);
@@ -256,22 +315,12 @@ pub(crate) fn compute_scores(
                 by_tid[tb].opponents.push(ta);
             }
 
-            // Direction from the frozen float, recorded at pairing time — for
-            // every source, cup included: a bracket pairing that crosses score
-            // groups floats its players just like a Swiss one, so it should curb
-            // re-floating them in later rounds. (The board is already recorded as
-            // a game faced above, so a later Swiss round won't re-pair them.)
-            match board.points_diff.cmp(&0) {
-                Ordering::Greater => {
-                    // a had more points → a downfloats, b upfloats.
-                    by_tid[ta].last_descended = Some(round.number);
-                    by_tid[tb].last_ascended = Some(round.number);
-                }
-                Ordering::Less => {
-                    by_tid[ta].last_ascended = Some(round.number);
-                    by_tid[tb].last_descended = Some(round.number);
-                }
-                Ordering::Equal => {}
+            // Direction from the frozen float, recorded at pairing time. (The
+            // board is already recorded as a game faced above, so a later Swiss
+            // round won't re-pair them.)
+            if let Some((down, up)) = float_direction(board.points_diff, ta, tb) {
+                by_tid[down].last_descended = Some(round.number);
+                by_tid[up].last_ascended = Some(round.number);
             }
         }
         // Everyone with no board this round: byes (engine, forced or cup) and
@@ -331,17 +380,12 @@ pub(crate) fn compute_scores(
         }
 
         // Cumulative tie-break: after this round is scored, add every player's
-        // running total to their running sum. A round the player sat out still
-        // contributes their (unchanged) total, matching the classic "cumulative"
-        // definition of a sum over the sequence of rounds. Visits the present
-        // players (by their numbers), never the gap slots.
+        // running total to their running sum (see [`Cumulative`]). Visits the
+        // present players (by their numbers), never the gap slots.
         for &t in &real_tids {
             let s = &mut by_tid[t];
-            let points = s.points();
-            s.cuss_m += points;
-            s.cuss_w += s.victories;
-            s.running_points.push(points);
-            s.running_wins.push(s.victories);
+            let (points, victories) = (s.points(), s.victories);
+            s.cumulative.push_round(points, victories);
         }
     }
 

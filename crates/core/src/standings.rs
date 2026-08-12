@@ -54,7 +54,7 @@ use uuid::Uuid;
 use crate::elo::estimate_elos;
 use crate::player::Player;
 use crate::round::Round;
-use crate::scoring::compute_scores;
+use crate::scoring::{compute_scores, Cumulative};
 use crate::settings::{Tiebreak, TournamentSettings};
 use crate::units::{HalfPoints, TournamentId, Wins};
 
@@ -212,8 +212,7 @@ pub(crate) struct ScoreRow<'a, K> {
     pub defeated: &'a [K],
     pub points: HalfPoints,
     pub victories: Wins,
-    pub cuss_m: HalfPoints,
-    pub cuss_w: Wins,
+    pub cumulative: &'a Cumulative,
 }
 
 /// Compute the shared tie-break block for every unit, indexed by its dense
@@ -264,8 +263,8 @@ where
             sosm2: sum_dropping_lowest(opp_m, 2),
             sosw1: sum_dropping_lowest(opp_w.clone(), 1),
             sosw2: sum_dropping_lowest(opp_w, 2),
-            cussm: s.cuss_m,
-            cussw: s.cuss_w,
+            cussm: s.cumulative.cuss_m,
+            cussw: s.cumulative.cuss_w,
             // Filled in below, while the ranking order is computed, since it
             // depends on which units end up tied on the earlier criteria.
             dc: Wins::ZERO,
@@ -373,8 +372,7 @@ pub(crate) fn compute_standings(
             defeated: &s.defeated,
             points: s.points(),
             victories: s.victories,
-            cuss_m: s.cuss_m,
-            cuss_w: s.cuss_w,
+            cumulative: &s.cumulative,
         }
     });
 
@@ -392,8 +390,8 @@ pub(crate) fn compute_standings(
                 // The output faces callers by id, so translate the numbers back.
                 opponents: s.opponents.iter().map(|&o| scores.id_of(o)).collect(),
                 defeated: s.defeated.iter().map(|&o| scores.id_of(o)).collect(),
-                running_points: s.running_points.clone(),
-                running_wins: s.running_wins.clone(),
+                running_points: s.cumulative.running_points.clone(),
+                running_wins: s.cumulative.running_wins.clone(),
                 estimated_elo: elos
                     .as_ref()
                     .filter(|_| !(rated_pinned && p.rating.is_some()))

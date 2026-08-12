@@ -13,9 +13,10 @@ use typed_index_collections::TiVec;
 
 use crate::player::Player;
 use crate::round::{Board, Round, SitoutKind, SitoutValue, Winner};
+use crate::scoring::{float_direction, starting_macmahon, Cumulative};
 use crate::settings::{Tiebreak, TournamentSettings};
 use crate::standings::{compute_tiebreaks, rank_groups, DcRow, ScoreRow, Tiebreaks};
-use crate::team::{average_pairing_rating, Team};
+use crate::team::{average_pairing_rating, mean, Team};
 use crate::units::{HalfPoints, TeamId, TournamentId, Wins};
 
 /// Where each player sits in the team structure, and the rosters by team number
@@ -294,10 +295,9 @@ pub(crate) struct TeamScore {
     pub opponents: Vec<TeamId>,
     /// Opposing teams beaten, one entry per match won.
     pub defeated: Vec<TeamId>,
-    pub cuss_m: HalfPoints,
-    pub cuss_w: Wins,
-    pub running_points: Vec<HalfPoints>,
-    pub running_wins: Vec<Wins>,
+    /// The cumulative ("CUSS") tie-breaks, round by round — the same fold a
+    /// player's score does.
+    pub cumulative: Cumulative,
     /// Whether the team has already had a bye of some kind.
     pub had_bye: bool,
     pub last_ascended: Option<u32>,
@@ -403,17 +403,11 @@ pub(crate) fn compute_team_scores(
             None => average_pairing_rating(&members),
         };
         // Grade thresholds are rejected in team mode (a team has an average
-        // rating, not a grade), so there is no grade to pass.
-        let base =
-            HalfPoints::from_whole(settings.macmahon_points_at(mm_rating, None, rounds_played));
-        // Manual bonuses/maluses fold into the MacMahon start, before any round
-        // is replayed, so they act as ordinary MacMahon points from here on.
-        // They are whole-point deltas; the signed floor at zero needs raw
-        // units, so this one computation drops into halves. A team's effective
-        // start can't go below zero.
-        let adjustment: i32 = team.adjustments.iter().map(|a| a.delta).sum();
+        // rating, not a grade), so there is no grade to pass. Manual
+        // bonuses/maluses fold into the start before any round is replayed, as
+        // they do for a player.
         let macmahon =
-            HalfPoints::from_halves((base.halves() as i32 + adjustment * 2).max(0) as u32);
+            starting_macmahon(settings, mm_rating, None, rounds_played, &team.adjustments);
         real_teams.push(number);
         by_id[number] = TeamScore {
             macmahon,
@@ -433,16 +427,9 @@ pub(crate) fn compute_team_scores(
             // Every board of a match carries the same team-level float, so any of
             // them answers for the match.
             let diff = m.boards.first().map_or(0, |&i| round.boards[i].points_diff);
-            match diff.cmp(&0) {
-                Ordering::Greater => {
-                    by_id[m.team1].last_descended = Some(round.number);
-                    by_id[m.team2].last_ascended = Some(round.number);
-                }
-                Ordering::Less => {
-                    by_id[m.team1].last_ascended = Some(round.number);
-                    by_id[m.team2].last_descended = Some(round.number);
-                }
-                Ordering::Equal => {}
+            if let Some((down, up)) = float_direction(diff, m.team1, m.team2) {
+                by_id[down].last_descended = Some(round.number);
+                by_id[up].last_ascended = Some(round.number);
             }
         }
         // A bye is a downfloat that shouldn't be handed out twice — which follows
@@ -496,24 +483,12 @@ pub(crate) fn compute_team_scores(
 
         for &team in &real_teams {
             let s = &mut by_id[team];
-            let points = s.points();
-            s.cuss_m += points;
-            s.cuss_w += s.victories;
-            s.running_points.push(points);
-            s.running_wins.push(s.victories);
+            let (points, victories) = (s.points(), s.victories);
+            s.cumulative.push_round(points, victories);
         }
     }
 
     TeamScores { by_id }
-}
-
-/// Integer mean, rounded to nearest; `None` for an empty slice.
-fn mean(values: &[u32]) -> Option<u32> {
-    if values.is_empty() {
-        return None;
-    }
-    let sum: u64 = values.iter().map(|&v| u64::from(v)).sum();
-    Some(((sum + values.len() as u64 / 2) / values.len() as u64) as u32)
 }
 
 /// Build the pairing engine's input for a **team** tournament: one unit per
@@ -1231,8 +1206,7 @@ pub(crate) fn compute_team_standings(
             defeated: &s.defeated,
             points: s.points(),
             victories: s.victories,
-            cuss_m: s.cuss_m,
-            cuss_w: s.cuss_w,
+            cumulative: &s.cumulative,
         }
     });
 
@@ -1253,8 +1227,8 @@ pub(crate) fn compute_team_standings(
                 tiebreaks: tiebreaks[number],
                 opponents: s.opponents.iter().map(|&o| uuid_of[o]).collect(),
                 defeated: s.defeated.iter().map(|&o| uuid_of[o]).collect(),
-                running_points: s.running_points.clone(),
-                running_wins: s.running_wins.clone(),
+                running_points: s.cumulative.running_points.clone(),
+                running_wins: s.cumulative.running_wins.clone(),
                 members: team.members.clone(),
             }
         })

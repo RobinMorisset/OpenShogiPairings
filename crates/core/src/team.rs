@@ -129,10 +129,21 @@ pub(crate) fn average_pairing_rating(members: &[&Player]) -> Option<u32> {
     if rated.len() != members.len() {
         return None;
     }
-    // Integer mean, rounded to nearest — a team's average is only ever compared
-    // against other averages and MacMahon thresholds, both integers.
-    let sum: u64 = rated.iter().map(|&r| u64::from(r)).sum();
-    Some(((sum + rated.len() as u64 / 2) / rated.len() as u64) as u32)
+    mean(&rated)
+}
+
+/// Integer mean, rounded to nearest; `None` for an empty slice.
+///
+/// Integer because a team's average is only ever compared against other averages
+/// and against MacMahon thresholds, both integers — and the same rounding serves
+/// the average of the members' *live estimates* when estimate-based MacMahon is
+/// on, which is the same quantity computed over a different rating.
+pub(crate) fn mean(values: &[u32]) -> Option<u32> {
+    if values.is_empty() {
+        return None;
+    }
+    let sum: u64 = values.iter().map(|&v| u64::from(v)).sum();
+    Some(((sum + values.len() as u64 / 2) / values.len() as u64) as u32)
 }
 
 /// The team-roster operations on a tournament. They all reject outside team
