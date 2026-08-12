@@ -609,11 +609,16 @@ pub enum Tiebreak {
     /// The live Bayesian ELO estimate (experimental ELO pairing mode). Ranks
     /// higher estimate first, like the other metrics.
     EstElo,
-    /// Games won: a player's own wins, or — in a team tournament, where it is
-    /// the established second criterion after match points — the total won by a
-    /// team's players across every board. Distinct from [`Points`](Self::Points),
-    /// which also carries MacMahon starting points and (for a team) counts a
-    /// match rather than the boards inside it.
+    /// Board wins: the games a team's players won across every board — the
+    /// established second criterion after match points, separating two teams
+    /// level on matches. Distinct from [`Points`](Self::Points), which counts
+    /// the match rather than the boards inside it (and carries the MacMahon
+    /// start besides).
+    ///
+    /// **Team mode only.** An individual's board wins are just their wins, so
+    /// the criterion would repeat a column and could never break a tie;
+    /// [`TournamentSettings::normalized`] drops it outside team mode, which is
+    /// what keeps the arm for it in individual standings unreachable.
     BoardWins,
 }
 
@@ -1285,6 +1290,16 @@ impl TournamentSettings {
         if !self.est_elo_ranks() {
             self.tiebreaks.retain(|&tb| tb != Tiebreak::EstElo);
         }
+        // Board wins only exists as a criterion *because* a team match is not
+        // the boards inside it: it separates two teams level on match points.
+        // An individual has no such distinction — their board wins are simply
+        // their wins, which `points` already carries — so outside team mode the
+        // criterion is a column that repeats one beside it and can never break
+        // a tie. Dropped here rather than merely hidden, so leaving team mode
+        // takes it with it instead of leaving it lying in the save file.
+        if self.teams.is_none() {
+            self.tiebreaks.retain(|&tb| tb != Tiebreak::BoardWins);
+        }
 
         // The free-text header fields: trimmed, and a blank (or whitespace-only)
         // entry means "not set" rather than a stray comma or an empty
@@ -1936,6 +1951,41 @@ mod tests {
             n.tiebreaks,
             vec![Tiebreak::SosW, Tiebreak::SosM, Tiebreak::CussM]
         );
+    }
+
+    #[test]
+    fn normalizing_drops_board_wins_tiebreak_outside_team_mode() {
+        // Individual (the default): board wins would just repeat the player's
+        // own wins, so it goes — and goes from the *settings*, so that leaving
+        // team mode removes it rather than leaving it in the save file.
+        let individual = TournamentSettings {
+            tiebreaks: vec![Tiebreak::Points, Tiebreak::BoardWins, Tiebreak::SosM],
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(individual.tiebreaks, vec![Tiebreak::Points, Tiebreak::SosM]);
+
+        // Team mode: kept, in place — it is the established second criterion.
+        let teamed = TournamentSettings {
+            tiebreaks: vec![Tiebreak::Points, Tiebreak::BoardWins, Tiebreak::SosM],
+            teams: Some(TeamSettings::default()),
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(
+            teamed.tiebreaks,
+            vec![Tiebreak::Points, Tiebreak::BoardWins, Tiebreak::SosM]
+        );
+
+        // And the team default order survives its own normalization, which is
+        // what a fresh team tournament is handed.
+        let defaults = TournamentSettings {
+            tiebreaks: Tiebreak::default_team_order(),
+            teams: Some(TeamSettings::default()),
+            ..Default::default()
+        }
+        .normalized();
+        assert!(defaults.tiebreaks.contains(&Tiebreak::BoardWins));
     }
 
     #[test]

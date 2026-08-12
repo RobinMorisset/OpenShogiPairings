@@ -114,5 +114,5 @@ export const TIEBREAKS: {
   { code: "cuss_w", label: "CUSSW", field: "cussw", title: "Cumulative sum of the running win total each round" },
   { code: "dc", label: "DC", field: "dc", title: "Direct confrontation: wins among players tied on every earlier criterion, when they've all played each other" },
   { code: "est_elo", label: "Est. ELO", field: "estimated_elo", title: "Live Bayesian estimate of the player's current strength" },
-  { code: "board_wins", label: "Board wins", field: "victories", title: "Games won — a player's own, or a team's total across every board" },
+  { code: "board_wins", label: "Board wins", field: "victories", title: "Team tournaments: the games a team won across every board, where Points counts the match and not the boards inside it" },
 ];

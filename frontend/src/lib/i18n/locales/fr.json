@@ -579,7 +579,7 @@
     },
     "board_wins": {
       "label": "Parties gagnées",
-      "title": "Parties gagnées — celles du joueur, ou le total de l'équipe sur tous les échiquiers"
+      "title": "Tournois par équipes : les parties gagnées par l'équipe sur l'ensemble des échiquiers, là où Points compte le match et non les échiquiers qui le composent"
     }
   },
   "teams": {

@@ -168,9 +168,12 @@ impl Standing {
             // the estimate both is maintained and estimates rated players (see the
             // `EstElo` skip in ranking), so it is `Some` for every player; a
             // missing one sorts as 0.
-            // A player's board wins *are* their own game wins — same quantity,
-            // one board at a time. It is a team's members' total that makes the
-            // criterion interesting, but the meaning is one and the same.
+            // Unreachable in a normalized individual tournament:
+            // `TournamentSettings::normalized` drops board wins outside team
+            // mode, precisely because a player's board wins *are* their own
+            // wins and the criterion could never break a tie. Answered rather
+            // than panicked because that is still the honest value for anyone
+            // who builds settings by hand and skips normalization.
             Tiebreak::BoardWins => self.victories.halves(),
             Tiebreak::EstElo => {
                 debug_assert!(

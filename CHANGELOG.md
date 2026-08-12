@@ -61,6 +61,15 @@ rather than half-parsed; re-create the tournament.
 
 ### Fixed
 
+- **The "Board wins" tie-break is confined to team tournaments.** It exists to
+  separate two teams level on match points, by the boards inside those matches;
+  for an individual it is simply their own wins, so it repeated a column and
+  could never break a tie. It is no longer offered outside team mode, and
+  leaving team mode removes it from the tournament's criteria rather than
+  leaving it in the save file. Its description said "a player's own wins, or a
+  team's total", describing a case that cannot arise; it now names the
+  distinction that makes the criterion worth having — Points counts the match,
+  this counts the boards.
 - **A drawn team match now counts as half a win** for each side, not none. It
   already scored half a *point* — the same half the Wins column was dropping,
   so the two columns described one match and disagreed about it, and the

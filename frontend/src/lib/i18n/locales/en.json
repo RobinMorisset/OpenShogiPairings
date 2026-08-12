@@ -579,7 +579,7 @@
     },
     "board_wins": {
       "label": "Board wins",
-      "title": "Games won — a player's own, or a team's total across every board"
+      "title": "Team tournaments: the games a team won across every board, where Points counts the match and not the boards inside it"
     }
   },
   "teams": {

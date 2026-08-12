@@ -245,12 +245,17 @@
   );
 
   // Metrics not yet in the ranking order — the choices for the "add" dropdown.
-  // Estimated ELO is only meaningful as a ranking criterion when the estimate is
-  // maintained *and* applies to rated players (otherwise it just sits at the
-  // registration rating), so it isn't offered otherwise.
+  // Two are conditional. Estimated ELO is only meaningful as a ranking criterion
+  // when the estimate is maintained *and* applies to rated players (otherwise it
+  // just sits at the registration rating). Board wins only means anything when a
+  // match and its boards are different things, which is team mode; for an
+  // individual it is their own wins, already carried by Points.
   const availableTiebreaks = $derived(
     TIEBREAKS.filter(
-      (t) => !tiebreaks.includes(t.code) && (estEloRanks || t.code !== "est_elo"),
+      (t) =>
+        !tiebreaks.includes(t.code) &&
+        (estEloRanks || t.code !== "est_elo") &&
+        (teamMode || t.code !== "board_wins"),
     ),
   );
   const labelOf = (code: Tiebreak) => tiebreakLabel(code, $_);
@@ -483,6 +488,14 @@
     if (!estEloRanks) tiebreaks = tiebreaks.filter((c) => c !== "est_elo");
   }
 
+  /** Board wins is a team criterion; leaving team mode takes it with it. The
+   *  server does this too (`TournamentSettings::normalized`) and is the
+   *  authority — this only spares the referee seeing it linger for a round
+   *  trip. */
+  function dropBoardWinsUnlessTeams() {
+    if (!teamMode) tiebreaks = tiebreaks.filter((c) => c !== "board_wins");
+  }
+
   function setPairingMode(mode: "swiss" | "elo") {
     eloEnabled = mode === "elo";
     if (eloEnabled) applyEstimatorDefaultsIfUnset();
@@ -623,8 +636,10 @@
     if (teamMode && !wasTeam && eqStr(tiebreaks, INDIVIDUAL_DEFAULT_TIEBREAKS)) {
       tiebreaks = [...TEAM_DEFAULT_TIEBREAKS];
     }
-    // The estimated-ELO tie-break ranks nothing outside the ELO pairing mode.
+    // The estimated-ELO tie-break ranks nothing outside the ELO pairing mode,
+    // and board wins nothing outside team mode.
     dropEstEloUnlessRanking();
+    dropBoardWinsUnlessTeams();
     // The rest of what team mode forbids (long games, grade thresholds) is left
     // to the server, which rejects the pair naming the conflict rather than
     // silently discarding whichever side the referee did not just touch.

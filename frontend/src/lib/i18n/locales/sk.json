@@ -579,7 +579,7 @@
     },
     "board_wins": {
       "label": "Vyhrané partie",
-      "title": "Vyhrané partie — vlastné u hráča, alebo súčet družstva na všetkých šachovniciach"
+      "title": "Družstvové turnaje: partie vyhrané družstvom na všetkých šachovniciach — Body počítajú zápas, nie šachovnice v ňom"
     }
   },
   "teams": {

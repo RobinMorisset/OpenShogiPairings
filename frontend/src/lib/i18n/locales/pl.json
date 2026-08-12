@@ -579,7 +579,7 @@
     },
     "board_wins": {
       "label": "Wygrane partie",
-      "title": "Wygrane partie — własne zawodnika albo suma drużyny ze wszystkich szachownic"
+      "title": "Turnieje drużynowe: partie wygrane przez drużynę na wszystkich szachownicach — Punkty liczą mecz, a nie szachownice w jego środku"
     }
   },
   "teams": {

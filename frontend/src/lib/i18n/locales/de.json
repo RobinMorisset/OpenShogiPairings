@@ -579,7 +579,7 @@
     },
     "board_wins": {
       "label": "Brettpunkte",
-      "title": "Gewonnene Partien — die des Spielers, oder die Gesamtzahl der Mannschaft über alle Bretter"
+      "title": "Mannschaftsturniere: die von einer Mannschaft über alle Bretter gewonnenen Partien — Punkte zählt den Wettkampf, nicht die Bretter darin"
     }
   },
   "teams": {
