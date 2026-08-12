@@ -50,6 +50,11 @@ NOT backwards compatible with any earlier version.
   delete it outright. Such a tournament now falls back to the admin token.
   Local and embedded servers, which have no admin password, are unchanged, and
   the public reader page still needs only its capability key.
+- **The API answered cross-origin requests from any website.** It now names the
+  origins the app is actually served from — the desktop webview and the dev
+  server — so a page on an unrelated site can no longer read the API's replies.
+  This matters most on a server with no admin password, where every route is
+  open by design and `osp-server` listens on the well-known `127.0.0.1:3000`.
 - Some filesystem failures were silently swallowed; they are now surfaced
   as errors in the log.
 - The desktop app now respects `OSP_DATA_DIR` instead of putting its data in a

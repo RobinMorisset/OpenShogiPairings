@@ -49,11 +49,52 @@ pub use state::{
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
+use axum::http::{request, HeaderName, HeaderValue, Method};
 use axum::{middleware, routing::get, Json, Router};
 use osp_core::HealthStatus;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
+
+/// The `http:` origins the SPA can be served from when it is *not* same-origin
+/// with the API. The `tauri:` scheme is handled in [`is_app_origin`]; a hosted
+/// server serves the SPA same-origin (see [`router_with_static`]) and so appears
+/// nowhere here.
+const CROSS_ORIGIN_CLIENTS: [&str; 3] = [
+    // The Tauri webview on Windows, which uses `http:` where the other
+    // platforms use the `tauri:` scheme.
+    "http://tauri.localhost",
+    // The Vite dev server (`devUrl` in `tauri.conf.json`, and `strictPort` in
+    // `vite.config.ts`, so the port is fixed).
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+];
+
+/// Whether `origin` is one of this app's own front-ends.
+///
+/// Named origins rather than `Any`, because the API answers several routes that
+/// need no credentials at all — the picker listing, `/api/health`, the SSE
+/// stream, the public reader group — and on a server with no admin password
+/// (every desktop and embedded one) *every* route is open by design. `Any` lets
+/// a page on an unrelated site read and script all of it; the desktop server is
+/// on an OS-assigned port, but `osp-server` itself defaults to the well-known
+/// `127.0.0.1:3000`. Naming them keeps the browser's own same-origin policy as
+/// the backstop it is meant to be.
+fn is_app_origin(origin: &HeaderValue, _parts: &request::Parts) -> bool {
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    // The Tauri webview's own scheme on macOS and Linux. Nothing fetched over
+    // the network can claim a `tauri:` origin, so admitting the scheme is safe —
+    // and it avoids depending on the host Tauri picks, which differs by platform
+    // and has changed between Tauri versions.
+    origin.starts_with("tauri://") || CROSS_ORIGIN_CLIENTS.contains(&origin)
+}
+
+/// `X-Tournament-Version`, the optimistic-concurrency header the client sends on
+/// every mutation (see [`live::check_version`]).
+const TOURNAMENT_VERSION_HEADER: HeaderName = HeaderName::from_static("x-tournament-version");
 
 /// Build the API-only router around the given state.
 ///
@@ -77,11 +118,19 @@ pub fn router_with_static(state: AppState, static_dir: PathBuf) -> Router {
 }
 
 fn router_inner(state: AppState, static_dir: Option<PathBuf>) -> Router {
-    // Permissive CORS: in dev the SPA is served cross-origin from the Vite dev
-    // server (:5173), and the desktop app talks from the `tauri://` /
-    // `http://tauri.localhost` webview origin. The hosted server serves the SPA
-    // same-origin (see `router_with_static`), so this only matters for those.
-    let cors = CorsLayer::permissive();
+    // In dev the SPA is served cross-origin from the Vite dev server (:5173),
+    // and the desktop app talks from the `tauri://` / `http://tauri.localhost`
+    // webview origin. The hosted server serves the SPA same-origin (see
+    // `router_with_static`), so this only matters for those — and it names them
+    // rather than allowing any origin (see `CROSS_ORIGIN_CLIENTS`).
+    //
+    // No `allow_credentials`: authentication here is a bearer token the client
+    // reads from `localStorage` and sets by hand, never an ambient cookie, so
+    // there is nothing for a browser to attach on its own.
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(is_app_origin))
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+        .allow_headers([CONTENT_TYPE, AUTHORIZATION, TOURNAMENT_VERSION_HEADER]);
 
     // The FESA ratings proxy is a shared, instance-wide resource (not
     // per-tournament data), so it's gated by the admin password like
@@ -2065,6 +2114,82 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::CREATED);
+    }
+
+    /// CORS names the app's own origins. It matters most on a server with no
+    /// admin password, where every route is open by design: `Any` would let a
+    /// page on an unrelated site read and script the whole API over
+    /// `127.0.0.1:3000`.
+    #[tokio::test]
+    async fn cors_answers_the_apps_own_origins_and_no_others() {
+        let state = AppState::default();
+        let allow_origin = |response: &axum::response::Response| {
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .map(|v| v.to_str().unwrap().to_string())
+        };
+
+        // The desktop webview and the Vite dev server are the app talking to
+        // itself, and are answered.
+        for origin in [
+            "tauri://localhost",
+            "http://tauri.localhost",
+            "http://localhost:5173",
+        ] {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/health")
+                        .header("origin", origin)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                allow_origin(&response).as_deref(),
+                Some(origin),
+                "{origin} is one of ours"
+            );
+        }
+
+        // A stranger's page gets no grant, so the browser will not hand it the
+        // body of even an unauthenticated route — including one dressed up to
+        // look like ours, since the `http:` origins match exactly.
+        for origin in [
+            "https://evil.example",
+            "http://tauri.localhost.evil.example",
+            "https://tauri.localhost",
+        ] {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/tournaments")
+                        .header("origin", origin)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(allow_origin(&response), None, "{origin} is not ours");
+        }
+
+        // ...and its preflight for a mutation is refused, so the `DELETE` that
+        // preflight stands for is never sent.
+        let response = router(state)
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri(t(Uuid::new_v4(), ""))
+                    .header("origin", "https://evil.example")
+                    .header("access-control-request-method", "DELETE")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(allow_origin(&response), None);
     }
 
     /// Phase 2's static export reads the projection through the referee's own
