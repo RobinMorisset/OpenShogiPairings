@@ -63,6 +63,12 @@ NOT backwards compatible with any earlier version.
   confirming it failed the same way. They are now removed from the rounds and
   the draft along with everything else, leaving no row in the standings and no
   line in the american grid.
+- **A round with no game to play could not be finished.** A round where every
+  player is byed, absent, or still on a long board carried over from the
+  previous round has no board at all, and was nonetheless stamped as being in
+  progress. Since a round only finishes when a board result is recorded, and
+  there was no board to record, it stayed unfinished and no later round could
+  be started.
 - Some filesystem failures were silently swallowed; they are now surfaced
   as errors in the log.
 - The desktop app now respects `OSP_DATA_DIR` instead of putting its data in a

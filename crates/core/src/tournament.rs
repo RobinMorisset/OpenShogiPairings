@@ -1429,13 +1429,20 @@ impl Tournament {
                 }),
         );
 
-        let round = Round {
+        let mut round = Round {
             number: draft.number,
             boards,
             sitouts,
             completed: false,
             explanation,
         };
+        // Almost always `false` — a fresh round has results to record. But a
+        // round can be born complete: with every player byed, absent, or already
+        // playing a long board carried from the previous round, it has no board
+        // at all, and `all()` over nothing is true. The flag is otherwise only
+        // recomputed when a board changes, so leaving it `false` here left such a
+        // round permanently unfinishable and every later round unpreparable.
+        round.completed = round.is_complete();
         self.rounds.push(round);
         self.draft = None;
         self.explanations_extend_through(draft.number);
@@ -2374,6 +2381,48 @@ mod tests {
         assert!(t.rounds[0].boards[0].is_decided());
         t.set_board_long(1, 0, false).unwrap();
         assert!(!t.rounds[0].boards[0].long);
+    }
+
+    /// A round can be born complete. With the only two players on a long board
+    /// carried over from round 1, round 2 has no board to record at all — and
+    /// the flag is otherwise recomputed only when a board changes, so stamping
+    /// it incomplete here left the round permanently unfinishable and every
+    /// later round unpreparable.
+    #[test]
+    fn a_round_with_no_boards_is_complete_the_moment_it_is_confirmed() {
+        let mut t = Tournament::new("Long").unwrap();
+        for n in ["Alpha", "Bravo"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.settings.long_boards_enabled = true;
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+        t.set_board_long(1, 0, true).unwrap();
+        assert!(
+            t.rounds[0].completed,
+            "a long board completes its own round"
+        );
+
+        start_next_round(&mut t);
+        assert!(
+            t.rounds[1].boards.is_empty() && t.rounds[1].sitouts.is_empty(),
+            "both players are still busy on the long board"
+        );
+        assert!(
+            t.rounds[1].completed,
+            "nothing to record, so nothing to wait for"
+        );
+
+        // Until the long game is resolved the tournament is gated on *that*,
+        // which is a separate and correct guard.
+        assert_eq!(
+            t.prepare_round(),
+            Err(TournamentError::UnresolvedLongGame { round: 1 })
+        );
+        // Once it is, round 3 must go ahead — round 2 has no board anyone could
+        // ever record, so if it were not already complete, nothing would make it.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        t.prepare_round().expect("round 3 prepares");
     }
 
     #[test]
