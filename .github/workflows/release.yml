@@ -136,7 +136,8 @@ jobs:
       - name: Install Node
         uses: actions/setup-node@v5
         with:
-          node-version: 20
+          # Kept in step with frontend/package.json's `engines` — see ci.yml.
+          node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 

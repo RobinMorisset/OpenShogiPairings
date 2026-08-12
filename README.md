@@ -512,7 +512,9 @@ loaded tournament is `PUT` back to the server, which stays authoritative.
 ## Prerequisites
 
 - **Rust** (stable, ≥ 1.77) via [rustup](https://rustup.rs)
-- **Node.js** LTS (≥ 20) with npm
+- **Node.js** ≥ 22.22.2 (or ≥ 24.15.0, or ≥ 26) with npm — the range in
+  `frontend/package.json`'s `engines`, enforced at install time by
+  `frontend/.npmrc`
 - For the Tauri desktop client: platform WebView (WebView2 is preinstalled on
   current Windows; `webkit2gtk` on Linux) — see the
   [Tauri prerequisites](https://tauri.app/start/prerequisites/).
