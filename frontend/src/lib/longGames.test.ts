@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { busyOnLongGame, longPending, overrunLongRound } from "./longGames";
+import {
+  busyOnLongGame,
+  longPending,
+  overrunLongRound,
+  pendingLongRound,
+} from "./longGames";
 import type { Board, Round } from "./types";
 
 /** Only the fields these predicates read; the rest of `Board` is irrelevant. */
@@ -105,5 +110,32 @@ describe("busyOnLongGame", () => {
     expect(busyOnLongGame(rounds, 2)).toEqual([1, 2]);
     expect(busyOnLongGame([round(1, [board({})])], 2)).toEqual([]);
     expect(busyOnLongGame([], 1)).toEqual([]);
+  });
+});
+
+describe("pendingLongRound", () => {
+  it("names the round of an unresolved long game", () => {
+    expect(pendingLongRound([round(1, [pendingLong()])])).toBe(1);
+  });
+
+  // Wider than overrunLongRound on purpose. A long game started in round 2 is
+  // *meant* to still be open while round 3 is prepared — it spans 2 and 3, so
+  // the round guard passes. The export must refuse anyway: the game has no
+  // result to put in round 3's column, and rendering it would write a loss for
+  // both players into a document bound for a rating body.
+  it("blocks a long game that is still legitimately in flight", () => {
+    const rounds = [round(1, [board({ player1: 3, player2: 4 })]), round(2, [pendingLong()])];
+    expect(overrunLongRound(rounds, 3)).toBeNull();
+    expect(pendingLongRound(rounds)).toBe(2);
+  });
+
+  it("is null once the long game is decided", () => {
+    const decided = board({ long: true, outcome: { kind: "won", winner: "player1" } });
+    expect(pendingLongRound([round(1, [decided])])).toBeNull();
+  });
+
+  it("is null with no long boards at all", () => {
+    expect(pendingLongRound([round(1, [board({})])])).toBeNull();
+    expect(pendingLongRound([])).toBeNull();
   });
 });

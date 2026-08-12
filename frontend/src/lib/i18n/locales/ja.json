@@ -34,6 +34,7 @@
     "exportGrid": "星取表を出力",
     "exportTitleNoRounds": "先に1回戦を終えてください",
     "exportTitleNotReady": "出力する前に進行中の回戦を終えてください",
+    "exportTitleLongGamePending": "出力する前に第{round}回戦の長時間対局の結果を入力してください",
     "exportTitleReady": "レーティング用のアメリカングリッド（星取表）をダウンロードします",
     "cancelLastRound": "最終回戦を取り消し",
     "cancelTitleDraft": "準備中の回戦を破棄します",

@@ -414,7 +414,10 @@ async fn american_grid(
 ) -> Result<impl IntoResponse, ApiError> {
     let store = instance.read();
     let tournament = store.current().ok_or(ApiError::NoTournament)?;
-    let grid = osp_core::american_grid(tournament, &tournament.standings());
+    // Refused outright while a long game is unresolved — an unfinished two-round
+    // board has no result to put in its column, and rendering it anyway writes a
+    // loss for both players into a document destined for a rating body.
+    let grid = osp_core::american_grid(tournament, &tournament.standings())?;
     Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], grid))
 }
 

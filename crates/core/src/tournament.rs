@@ -3134,7 +3134,7 @@ mod tests {
             );
             // The american grid is built from the same records, and no longer
             // has a line for them.
-            let grid = crate::american_grid::to_grid(&t, &standings);
+            let grid = crate::american_grid::to_grid(&t, &standings).unwrap();
             assert!(
                 !grid.contains(name),
                 "{name}: gone from the american grid too"

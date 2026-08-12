@@ -34,6 +34,7 @@
     "exportGrid": "Export grid",
     "exportTitleNoRounds": "Complete a round first",
     "exportTitleNotReady": "Finish the current round before exporting",
+    "exportTitleLongGamePending": "Record the result of the long game from round {round} before exporting",
     "exportTitleReady": "Download the American Grid (cross-table) for ELO",
     "cancelLastRound": "Cancel last round",
     "cancelTitleDraft": "Discard the round being prepared",

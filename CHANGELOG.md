@@ -122,6 +122,12 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   name.
 - If `OSP_ADMIN_PASSWORD` is set, only published tournaments are visible to
   anyone without that password.
+- **The American Grid export invented a result for an unfinished long game.** A
+  long board carries its result into the *next* round's column, so one that had
+  not been entered yet was written as a loss for **both** players — a double
+  defeat, submitted to the rating body, for a game nobody had played. The export
+  now refuses while any long game is unresolved, naming the round, and the
+  "Export grid" button says so rather than failing on click.
 - **A long game that finished early handed its players a third point.** A long
   board is one game played across two rounds, which is why its winner scores
   two points — but if it was decided inside its own round, or resolved by a

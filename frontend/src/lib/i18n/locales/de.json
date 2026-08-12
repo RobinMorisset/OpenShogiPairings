@@ -34,6 +34,7 @@
     "exportGrid": "Kreuztabelle exportieren",
     "exportTitleNoRounds": "Schließen Sie zuerst eine Runde ab",
     "exportTitleNotReady": "Beenden Sie die laufende Runde vor dem Export",
+    "exportTitleLongGamePending": "Tragen Sie das Ergebnis der Langpartie aus Runde {round} vor dem Export ein",
     "exportTitleReady": "American Grid (Kreuztabelle) für die ELO-Auswertung herunterladen",
     "cancelLastRound": "Letzte Runde abbrechen",
     "cancelTitleDraft": "Die in Vorbereitung befindliche Runde verwerfen",

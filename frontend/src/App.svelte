@@ -37,7 +37,12 @@
     type DraftUpdate,
   } from "./lib/api";
   import { describeApiError } from "./lib/errorCodes";
-  import { busyOnLongGame, longPending, overrunLongRound } from "./lib/longGames";
+  import {
+    busyOnLongGame,
+    longPending,
+    overrunLongRound,
+    pendingLongRound,
+  } from "./lib/longGames";
   import { isDecided } from "./lib/noShow";
   import { pairingRating } from "./lib/teams";
   import type {
@@ -352,15 +357,29 @@
   const completedRoundCount = $derived(
     tournament?.rounds.filter((r) => r.completed).length ?? 0,
   );
+  // An unresolved long game blocks the export outright — mirrors the guard in
+  // `american_grid::to_grid`. Without this the button stayed live and the server
+  // refused; before that guard existed, the grid was emitted with a loss for both
+  // players on a game nobody had finished.
+  const exportPendingLongRound = $derived(
+    pendingLongRound(tournament?.rounds ?? []),
+  );
   const exportEnabled = $derived(
-    !busy && phase === "ready" && completedRoundCount > 0,
+    !busy &&
+      phase === "ready" &&
+      completedRoundCount > 0 &&
+      exportPendingLongRound === null,
   );
   const exportTitle = $derived(
     completedRoundCount === 0
       ? $_("app.exportTitleNoRounds")
       : phase !== "ready"
         ? $_("app.exportTitleNotReady")
-        : $_("app.exportTitleReady"),
+        : exportPendingLongRound !== null
+          ? $_("app.exportTitleLongGamePending", {
+              values: { round: exportPendingLongRound },
+            })
+          : $_("app.exportTitleReady"),
   );
 
   // "Cancel last round" button: peels back one stage — discards the open draft,

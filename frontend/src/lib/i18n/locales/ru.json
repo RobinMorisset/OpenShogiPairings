@@ -34,6 +34,7 @@
     "exportGrid": "Экспорт кросс-таблицы",
     "exportTitleNoRounds": "Сначала завершите хотя бы один тур",
     "exportTitleNotReady": "Завершите текущий тур перед экспортом",
+    "exportTitleLongGamePending": "Внесите результат длинной партии из тура {round} перед экспортом",
     "exportTitleReady": "Скачать American Grid (кросс-таблицу) для расчёта ELO",
     "cancelLastRound": "Отменить последний тур",
     "cancelTitleDraft": "Отбросить подготавливаемый тур",

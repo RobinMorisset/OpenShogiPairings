@@ -45,7 +45,7 @@ use uuid::Uuid;
 use crate::player::Player;
 use crate::round::{Board, Round, Winner};
 use crate::standings::Standing;
-use crate::tournament::Tournament;
+use crate::tournament::{Tournament, TournamentError};
 use crate::units::{HalfPoints, TournamentId};
 
 /// Columns are separated by a single space (widths carry the rest of the layout).
@@ -55,7 +55,30 @@ const COLUMN_SEP: &str = " ";
 ///
 /// `standings` must be the tournament's own [`Tournament::standings`], whose
 /// order defines each player's final rank (and thus the opponent numbering).
-pub fn to_grid(tournament: &Tournament, standings: &[Standing]) -> String {
+///
+/// # Errors
+///
+/// Refuses while any long game is still unresolved
+/// ([`UnresolvedLongGame`](TournamentError::UnresolvedLongGame)). A long board
+/// carries its result into the *next* round's column, so an unfinished one has
+/// no result to put there — and since `Outcome::Pending` is neither a draw nor a
+/// win, it would render as `-` for **both** players: a double loss, submitted to
+/// a rating body, for a game nobody has played. There is no honest grid to emit
+/// until the game is entered, so this refuses rather than guessing.
+///
+/// The check lives here rather than in the caller because the document is what
+/// is wrong, and every route to it — the API, the desktop app, a future export —
+/// must be refused alike.
+pub fn to_grid(tournament: &Tournament, standings: &[Standing]) -> Result<String, TournamentError> {
+    if let Some(round) = tournament
+        .rounds
+        .iter()
+        .find(|r| r.boards.iter().any(|b| b.long_pending()))
+    {
+        return Err(TournamentError::UnresolvedLongGame {
+            round: round.number,
+        });
+    }
     let players_by_id: HashMap<Uuid, &Player> =
         tournament.players.iter().map(|p| (p.id, p)).collect();
     // Boards reference players by tournament number, so key the rank (1-based
@@ -115,7 +138,7 @@ pub fn to_grid(tournament: &Tournament, standings: &[Standing]) -> String {
         out.push_str(line.trim_end());
         out.push('\n');
     }
-    out
+    Ok(out)
 }
 
 /// The bracketed header lines that open the document (see the module docs): the
@@ -421,7 +444,7 @@ mod tests {
     #[test]
     fn header_line_and_columns() {
         let (t, ..) = one_board(|_| {});
-        let grid = to_grid(&t, &t.standings());
+        let grid = to_grid(&t, &t.standings()).unwrap();
         let mut lines = grid.lines();
         assert_eq!(lines.next().unwrap(), "[Test Cup]");
         // Column header carries the round number and the totals column.
@@ -442,7 +465,7 @@ mod tests {
         t.settings.dates =
             Some(TournamentDates::new(day("2026-07-04"), day("2026-07-05")).unwrap());
         t.settings.time_control = Some("30min + 30sec".into());
-        let grid = to_grid(&t, &t.standings());
+        let grid = to_grid(&t, &t.standings()).unwrap();
         let mut lines = grid.lines();
         assert_eq!(
             lines.next().unwrap(),
@@ -455,7 +478,7 @@ mod tests {
         // A one-day event writes the day itself, not a `X to X` range.
         t.settings.dates =
             Some(TournamentDates::new(day("2026-07-04"), day("2026-07-04")).unwrap());
-        let grid = to_grid(&t, &t.standings());
+        let grid = to_grid(&t, &t.standings()).unwrap();
         let mut lines = grid.lines();
         assert_eq!(
             lines.next().unwrap(),
@@ -472,14 +495,14 @@ mod tests {
         // Nothing filled in: the bare name line this export has always written.
         let (mut t, ..) = one_board(|_| {});
         assert_eq!(
-            to_grid(&t, &t.standings()).lines().next().unwrap(),
+            to_grid(&t, &t.standings()).unwrap().lines().next().unwrap(),
             "[Test Cup]"
         );
 
         // Time control only: the name line stays bare, and the time control
         // follows it directly (there is no date line to hold its place).
         t.settings.time_control = Some("40min sudden death".into());
-        let grid = to_grid(&t, &t.standings());
+        let grid = to_grid(&t, &t.standings()).unwrap();
         let mut lines = grid.lines();
         assert_eq!(lines.next().unwrap(), "[Test Cup]");
         assert_eq!(lines.next().unwrap(), "[Time control: 40min sudden death]");
@@ -489,7 +512,7 @@ mod tests {
         t.settings.time_control = None;
         t.settings.dates =
             Some(TournamentDates::new(day("2026-07-04"), day("2026-07-05")).unwrap());
-        let grid = to_grid(&t, &t.standings());
+        let grid = to_grid(&t, &t.standings()).unwrap();
         let mut lines = grid.lines();
         assert_eq!(
             lines.next().unwrap(),
@@ -503,7 +526,7 @@ mod tests {
         t.settings.dates = None;
         t.settings.country = Some("Germany".into());
         assert_eq!(
-            to_grid(&t, &t.standings()).lines().next().unwrap(),
+            to_grid(&t, &t.standings()).unwrap().lines().next().unwrap(),
             "[Test Cup, Germany]"
         );
     }
@@ -512,7 +535,7 @@ mod tests {
     fn win_and_loss_reference_final_rank() {
         // P1 (rank 1) beat P2 (rank 2). P1's cell reads `2+`, P2's `1-`.
         let (t, ..) = one_board(|_| {});
-        let rows = data_rows(&to_grid(&t, &t.standings()));
+        let rows = data_rows(&to_grid(&t, &t.standings()).unwrap());
         assert!(rows[0].starts_with("1 "), "winner first: {rows:?}");
         assert!(rows[0].contains("[2+]"));
         assert!(rows[0].contains("[Alpha] [Ann]"));
@@ -533,7 +556,7 @@ mod tests {
                 drawn: true,
             }
         });
-        let rows = data_rows(&to_grid(&t, &t.standings()));
+        let rows = data_rows(&to_grid(&t, &t.standings()).unwrap());
         assert!(rows.iter().any(|r| r.contains("[2=]")));
         assert!(rows.iter().any(|r| r.contains("[1=]")));
         assert!(!rows.iter().any(|r| r.contains('+') || r.contains('-')));
@@ -549,7 +572,7 @@ mod tests {
                 giver: Winner::Player1,
             });
         });
-        let grid = to_grid(&t, &t.standings());
+        let grid = to_grid(&t, &t.standings()).unwrap();
         let _ = p1;
         assert!(grid.contains("[2+(-2p)]"), "giver cell: {grid}");
         assert!(grid.contains("[1-(+2p)]"), "receiver cell: {grid}");
@@ -585,9 +608,51 @@ mod tests {
             sitouts: Vec::new(),
             completed: true,
         });
-        let rows = data_rows(&to_grid(&t, &t.standings()));
+        let rows = data_rows(&to_grid(&t, &t.standings()).unwrap());
         assert!(rows[0].contains("[0- 2+]"), "A row: {rows:?}");
         assert!(rows[1].contains("[0- 1-]"), "B row: {rows:?}");
+    }
+
+    /// The same shape as above but with the long game *not* entered. The result
+    /// belongs in round 2's column and there is none, and a `Pending` outcome is
+    /// neither a draw nor a win — so the renderer would have written `-` for both
+    /// sides, submitting a double loss for a game nobody played. There is no
+    /// honest document to emit, so it refuses.
+    #[test]
+    fn an_unresolved_long_game_refuses_to_export_rather_than_inventing_a_result() {
+        let mut t = Tournament::new("Long").unwrap();
+        let a = t.add_player(named("A")).unwrap().id;
+        let b = t.add_player(named("B")).unwrap().id;
+        t.finalize_registration().unwrap();
+        let a = tid(&t, a);
+        let b = tid(&t, b);
+        t.rounds.push(Round {
+            number: 1,
+            explanation: RoundExplanation::empty(1),
+            boards: vec![Board {
+                long: true,
+                ..Board::pending(a, b, 0, PairingSource::Swiss)
+            }],
+            sitouts: Vec::new(),
+            completed: true,
+        });
+        t.rounds.push(Round {
+            number: 2,
+            explanation: RoundExplanation::empty(2),
+            boards: Vec::new(),
+            sitouts: Vec::new(),
+            completed: true,
+        });
+
+        assert_eq!(
+            to_grid(&t, &t.standings()),
+            Err(TournamentError::UnresolvedLongGame { round: 1 })
+        );
+
+        // Entering the result unblocks it, and the round-2 column carries it.
+        t.rounds[0].boards[0].outcome = Outcome::won(Winner::Player1);
+        let rows = data_rows(&to_grid(&t, &t.standings()).unwrap());
+        assert!(rows[0].contains("[0- 2+]"), "A row: {rows:?}");
     }
 
     #[test]
@@ -615,7 +680,7 @@ mod tests {
             }],
             completed: true,
         });
-        let grid = to_grid(&t, &t.standings());
+        let grid = to_grid(&t, &t.standings()).unwrap();
         assert!(grid.contains("[0+]"), "bye token missing: {grid}");
 
         // A second round where C is absent (no board, not the bye).
@@ -634,7 +699,7 @@ mod tests {
             }],
             completed: true,
         });
-        let grid = to_grid(&t, &t.standings());
+        let grid = to_grid(&t, &t.standings()).unwrap();
         // C's row now ends its round block with an absence in round 2.
         assert!(grid.contains("0-]"), "absence token missing: {grid}");
     }
@@ -657,7 +722,7 @@ mod tests {
             sitouts: Vec::new(),
             completed: true,
         });
-        let grid = to_grid(&t, &t.standings());
+        let grid = to_grid(&t, &t.standings()).unwrap();
         // P1 (rank 1) shows the free point `0+`; P2 (rank 2) the no-show `0#`.
         assert!(
             grid.contains("0+]"),
@@ -684,7 +749,7 @@ mod tests {
             sitouts: Vec::new(),
             completed: true,
         });
-        let grid = to_grid(&t, &t.standings());
+        let grid = to_grid(&t, &t.standings()).unwrap();
         assert!(
             grid.contains("0-]"),
             "justified absence token missing: {grid}"
@@ -715,7 +780,7 @@ mod tests {
             sitouts: Vec::new(),
             completed: true,
         });
-        let grid = to_grid(&t, &t.standings());
+        let grid = to_grid(&t, &t.standings()).unwrap();
         assert_eq!(
             grid.matches("0#").count(),
             2,
@@ -744,7 +809,7 @@ mod tests {
             }],
             completed: true,
         });
-        let grid = to_grid(&t, &t.standings());
+        let grid = to_grid(&t, &t.standings()).unwrap();
         assert!(grid.contains("0+"), "cup bye token missing: {grid}");
     }
 
@@ -764,7 +829,7 @@ mod tests {
             }],
             completed: true,
         });
-        let grid = to_grid(&t, &t.standings());
+        let grid = to_grid(&t, &t.standings()).unwrap();
         assert!(
             grid.contains("0=]"),
             "half-scored bye token missing: {grid}"
@@ -776,7 +841,7 @@ mod tests {
         let mut t = Tournament::new("Mixed").unwrap();
         t.add_player(named("Nobody")).unwrap(); // unrated, no nationality
         t.finalize_registration().unwrap();
-        let grid = to_grid(&t, &t.standings());
+        let grid = to_grid(&t, &t.standings()).unwrap();
         // Unrated → `N` flag, and no rounds yet so no bracket block.
         let row = data_rows(&grid).into_iter().next().unwrap();
         assert!(row.contains(" N "), "new-player flag: {row}");

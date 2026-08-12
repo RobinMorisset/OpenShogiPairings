@@ -35,6 +35,21 @@ export function longPending(board: Board): boolean {
  * be two rounds behind and unresolved, because `prepare_round` refuses to advance
  * past R+1 while one is pending.
  */
+/**
+ * The round holding *any* still-unresolved long game, or `null` if none is.
+ * Mirrors the guard in `american_grid::to_grid` (`crates/core`).
+ *
+ * Wider than {@link overrunLongRound}, deliberately: a long game that has not
+ * overrun still has no result, and a long board carries its result into the
+ * *next* round's column — so exporting now would write a loss for both players
+ * into a document bound for a rating body. Any pending long game blocks the
+ * export, not just a late one.
+ */
+export function pendingLongRound(rounds: Round[]): number | null {
+  const round = rounds.find((r) => r.boards.some(longPending));
+  return round?.number ?? null;
+}
+
 export function busyOnLongGame(rounds: Round[], roundNumber: number): number[] {
   const previous = rounds.find((r) => r.number + 1 === roundNumber);
   if (!previous) return [];

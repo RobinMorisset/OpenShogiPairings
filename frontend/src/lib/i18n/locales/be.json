@@ -34,6 +34,7 @@
     "exportGrid": "Экспартаваць крыж-табліцу",
     "exportTitleNoRounds": "Спачатку завяршыце хоць адзін тур",
     "exportTitleNotReady": "Завяршыце бягучы тур перад экспартам",
+    "exportTitleLongGamePending": "Занясіце вынік доўгай партыі з тура {round} перад экспартам",
     "exportTitleReady": "Спампаваць амерыканскую крыж-табліцу для ELO",
     "cancelLastRound": "Скасаваць апошні тур",
     "cancelTitleDraft": "Адкінуць тур, які рыхтуецца",

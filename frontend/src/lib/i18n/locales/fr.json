@@ -34,6 +34,7 @@
     "exportGrid": "Exporter la grille",
     "exportTitleNoRounds": "Terminez d'abord une ronde",
     "exportTitleNotReady": "Terminez la ronde en cours avant d'exporter",
+    "exportTitleLongGamePending": "Enregistrez le résultat de la partie longue de la ronde {round} avant d'exporter",
     "exportTitleReady": "Télécharger l'American Grid (tableau croisé) pour l'ELO",
     "cancelLastRound": "Annuler la dernière ronde",
     "cancelTitleDraft": "Abandonner la ronde en préparation",
