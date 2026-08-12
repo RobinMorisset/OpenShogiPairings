@@ -127,6 +127,10 @@ fn solve_stable(
             model.edge_cost(a, b)
         }
     };
+    // Row-major `n × n`, upper triangle only: `min_weight_perfect_matching` reads
+    // the matrix as symmetric and never looks below the diagonal, so mirroring
+    // each cost would be a store nothing reads — as in `pair_round_weighted`'s
+    // own fill.
     let mut cost = vec![0i128; n * n];
     let mut max_c = 0i128;
     for i in 0..n {
@@ -137,7 +141,6 @@ fn solve_stable(
             // the ladder itself (see [`ladder_mul`]).
             let c = ladder_add(ladder_mul(base(verts[i], verts[j]), stab), stray);
             cost[i * n + j] = c;
-            cost[j * n + i] = c;
             max_c = max_c.max(c);
         }
     }
@@ -148,7 +151,6 @@ fn solve_stable(
             for j in (i + 1)..n {
                 if forbidden.contains(&unord_pair(verts[i], verts[j])) {
                     cost[i * n + j] = prohibitive;
-                    cost[j * n + i] = prohibitive;
                 }
             }
         }
