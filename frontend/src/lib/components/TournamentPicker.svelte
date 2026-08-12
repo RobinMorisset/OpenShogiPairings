@@ -233,6 +233,13 @@
 </script>
 
 <section class="picker">
+  <!-- Above the cards, not under them: at the bottom of a page with a
+       tournament list and a create form this sat below the fold, so the action
+       that failed looked like it had simply done nothing. -->
+  {#if error}
+    <p class="error-banner" role="alert">{error}</p>
+  {/if}
+
   <section class="card list-card">
     <h2>{$_("picker.title")}</h2>
     {#if loading}
@@ -405,10 +412,6 @@
     </section>
   {:else}
     <CreateTournament onCreate={handleCreate} onLoad={handleLoad} {busy} />
-  {/if}
-
-  {#if error}
-    <p class="error-banner" role="alert">{error}</p>
   {/if}
 </section>
 
