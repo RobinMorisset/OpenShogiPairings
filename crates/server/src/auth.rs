@@ -93,7 +93,23 @@ impl AuthConfig {
     /// [`password_matches`](Self::password_matches), without having to mint a
     /// per-boot token for a tournament that isn't running.
     pub fn hash_matches(hash: &str, presented: &str) -> bool {
-        bcrypt::verify(presented, hash).unwrap_or(false)
+        // A `verify` error is not a wrong password: it means the stored hash
+        // itself is unusable (truncated by a partial write, hand-edited, from a
+        // future format). Answering `false` is the only safe reply — nothing else
+        // may authenticate — but doing it silently means the referee is locked out
+        // of their own tournament with "wrong password" forever and no way to tell
+        // why, so say so once per attempt. Not a `debug_assert!`: the hash comes
+        // off disk, so this is malformed external input rather than a bug here.
+        match bcrypt::verify(presented, hash) {
+            Ok(ok) => ok,
+            Err(e) => {
+                tracing::warn!(
+                    "auth: stored password hash is unusable ({e}); every password \
+                     will be rejected until it is replaced"
+                );
+                false
+            }
+        }
     }
 
     /// The current bearer token, e.g. to hand back immediately on creation so

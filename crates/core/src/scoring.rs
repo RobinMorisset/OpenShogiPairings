@@ -190,12 +190,7 @@ pub(crate) fn compute_scores(
         // A player with no counted games sits at their prior mean, so every player
         // has an estimate.
         let mm_rating = match &estimated_elos {
-            Some(est) => Some(
-                est.get(&p.id)
-                    .copied()
-                    .unwrap_or(crate::elo::UNRATED_PRIOR_MEAN)
-                    .round() as u32,
-            ),
+            Some(est) => Some(crate::elo::estimate_or_prior(est, p.id).round() as u32),
             None => p.rating,
         };
         let base =

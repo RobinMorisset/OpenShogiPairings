@@ -197,6 +197,18 @@ fn alternating_cycles(
             visited.insert(cur);
             order.push(cur);
             let nbrs = &adj[&cur];
+            // Both matchings are perfect over the same vertices, so every vertex
+            // of their symmetric difference has exactly one edge from each — the
+            // degree-2 property this walk indexes into. Degree 1 would panic on
+            // `nbrs[1]`, degree > 2 would silently walk the wrong ring; either
+            // means the two matchings aren't both perfect, which only this crate
+            // can get wrong.
+            debug_assert_eq!(
+                nbrs.len(),
+                2,
+                "vertex {cur:?} has degree {} in the symmetric difference, not 2",
+                nbrs.len()
+            );
             let next = if Some(nbrs[0]) != prev {
                 nbrs[0]
             } else {

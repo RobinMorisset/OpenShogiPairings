@@ -154,15 +154,22 @@ fn row_for(
     rounds: &[&Round],
     rank_of: &HashMap<TournamentId, u32>,
 ) -> Vec<String> {
+    // The export runs on a finalized tournament, where every player carries a
+    // number and appears in the standings this rank table was built from. Both
+    // fallbacks below (number 0, which is no player, and a `?` rank) would ship a
+    // malformed federation document rather than refuse it, so state the invariant
+    // here — the numbering and the standings are ours, not the file's.
+    debug_assert!(
+        player.tournament_id.is_some(),
+        "an exported player has no tournament number"
+    );
+    let tid = player.tournament_id.unwrap_or(TournamentId(0));
+    debug_assert!(
+        rank_of.contains_key(&tid),
+        "exported player {tid} is missing from the standings"
+    );
     let mut round_cells: Vec<String> = (0..rounds.len())
-        .map(|i| {
-            long_aware_cell(
-                player.tournament_id.unwrap_or(TournamentId(0)),
-                i,
-                rounds,
-                rank_of,
-            )
-        })
+        .map(|i| long_aware_cell(tid, i, rounds, rank_of))
         .collect();
     // Wrap the whole block in a single literal bracket pair. Done in place so a
     // one-round tournament yields `[cell]` (both edits land on the same cell).
@@ -174,7 +181,7 @@ fn row_for(
 
     let mut row = vec![
         rank_of
-            .get(&player.tournament_id.unwrap_or(TournamentId(0)))
+            .get(&tid)
             .map_or_else(|| "?".into(), |r| r.to_string()),
         if player.rating.is_none() {
             "N".into()
@@ -289,6 +296,12 @@ fn game_cell(
     } else {
         board.player1
     };
+    // An opponent is a player of this tournament, so it is ranked like any other;
+    // a `?` here is a malformed cell in a document a rating body ingests.
+    debug_assert!(
+        rank_of.contains_key(&opponent_id),
+        "opponent {opponent_id} is missing from the standings"
+    );
     let opponent = rank_of
         .get(&opponent_id)
         .map_or_else(|| "?".into(), |r| r.to_string());

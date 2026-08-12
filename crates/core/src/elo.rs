@@ -576,6 +576,7 @@ pub fn estimate_elos(
     // penalised log-likelihood. Strong concavity (every player has a finite prior
     // precision, or — for a flat prior — enough game curvature after the degenerate
     // guards) gives a unique maximum and convergence.
+    let mut converged = false;
     for _ in 0..MAX_SWEEPS {
         let mut max_delta = 0.0_f64;
         for i in 0..n {
@@ -616,9 +617,20 @@ pub fn estimate_elos(
             max_delta = max_delta.max(step.abs());
         }
         if max_delta < CONVERGENCE_TOL {
+            converged = true;
             break;
         }
     }
+    // Running out of sweeps means the strong concavity argument above no longer
+    // holds, and the estimate returned is an arbitrary iterate rather than the
+    // maximum — indistinguishable from a converged one to every caller, while it
+    // drives pairing, MacMahon groups and the published standings. Purely
+    // internal (the objective and the sweep are both ours), so this is a
+    // debug-only invariant; release still returns the best iterate it has.
+    debug_assert!(
+        converged,
+        "ELO coordinate ascent did not converge within {MAX_SWEEPS} sweeps"
+    );
 
     // Output keyed by player id (positions align with `players`).
     players
@@ -626,6 +638,23 @@ pub fn estimate_elos(
         .enumerate()
         .map(|(i, p)| (p.id, theta[i]))
         .collect()
+}
+
+/// The estimate [`estimate_elos`] produced for `id`.
+///
+/// It returns one entry per player it was handed, and every caller looks players
+/// up in the very slice it was given, so a miss means those two lists drifted
+/// apart — a bug in this crate rather than anything a save file can cause, hence
+/// the debug-only check. Release falls back to the unrated prior mean rather than
+/// panicking mid-round; [`compute_standings`](crate::standings::compute_standings)
+/// states the same invariant with an `expect`, because a rank has no such
+/// fallback.
+pub(crate) fn estimate_or_prior(estimates: &HashMap<Uuid, f64>, id: Uuid) -> f64 {
+    debug_assert!(
+        estimates.contains_key(&id),
+        "estimate_elos returns one entry per player, so {id} must have one"
+    );
+    estimates.get(&id).copied().unwrap_or(UNRATED_PRIOR_MEAN)
 }
 
 #[cfg(test)]

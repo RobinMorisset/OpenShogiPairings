@@ -175,7 +175,17 @@ pub(super) struct Ctx<'a> {
 /// else `FLOAT_BASE` decayed by the rounds since (at least 1, so `≤ FLOAT_BASE`).
 fn float_units(last: Option<u32>, round: u32) -> i128 {
     match last {
-        Some(k) => FLOAT_BASE / (round - k) as i128, // k < round always
+        Some(k) => {
+            // A float is recorded by replaying *completed* rounds, so it always
+            // predates the round being paired. `k == round` would divide by zero
+            // and `k > round` would underflow; both mean the score replay and the
+            // round number disagree, which only this crate can get wrong.
+            debug_assert!(
+                k < round,
+                "a float recorded in round {k} does not predate round {round}"
+            );
+            FLOAT_BASE / (round - k) as i128
+        }
         None => 0,
     }
 }
@@ -187,6 +197,15 @@ fn float_units(last: Option<u32>, round: u32) -> i128 {
 /// (shouldn't happen for free players) or its group is a singleton.
 fn floater_units(ctx: &Ctx, id: UnitKey, descending: bool) -> i128 {
     let Some(f) = &ctx.fold[id] else {
+        // `fold_ranks` fills an entry for every free unit, and this rule only ever
+        // scores free units (the edges and the bye are built from `free`), so a
+        // missing entry means the free set and the fold table were built from
+        // different lists. Answering "indifferent" would silently drop the
+        // floater-selection tier for that unit instead of saying so.
+        debug_assert!(
+            false,
+            "no fold info for free unit {id:?} — the free set and the fold table disagree"
+        );
         return 0;
     };
     let ideal = match ctx.floater_style {
@@ -338,7 +357,17 @@ impl Rule {
                         let db = fa.rank as i128 - ib;
                         da * da + db * db
                     }
-                    _ => 0,
+                    // Same invariant as `floater_units`: both endpoints of an edge
+                    // are free, so both have fold info. Without it the fold tier is
+                    // silently indifferent on this edge.
+                    _ => {
+                        debug_assert!(
+                            false,
+                            "no fold info for free unit {a:?} or {b:?} — the free set \
+                             and the fold table disagree"
+                        );
+                        0
+                    }
                 }
             }
             // Bye selection acts only on the bye edge; a real board is neutral.

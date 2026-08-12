@@ -173,8 +173,17 @@ impl Standing {
             // mode, precisely because a player's board wins *are* their own
             // wins and the criterion could never break a tie. Answered rather
             // than panicked because that is still the honest value for anyone
-            // who builds settings by hand and skips normalization.
-            Tiebreak::BoardWins => self.victories.halves(),
+            // who builds settings by hand and skips normalization — but reaching
+            // it means normalization was skipped, so say so in debug (the
+            // `EstElo` sibling below states its own invariant the same way).
+            Tiebreak::BoardWins => {
+                debug_assert!(
+                    false,
+                    "board_wins ranks no individual player; `normalized` drops it \
+                     outside team mode"
+                );
+                self.victories.halves()
+            }
             Tiebreak::EstElo => {
                 debug_assert!(
                     self.estimated_elo.is_some(),

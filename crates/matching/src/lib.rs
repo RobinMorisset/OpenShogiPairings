@@ -791,6 +791,18 @@ impl<W: Weight> Blossom<W> {
                     }
                 }
             }
+            // `d == inf` means no tight edge and no blossom can be reached: the
+            // phase is stuck. In max-weight mode that is the normal end (the
+            // zero-dual termination just below returns `Some(false)`), but on the
+            // perfect path there is no such exit, so the label shifts below apply
+            // `MAX / 4` twice and overflow *silently* in release — a corrupted
+            // matching, not an error. `docs/blossom-v2-plan.md` calls for this
+            // assert: impossible on the complete graphs this API takes, which is
+            // exactly why it is stated rather than handled.
+            debug_assert!(
+                !self.perfect || d != W::inf(),
+                "perfect-matching phase is stuck: no tight edge to adjust toward"
+            );
             for u in 1..=self.n {
                 match self.s[self.st[u]] {
                     0 => {
@@ -1062,8 +1074,14 @@ pub fn min_weight_perfect_matching<W: Weight>(cost: &[W], n: usize) -> Vec<usize
             }
         },
         // Every vertex is matched (the matching is perfect), so the raw mate is
-        // always ≥ 1; de-bias to a 0-indexed partner.
-        |m| m - 1,
+        // always ≥ 1; de-bias to a 0-indexed partner. A raw 0 means "unmatched",
+        // which this path has ruled out — and `0 - 1` wraps to `usize::MAX`
+        // silently in release, handing the caller an out-of-range partner instead
+        // of reporting that the solver failed to find a perfect matching.
+        |m| {
+            debug_assert!(m >= 1, "vertex left unmatched by a perfect matching");
+            m - 1
+        },
     )
 }
 

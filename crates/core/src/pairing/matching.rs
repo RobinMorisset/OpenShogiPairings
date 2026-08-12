@@ -151,6 +151,20 @@ pub(crate) fn pair_round_weighted(
         placed.insert(b);
     }
     placed.extend(forced_byes.iter().copied());
+    // The documented preconditions, stated rather than trusted. A forced unit
+    // named twice collapses in `placed` and quietly loses a board; one that isn't
+    // present is subtracted from a pool it was never in, and the round is paired
+    // one unit short with nothing said. Both are the caller's job to validate, so
+    // this is a debug-only check on that contract.
+    debug_assert_eq!(
+        placed.len(),
+        forced_pairs.len() * 2 + forced_byes.len(),
+        "a forced unit appears in more than one forced pair or bye"
+    );
+    debug_assert!(
+        placed.iter().all(|key| present.contains(key)),
+        "a forced unit is not in the present pool"
+    );
     let mut free: Vec<UnitKey> = present
         .iter()
         .copied()

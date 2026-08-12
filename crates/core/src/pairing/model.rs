@@ -13,7 +13,7 @@ use std::collections::HashSet;
 
 use typed_index_collections::{TiSlice, TiVec};
 
-use crate::elo::{estimate_elos, UNRATED_PRIOR_MEAN};
+use crate::elo::{estimate_elos, estimate_or_prior};
 use crate::player::Player;
 use crate::round::Round;
 use crate::scoring::compute_scores;
@@ -337,12 +337,7 @@ pub(crate) fn player_units(
             prequalified: false,
             elo: estimates
                 .as_ref()
-                .map(|est| {
-                    est.get(&p.id)
-                        .copied()
-                        .unwrap_or(UNRATED_PRIOR_MEAN)
-                        .round() as i64
-                })
+                .map(|est| estimate_or_prior(est, p.id).round() as i64)
                 .unwrap_or(0),
         };
     }

@@ -388,12 +388,7 @@ pub(crate) fn compute_team_scores(
             Some(est) => {
                 let estimates: Vec<u32> = members
                     .iter()
-                    .map(|p| {
-                        est.get(&p.id)
-                            .copied()
-                            .unwrap_or(crate::elo::UNRATED_PRIOR_MEAN)
-                            .round() as u32
-                    })
+                    .map(|p| crate::elo::estimate_or_prior(est, p.id).round() as u32)
                     .collect();
                 mean(&estimates)
             }
