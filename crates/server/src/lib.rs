@@ -363,7 +363,7 @@ mod tests {
         let (status, body) = send(router(state.clone()), get(&t(id, ""))).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["tournament"]["name"], "Paris Open");
-        assert_eq!(body["tournament"]["format_version"], 9);
+        assert_eq!(body["tournament"]["format_version"], 10);
         assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
         assert_eq!(body["can_undo"], false); // nothing to undo on a fresh tournament
 

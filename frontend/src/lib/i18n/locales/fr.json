@@ -168,6 +168,7 @@
     "cupByeOpponent": "EXEMPT COUPE",
     "explanation": {
       "reportTitle": "Pourquoi ces appariements ?",
+      "staleWarning": "Les données sous-jacentes ont changé depuis l'appariement de cette ronde : un résultat, un classement ou un réglage a été modifié. Ce sont toujours les raisons utilisées par le moteur à l'époque.",
       "compromiseOn": "Compromis sur : {rules}",
       "ruleCount": "{count} × {rule}",
       "boardsCount": "{count, plural, one {# table} other {# tables}}",

@@ -15,18 +15,6 @@ Known limitations and future work, roughly ordered by area.
   plain matching can't express, and by very large fields. Plan: `good_lp` + HiGHS
   first, then CP-SAT.
 
-- **Freeze the round explanation at confirmation.** `explain_round` rebuilds the
-  `PairingModel` from `rounds[..idx]`, so correcting an earlier round's result, or
-  editing a rating, club or pairing setting, silently changes the reported
-  rationale of later rounds — while the ledger still looks plausible. Store the
-  `RoundExplanation` on the `Round` when it is confirmed (a record of a past event,
-  like the frozen `sitouts` scores, not a cache), bumping
-  `TOURNAMENT_FORMAT_VERSION` 5 → 6. Plus an `explanations_faithful_through`
-  watermark on the `Tournament` — decreasing only, `min(mark, k)` on a result edit
-  in round `k` and `0` on a player/settings edit — so rounds above it are shown
-  with a "the data behind this has changed since" warning. Design in the appendix
-  of [docs/public-access.md](docs/public-access.md).
-
 ## Multi-referee server
 
 - **OAuth authentication**

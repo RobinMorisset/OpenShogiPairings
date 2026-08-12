@@ -49,7 +49,9 @@ use typed_index_collections::TiVec;
 /// v7: team tournaments — a `teams` roster list and `settings.teams`.
 /// v8: a board's forfeit records *why* each missing side missed it.
 /// v9: teams carry manual point `adjustments`.
-pub const TOURNAMENT_FORMAT_VERSION: u32 = 9;
+/// v10: rounds carry the `explanation` of their pairing, frozen at confirmation,
+/// and the tournament an `explanations_faithful_through` watermark.
+pub const TOURNAMENT_FORMAT_VERSION: u32 = 10;
 
 fn default_format_version() -> u32 {
     TOURNAMENT_FORMAT_VERSION
@@ -100,6 +102,30 @@ pub struct Tournament {
     /// Empty (and absent from JSON) outside team mode.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub teams: Vec<Team>,
+    /// How far the frozen [`Round::explanation`]s still match the tournament a
+    /// reader is looking at: rounds `1..=n` are faithful, every round above `n`
+    /// is to be shown with a "the data behind this has changed since" warning.
+    /// `0` means none are.
+    ///
+    /// The explanations themselves stay permanently faithful to the pairing they
+    /// describe (that is the point of freezing them), but the *present* moves:
+    /// the stored round-3 ledger may cite a score that a later correction to
+    /// round 2 has since changed. Round `r` is paired from `rounds[..r-1]`, so an
+    /// edit inside round `k` can only disturb rounds *after* `k` — which makes
+    /// the faithful rounds a prefix, and this watermark decreasing-only:
+    /// [`min(mark, k)`](Self::explanations_stale_after) on a per-round edit and
+    /// [`0`](Self::explanations_all_stale) on a player or settings edit, which
+    /// are global. Round 1 is never disturbed by anything.
+    ///
+    /// Lives here rather than in server session state because, unlike the
+    /// undo/redo `version`, it must survive save/load, travel with a mailed save
+    /// file, and be restored by undo and by a backup restore alongside the state
+    /// it describes.
+    ///
+    /// Not defaulted on load, for the same reason [`Round::explanation`] is not:
+    /// the only save that can lack it is one this build already rejects on its
+    /// format version.
+    pub explanations_faithful_through: u32,
 }
 
 /// Errors that can arise while mutating a [`Tournament`].
@@ -304,6 +330,17 @@ pub enum TournamentError {
     /// Team-level adjustments are the answer, and are still to come.
     #[error("a team tournament ranks by team, so a per-player point adjustment has no effect")]
     PlayerAdjustmentInTeamMode,
+    /// A loaded round carries an explanation that names a different round, so the
+    /// rationale and the pairings it is shown against do not belong together.
+    #[error("round {round} carries the explanation of round {explains}")]
+    MisplacedExplanation { round: u32, explains: u32 },
+    /// A loaded tournament vouches for the explanations of rounds it does not
+    /// have (see [`Tournament::explanations_faithful_through`]).
+    #[error(
+        "the explanation watermark is {mark}, past the last of the {rounds} \
+         rounds this tournament has"
+    )]
+    WatermarkPastLastRound { mark: u32, rounds: usize },
     /// A justified absence was recorded on a board outside team mode, where it
     /// cannot arise: an absent player is excluded from the pairing before any
     /// board exists, so the only forfeit an individual tournament can produce is
@@ -332,6 +369,7 @@ impl Tournament {
             rounds: Vec::new(),
             cup: None,
             teams: Vec::new(),
+            explanations_faithful_through: 0,
         })
     }
 
@@ -382,16 +420,33 @@ impl Tournament {
         if new.last_name.trim().is_empty() {
             return Err(TournamentError::EmptyPlayerName);
         }
-        let player = self.player_mut(id)?;
-        // Reuse the normalization in `from_new`, but keep the existing id.
-        let normalized = Player::from_new(new);
-        player.last_name = normalized.last_name;
-        player.first_name = normalized.first_name;
-        player.rating = normalized.rating;
-        player.grade = normalized.grade;
-        player.nationality = normalized.nationality;
-        player.club = normalized.club;
-        Ok(player)
+        let moved = {
+            let player = self.player_mut(id)?;
+            // Reuse the normalization in `from_new`, but keep the existing id.
+            let normalized = Player::from_new(new);
+            // Rating, club and nationality are pairing input. Compared rather
+            // than assumed changed: the client re-sends the whole player for a
+            // one-cell edit, and a warning that fires on a no-op is a warning
+            // referees learn to ignore.
+            let moved = (&player.rating, &player.nationality, &player.club)
+                != (
+                    &normalized.rating,
+                    &normalized.nationality,
+                    &normalized.club,
+                );
+            player.last_name = normalized.last_name;
+            player.first_name = normalized.first_name;
+            player.rating = normalized.rating;
+            player.grade = normalized.grade;
+            player.nationality = normalized.nationality;
+            player.club = normalized.club;
+            moved
+        };
+        if moved {
+            // A player's pairing data sits under every round's model at once.
+            self.explanations_all_stale();
+        }
+        self.player_mut(id).map(|p| &*p)
     }
 
     /// Remove the player with the given id.
@@ -497,6 +552,13 @@ impl Tournament {
         let valid_categories = settings.category_ids();
         for p in &mut self.players {
             p.categories.retain(|c| valid_categories.contains(c));
+        }
+        // The settings sit under every round's pairing model. Coarse — a change
+        // to the tournament's city moves the watermark too — but compared rather
+        // than assumed, since the client PUTs the whole settings object for any
+        // one field.
+        if settings != self.settings {
+            self.explanations_all_stale();
         }
         self.settings = settings;
         Ok(&self.settings)
@@ -714,13 +776,17 @@ impl Tournament {
         if delta == 0 {
             return Err(TournamentError::ZeroPointAdjustment);
         }
-        let player = self.player_mut(player_id)?;
-        player.adjustments.push(PointAdjustment {
-            id: Uuid::new_v4(),
-            delta,
-            reason,
-        });
-        Ok(player)
+        self.player_mut(player_id)?
+            .adjustments
+            .push(PointAdjustment {
+                id: Uuid::new_v4(),
+                delta,
+                reason,
+            });
+        // An adjustment moves points, and points are what every round was paired
+        // on — it carries no round of its own, so it lands under all of them.
+        self.explanations_all_stale();
+        self.player_mut(player_id).map(|p| &*p)
     }
 
     /// Remove a previously applied point adjustment.
@@ -742,7 +808,8 @@ impl Tournament {
                 adjustment: adjustment_id,
             });
         }
-        Ok(player)
+        self.explanations_all_stale();
+        self.player_mut(player_id).map(|p| &*p)
     }
 
     /// The cup podium (champion, runner-up, third, fourth), once the final round is
@@ -830,6 +897,9 @@ impl Tournament {
         if self.rounds.pop().is_none() {
             return Err(TournamentError::NoRoundToCancel);
         }
+        // The watermark counts rounds, so it must not survive past the end of the
+        // list it indexes into.
+        self.explanations_stale_after(self.rounds.len() as u32);
         // Removing the very first round reopens registration; later rounds leave
         // the preceding one untouched (and thus still complete).
         if self.rounds.is_empty() {
@@ -1207,6 +1277,22 @@ impl Tournament {
             &forced_pairs,
             &forced_bye_keys,
         );
+        // Freeze the explanation here, against the very `units` the engine was
+        // just handed — this is the one moment the model is provably the one that
+        // paired the round. See [`Round::explanation`].
+        let explanation = explain_pairing(
+            draft.number,
+            &self.settings,
+            &units,
+            &swiss
+                .pairs
+                .iter()
+                .filter(|p| matches!(p.source, PairingSource::Swiss))
+                .map(|p| (p.a, p.b))
+                .collect::<Vec<_>>(),
+            swiss.swiss_bye,
+        );
+
         let mut boards = cup_boards;
         boards.extend(swiss.pairs.iter().map(|p| {
             Board::pending(
@@ -1307,10 +1393,52 @@ impl Tournament {
             boards,
             sitouts,
             completed: false,
+            explanation,
         };
         self.rounds.push(round);
         self.draft = None;
+        self.explanations_extend_through(draft.number);
         Ok(self.rounds.last().expect("just pushed a round"))
+    }
+
+    /// Record that round `number` has just been confirmed with a freshly frozen
+    /// explanation, advancing [`explanations_faithful_through`] over it — but
+    /// only when the prefix below it is intact. A confirmation never *rescues* an
+    /// earlier round whose data has since moved; it only extends an unbroken run.
+    ///
+    /// `>=` rather than `==` because re-pairing (`force_pairing`) pops the round
+    /// and re-confirms it, so the mark can already be at `number`.
+    ///
+    /// [`explanations_faithful_through`]: Self::explanations_faithful_through
+    pub(crate) fn explanations_extend_through(&mut self, number: u32) {
+        if self.explanations_faithful_through + 1 >= number {
+            self.explanations_faithful_through = number;
+        }
+    }
+
+    /// An edit *inside* round `k` (a result, a sit-out value, a long-board flag):
+    /// every later round was paired from a model that read it, so their frozen
+    /// explanations may now cite data that has moved. Round `k`'s own explanation
+    /// is untouched — it was paired before this round was played.
+    pub(crate) fn explanations_stale_after(&mut self, k: u32) {
+        self.explanations_faithful_through = self.explanations_faithful_through.min(k);
+    }
+
+    /// A global edit — a player's rating, club or nationality, a point
+    /// adjustment, a pairing ELO, or the settings. These sit under *every*
+    /// round's model, so no round's explanation is known to still match the
+    /// present.
+    ///
+    /// Deliberately coarse: changing one player's club drops the mark even when
+    /// no board's ledger would move. The exact version (recompute each round and
+    /// compare) is noted as a follow-on in `docs/public-access.md`; a warning
+    /// that over-fires is recoverable, one that under-fires is not.
+    ///
+    /// What is *not* here is as deliberate: a category membership and a cup
+    /// eligibility flag are read by neither `player_units` nor `compute_scores`,
+    /// so no ledger can depend on them and warning would be pure noise.
+    pub(crate) fn explanations_all_stale(&mut self) {
+        self.explanations_faithful_through = 0;
     }
 
     /// Explain the Swiss pairings of the round numbered `round_number`: for each
@@ -1318,53 +1446,17 @@ impl Tournament {
     /// much, plus a per-rule round report. Forced and cup boards are omitted —
     /// they were not chosen by the engine.
     ///
-    /// Reconstructs the exact inputs the round was paired from (the standings
-    /// entering it and the same free set), so the ledger matches what the engine
-    /// actually optimized.
+    /// A lookup, not a computation: the ledger was scored against the model that
+    /// actually paired the round and frozen onto it at confirmation (see
+    /// [`Round::explanation`]). Whether it still matches the tournament as it
+    /// stands now is a separate question, answered by
+    /// [`explanations_faithful_through`](Self::explanations_faithful_through).
     pub fn explain_round(&self, round_number: u32) -> Result<RoundExplanation, TournamentError> {
-        let idx = self
-            .rounds
+        self.rounds
             .iter()
-            .position(|r| r.number == round_number)
-            .ok_or(TournamentError::RoundNotFound(round_number))?;
-        let round = &self.rounds[idx];
-        let completed = &self.rounds[..idx];
-        // In team mode the engine paired *teams*, so the explanation is scored
-        // against the team units and its ledgers name team numbers.
-        if self.settings.team_mode() {
-            let slots = self.team_slots();
-            let units = self.team_pairing_units(completed, &slots);
-            let swiss_boards: Vec<(UnitKey, UnitKey)> = matches_in_round(round, &slots)
-                .iter()
-                .filter(|m| {
-                    m.boards
-                        .first()
-                        .is_some_and(|&i| matches!(round.boards[i].source, PairingSource::Swiss))
-                })
-                .map(|m| (UnitKey::from(m.team1), UnitKey::from(m.team2)))
-                .collect();
-            return Ok(explain_pairing(
-                round.number,
-                &self.settings,
-                &units,
-                &swiss_boards,
-                swiss_bye_team(round, &slots).map(UnitKey::from),
-            ));
-        }
-        let swiss_boards: Vec<(UnitKey, UnitKey)> = round
-            .boards
-            .iter()
-            .filter(|b| matches!(b.source, PairingSource::Swiss))
-            .map(|b| (UnitKey::from(b.player1), UnitKey::from(b.player2)))
-            .collect();
-        let units = self.pairing_units(round.number, completed);
-        Ok(explain_pairing(
-            round.number,
-            &self.settings,
-            &units,
-            &swiss_boards,
-            round.swiss_bye().map(UnitKey::from),
-        ))
+            .find(|r| r.number == round_number)
+            .map(|r| r.explanation.clone())
+            .ok_or(TournamentError::RoundNotFound(round_number))
     }
 
     /// Explain a counterfactual pairing in round `round_number`, relative to the
@@ -1721,11 +1813,12 @@ impl Tournament {
         board_index: usize,
         clicked: Winner,
     ) -> Result<&Board, TournamentError> {
-        let round = self
+        let idx = self
             .rounds
-            .iter_mut()
-            .find(|r| r.number == round_number)
+            .iter()
+            .position(|r| r.number == round_number)
             .ok_or(TournamentError::RoundNotFound(round_number))?;
+        let round = &mut self.rounds[idx];
         let board = round
             .boards
             .get_mut(board_index)
@@ -1747,7 +1840,9 @@ impl Tournament {
             }
         };
         round.completed = round.is_complete();
-        Ok(&round.boards[board_index])
+        // Every later round was paired from a model that read this result.
+        self.explanations_stale_after(round_number);
+        Ok(&self.rounds[idx].boards[board_index])
     }
 
     /// Set what a round is worth to a player who sat it out — the `0+` / `0=` /
@@ -1759,20 +1854,22 @@ impl Tournament {
     /// confirmed; this is how a referee overrules it for one player in one round
     /// (an excused absence, a bye they judge shouldn't score, …). Completed
     /// rounds are fair game — re-scoring a past round is the whole point — and
-    /// only the score moves: why the player sat out is untouched, so this can
-    /// never change how a later round pairs.
+    /// only the score moves: why the player sat out is untouched, so the facts a
+    /// *re-pairing* would read from the kind (the bye they can't be given twice,
+    /// the float history) are unaffected. The score itself does feed later
+    /// rounds' pairing models, which is why this moves the explanation watermark.
     pub fn set_sitout_value(
         &mut self,
         round_number: u32,
         player: TournamentId,
         value: SitoutValue,
     ) -> Result<&Round, TournamentError> {
-        let round = self
+        let idx = self
             .rounds
-            .iter_mut()
-            .find(|r| r.number == round_number)
+            .iter()
+            .position(|r| r.number == round_number)
             .ok_or(TournamentError::RoundNotFound(round_number))?;
-        let sitout = round
+        let sitout = self.rounds[idx]
             .sitouts
             .iter_mut()
             .find(|s| s.player == player)
@@ -1781,7 +1878,8 @@ impl Tournament {
                 player,
             })?;
         sitout.value = value;
-        Ok(round)
+        self.explanations_stale_after(round_number);
+        Ok(&self.rounds[idx])
     }
 
     /// Re-score a round a whole **team** sat out (`0+` / `0=` / `0−`).
@@ -1811,11 +1909,12 @@ impl Tournament {
             .iter()
             .filter_map(|p| p.tournament_id)
             .collect();
-        let round = self
+        let idx = self
             .rounds
-            .iter_mut()
-            .find(|r| r.number == round_number)
+            .iter()
+            .position(|r| r.number == round_number)
             .ok_or(TournamentError::RoundNotFound(round_number))?;
+        let round = &mut self.rounds[idx];
         // Check every member first: a team that played has no team-level cell to
         // re-score, and writing the ones that do sit out would be a half-edit.
         if let Some(&player) = members
@@ -1832,7 +1931,8 @@ impl Tournament {
                 sitout.value = value;
             }
         }
-        Ok(round)
+        self.explanations_stale_after(round_number);
+        Ok(&self.rounds[idx])
     }
 
     /// Mark a board as forfeited, or clear it.
@@ -1859,11 +1959,12 @@ impl Tournament {
         if absent.is_some_and(Forfeit::has_justified) && !self.settings.team_mode() {
             return Err(TournamentError::JustifiedAbsenceOutsideTeamMode);
         }
-        let round = self
+        let idx = self
             .rounds
-            .iter_mut()
-            .find(|r| r.number == round_number)
+            .iter()
+            .position(|r| r.number == round_number)
             .ok_or(TournamentError::RoundNotFound(round_number))?;
+        let round = &mut self.rounds[idx];
         let board = round
             .boards
             .get_mut(board_index)
@@ -1881,7 +1982,8 @@ impl Tournament {
             None => board.outcome,
         };
         round.completed = round.is_complete();
-        Ok(&round.boards[board_index])
+        self.explanations_stale_after(round_number);
+        Ok(&self.rounds[idx].boards[board_index])
     }
 
     /// Flag (or unflag) a board as a "long game": double time control, lasting two
@@ -1945,6 +2047,10 @@ impl Tournament {
             board.long = long;
         }
         round.completed = round.is_complete();
+        // A no-op as long as only the last round can be toggled (there is no
+        // later round to have read the doubled score), but stated rather than
+        // relied on: a long board is worth two points, which is pairing input.
+        self.explanations_stale_after(round_number);
         Ok(&self.rounds[idx])
     }
 
@@ -1972,7 +2078,10 @@ impl Tournament {
                 })
             }
         };
-        Ok(board)
+        // A draw feeds the live ELO estimate, which is what an ELO-mode
+        // tournament pairs on, so later rounds' models read it.
+        self.explanations_stale_after(round_number);
+        self.board_mut(round_number, board_index).map(|b| &*b)
     }
 
     /// Set (`Some`) or clear (`None`) the handicap on a board.
@@ -2005,9 +2114,11 @@ impl Tournament {
                 Some(HandicapGame { handicap, giver })
             }
         };
-        let board = self.board_mut(round_number, board_index)?;
-        board.handicap = game;
-        Ok(board)
+        self.board_mut(round_number, board_index)?.handicap = game;
+        // Under the Wiel rule the handicap decides who the board scores for, and
+        // that score is what later rounds were paired on.
+        self.explanations_stale_after(round_number);
+        self.board_mut(round_number, board_index).map(|b| &*b)
     }
 
     /// Set a board's handicap with an **explicit** giver, for an importer that
@@ -2029,6 +2140,7 @@ impl Tournament {
         }
         self.board_mut(round_number, board_index)?.handicap =
             Some(HandicapGame { handicap, giver });
+        self.explanations_stale_after(round_number);
         Ok(())
     }
 
@@ -2142,6 +2254,22 @@ impl Tournament {
                 .any(Forfeit::has_justified)
         {
             return Err(TournamentError::JustifiedAbsenceOutsideTeamMode);
+        }
+        // A frozen explanation names the round it explains. A file where the two
+        // disagree, or whose watermark points past the last round, would put a
+        // rationale under the wrong pairings (or vouch for rounds that aren't
+        // there) — both silent, both wrong.
+        if let Some(round) = self.rounds.iter().find(|r| r.explanation.round != r.number) {
+            return Err(TournamentError::MisplacedExplanation {
+                round: round.number,
+                explains: round.explanation.round,
+            });
+        }
+        if self.explanations_faithful_through as usize > self.rounds.len() {
+            return Err(TournamentError::WatermarkPastLastRound {
+                mark: self.explanations_faithful_through,
+                rounds: self.rounds.len(),
+            });
         }
         Ok(())
     }
@@ -4230,5 +4358,142 @@ mod tests {
         let board = find_board(&t, 1, s[0], s[7]).expect("bracket board created despite absence");
         assert!(matches!(board.source, PairingSource::Cup { .. }));
         assert!(!board.is_decided());
+    }
+
+    // --- Frozen explanations and the staleness watermark ---------------------
+
+    /// An eight-player tournament with `rounds` rounds played out (player 1 of
+    /// every board wins), so the later rounds have real score groups to pair on.
+    fn eight_players_played(rounds: u32) -> Tournament {
+        let mut t = Tournament::new("Frozen").unwrap();
+        for n in ["A", "B", "C", "D", "E", "F", "G", "H"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        for r in 1..=rounds {
+            start_next_round(&mut t);
+            for i in 0..t.rounds[(r - 1) as usize].boards.len() {
+                t.toggle_board_winner(r, i, Winner::Player1).unwrap();
+            }
+        }
+        t
+    }
+
+    #[test]
+    fn a_rounds_explanation_survives_a_correction_to_an_earlier_round() {
+        let mut t = eight_players_played(3);
+        let before = t.explain_round(3).unwrap();
+        // Correcting round 1 changes the standings round 3 was paired from — the
+        // exact edit that used to rewrite round 3's rationale under the referee.
+        t.toggle_board_winner(1, 0, Winner::Player2).unwrap();
+        assert_eq!(t.explain_round(3).unwrap(), before);
+        // ...and the round that edit was *inside* keeps its own explanation too.
+        assert_eq!(t.explain_round(1).unwrap().round, 1);
+
+        // The point of freezing, made explicit: recomputing round 3's ledger from
+        // the tournament as it now stands gives a *different* answer — a model
+        // that never paired anything, which is what used to be served.
+        let recomputed = {
+            let swiss: Vec<(UnitKey, UnitKey)> = t.rounds[2]
+                .boards
+                .iter()
+                .filter(|b| matches!(b.source, PairingSource::Swiss))
+                .map(|b| (UnitKey::from(b.player1), UnitKey::from(b.player2)))
+                .collect();
+            let units = t.pairing_units(3, &t.rounds[..2]);
+            explain_pairing(3, &t.settings, &units, &swiss, None)
+        };
+        assert_ne!(recomputed, before);
+        assert_eq!(t.explanations_faithful_through, 1);
+    }
+
+    #[test]
+    fn confirming_a_round_extends_the_watermark_but_never_rescues_a_stale_prefix() {
+        let mut t = eight_players_played(2);
+        assert_eq!(t.explanations_faithful_through, 2);
+
+        // An edit inside round 1 leaves round 1's own explanation faithful (it was
+        // paired before the game was played) and warns from round 2 on.
+        t.toggle_board_winner(1, 0, Winner::Player2).unwrap();
+        assert_eq!(t.explanations_faithful_through, 1);
+
+        // Round 3 is faithful by construction, but the mark is a prefix: it cannot
+        // step over round 2 to say so.
+        start_next_round(&mut t);
+        assert_eq!(t.explanations_faithful_through, 1);
+    }
+
+    #[test]
+    fn a_pairing_relevant_player_edit_stales_every_explanation_and_a_no_op_does_not() {
+        let mut t = eight_players_played(2);
+        let id = t.players[0].id;
+
+        // Renaming touches nothing the engine reads.
+        t.edit_player(
+            id,
+            NewPlayer {
+                last_name: "Renamed".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(t.explanations_faithful_through, 2);
+
+        // A rating does: it sits under every round's model at once.
+        t.edit_player(
+            id,
+            NewPlayer {
+                last_name: "Renamed".into(),
+                rating: Some(1800),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(t.explanations_faithful_through, 0);
+    }
+
+    #[test]
+    fn a_point_adjustment_stales_every_explanation() {
+        let mut t = eight_players_played(2);
+        let id = t.players[0].id;
+        let player = t
+            .add_point_adjustment(id, 1, "late arrival".into())
+            .unwrap();
+        let adjustment = player.adjustments[0].id;
+        assert_eq!(t.explanations_faithful_through, 0);
+
+        // Removing it doesn't undo the doubt — the ledgers still describe scores
+        // that moved twice.
+        start_next_round(&mut t);
+        t.remove_point_adjustment(id, adjustment).unwrap();
+        assert_eq!(t.explanations_faithful_through, 0);
+    }
+
+    #[test]
+    fn cancelling_a_round_pulls_the_watermark_back_inside_the_rounds_it_indexes() {
+        let mut t = eight_players_played(2);
+        assert_eq!(t.explanations_faithful_through, 2);
+        t.cancel_last_round().unwrap();
+        assert_eq!(t.explanations_faithful_through, 1);
+    }
+
+    #[test]
+    fn re_pairing_the_current_round_re_freezes_its_explanation_and_keeps_the_mark() {
+        // Round 1 played, round 2 paired but not yet played — the only state a
+        // round can be re-paired in.
+        let mut t = eight_players_played(1);
+        start_next_round(&mut t);
+        assert_eq!(t.explanations_faithful_through, 2);
+
+        let (a, b) = {
+            let boards = &t.rounds[1].boards;
+            (boards[0].player1, boards[1].player2)
+        };
+        t.force_pairing(UnitKey::from(a), UnitKey::from(b)).unwrap();
+        // The re-paired round carries the ledger of the pairing it now has.
+        let explanation = t.explain_round(2).unwrap();
+        assert_eq!(explanation.round, 2);
+        assert_eq!(explanation, t.rounds[1].explanation);
+        assert_eq!(t.explanations_faithful_through, 2);
     }
 }

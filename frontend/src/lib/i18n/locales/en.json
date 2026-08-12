@@ -168,6 +168,7 @@
     "cupByeOpponent": "CUP BYE",
     "explanation": {
       "reportTitle": "Why these pairings?",
+      "staleWarning": "The data behind this has changed since the round was paired — a result, a rating or a setting has been edited. These are still the reasons the engine used at the time.",
       "compromiseOn": "Compromise on: {rules}",
       "ruleCount": "{count} × {rule}",
       "boardsCount": "{count, plural, one {# board} other {# boards}}",

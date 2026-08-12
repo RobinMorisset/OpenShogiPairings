@@ -17,7 +17,6 @@
     forcePairing,
     fetchRatings,
     fetchPublication,
-    fetchRoundExplanation,
     fetchTournament,
     importPlayersCsv,
     prepareRound,
@@ -62,7 +61,6 @@
     Forfeit,
     PublicationState,
     RatedPlayer,
-    RoundExplanation,
     SitoutValue,
     Standing,
     TeamStanding,
@@ -256,40 +254,17 @@
     return out;
   });
 
-  // Why the engine chose the active round's pairings — fetched lazily whenever a
-  // round tab is open (and refetched when the tournament changes, since editing
-  // an earlier result can shift a later round's ledger).
-  let roundExplanation = $state<RoundExplanation | null>(null);
-  // Which round the panel currently shows, so we only blank it when moving to a
-  // different round — not on every tournament update.
-  let explanationRound = -1;
-  $effect(() => {
-    const round = activeRound;
-    void tournament; // re-run on any tournament update
-    if (!round) {
-      roundExplanation = null;
-      explanationRound = -1;
-      return;
-    }
-    // Keep the current explanation on screen while re-fetching after an in-round
-    // update (e.g. recording a winner): the pairing rationale doesn't change, so
-    // blanking it would just flicker the panel out and back, shifting the table.
-    if (round.number !== explanationRound) {
-      roundExplanation = null;
-      explanationRound = round.number;
-    }
-    let cancelled = false;
-    fetchRoundExplanation(round.number)
-      .then((ex) => {
-        if (!cancelled) roundExplanation = ex;
-      })
-      .catch(() => {
-        if (!cancelled) roundExplanation = null;
-      });
-    return () => {
-      cancelled = true;
-    };
-  });
+  // Why the engine chose the active round's pairings. Frozen onto the round when
+  // it was confirmed, so it travels with the tournament and needs no round-trip
+  // of its own — and stays the ledger the round was really paired from, whatever
+  // has been edited since (see the appendix of docs/public-access.md).
+  //
+  // What *can* go stale is the data it cites: the tournament's watermark says how
+  // far the explanations still match the present, and every round above it is
+  // shown with a warning rather than silently.
+  const explanationStale = $derived(
+    !!activeRound && !!tournament && activeRound.number > tournament.explanations_faithful_through,
+  );
 
   // Tournament phase, derived from the finalize flag, the draft, and the last
   // round's state.
@@ -1557,7 +1532,8 @@
             players={tournament.players}
             handicapPolicy={handicapChoice(tournament.settings.handicap_policy)}
             suggestedHandicaps={activeRoundSuggested}
-            explanation={roundExplanation}
+            explanation={activeRound.explanation}
+            {explanationStale}
             onProbe={(a, b, mode) => fetchCounterfactual(activeRound.number, a, b, mode)}
             canForce={canForceActiveRound}
             onForcePairing={(a, b) => run(async () => apply(await forcePairing(a, b)))}

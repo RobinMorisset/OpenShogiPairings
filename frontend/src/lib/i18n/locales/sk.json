@@ -168,6 +168,7 @@
     "cupByeOpponent": "VOĽNO V POHÁRI",
     "explanation": {
       "reportTitle": "Prečo práve tieto dvojice?",
+      "staleWarning": "Údaje, z ktorých toto vychádza, sa od zlosovania tohto kola zmenili — bol upravený výsledok, rating alebo nastavenie. Nižšie sú aj naďalej dôvody, ktoré vtedy použil algoritmus.",
       "compromiseOn": "Ústupok pri: {rules}",
       "ruleCount": "{count} × {rule}",
       "boardsCount": "{count, plural, one {# stôl} few {# stoly} other {# stolov}}",

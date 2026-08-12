@@ -96,7 +96,9 @@ tournament. For how it's built, see [Architecture](#architecture) below.
 - **"Why these pairings?"**: every round explains itself — a per-board
   compromise ledger, a round-level report of which rules had to bend, and a
   counterfactual probe ("why weren't these two paired?" / "why were they?")
-  that shows exactly what forcing or forbidding a pairing would cost.
+  that shows exactly what forcing or forbidding a pairing would cost. The
+  ledger is recorded when the round is paired, so a later correction can't
+  rewrite it; when the data it cites has since been edited, it says so.
 - **Click-to-edit** any player cell in place; forced pairings and a forced
   bye when hand-tuning a round draft.
 - **Print** pairings, **save/load** a tournament as a portable JSON file.
@@ -330,8 +332,12 @@ formats needing hard constraints is future work (see [TODO.md](TODO.md)).
 Because a global optimum has no local "reason" for any one board, the engine
 can also **explain itself**
 ([`docs/pairing-explanations.md`](docs/pairing-explanations.md)): a per-board
-penalty ledger and a per-round report of which rules had to bend are always
-computed (`GET /rounds/{n}/explanation`), and a referee can probe a specific
+penalty ledger and a per-round report of which rules had to bend are **frozen
+onto the round when it is confirmed**, so correcting an earlier result or a
+rating can never rewrite why a later round was paired the way it was. The
+tournament carries a watermark saying how far those ledgers still match the
+present, and rounds above it are shown with a "the data behind this has changed
+since" warning rather than quietly. A referee can also probe a specific
 counterfactual — "why weren't these two paired?" or "why were they?" — via
 `POST /rounds/{n}/counterfactual`, which re-solves with that pairing forced or
 forbidden and reports the chain of boards that would change and why.
@@ -457,7 +463,7 @@ instead — see [public read-only access](#public-read-only-access)):
 | `POST /rounds/prepare` | Begin drafting the next round. For round 1, finalizes registration first, in the same undo step — that is the only way to finalize. Body optional: `{ "cup_size": 8｜16｜32｜64 }` when the hybrid cup is enabled — `cup_size` is the *bracket* size; it seeds the top eligible players into it, taking `cup_size` of them under `cup_format: "direct"` and `1.5 × cup_size` under `"qualifier"` (400 if fewer are marked eligible). Ignored from round 2 on (already finalized). A round completes automatically once every board has a result, so there is no separate "complete round" call. |
 | `PUT /draft` | Edit the draft: `{ "absent", "forced_boards", "forced_byes" }` — or, in a team tournament, `{ "absent", "forced_matches": [{ "team1", "team2" }], "forced_team_byes" }`, since teams are what get paired there. The absent set is per player in either mode: a team member can be absent without their team being, and their board is then forfeited for them. Sending the other mode's forced lists is an error, not a silently ignored field. |
 | `POST /rounds` | Confirm the draft: pair remaining players and start the round. |
-| `GET /rounds/{n}/explanation` | Explain a round's Swiss pairings: per-board rule ledger and round report. Read-only. |
+| `GET /rounds/{n}/explanation` | A round's frozen Swiss pairing explanation: per-board rule ledger and round report, as scored at confirmation. Read-only. |
 | `POST /rounds/{n}/counterfactual` | Explain forcing (`"force"`) or forbidding (`"forbid"`) a pairing `{a, b}` in this round. `a`/`b` are player numbers, or **team** numbers in a team tournament — whichever the engine paired; `0` means the bye. Read-only. |
 | `POST /rounds/force-pairing` | Re-pair the current round with `{a, b}` fixed — a board, or a **team match** in a team tournament (same numbering as the counterfactual; `0` forces the other side onto the bye). |
 | `POST /rounds/{n}/boards/{i}/result` | Toggle a board's winner: `{ "clicked": "player1"｜"player2" }`. |

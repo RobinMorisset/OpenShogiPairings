@@ -168,6 +168,7 @@
     "cupByeOpponent": "不戦勝（トーナメント）",
     "explanation": {
       "reportTitle": "この組み合わせになった理由",
+      "staleWarning": "この回戦の組み合わせを決めたあとで、もとになったデータが変わっています（結果・レーティング・設定のいずれかが編集されました）。以下は当時の組み合わせ決定に用いられた理由のままです。",
       "compromiseOn": "妥協した項目: {rules}",
       "ruleCount": "{count} × {rule}",
       "boardsCount": "{count, plural, other {#卓}}",

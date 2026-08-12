@@ -168,6 +168,7 @@
     "cupByeOpponent": "PAUZA PUCHAROWA",
     "explanation": {
       "reportTitle": "Dlaczego takie kojarzenie?",
+      "staleWarning": "Dane leżące u podstaw tego kojarzenia zmieniły się od czasu rundy — zmieniono wynik, ranking lub ustawienie. Poniżej nadal widnieją powody, którymi algorytm kierował się wówczas.",
       "compromiseOn": "Ustępstwa w zakresie: {rules}",
       "ruleCount": "{count} × {rule}",
       "boardsCount": "{count, plural, one {# stolik} few {# stoliki} many {# stolików} other {# stolika}}",

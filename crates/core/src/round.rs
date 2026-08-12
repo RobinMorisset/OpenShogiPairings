@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::pairing::RoundExplanation;
 use crate::units::{HalfPoints, TeamId, TournamentId, Wins};
 
 /// Which player won a board. Colour (sente/gote) is chosen at random per game
@@ -622,6 +623,20 @@ pub struct Round {
     /// A new round must not be started until the current one is completed.
     #[serde(default)]
     pub completed: bool,
+    /// Why the engine paired the round the way it did, frozen when the round was
+    /// confirmed — like [`sitouts`](Self::sitouts), a record of a past event and
+    /// not a cache of a derived value.
+    ///
+    /// It cannot be recomputed: the model it scores against is built from the
+    /// earlier rounds' results, the players' ratings and clubs and the pairing
+    /// settings, every one of which a referee may legitimately edit afterwards.
+    /// Recomputing would then describe a model that never paired anything, while
+    /// looking entirely plausible — see the appendix of `docs/public-access.md`.
+    ///
+    /// Deliberately not `#[serde(default)]`: a save without it is a save from
+    /// before [`TOURNAMENT_FORMAT_VERSION`](crate::TOURNAMENT_FORMAT_VERSION) 10
+    /// and must be rejected, not silently given an empty ledger.
+    pub explanation: RoundExplanation,
 }
 
 impl Round {

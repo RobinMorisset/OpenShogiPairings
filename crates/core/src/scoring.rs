@@ -343,6 +343,7 @@ pub(crate) fn compute_scores(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pairing::RoundExplanation;
     use crate::round::{
         AbsenceKind, Board, CupStage, Forfeit, Outcome, PairingSource, Sitout, SitoutKind,
         SitoutValue,
@@ -376,6 +377,7 @@ mod tests {
         let b = player(2, None);
         let round = Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: vec![Board {
                 outcome: Outcome::won(Winner::Player1),
                 ..Board::pending(
@@ -408,6 +410,7 @@ mod tests {
         let b = player(2, None);
         let round = Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: vec![Board {
                 outcome: Outcome::Forfeit {
                     absent: Forfeit::Player2(AbsenceKind::NoShow),
@@ -446,6 +449,7 @@ mod tests {
         let b = player(2, None);
         let round = Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: vec![Board {
                 outcome: Outcome::Forfeit {
                     absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
@@ -478,6 +482,7 @@ mod tests {
         let a = player(1, None);
         let round = Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: Vec::new(),
             sitouts: vec![Sitout {
                 player: a.tournament_id.unwrap(),
@@ -505,6 +510,7 @@ mod tests {
         let a = player(1, None);
         let round = |value| Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: Vec::new(),
             sitouts: vec![Sitout {
                 player: a.tournament_id.unwrap(),
@@ -546,6 +552,7 @@ mod tests {
         let a = player(1, None);
         let round = Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: Vec::new(),
             sitouts: vec![Sitout {
                 player: a.tournament_id.unwrap(),
@@ -574,6 +581,7 @@ mod tests {
         let b = player(2, None);
         let round = Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: vec![Board {
                 outcome: Outcome::won(Winner::Player1),
                 long: true,
@@ -610,6 +618,7 @@ mod tests {
         let b = player(2, None);
         let round = Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: vec![Board {
                 long: true,
                 ..Board::pending(
@@ -644,6 +653,7 @@ mod tests {
         let b = player(2, None);
         let round = Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: vec![Board {
                 outcome: Outcome::Forfeit {
                     absent: Forfeit::Player2(AbsenceKind::NoShow),
@@ -700,6 +710,7 @@ mod tests {
         let b = player(2, None);
         let round = Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: vec![Board {
                 outcome: Outcome::won(Winner::Player1),
                 ..Board::pending(
@@ -744,6 +755,7 @@ mod tests {
             .enumerate()
             .map(|(i, o)| Round {
                 number: i as u32 + 1,
+                explanation: RoundExplanation::empty(i as u32 + 1),
                 boards: vec![Board {
                     outcome: Outcome::won(Winner::Player1), // A wins every game
                     ..Board::pending(

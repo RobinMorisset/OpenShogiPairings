@@ -18,10 +18,11 @@ use ts_rs::TS;
 use typed_index_collections::TiVec;
 use uuid::Uuid;
 
-use crate::pairing::{pair_round_weighted, PairingUnit};
+use crate::pairing::{explain_pairing, pair_round_weighted, PairingUnit};
 use crate::player::{Player, PointAdjustment};
 use crate::round::{
-    AbsenceKind, Board, Forfeit, Outcome, Round, Sitout, SitoutKind, SitoutValue, Winner,
+    AbsenceKind, Board, Forfeit, Outcome, PairingSource, Round, Sitout, SitoutKind, SitoutValue,
+    Winner,
 };
 use crate::team_scoring::{match_boards, matches_in_round, team_units, TeamMatch, TeamSlots};
 use crate::tournament::{Tournament, TournamentError, MIN_TEAMS_PER_ROUND};
@@ -367,7 +368,13 @@ impl Tournament {
             .find(|p| p.id == player)
             .ok_or(TournamentError::PlayerNotFound(player))?;
         p.pairing_rating = rating;
-        Ok(p)
+        // A pairing ELO feeds the MacMahon starting points every round's model
+        // was built on, and it stays editable after finalization.
+        self.explanations_all_stale();
+        self.players
+            .iter()
+            .find(|p| p.id == player)
+            .ok_or(TournamentError::PlayerNotFound(player))
     }
 
     /// The board↔team lookup for this tournament's frozen rosters — what every
@@ -482,6 +489,22 @@ impl Tournament {
             &forced_bye_keys,
         );
 
+        // Freeze the explanation against the very `units` the engine was handed —
+        // team units here, so the ledgers name team numbers. See
+        // [`Round::explanation`].
+        let explanation = explain_pairing(
+            draft.number,
+            &self.settings,
+            &units,
+            &paired
+                .pairs
+                .iter()
+                .filter(|p| matches!(p.source, PairingSource::Swiss))
+                .map(|p| (p.a, p.b))
+                .collect::<Vec<_>>(),
+            paired.swiss_bye,
+        );
+
         // Each matched pair becomes `size` boards, all carrying the team-level
         // float: it is a fact of the *team* pairing, and the float history
         // replays from it.
@@ -562,8 +585,10 @@ impl Tournament {
             boards,
             sitouts,
             completed: false,
+            explanation,
         });
         self.draft = None;
+        self.explanations_extend_through(draft.number);
         Ok(self.rounds.last().expect("just pushed a round"))
     }
 
@@ -589,13 +614,15 @@ impl Tournament {
         if delta == 0 {
             return Err(TournamentError::ZeroPointAdjustment);
         }
-        let t = self.team_mut(team)?;
-        t.adjustments.push(PointAdjustment {
+        self.team_mut(team)?.adjustments.push(PointAdjustment {
             id: Uuid::new_v4(),
             delta,
             reason,
         });
-        Ok(t)
+        // The team's points are what every round was paired on, and an adjustment
+        // carries no round of its own, so it lands under all of them.
+        self.explanations_all_stale();
+        self.team_mut(team).map(|t| &*t)
     }
 
     /// Remove a previously applied team adjustment.
@@ -616,7 +643,8 @@ impl Tournament {
                 adjustment,
             });
         }
-        Ok(t)
+        self.explanations_all_stale();
+        self.team_mut(team).map(|t| &*t)
     }
 
     /// Mutable access to a team by id.

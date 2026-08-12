@@ -168,6 +168,7 @@
     "cupByeOpponent": "POKAL-FREILOS",
     "explanation": {
       "reportTitle": "Warum diese Paarungen?",
+      "staleWarning": "Die zugrunde liegenden Daten haben sich seit der Paarung dieser Runde geändert — ein Ergebnis, eine Wertung oder eine Einstellung wurde bearbeitet. Dies sind weiterhin die Gründe, die die Engine damals herangezogen hat.",
       "compromiseOn": "Kompromiss bei: {rules}",
       "ruleCount": "{count} × {rule}",
       "boardsCount": "{count, plural, one {# Brett} other {# Bretter}}",

@@ -284,6 +284,11 @@ pub(crate) fn domain_payload(
         // The UI only offers a justified absence in team mode, so this means a
         // client sent a kind it never renders there.
         | TournamentError::JustifiedAbsenceOutsideTeamMode
+        // Frozen-explanation invariants nothing this program writes can break —
+        // a file reaching these was hand-edited, not merely old (an old one is
+        // caught by its format version, which *is* translated).
+        | TournamentError::MisplacedExplanation { .. }
+        | TournamentError::WatermarkPastLastRound { .. }
         // Deliberately English: unfinished scaffolding (the UI offers no team
         // probe yet), not a state the product is meant to have.
         // TODO: `InvalidDraft` carries a free-form English string built at ~8

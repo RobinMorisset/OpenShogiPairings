@@ -31,9 +31,15 @@
     handicapPolicy: HandicapChoice;
     /** Suggested handicap per board, indexed like `round.boards`. */
     suggestedHandicaps: (Handicap | null)[];
-    /** Why the engine chose these pairings (per-board rule ledger + report).
-     *  `null` while loading or unavailable. */
+    /** Why the engine chose these pairings (per-board rule ledger + report),
+     *  as frozen onto the round when it was confirmed. Omitted to hide the
+     *  explanation entirely. */
     explanation?: RoundExplanation | null;
+    /** Whether the data the explanation cites has been edited since the round
+     *  was paired (a corrected earlier result, a rating, a setting). The ledger
+     *  is still the one the round was paired from — it is the present that
+     *  moved — so this warns rather than hides. */
+    explanationStale?: boolean;
     /** Ask what forcing/forbidding the pairing `a`–`b` would cost. Absent =
      *  probe disabled. */
     onProbe?: (a: number, b: number, mode: CounterfactualMode) => Promise<Counterfactual>;
@@ -94,6 +100,7 @@
     handicapPolicy,
     suggestedHandicaps,
     explanation = null,
+    explanationStale = false,
     onProbe,
     canForce = false,
     onForcePairing,
@@ -759,6 +766,9 @@
         >
         <span class="report-caret">{reportOpen ? "▾" : "▸"}</span>
       </button>
+      {#if explanationStale}
+        <p class="report-stale">{$_("roundView.explanation.staleWarning")}</p>
+      {/if}
       {#if reportOpen}
         <ul class="report-list">
           {#each explanation?.report ?? [] as total (total.rule)}
@@ -1456,6 +1466,17 @@
   }
   .report-caret {
     color: var(--text-tertiary);
+  }
+  /* The ledger is still the one this round was paired from; what moved is the
+     data it cites. So this reads as a caveat on the report, not an error. */
+  .report-stale {
+    margin: 0.4rem 0 0;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border-warning);
+    border-radius: 4px;
+    background: var(--bg-warning);
+    color: var(--color-warning-strong);
+    font-size: 0.85rem;
   }
   .report-list {
     margin: 0.4rem 0 0;

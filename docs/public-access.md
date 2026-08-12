@@ -175,11 +175,11 @@ service against a laptop in the middle of a tournament. The standing rule is
 that the public surface is **precomputed or cheap-derived data only**, and
 nothing that can invoke the solver.
 
-`/rounds/{n}/explanation` is *not* in that category — `explain_pairing` builds
-the pairing model and scores the N/2 boards already chosen, with no matching
-solve. It becomes publishable once the explanation is frozen at confirmation
-(appendix), which removes both the per-request rebuild and the faithfulness
-problem; it is not in phase 1 only to keep that phase small.
+`/rounds/{n}/explanation` is *not* in that category, and since the appendix
+landed it is a plain lookup: the ledger is frozen onto the round at
+confirmation, so there is no rebuild and no faithfulness problem left. It rides
+along inside the projection's `rounds` already; what is still to do is the
+public *UI* for it, kept out of phase 1 only to keep that phase small.
 
 ### 3.1 Opting in
 
@@ -491,6 +491,9 @@ decide against real use, not blockers.
 
 ## Appendix: freeze the round explanation at confirmation
 
+**Shipped.** `TOURNAMENT_FORMAT_VERSION` went 9 → 10; the notes below are the
+design as decided, with the two deviations recorded at the end.
+
 Noticed while deciding what the public surface may call. `explain_round`
 ([`crates/core/src/tournament.rs`](../crates/core/src/tournament.rs)) rebuilds
 the `PairingModel` from `self.rounds[..idx]` — the rounds *before* the one
@@ -562,6 +565,30 @@ Two follow-ons, neither needed at first:
   "recompute from current data and show what changed" becomes a natural
   referee tool for exactly the dispute this whole appendix is about — and it
   is the same shape as the existing counterfactual probe.
+
+### What shipped, where it differs from the above
+
+Two deviations, both narrowing the coarse rule rather than widening it:
+
+- **Confirming round `n` does advance the mark** — to `n`, but only when the
+  prefix below it is intact (`mark + 1 >= n`). Read literally, "unchanged" would
+  leave the mark at 0 forever and warn on every round of an untouched
+  tournament, which is the opposite of the intent: it must not *step over* a
+  stale round, and that is what the guard says. Re-pairing (`force_pairing`)
+  pops the round and re-confirms it, which is why the guard is `>=` and not `==`.
+- **Categories and cup eligibility do not move the mark.** The table names them
+  under "edit a player", but neither is read by `player_units` or
+  `compute_scores` — no board's ledger can depend on them, so warning would be a
+  pure false alarm. Rating, club and nationality do move it, and so do point
+  adjustments (which carry no round of their own) and a pairing ELO. A player
+  edit that changes none of those (a rename) leaves the mark alone, as does a
+  settings PUT that changes nothing — the client sends whole objects for
+  one-field edits, and a warning that fires on a no-op is one referees learn to
+  ignore.
+
+The watermark is also validated on load (`validate_loaded`): an explanation that
+names a different round than the one carrying it, or a mark past the last round,
+is rejected rather than shown against the wrong pairings.
 
 ### Consequence for publication
 

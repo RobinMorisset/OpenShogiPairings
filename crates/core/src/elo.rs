@@ -631,6 +631,7 @@ pub fn estimate_elos(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pairing::RoundExplanation;
     use crate::round::{Board, HandicapGame, Outcome, PairingSource};
     use crate::settings::{Ratio, RatioAtLeastOne, UnratedK};
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -659,6 +660,7 @@ mod tests {
     fn decided(number: u32, boards: Vec<Board>) -> Round {
         Round {
             number,
+            explanation: RoundExplanation::empty(number),
             boards,
             sitouts: Vec::new(),
             completed: true,

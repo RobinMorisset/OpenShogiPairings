@@ -288,8 +288,11 @@ maps `RuleId` → localized label.
 
 ## Server API
 
-All read-only (no mutation, no backup). Explanations are computed on demand from
-current state.
+All read-only (no mutation, no backup). The round explanation is a **lookup**:
+it was scored against the model that paired the round and frozen onto the round
+at confirmation (see the appendix of [public-access.md](public-access.md)), so
+it cannot drift when an earlier result or a rating is corrected. The
+counterfactual is still computed on demand, from current state.
 
 ```
 GET  /api/tournament/rounds/{number}/explanation
@@ -349,9 +352,15 @@ stays quiet, drawing the eye only to the boards that actually involved a
 meaningful trade-off. The glyph is the visible anchor (tooltips alone can't tell
 the referee *which* board to hover).
 
-The explanation is fetched once per round load (`GET …/explanation`) and indexed
-by board to align with `round.boards` display order (the core returns them in
-the same order `confirm_round` stored).
+The explanation rides along with the round (`round.explanation`), so the client
+needs no request of its own; it is indexed by the unordered player pair, since
+the ledger covers only the engine-paired boards and lists them in engine order
+rather than `round.boards` display order.
+
+When `round.number > tournament.explanations_faithful_through`, the report
+carries a warning line: the ledger is still the one the round was paired from,
+but data it cites (an earlier result, a rating, a setting) has been edited
+since.
 
 ### 2. Per-round report
 
@@ -440,6 +449,10 @@ the probe panel returns a normal diff (cost summary + changed boards) and the
    re-solves with the edge priced out; the apply action re-pairs the current
    round through `confirm_round` with the probed edge as a `Forced` board,
    closing the loop from *"why not?"* to *"then do it."*
+4. **Freezing** — *shipped.* The ledger is stored on the `Round` at
+   confirmation and the `Tournament` carries a staleness watermark, so an
+   explanation is a record of what the engine did rather than a re-derivation
+   that quietly follows the edits made since.
 
 ---
 

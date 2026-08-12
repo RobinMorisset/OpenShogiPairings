@@ -10,12 +10,30 @@ will be explicitly mentioned in the changelog for that version though.
 ## [Unreleased]
 
 **Save files from earlier versions no longer load** (the save format version is
-now 9): a board records what happened on it as a single value instead of three
+now 10): a board records what happened on it as a single value instead of three
 separate flags — and, when it was forfeited, why each missing side missed it —
-and tournaments can carry teams. A stale file is rejected with a clear message
-rather than half-parsed; re-create the tournament.
+tournaments can carry teams, and each round now stores the explanation of its
+own pairing. A stale file is rejected with a clear message rather than
+half-parsed; re-create the tournament.
 
 ### Changed
+
+- **"Why these pairings?" is now a record, not a re-derivation.** The ledger is
+  scored against the model that actually paired the round and stored on that
+  round when it is confirmed. Before, it was rebuilt from the current
+  standings on every request, so correcting an earlier round's result — or
+  editing a rating, a club or a pairing setting — silently rewrote the stated
+  reasons for every later round, into a rationale no pairing had ever been made
+  from, and it still read as plausible.
+
+  What can still move is the data the ledger cites: a round-3 ledger may quote a
+  score that a later correction to round 2 has since changed. So the tournament
+  now tracks how far the explanations still match the present, and any round past
+  that point shows its report under a warning saying the data behind it has
+  changed since. The mark only ever moves back — to round `k` when something
+  inside round `k` is edited, to the start when a rating, an adjustment or a
+  setting is — and a no-op edit (a rename, a settings save that changes nothing)
+  leaves it alone.
 
 - **The standings table is readable on a phone.** The header row stays pinned
   to the top of the window as you scroll down, and the tournament number and

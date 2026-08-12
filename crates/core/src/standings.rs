@@ -451,6 +451,7 @@ fn direct_confrontation(group: &[usize], rows: &[DcRow]) -> Option<HashMap<Uuid,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pairing::RoundExplanation;
     use crate::round::{Board, Outcome, PairingSource, Winner};
     use crate::settings::{MacMahonThreshold, ThresholdCriterion};
 
@@ -482,6 +483,7 @@ mod tests {
     fn round(number: u32, boards: Vec<Board>) -> Round {
         Round {
             number,
+            explanation: RoundExplanation::empty(number),
             boards,
             sitouts: Vec::new(),
             completed: true,
@@ -750,6 +752,7 @@ mod tests {
             // Both then take a `0=` sit-out.
             Round {
                 number: 2,
+                explanation: RoundExplanation::empty(2),
                 boards: Vec::new(),
                 sitouts: vec![half_bye(1), half_bye(2)],
                 completed: true,

@@ -13,4 +13,16 @@ import type { TournamentSettings } from "./TournamentSettings";
  * therefore pairings, so hiding it would make the public standings
  * unexplainable.
  */
-export type PublicTournament = { format_version: number, id: string, name: string, settings: TournamentSettings, players: Array<Player>, registration_finalized: boolean, rounds: Array<Round>, cup: Cup | null, teams: Array<Team>, };
+export type PublicTournament = { format_version: number, id: string, name: string, settings: TournamentSettings, players: Array<Player>, registration_finalized: boolean, 
+/**
+ * Each round carries its frozen pairing `explanation`, so the ledger rides
+ * along with the projection — nothing in it goes beyond what is published
+ * here anyway (it names the same players and the same rules). No public UI
+ * reads it yet; showing it is phase 4 in `docs/public-access.md`.
+ */
+rounds: Array<Round>, cup: Cup | null, teams: Array<Team>, 
+/**
+ * Published with the ledgers it qualifies: a reader shown an explanation
+ * must be shown whether the data behind it has moved since.
+ */
+explanations_faithful_through: number, };

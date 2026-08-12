@@ -70,7 +70,13 @@ const board = (player1: number, player2: number): Board =>
   ({ player1, player2, outcome: { kind: "won", winner: "player1" } }) as Board;
 
 const round = (number: number, boards: Board[]): Round =>
-  ({ number, boards, sitouts: [], completed: true }) as Round;
+  ({
+    number,
+    boards,
+    sitouts: [],
+    completed: true,
+    explanation: { round: number, boards: [], report: [] },
+  }) as Round;
 
 /** A two-player tournament with one played round. */
 function view(rounds: Round[]): PublicTournamentResponse {

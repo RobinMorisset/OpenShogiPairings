@@ -667,6 +667,7 @@ pub fn simulate_run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pairing::RoundExplanation;
     use crate::player::NewPlayer;
     use crate::round::{Board, PairingSource, Sitout, SitoutKind, SitoutValue};
     use rand::SeedableRng;
@@ -1518,6 +1519,7 @@ mod tests {
         // Round 1 with fr_absent sitting out.
         t.rounds.push(crate::round::Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: Vec::new(),
             sitouts: vec![Sitout {
                 player: fr_absent_tid,

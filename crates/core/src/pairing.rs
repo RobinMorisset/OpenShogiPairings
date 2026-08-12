@@ -992,7 +992,7 @@ impl<'u> PairingModel<'u> {
 
 /// One rule's contribution to a single board (or the bye): the rule and the
 /// penalty *units* it emitted, before the priority multiplier.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct RuleContribution {
     pub rule: RuleId,
@@ -1008,7 +1008,7 @@ pub struct RuleContribution {
 /// The two sides are [`UnitKey`]s, so this reads as player numbers in individual
 /// mode and team numbers in team mode — the pairing it explains is a pairing of
 /// whatever the engine was given.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct BoardLedger {
     pub player1: UnitKey,
@@ -1022,7 +1022,7 @@ pub struct BoardLedger {
 }
 
 /// How often one rule had to be relaxed across a whole round, and the total units.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct RuleTotal {
     pub rule: RuleId,
@@ -1033,7 +1033,13 @@ pub struct RuleTotal {
 
 /// A human-facing explanation of one round's Swiss pairings: a per-board ledger,
 /// the bye's ledger, and the per-rule round totals (in priority order).
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+///
+/// Frozen onto the [`Round`](crate::Round) when it is confirmed, because it is a
+/// record of a past event rather than a function of the present state: the model
+/// it scores against is the one that actually paired the round, and that model's
+/// inputs (results, ratings, settings) are all editable afterwards. See the
+/// appendix of `docs/public-access.md`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct RoundExplanation {
     pub round: u32,
@@ -1042,6 +1048,21 @@ pub struct RoundExplanation {
     #[ts(optional)]
     pub bye: Option<BoardLedger>,
     pub report: Vec<RuleTotal>,
+}
+
+impl RoundExplanation {
+    /// The explanation of a round the engine chose nothing in: every board was
+    /// referee-forced or drawn from the cup bracket, so there is no Swiss
+    /// decision to account for. A real value, not a placeholder — a round of
+    /// nothing but forced boards is explained by exactly this.
+    pub fn empty(round: u32) -> Self {
+        Self {
+            round,
+            boards: Vec::new(),
+            bye: None,
+            report: Vec::new(),
+        }
+    }
 }
 
 /// Turn a per-rule unit vector (aligned with `rules`, priority order) into a
@@ -1788,6 +1809,7 @@ mod tests {
             .collect();
         Round {
             number,
+            explanation: RoundExplanation::empty(number),
             boards: paired
                 .pairs
                 .iter()
@@ -1954,6 +1976,7 @@ mod tests {
     ) -> Round {
         Round {
             number,
+            explanation: RoundExplanation::empty(number),
             boards: boards
                 .iter()
                 .map(|&(a, b, w)| Board {
@@ -2195,6 +2218,7 @@ mod tests {
         // Round 1: A beats B; C is absent for half a point.
         let r1 = Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: vec![Board {
                 outcome: Outcome::won(Winner::Player1),
                 ..Board::pending(

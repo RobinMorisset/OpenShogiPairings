@@ -10,7 +10,6 @@ import type {
   PublicationState,
   PublicTournamentResponse,
   RatedPlayer,
-  RoundExplanation,
   SitoutValue,
   Tournament,
   TournamentResponse,
@@ -677,13 +676,6 @@ export function updateDraft(update: DraftUpdate): Promise<TournamentResponse> {
 /** Confirm the draft: pair the remaining players and start the round. */
 export function confirmRound(): Promise<TournamentResponse> {
   return request<TournamentResponse>(scopedPath("/rounds"), { method: "POST" });
-}
-
-/** Explain a round's Swiss pairings: per-board rule ledger and round report. */
-export function fetchRoundExplanation(
-  roundNumber: number,
-): Promise<RoundExplanation> {
-  return request<RoundExplanation>(scopedPath(`/rounds/${roundNumber}/explanation`));
 }
 
 /** Explain what forcing (or forbidding) the pairing `a`–`b` in a round would cost. */

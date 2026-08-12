@@ -339,6 +339,7 @@ fn pad(s: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pairing::RoundExplanation;
     use crate::round::{
         AbsenceKind, CupStage, Forfeit, Handicap, HandicapGame, Outcome, PairingSource, Sitout,
         SitoutKind, SitoutValue,
@@ -390,6 +391,7 @@ mod tests {
         configure(&mut board);
         t.rounds.push(Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: vec![board],
             sitouts: Vec::new(),
             completed: true,
@@ -553,6 +555,7 @@ mod tests {
         let b = tid(&t, b);
         t.rounds.push(Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: vec![Board {
                 outcome: Outcome::won(Winner::Player1),
                 long: true,
@@ -564,6 +567,7 @@ mod tests {
         // Round 2: A and B are on the long game, so they have no board here.
         t.rounds.push(Round {
             number: 2,
+            explanation: RoundExplanation::empty(2),
             boards: Vec::new(),
             sitouts: Vec::new(),
             completed: true,
@@ -586,6 +590,7 @@ mod tests {
         // A vs B played; C sits out as the bye; nobody absent.
         t.rounds.push(Round {
             number: 1,
+            explanation: RoundExplanation::empty(1),
             boards: vec![Board {
                 outcome: Outcome::won(Winner::Player1),
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
@@ -604,6 +609,7 @@ mod tests {
         t.rounds[0].completed = true;
         t.rounds.push(Round {
             number: 2,
+            explanation: RoundExplanation::empty(2),
             boards: vec![Board {
                 outcome: Outcome::won(Winner::Player2),
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
@@ -628,6 +634,7 @@ mod tests {
         let (mut t, p1, p2) = one_board(|_| {});
         t.rounds.push(Round {
             number: 2,
+            explanation: RoundExplanation::empty(2),
             boards: vec![Board {
                 outcome: Outcome::Forfeit {
                     absent: Forfeit::Player2(AbsenceKind::NoShow),
@@ -654,6 +661,7 @@ mod tests {
         let (mut t, p1, p2) = one_board(|_| {});
         t.rounds.push(Round {
             number: 2,
+            explanation: RoundExplanation::empty(2),
             boards: vec![Board {
                 outcome: Outcome::Forfeit {
                     absent: Forfeit::Player2(AbsenceKind::Justified),
@@ -684,6 +692,7 @@ mod tests {
         let (mut t, p1, p2) = one_board(|_| {});
         t.rounds.push(Round {
             number: 2,
+            explanation: RoundExplanation::empty(2),
             boards: vec![Board {
                 outcome: Outcome::Forfeit {
                     absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
@@ -711,6 +720,7 @@ mod tests {
         let (mut t, p1, _p2) = one_board(|_| {});
         t.rounds.push(Round {
             number: 2,
+            explanation: RoundExplanation::empty(2),
             boards: Vec::new(),
             sitouts: vec![Sitout {
                 player: p1,
@@ -732,6 +742,7 @@ mod tests {
         let (mut t, _p1, p2) = one_board(|_| {});
         t.rounds.push(Round {
             number: 2,
+            explanation: RoundExplanation::empty(2),
             boards: Vec::new(),
             sitouts: vec![Sitout {
                 player: p2,

@@ -799,6 +799,7 @@ fn frontier_round_winners(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pairing::RoundExplanation;
     use crate::round::{AbsenceKind, Board, Outcome, PairingSource, Winner};
 
     fn ids(n: usize) -> Vec<TournamentId> {
@@ -809,6 +810,7 @@ mod tests {
     fn cup_round(number: u32, results: &[(TournamentId, TournamentId, CupStage)]) -> Round {
         Round {
             number,
+            explanation: RoundExplanation::empty(number),
             boards: results
                 .iter()
                 .map(|&(w, l, stage)| Board {
