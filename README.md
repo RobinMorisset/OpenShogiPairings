@@ -591,13 +591,14 @@ in [`tauri.conf.json`](frontend/src-tauri/tauri.conf.json).
 ```sh
 cargo test          # Rust workspace (core, server, sim, matching)
 cd frontend && npm run check   # Svelte / TypeScript type-check
+cd frontend && npm run lint    # ESLint (typescript-eslint + eslint-plugin-svelte)
 cd frontend && npm test        # frontend unit tests (vitest)
 ```
 
 Dev helpers (Windows/PowerShell) in [`scripts/`](scripts):
 
-- `scripts/check.ps1` — runs `cargo test` and the frontend type-check
-  (`npm run check`).
+- `scripts/check.ps1` — runs `cargo test`, the frontend type-check
+  (`npm run check`) and ESLint (`npm run lint`).
 - `scripts/restart-server.ps1` — restart `osp-server` and wait until it responds
   (the running server doesn't hot-reload, so restart it after backend changes).
 
@@ -613,9 +614,9 @@ git config core.hooksPath scripts/git-hooks
 - `pre-commit` — rustfmt (auto-formats staged `.rs` files and re-stages them, so
   a formatting nit doesn't fail the commit; a partially-staged file it would
   rewrite is reported and gates instead), `cargo clippy --workspace
-  --all-targets -- -D warnings`, `svelte-check`, and an i18n locale-key check
-  (`scripts/check-i18n-keys.mjs`, catching keys that exist in some locales but
-  not all). Fast; keeps the tree clean commit by commit.
+  --all-targets -- -D warnings`, `svelte-check`, `eslint`, and an i18n
+  locale-key check (`scripts/check-i18n-keys.mjs`, catching keys that exist in
+  some locales but not all). Fast; keeps the tree clean commit by commit.
 - `pre-push` — the full test suite (`cargo test --workspace` and the frontend
   tests, `npm test`), a rustdoc pass with warnings denied (`cargo doc --workspace
   --no-deps --document-private-items`, catching doc links that stopped

@@ -10,7 +10,6 @@
     GradeKind,
     HandicapPolicy,
     PairingMode,
-    MacMahonThreshold,
     NationalityProtection,
     Player,
     PlayerCategory,
@@ -215,13 +214,6 @@
   // ELO thresholds, so it needs one to do anything. Kept on screen when already
   // on but inert (no ELO threshold left), rather than hiding a flag that is set.
   const showMacmahonFromElo = $derived(hasEloThreshold || macmahonFromElo);
-
-  // Whether a live ELO estimate is maintained at all: the ELO pairing mode, or
-  // estimate-based MacMahon with an ELO threshold to compare against. Mirrors the
-  // server's `elo_estimate_live`.
-  const eloEstimateLive = $derived(
-    eloEnabled || (macmahonFromElo && hasEloThreshold),
-  );
 
   // Whether the estimated-ELO tie-break is a meaningful *ranking* criterion: only
   // in the ELO pairing mode, where the estimate is what the tournament runs on

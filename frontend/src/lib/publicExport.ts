@@ -83,11 +83,13 @@ async function readStyleSheet(sheet: CSSStyleSheet): Promise<string> {
       .join("\n");
   } catch (err) {
     if (!sheet.href) {
-      throw new Error(`could not read a stylesheet with no URL to fall back to: ${err}`);
+      throw new Error("could not read a stylesheet with no URL to fall back to", { cause: err });
     }
     const response = await fetch(sheet.href);
     if (!response.ok) {
-      throw new Error(`could not read the stylesheet ${sheet.href}: ${response.status}`);
+      throw new Error(`could not read the stylesheet ${sheet.href}: ${response.status}`, {
+        cause: err,
+      });
     }
     return await response.text();
   }

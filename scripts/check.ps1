@@ -16,3 +16,6 @@ Write-Host "== svelte-check ==" -ForegroundColor Cyan
 $env:Path = "C:\Program Files\nodejs;" + $env:Path
 Set-Location (Join-Path $repo "frontend")
 npm run check
+
+Write-Host "== eslint ==" -ForegroundColor Cyan
+npm run lint

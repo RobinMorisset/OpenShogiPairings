@@ -51,7 +51,7 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-  # Frontend: type-check, unit tests, and the i18n locale-key parity check.
+  # Frontend: type-check, lint, unit tests, and the i18n locale-key parity check.
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -68,6 +68,9 @@ jobs:
       - name: Type-check (svelte-check)
         working-directory: frontend
         run: npm run check
+      - name: Lint (eslint)
+        working-directory: frontend
+        run: npm run lint
       - name: Test (vitest)
         working-directory: frontend
         run: npm test
