@@ -65,8 +65,6 @@ Known limitations and future work, roughly ordered by area.
   Do not import email addresses (see the non-goals in
   [docs/public-access.md](docs/public-access.md)).
 
-- Check all instances of `#[allow(clippy::too_many_arguments)]`
-
 - **Keyboard shortcut to undo** is Ctrl+Z even on Mac, maybe Command+Z would be better ?
 
 - Show **predicted elo change** as the rightmost column of the Standings tab.

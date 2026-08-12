@@ -222,6 +222,23 @@ struct Args {
     dump_strengths: Option<PathBuf>,
 }
 
+/// The knobs describing the whole invocation, resolved once from [`Args`] and
+/// shared by the simulation loop and both report writers. Grouped because they
+/// travel together and are all plain scalars: passed one by one, `seed` and
+/// `runs` (both `u64`) transpose silently.
+#[derive(Clone, Copy)]
+struct RunSpec {
+    /// Rounds per simulated tournament, defaulted from the base's round count.
+    rounds: u32,
+    /// Simulated tournaments per variant.
+    runs: u64,
+    /// Master seed; run i uses `seed + i`.
+    seed: u64,
+    /// The oracle's prior-width multiplier, kept here for the report headers
+    /// (the simulation itself reads it from the [`OracleModel`]).
+    jitter: f64,
+}
+
 fn main() {
     if let Err(e) = run(Args::parse()) {
         eprintln!("error: {e}");
@@ -396,6 +413,12 @@ fn run(args: Args) -> Result<(), String> {
         unrated_center: args.oracle_unrated_center,
         unrated_k: args.oracle_unrated_k,
     };
+    let spec = RunSpec {
+        rounds,
+        runs: args.runs,
+        seed: args.seed,
+        jitter: args.jitter,
+    };
 
     let names = player_names(&base);
     let observed = observed_report(&base, &overrides, &oracle, &args.thresholds);
@@ -409,17 +432,8 @@ fn run(args: Args) -> Result<(), String> {
         .as_ref()
         .map(|_| String::from("variant,run,player,strength\n"));
     for (name, settings) in &variants {
-        let outcomes = simulate_variant(
-            &base,
-            settings,
-            &overrides,
-            &oracle,
-            rounds,
-            cup.as_ref(),
-            args.runs,
-            args.seed,
-        )
-        .map_err(|e| format!("variant '{name}': {e}"))?;
+        let outcomes = simulate_variant(&base, settings, &overrides, &oracle, cup.as_ref(), spec)
+            .map_err(|e| format!("variant '{name}': {e}"))?;
         if let Some(buf) = &mut dump {
             append_run_rows(buf, name, &outcomes, &args.thresholds, &names);
         }
@@ -437,28 +451,11 @@ fn run(args: Args) -> Result<(), String> {
         eprintln!("wrote ground-truth strengths to {}", path.display());
     }
 
-    print_report(
-        &reports,
-        observed.as_ref(),
-        &names,
-        rounds,
-        args.runs,
-        args.seed,
-        args.jitter,
-    );
+    print_report(&reports, observed.as_ref(), &names, spec);
 
     if let Some(dir) = &args.out {
-        write_outputs(
-            dir,
-            &reports,
-            observed.as_ref(),
-            &base,
-            args.jitter,
-            args.seed,
-            rounds,
-            args.runs,
-        )
-        .map_err(|e| format!("writing outputs: {e}"))?;
+        write_outputs(dir, &reports, observed.as_ref(), &base, spec)
+            .map_err(|e| format!("writing outputs: {e}"))?;
         println!(
             "\nwrote report.json and per-variant CSV histograms to {}",
             dir.display()
@@ -539,17 +536,18 @@ fn load_overrides(path: &Path, base: &Tournament) -> Result<StrengthMap, String>
 
 // --- simulation ------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
 fn simulate_variant(
     base: &Tournament,
     settings: &TournamentSettings,
     overrides: &StrengthMap,
     oracle: &OracleModel,
-    rounds: u32,
     cup: Option<&CupConfig>,
-    runs: u64,
-    seed: u64,
+    spec: RunSpec,
 ) -> Result<Vec<RunOutcome>, String> {
+    // `jitter` is the oracle's, and reaches the model through `oracle`.
+    let RunSpec {
+        rounds, runs, seed, ..
+    } = spec;
     (0..runs)
         .into_par_iter()
         .map(|i| {
@@ -954,11 +952,14 @@ fn print_report(
     reports: &[VariantReport],
     observed: Option<&ObservedReport>,
     names: &HashMap<TournamentId, String>,
-    rounds: u32,
-    runs: u64,
-    seed: u64,
-    jitter: f64,
+    spec: RunSpec,
 ) {
+    let RunSpec {
+        rounds,
+        runs,
+        seed,
+        jitter,
+    } = spec;
     println!("osp-sim: {runs} runs × {rounds} rounds, seed {seed}, jitter {jitter}");
     println!("(no draws modelled; byes excluded from game stats)\n");
 
@@ -1342,19 +1343,21 @@ struct JsonCupChampion {
     prob_hi: f64,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn write_outputs(
     dir: &Path,
     reports: &[VariantReport],
     observed: Option<&ObservedReport>,
     base: &Tournament,
-    jitter: f64,
-    seed: u64,
-    rounds: u32,
-    runs: u64,
+    spec: RunSpec,
 ) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let names = player_names(base);
+    let RunSpec {
+        rounds,
+        runs,
+        seed,
+        jitter,
+    } = spec;
 
     let json = JsonReport {
         runs,
