@@ -1,6 +1,9 @@
 # Public read-only access to standings and pairings — design
 
-Status: **design only, nothing implemented.** Supersedes the `TODO.md` line
+Status: **phase 1 implemented** (the projection, the capability-keyed public
+endpoint and its payload-carrying stream, the publication flag, the picker
+audit, and the read-only frontend mode — see §6). Phases 2 and 3 are still
+design only. Supersedes the `TODO.md` line
 "Read-only access to the pairings and standings" and covers the read half of
 the "Webhook for pushing results and pulling players" line (the *pulling
 players* half — HelloAsso registration import — is a separate direction and is
@@ -302,12 +305,63 @@ mean a second renderer to keep in sync.
 
 ## 6. Phasing
 
-**Phase 1 — the projection and the public endpoint (hosted server).**
+**Phase 1 — the projection and the public endpoint (hosted server). Done.**
 `PublicTournamentView` + the destructuring filter, the per-tournament
 publication flag and capability key, the third router group, the
 serialize-once cache with `ETag` on the `GET` and the payload-carrying SSE
 stream on top of it, the picker audit, and the read-only frontend mode.
 End-to-end useful on its own: QR code on the wall, done.
+
+Landed in [`crates/server/src/public.rs`](../crates/server/src/public.rs) (the
+projection, the reader routes, the publication endpoints),
+[`crates/server/src/state.rs`](../crates/server/src/state.rs) (the key in the
+auth sidecar, the payload cache, the stream cap, the per-boot id the `ETag`
+needs), and `frontend/src/lib/components/PublicView.svelte` +
+`frontend/src/lib/publicAccess.ts` on the client.
+
+Two deviations from the text above, both deliberate:
+
+- **The `ETag` carries the boot id as well as the version.** §4.1 introduced
+  `boot_id` for the push transport, but the hazard is the same here and lands
+  sooner: `version` restarts at `0` on every boot, so without it a reader
+  holding `"5"` from before a restart is answered `304` for an entirely
+  different state — and the page simply stops updating, with no error anywhere.
+- **Revocation has to reach the connections that are already open.** §3.2 calls
+  the key "revocable independently of the tournament password", and a stream
+  outlives the request that opened it — so checking the key only at connect made
+  rotation revoke nothing for anyone already watching: they kept receiving every
+  result down a connection opened with a key that no longer existed, for as long
+  as the tab stayed open. The reader stream therefore re-checks its key on
+  **every** event, and `set_publication` pings the change channel so the check
+  happens at the moment of revocation rather than at the next edit. The revoked
+  reader is told (`event: revoked`) instead of merely dropped — a silent close
+  is indistinguishable from a wifi blip, and the client would reconnect against
+  it forever.
+
+- **The picker audit needed a visible answer, not just a filter.** Hiding
+  unpublished tournaments from an unauthenticated caller (§3.1) leaves a
+  referee looking at a short list with no hint that there is more, which reads
+  as "my tournament was deleted". `GET /api/tournaments` therefore answers
+  `{ tournaments, restricted }`, and the picker turns `restricted` into an
+  admin-password prompt. The filter applies only when an admin password is
+  configured — the marker of a host reachable by people who are not its
+  referees; a server deliberately run open is unchanged.
+
+The QR code is generated in the app (`qrcode-generator`, zero dependencies,
+MIT), with a *Print QR code* button that lays out one sheet — tournament name,
+code, link — for the wall. Three things about it are decisions rather than
+defaults:
+
+- **Never themed.** Reflectance reversal (light modules on dark) is optional in
+  the QR spec, so an inverted code is unreadable to a fair number of phone
+  scanners. It is dark-on-white in both themes, always.
+- **Inline SVG, not a bitmap.** A code that has been through a raster scale is
+  exactly the thing that reads fine on the referee's screen and not from the
+  wall.
+- **The encoder is loaded on demand.** It is ~8 kB gzipped and only the
+  referee's publication panel ever renders a code — while the *reader* page
+  loads the same bundle, on a phone, on venue wifi, a hundred at a time. Making
+  readers pay for it would undo a chunk of §4.
 
 **Phase 2 — static export.** The same projection written as a self-contained
 HTML file (data inlined, no server), regenerated on every change, for the

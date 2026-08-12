@@ -2499,6 +2499,7 @@ dependencies = [
  "constant_time_eq",
  "dirs 5.0.1",
  "osp-core",
+ "rand 0.8.6",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

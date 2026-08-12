@@ -1,6 +1,6 @@
 <script lang="ts">
   import { _, locale } from "svelte-i18n";
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import {
     addPlayer,
     addPointAdjustment,
@@ -16,10 +16,13 @@
     fetchCounterfactual,
     forcePairing,
     fetchRatings,
+    fetchPublication,
     fetchRoundExplanation,
     fetchTournament,
     importPlayersCsv,
     prepareRound,
+    publicPageUrl,
+    setPublication,
     refreshRatings,
     removePlayer,
     removePointAdjustment,
@@ -57,6 +60,7 @@
     Handicap,
     NewPlayer,
     Forfeit,
+    PublicationState,
     RatedPlayer,
     RoundExplanation,
     SitoutValue,
@@ -70,6 +74,10 @@
   import { saveAmericanGrid, saveTournament } from "./lib/tournamentFile";
   import { pickCsvFile } from "./lib/csvImport";
   import { handicapChoice } from "./lib/handicap";
+  import { isTauri, printPage } from "./lib/platform";
+  import { publicPage } from "./lib/publicAccess";
+  import PublicView from "./lib/components/PublicView.svelte";
+  import QrCode from "./lib/components/QrCode.svelte";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
   import Login from "./lib/components/Login.svelte";
   import TournamentPicker from "./lib/components/TournamentPicker.svelte";
@@ -466,6 +474,15 @@
           .catch(() => {
             /* the panel fetches it again when opened */
           });
+        // Likewise for the publication state: it is not only the panel's, it
+        // decides whether the point-adjustment form warns that its reason is
+        // now read by players — and a warning that only appears after you have
+        // opened an unrelated panel is no warning at all.
+        fetchPublication()
+          .then((state) => (publication = state))
+          .catch(() => {
+            /* the panel fetches it again when opened */
+          });
       } else {
         // The tournament no longer exists (e.g. deleted from another
         // client/tab) — back to the picker.
@@ -511,6 +528,11 @@
   // (Re)load whenever the open tournament changes — including the very first
   // selection — and keep the live-sync subscription scoped to it.
   $effect(() => {
+    // A reader page renders `PublicView` and nothing of this component's
+    // markup — but its effects still run. Without this guard, opening a
+    // capability link in a browser that has a referee session would fetch and
+    // subscribe to *that* tournament behind the reader page.
+    if (publicPage) return;
     if ($currentTournamentId === null) return;
     // Reset the view before loading the newly selected tournament, so a
     // moment of stale UI from the previous one never shows.
@@ -528,6 +550,11 @@
     // Each tournament has its own backups directory, so the previous one's
     // listing (and the path in the tooltip) must not carry over.
     backupListing = null;
+    // Nor its publication state — showing one tournament's capability key
+    // under another's name is exactly how a link ends up on the wrong wall.
+    publication = null;
+    showPublication = false;
+    copiedLink = false;
     error = null;
     // Read (and clear) the requested tab *untracked*: this effect must depend
     // only on `currentTournamentId`. Subscribing to `initialTab` here would let
@@ -726,6 +753,9 @@
   // Keyboard shortcuts. Skipped while typing in a field so we don't clobber the
   // browser's native caret movement (arrows) or per-field undo (Ctrl/Cmd+Z).
   function handleKeydown(e: KeyboardEvent) {
+    // Nothing here applies to a reader: no undo, and the tabs are the reader
+    // page's own (see `PublicView`).
+    if (publicPage) return;
     const target = e.target as HTMLElement | null;
     const typing =
       !!target &&
@@ -869,6 +899,78 @@
     });
   }
 
+  // --- Public read-only access (docs/public-access.md) ----------------------
+  //
+  // Publication is per tournament and off by default. Turning it on mints a
+  // capability key; the URL built from it is what goes on the wall, and
+  // publishing again rotates the key, revoking every link already handed out.
+  //
+  // Not offered in the desktop app: its server listens on a random loopback
+  // port, so nobody outside the laptop could reach the link. Serving the
+  // laptop deployment is phase 2 (a static export the referee uploads).
+  const canPublish = !isTauri();
+  let showPublication = $state(false);
+  let publication = $state<PublicationState | null>(null);
+  const publicUrl = $derived(
+    publication?.key && $currentTournamentId
+      ? publicPageUrl($currentTournamentId, publication.key)
+      : null,
+  );
+  /** Set after a successful copy, so the button can confirm it happened. */
+  let copiedLink = $state(false);
+
+  function handleTogglePublication() {
+    showPublication = !showPublication;
+    if (!showPublication) return;
+    run(async () => {
+      publication = await fetchPublication();
+    });
+  }
+
+  function handleSetPublication(published: boolean) {
+    // Rotating invalidates links already on the wall, and unpublishing takes
+    // the page away from a room that may be reading it — neither is something
+    // to discover by having clicked the wrong button.
+    const confirmKey = !published
+      ? "app.confirmUnpublish"
+      : publication?.published
+        ? "app.confirmRotateKey"
+        : null;
+    if (confirmKey && !window.confirm($_(confirmKey))) return;
+    copiedLink = false;
+    run(async () => {
+      publication = await setPublication(published);
+    });
+  }
+
+  function handleCopyPublicLink() {
+    const url = publicUrl;
+    if (!url) return;
+    run(async () => {
+      await navigator.clipboard.writeText(url);
+      copiedLink = true;
+    });
+  }
+
+  // Set only for the duration of a "print the QR code" — it switches the print
+  // stylesheet from "print the pairings" to "print one sheet for the wall".
+  let printingQr = $state(false);
+
+  function handlePrintQr() {
+    run(async () => {
+      printingQr = true;
+      // `window.print()` snapshots the DOM synchronously, so the class has to
+      // have landed before it is called — without this the first print comes
+      // out as the ordinary page.
+      await tick();
+      try {
+        await printPage();
+      } finally {
+        printingQr = false;
+      }
+    });
+  }
+
   function handleRefreshRatings() {
     run(async () => {
       ratings = await refreshRatings();
@@ -898,7 +1000,13 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="app">
+{#if publicPage}
+  <!-- This tab was opened at a capability URL, so it is a reader page and
+       nothing else: no picker, no login, no way back into the referee app.
+       See `lib/publicAccess.ts`. -->
+  <PublicView page={publicPage} />
+{:else}
+<div class="app" class:printing-qr={printingQr}>
   <header>
     <div class="header-top">
       <div class="header-titles">
@@ -965,6 +1073,19 @@
           >
             {$_("app.backups")}
           </button>
+          {#if canPublish}
+            <button
+              type="button"
+              class="ghost"
+              class:active={showPublication}
+              data-testid="toggle-publication"
+              onclick={handleTogglePublication}
+              disabled={busy}
+              title={$_("app.publicPageTitle")}
+            >
+              {$_("app.publicPage")}
+            </button>
+          {/if}
           <button
             type="button"
             class="ghost"
@@ -977,6 +1098,85 @@
           </button>
         </div>
       </div>
+
+      {#if showPublication}
+        <div class="publication-panel">
+          {#if publication === null}
+            <p class="small">{$_("app.loading")}</p>
+          {:else if publication.published && publicUrl}
+            <p class="small">{$_("app.publicPageLive")}</p>
+            <!-- Only shown when printing the code for the wall: on screen the
+                 tournament's name is right above, in the toolbar. -->
+            <h3 class="qr-print-title">{tournament.name}</h3>
+            <div class="public-share">
+              <div class="qr-holder">
+                <QrCode
+                  text={publicUrl}
+                  label={$_("app.publicQrLabel", { values: { name: tournament.name } })}
+                />
+              </div>
+              <p class="public-url" data-testid="public-url">{publicUrl}</p>
+            </div>
+            <div class="publication-actions">
+              <button
+                type="button"
+                class="ghost small"
+                data-testid="copy-public-link"
+                onclick={handleCopyPublicLink}
+                disabled={busy}
+              >
+                {copiedLink ? $_("app.publicLinkCopied") : $_("app.copyPublicLink")}
+              </button>
+              <button
+                type="button"
+                class="ghost small"
+                data-testid="print-public-qr"
+                onclick={handlePrintQr}
+                disabled={busy}
+                title={$_("app.printPublicQrTitle")}
+              >
+                {$_("app.printPublicQr")}
+              </button>
+              <button
+                type="button"
+                class="ghost small"
+                data-testid="rotate-public-key"
+                onclick={() => handleSetPublication(true)}
+                disabled={busy}
+                title={$_("app.rotatePublicKeyTitle")}
+              >
+                {$_("app.rotatePublicKey")}
+              </button>
+              <button
+                type="button"
+                class="ghost small danger"
+                data-testid="unpublish"
+                onclick={() => handleSetPublication(false)}
+                disabled={busy}
+              >
+                {$_("app.unpublish")}
+              </button>
+            </div>
+            <!-- The adjustment reasons are referee-to-referee prose today, and
+                 this is where they stop being that. Said here rather than next
+                 to the field, so it is read at the moment it starts to matter. -->
+            <p class="small warn">{$_("app.publicPageReasonsWarning")}</p>
+          {:else}
+            <p class="small">{$_("app.publicPageOff")}</p>
+            <div class="publication-actions">
+              <button
+                type="button"
+                class="ghost small"
+                data-testid="publish"
+                onclick={() => handleSetPublication(true)}
+                disabled={busy}
+              >
+                {$_("app.publish")}
+              </button>
+            </div>
+          {/if}
+        </div>
+      {/if}
 
       {#if showBackups}
         <div class="backups-panel">
@@ -1208,6 +1408,7 @@
               onToggleCategory={handleToggleCategory}
               onAddAdjustment={teamMode ? undefined : handleAddPointAdjustment}
               onRemoveAdjustment={teamMode ? undefined : handleRemovePointAdjustment}
+              published={publication?.published ?? false}
               {busy}
             />
           </div>
@@ -1292,6 +1493,7 @@
     <ServerStatus />
   </footer>
 </div>
+{/if}
 
 <style>
   .app {
@@ -1403,6 +1605,60 @@
   .backups-list button.small {
     padding: 0.2rem 0.6rem;
     font-size: 0.78rem;
+  }
+
+  .publication-panel {
+    margin-bottom: 1.25rem;
+    padding: 0.6rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg-inset);
+  }
+  .publication-panel .small {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin: 0 0 0.4rem;
+  }
+  .publication-panel .small.warn {
+    color: var(--color-warning);
+    margin: 0.5rem 0 0;
+  }
+  .public-share {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.6rem;
+  }
+  .qr-holder {
+    flex: none;
+    width: 10rem;
+  }
+  /* The link itself: selectable and monospaced, because it gets pasted into a
+     message or a printed sheet rather than read. The QR beside it is what
+     anyone in the room actually uses. */
+  .public-url {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 0.8rem;
+    overflow-wrap: anywhere;
+    user-select: text;
+    margin: 0;
+  }
+  /* Screen shows the tournament name in the toolbar; the printed sheet leaves
+     the toolbar behind, so it carries its own heading. */
+  .qr-print-title {
+    display: none;
+  }
+  .publication-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .publication-actions button.small {
+    padding: 0.2rem 0.6rem;
+    font-size: 0.78rem;
+  }
+  .publication-actions button.danger {
+    color: var(--text-on-danger);
   }
 
   .tabs {
@@ -1540,6 +1796,39 @@
       border: none;
       background: transparent;
       padding: 0;
+    }
+
+    /* Printing the QR code for the wall is a different document from printing
+       the pairings: one sheet, the tournament's name, the code as large as the
+       page allows, and the link underneath for anyone who would rather type it.
+       Everything else — including the panel's own explanation and buttons — is
+       for the referee at the screen, not for the wall. */
+    .app.printing-qr .tab-content,
+    .app.printing-qr .backups-panel,
+    .app.printing-qr .publication-panel .small,
+    .app.printing-qr .publication-actions {
+      display: none;
+    }
+    .app.printing-qr .publication-panel {
+      border: none;
+      background: transparent;
+      padding: 0;
+      text-align: center;
+    }
+    .app.printing-qr .qr-print-title {
+      display: block;
+      font-size: 1.6rem;
+      margin: 0 0 1rem;
+    }
+    .app.printing-qr .public-share {
+      display: block;
+    }
+    .app.printing-qr .qr-holder {
+      width: min(15cm, 80vw);
+      margin: 0 auto 0.8rem;
+    }
+    .app.printing-qr .public-url {
+      font-size: 0.9rem;
     }
   }
 </style>

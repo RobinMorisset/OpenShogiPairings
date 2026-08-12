@@ -42,14 +42,20 @@
     /** Apply a forced pairing: re-pair the round with `a`–`b` fixed. */
     onForcePairing?: (a: number, b: number) => Promise<void>;
     /** Register a click on a board's player (toggles the winner). */
-    onClickWinner: (boardIndex: number, clicked: Winner) => void;
+    onClickWinner?: (boardIndex: number, clicked: Winner) => void;
     /** Set/clear the "a draw occurred" flag on a board. */
-    onToggleDrawn: (boardIndex: number, drawn: boolean) => void;
+    onToggleDrawn?: (boardIndex: number, drawn: boolean) => void;
     /** Mark (or clear, with null) a board as forfeited: `absent` names the
      *  side(s) that missed it and why (see `Forfeit`). */
-    onSetNoShow: (boardIndex: number, absent: Forfeit | null) => void;
+    onSetNoShow?: (boardIndex: number, absent: Forfeit | null) => void;
     /** Set (or clear, with null) a board's handicap. */
-    onSetHandicap: (boardIndex: number, handicap: Handicap | null) => void;
+    onSetHandicap?: (boardIndex: number, handicap: Handicap | null) => void;
+    /** Show the round without any way to change it — the public reader page
+     *  (see `docs/public-access.md`). Every control is inert; the results,
+     *  draws and absences it shows are exactly what the referee recorded.
+     *  Real enforcement is the server's: the reader endpoint has no mutating
+     *  handler at all, so this only spares them buttons that would 404. */
+    readOnly?: boolean;
     /** Whether long (two-round) games are enabled — shows the per-board checkbox. */
     longEnabled?: boolean;
     /** Whether the viewed round is the current round (the long flag is only
@@ -92,8 +98,13 @@
     onCarriedWinner,
     teams = [],
     effectiveWinners = [],
+    readOnly = false,
     busy = false,
   }: Props = $props();
+
+  // Every control on the board table is disabled by the same condition: an
+  // in-flight request, or a reader who has nothing to submit in the first place.
+  const locked = $derived(busy || readOnly);
 
   // In team mode the boards of a round are the boards of its team matches, so
   // they are shown that way: a header per match, then its boards in board order.
@@ -143,11 +154,39 @@
       : [{ match: null, boards: round.boards.map((_, i) => i) }],
   );
 
+  // Which optional columns the table carries.
+  //
+  // For the referee every one of these is a *control*, so it is there whether
+  // or not this round happens to use it — a draw button that appeared only on
+  // already-drawn boards would be a button you could never press first. A
+  // reader has no controls, so the same columns become pure reporting, and a
+  // column reporting nothing is noise: they collapse to what this round
+  // actually contains. The long column goes entirely, since the ★2R badge next
+  // to the board number already says it.
+  const showDrawColumn = $derived(!readOnly || round.boards.some((b) => drawnOf(b)));
+  const showNoShowColumn = $derived(
+    !readOnly || round.boards.some((b) => forfeitOf(b) != null),
+  );
+  const showLongColumn = $derived(longEnabled && !readOnly);
+  const showHandicapColumn = $derived(
+    handicapPolicy !== "none" &&
+      (!readOnly || round.boards.some((b) => b.handicap != null)),
+  );
+  const showSuggestedColumn = $derived(handicapPolicy === "suggested");
+
   /** How many columns the board table has, so a match header can span them. */
   const columnCount = $derived(
-    6 + (longEnabled ? 1 : 0) + (handicapPolicy !== "none" ? 1 : 0) +
-      (handicapPolicy === "suggested" ? 1 : 0),
+    // src, board number, and the two players.
+    4 +
+      (showDrawColumn ? 1 : 0) +
+      (showNoShowColumn ? 1 : 0) +
+      (showLongColumn ? 1 : 0) +
+      (showHandicapColumn ? 1 : 0) +
+      (showSuggestedColumn ? 1 : 0),
   );
+
+  /** Both sides of a board, in display order. */
+  const SIDES = ["player1", "player2"] as const;
 
   // The other side of a board.
   function other(side: Winner): Winner {
@@ -172,7 +211,7 @@
   // needs the board still undecided (turning it off after a result is the demote
   // path). Mirrors the server's `set_board_long` guards.
   function longToggleDisabled(board: Board): boolean {
-    if (busy || !isCurrentRound) return true;
+    if (locked || !isCurrentRound) return true;
     return isDecided(board) && !board.long;
   }
 
@@ -183,7 +222,7 @@
   // Outside team mode an absent player never reaches a board at all, so there
   // are only two states — and the server rejects the third.
   function toggleNoShow(index: number, board: Board, side: Winner) {
-    onSetNoShow(index, cycledForfeit(forfeitOf(board), side, teams.length > 0));
+    onSetNoShow?.(index, cycledForfeit(forfeitOf(board), side, teams.length > 0));
   }
 
   /** The glyph a side's absence control shows: its state, or the plain arrow
@@ -652,7 +691,7 @@
   }
 
   function onHandicapChange(index: number, value: string) {
-    onSetHandicap(index, value === "" ? null : (value as Handicap));
+    onSetHandicap?.(index, value === "" ? null : (value as Handicap));
   }
 </script>
 
@@ -729,7 +768,7 @@
                   class="player"
                   class:winner={isWinner(board, "player1")}
                   class:loser={isLoser(board, "player1")}
-                  disabled={busy || !onCarriedWinner}
+                  disabled={locked || !onCarriedWinner}
                   title={$_("roundView.clickToSetWinner")}
                   onclick={() => onCarriedWinner?.(index, "player1")}
                 >
@@ -742,7 +781,7 @@
                   class="player"
                   class:winner={isWinner(board, "player2")}
                   class:loser={isLoser(board, "player2")}
-                  disabled={busy || !onCarriedWinner}
+                  disabled={locked || !onCarriedWinner}
                   title={$_("roundView.clickToSetWinner")}
                   onclick={() => onCarriedWinner?.(index, "player2")}
                 >
@@ -820,16 +859,20 @@
           <th class="num">{$_("roundView.board")}</th>
           <th class="p1-col">{$_("roundView.player1")}</th>
           <th>{$_("roundView.player2")}</th>
-          <th class="draw-col">{$_("roundView.draw")}</th>
-          <th class="noshow-col">{$_("roundView.noShow")}</th>
-          {#if longEnabled}
+          {#if showDrawColumn}
+            <th class="draw-col">{$_("roundView.draw")}</th>
+          {/if}
+          {#if showNoShowColumn}
+            <th class="noshow-col">{$_("roundView.noShow")}</th>
+          {/if}
+          {#if showLongColumn}
             <th class="long-col">{$_("roundView.long")}</th>
           {/if}
-          {#if handicapPolicy !== "none"}
+          {#if showHandicapColumn}
             <th class="handicap-col">{$_("roundView.handicap")}</th>
-            {#if handicapPolicy === "suggested"}
-              <th class="suggested-col">{$_("roundView.suggested")}</th>
-            {/if}
+          {/if}
+          {#if showSuggestedColumn}
+            <th class="suggested-col">{$_("roundView.suggested")}</th>
           {/if}
         </tr>
       </thead>
@@ -866,78 +909,123 @@
                   >★2R</span
                 >{/if}</td
             >
+            <!-- A reader gets the names as plain text: a disabled button is
+                 dimmed by the global button styling and carries a
+                 not-allowed cursor, which is a poor way to render a name
+                 nobody was ever invited to click. -->
             <td class="p1-col">
-              <button
-                type="button"
-                class="player"
-                class:winner={isWinner(board, "player1")}
-                class:loser={isLoser(board, "player1")}
-                disabled={busy}
-                title={$_("roundView.clickToSetWinner")}
-                onclick={() => onClickWinner(index, "player1")}
-              >
-                {name(board.player1)}
-              </button>
+              {#if readOnly}
+                <span
+                  class="player"
+                  class:winner={isWinner(board, "player1")}
+                  class:loser={isLoser(board, "player1")}>{name(board.player1)}</span
+                >
+              {:else}
+                <button
+                  type="button"
+                  class="player"
+                  class:winner={isWinner(board, "player1")}
+                  class:loser={isLoser(board, "player1")}
+                  disabled={locked}
+                  title={$_("roundView.clickToSetWinner")}
+                  onclick={() => onClickWinner?.(index, "player1")}
+                >
+                  {name(board.player1)}
+                </button>
+              {/if}
             </td>
             <td>
-              <button
-                type="button"
-                class="player"
-                class:winner={isWinner(board, "player2")}
-                class:loser={isLoser(board, "player2")}
-                disabled={busy}
-                title={$_("roundView.clickToSetWinner")}
-                onclick={() => onClickWinner(index, "player2")}
-              >
-                {name(board.player2)}
-              </button>
-            </td>
-            <td class="draw-col">
-              <!-- A forfeited board was never played, so it cannot have been
-                   drawn — the server rejects the request outright. -->
-              <button
-                type="button"
-                class="draw"
-                class:active={drawnOf(board)}
-                disabled={busy || forfeitOf(board) != null}
-                title={forfeitOf(board) != null
-                  ? $_("roundView.drawForfeitedTitle")
-                  : $_("roundView.drawTitle")}
-                aria-pressed={drawnOf(board)}
-                onclick={() => onToggleDrawn(index, !drawnOf(board))}
-              >
-                =
-              </button>
-            </td>
-            <td class="noshow-col">
-              <div class="noshow">
+              {#if readOnly}
+                <span
+                  class="player"
+                  class:winner={isWinner(board, "player2")}
+                  class:loser={isLoser(board, "player2")}>{name(board.player2)}</span
+                >
+              {:else}
                 <button
                   type="button"
-                  class="noshow-btn"
-                  class:active={absent(forfeitOf(board), "player1")}
-                  class:justified={absenceKind(forfeitOf(board), "player1") === "justified"}
-                  disabled={busy}
-                  aria-pressed={absent(forfeitOf(board), "player1")}
-                  title={absenceTitle(board, "player1", name(board.player1))}
-                  onclick={() => toggleNoShow(index, board, "player1")}
+                  class="player"
+                  class:winner={isWinner(board, "player2")}
+                  class:loser={isLoser(board, "player2")}
+                  disabled={locked}
+                  title={$_("roundView.clickToSetWinner")}
+                  onclick={() => onClickWinner?.(index, "player2")}
                 >
-                  {absenceGlyph(board, "player1", "◀")}
+                  {name(board.player2)}
                 </button>
-                <button
-                  type="button"
-                  class="noshow-btn"
-                  class:active={absent(forfeitOf(board), "player2")}
-                  class:justified={absenceKind(forfeitOf(board), "player2") === "justified"}
-                  disabled={busy}
-                  aria-pressed={absent(forfeitOf(board), "player2")}
-                  title={absenceTitle(board, "player2", name(board.player2))}
-                  onclick={() => toggleNoShow(index, board, "player2")}
-                >
-                  {absenceGlyph(board, "player2", "▶")}
-                </button>
-              </div>
+              {/if}
             </td>
-            {#if longEnabled}
+            {#if showDrawColumn}
+              <td class="draw-col">
+                {#if readOnly}
+                  {#if drawnOf(board)}
+                    <span class="mark" title={$_("roundView.drawTitle")}>=</span>
+                  {/if}
+                {:else}
+                  <!-- A forfeited board was never played, so it cannot have been
+                       drawn — the server rejects the request outright. -->
+                  <button
+                    type="button"
+                    class="draw"
+                    class:active={drawnOf(board)}
+                    disabled={locked || forfeitOf(board) != null}
+                    title={forfeitOf(board) != null
+                      ? $_("roundView.drawForfeitedTitle")
+                      : $_("roundView.drawTitle")}
+                    aria-pressed={drawnOf(board)}
+                    onclick={() => onToggleDrawn?.(index, !drawnOf(board))}
+                  >
+                    =
+                  </button>
+                {/if}
+              </td>
+            {/if}
+            {#if showNoShowColumn}
+              <td class="noshow-col">
+                {#if readOnly}
+                  <!-- Only the side that actually missed the board is marked,
+                       and with which of the two absences it was; the arrows are
+                       the referee's "click here to record one". -->
+                  <div class="noshow">
+                    {#each SIDES as side (side)}
+                      {#if absenceKind(forfeitOf(board), side) !== null}
+                        <span class="mark" class:justified={absenceKind(forfeitOf(board), side) === "justified"}
+                          >{absenceGlyph(board, side, "")}</span
+                        >
+                      {/if}
+                    {/each}
+                  </div>
+                {:else}
+                  <div class="noshow">
+                    <button
+                      type="button"
+                      class="noshow-btn"
+                      class:active={absent(forfeitOf(board), "player1")}
+                      class:justified={absenceKind(forfeitOf(board), "player1") === "justified"}
+                      disabled={locked}
+                      aria-pressed={absent(forfeitOf(board), "player1")}
+                      title={absenceTitle(board, "player1", name(board.player1))}
+                      onclick={() => toggleNoShow(index, board, "player1")}
+                    >
+                      {absenceGlyph(board, "player1", "◀")}
+                    </button>
+                    <button
+                      type="button"
+                      class="noshow-btn"
+                      class:active={absent(forfeitOf(board), "player2")}
+                      class:justified={absenceKind(forfeitOf(board), "player2") === "justified"}
+                      disabled={locked}
+                      aria-pressed={absent(forfeitOf(board), "player2")}
+                      title={absenceTitle(board, "player2", name(board.player2))}
+                      onclick={() => toggleNoShow(index, board, "player2")}
+                    >
+                      {absenceGlyph(board, "player2", "▶")}
+                    </button>
+                  </div>
+                {/if}
+              </td>
+            {/if}
+            {#if showLongColumn}
               <td class="long-col">
                 <!-- Cup boards can be long too; the server couples every cup board
                      of the round, so ticking one ticks them all. -->
@@ -951,13 +1039,20 @@
                 />
               </td>
             {/if}
-            {#if handicapPolicy !== "none"}
+            {#if showHandicapColumn}
               <td class="handicap-col">
-                {#if !isCup(board)}
+                {#if readOnly}
+                  {#if board.handicap}
+                    <span class="mark">{board.handicap.handicap}</span>
+                    <span class="giver"
+                      >{$_("roundView.giverGives", { values: { name: giverName(board) } })}</span
+                    >
+                  {/if}
+                {:else if !isCup(board)}
                   {#if handicapAllowed(board)}
                     <select
                       class="handicap"
-                      disabled={busy}
+                      disabled={locked}
                       value={board.handicap?.handicap ?? ""}
                       onchange={(e) => onHandicapChange(index, e.currentTarget.value)}
                     >
@@ -982,15 +1077,15 @@
                   {/if}
                 {/if}
               </td>
-              {#if handicapPolicy === "suggested"}
-                <td class="suggested suggested-col">
-                  {#if !isCup(board) && suggestedHandicaps[index]}
-                    <span title={HANDICAPS.find((h) => h.value === suggestedHandicaps[index])?.label}
-                      >{suggestedHandicaps[index]}</span
-                    >
-                  {/if}
-                </td>
-              {/if}
+            {/if}
+            {#if showSuggestedColumn}
+              <td class="suggested suggested-col">
+                {#if !isCup(board) && suggestedHandicaps[index]}
+                  <span title={HANDICAPS.find((h) => h.value === suggestedHandicaps[index])?.label}
+                    >{suggestedHandicaps[index]}</span
+                  >
+                {/if}
+              </td>
             {/if}
           </tr>
         {/each}
@@ -1032,28 +1127,37 @@
                 >{$_(isCup ? "roundView.cupByeOpponent" : "roundView.byeOpponent")}</span
               >
             </td>
-            <td class="draw-col"></td>
-            <td class="noshow-col"></td>
-            {#if longEnabled}
+            {#if showDrawColumn}
+              <td class="draw-col"></td>
+            {/if}
+            {#if showNoShowColumn}
+              <td class="noshow-col"></td>
+            {/if}
+            {#if showLongColumn}
               <td class="long-col"></td>
             {/if}
-            {#if handicapPolicy !== "none"}
+            {#if showHandicapColumn}
               <td class="handicap-col"></td>
-              {#if handicapPolicy === "suggested"}
-                <td class="suggested-col"></td>
-              {/if}
+            {/if}
+            {#if showSuggestedColumn}
+              <td class="suggested-col"></td>
             {/if}
           </tr>
         {/each}
         {/each}
       </tbody>
     </table>
-    {#if round.completed}
-      <p class="hint warning">
-        ⚠ {$_("roundView.alreadyCompletedWarning")}
-      </p>
-    {:else}
-      <p class="hint print-hide">{$_("roundView.clickToRecordWinner")}</p>
+    <!-- Both lines address whoever records results, so a reader gets neither:
+         the warning is about editing a finished round, and the hint about a
+         click that does nothing here. -->
+    {#if !readOnly}
+      {#if round.completed}
+        <p class="hint warning">
+          ⚠ {$_("roundView.alreadyCompletedWarning")}
+        </p>
+      {:else}
+        <p class="hint print-hide">{$_("roundView.clickToRecordWinner")}</p>
+      {/if}
     {/if}
   {/if}
 
@@ -1561,6 +1665,23 @@
     border-color: var(--color-danger);
     color: var(--color-danger);
     background: var(--bg-warning);
+  }
+
+  /* The read-only rendering of the draw / absence / handicap cells: the value a
+     referee's control would be *showing*, with none of the chrome that says it
+     can be pressed. A justified absence still reads differently from a no-show
+     — the distinction matters to whoever the row is about — but neither is
+     dressed up as alarming here. */
+  .mark {
+    font-weight: 700;
+    color: var(--text-secondary);
+  }
+  .noshow .mark {
+    color: var(--color-danger);
+  }
+  .noshow .mark.justified {
+    color: var(--text-tertiary);
+    font-weight: 400;
   }
 
   .long-col {

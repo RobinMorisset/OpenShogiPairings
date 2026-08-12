@@ -46,7 +46,23 @@
     "refreshRatingsTitle": "Re-download the rating list from the FESA website",
     "confirmDiscard": "\"{name}\" has unsaved changes that will be lost. Continue anyway?",
     "cannotReachServer": "Cannot reach the server. Is it running (cargo run -p osp-server)?",
-    "conflictReloaded": "Another referee changed the tournament first, so your last action wasn't applied. The latest state has been reloaded — please try again."
+    "conflictReloaded": "Another referee changed the tournament first, so your last action wasn't applied. The latest state has been reloaded — please try again.",
+    "publicPage": "Public page…",
+    "publicPageTitle": "The read-only page for players and spectators",
+    "publicPageLive": "This tournament is published. Anyone with this link can see the standings and pairings — no password, and no way to change anything.",
+    "publicPageOff": "Not published. Publishing creates an unguessable link players can open on their phones. It shows the standings and the pairings of every round already started — never the round you are still preparing.",
+    "publish": "Publish",
+    "unpublish": "Stop publishing",
+    "copyPublicLink": "Copy link",
+    "publicLinkCopied": "Copied",
+    "rotatePublicKey": "New link",
+    "rotatePublicKeyTitle": "Issue a fresh link and revoke the old one",
+    "confirmRotateKey": "Issue a new link? Every link already handed out, including any QR code on the wall, stops working.",
+    "confirmUnpublish": "Stop publishing? The public page closes for everyone reading it.",
+    "publicPageReasonsWarning": "Point adjustments are shown with their reason. Those are now read by players, not only by referees.",
+    "publicQrLabel": "QR code for the public page of {name}",
+    "printPublicQr": "Print QR code",
+    "printPublicQrTitle": "One sheet with the code and the link, to put up in the playing room"
   },
   "login": {
     "title": "Referee sign-in",
@@ -113,7 +129,8 @@
     "removeAdjustment": "Remove this adjustment",
     "adjustmentPointsPlaceholder": "±pts",
     "adjustmentReasonPlaceholder": "Reason",
-    "add": "Add"
+    "add": "Add",
+    "adjustmentReasonIsPublic": "Published: players read this reason on the public page."
   },
   "roundView": {
     "unknownPlayer": "(unknown)",
@@ -318,7 +335,9 @@
     "delete": "Delete",
     "confirmDelete": "Delete \"{name}\"? This removes it and its backups from the server. This cannot be undone.",
     "adminPasswordTitle": "Admin sign-in required",
-    "adminPasswordPrompt": "This server requires the admin password to create tournaments."
+    "adminPasswordPrompt": "This server requires the admin password to create tournaments.",
+    "restrictedToPublished": "Only published tournaments are listed here.",
+    "showAll": "Sign in as admin"
   },
   "settings": {
     "finalizedWarning": "Registration is finalized — changing the MacMahon groups will change everyone's points and future pairings.",
@@ -557,5 +576,12 @@
     "adjustmentReasonPlaceholder": "Reason (required)",
     "cancelAdjustment": "Cancel",
     "addAdjustment": "Add"
+  },
+  "publicView": {
+    "subtitle": "Standings and pairings — live",
+    "gone": "This tournament is no longer available.",
+    "unavailable": "This link is not valid. It may have been replaced by a newer one, or the tournament may no longer be published.",
+    "notStarted": "The tournament has not started yet. Registered players:",
+    "revoked": "This link is no longer valid — a new one has been issued, or the tournament is no longer published. Ask for the current link."
   }
 }

@@ -46,7 +46,23 @@
     "refreshRatingsTitle": "Pobierz ponownie listę rankingową ze strony FESA",
     "confirmDiscard": "Turniej „{name}” ma niezapisane zmiany, które zostaną utracone. Kontynuować mimo to?",
     "cannotReachServer": "Nie można połączyć się z serwerem. Czy jest uruchomiony (cargo run -p osp-server)?",
-    "conflictReloaded": "Inny sędzia zmienił turniej wcześniej, więc Twoja ostatnia akcja nie została zastosowana. Wczytano najnowszy stan — spróbuj ponownie."
+    "conflictReloaded": "Inny sędzia zmienił turniej wcześniej, więc Twoja ostatnia akcja nie została zastosowana. Wczytano najnowszy stan — spróbuj ponownie.",
+    "publicPage": "Strona publiczna…",
+    "publicPageTitle": "Strona tylko do odczytu — dla graczy i widzów",
+    "publicPageLive": "Ten turniej jest opublikowany. Każdy, kto ma ten link, widzi tabelę i kojarzenia — bez hasła i bez możliwości cokolwiek zmienić.",
+    "publicPageOff": "Nieopublikowany. Publikacja tworzy niemożliwy do odgadnięcia link, który gracze otworzą w telefonie. Pokazuje tabelę i kojarzenia każdej już rozpoczętej rundy — nigdy rundy, którą właśnie przygotowujesz.",
+    "publish": "Opublikuj",
+    "unpublish": "Zakończ publikację",
+    "copyPublicLink": "Kopiuj link",
+    "publicLinkCopied": "Skopiowano",
+    "rotatePublicKey": "Nowy link",
+    "rotatePublicKeyTitle": "Wydaj nowy link i unieważnij stary",
+    "confirmRotateKey": "Wydać nowy link? Wszystkie rozdane linki, łącznie z kodem QR na ścianie, przestaną działać.",
+    "confirmUnpublish": "Zakończyć publikację? Strona publiczna zamknie się dla wszystkich, którzy ją czytają.",
+    "publicPageReasonsWarning": "Korekty punktów są pokazywane wraz z powodem. Czytają go teraz gracze, nie tylko sędziowie.",
+    "publicQrLabel": "Kod QR strony publicznej turnieju {name}",
+    "printPublicQr": "Drukuj kod QR",
+    "printPublicQrTitle": "Jedna kartka z kodem i linkiem do powieszenia w sali gry"
   },
   "login": {
     "title": "Logowanie sędziego",
@@ -113,7 +129,8 @@
     "removeAdjustment": "Usuń tę korektę",
     "adjustmentPointsPlaceholder": "±pkt",
     "adjustmentReasonPlaceholder": "Powód",
-    "add": "Dodaj"
+    "add": "Dodaj",
+    "adjustmentReasonIsPublic": "Opublikowany: gracze czytają ten powód na stronie publicznej."
   },
   "roundView": {
     "unknownPlayer": "(nieznany)",
@@ -318,7 +335,9 @@
     "delete": "Usuń",
     "confirmDelete": "Usunąć turniej „{name}”? Zostanie on wraz ze swoimi kopiami zapasowymi usunięty z serwera. Tej operacji nie można cofnąć.",
     "adminPasswordTitle": "Wymagane logowanie administratora",
-    "adminPasswordPrompt": "Ten serwer wymaga hasła administratora do tworzenia turniejów."
+    "adminPasswordPrompt": "Ten serwer wymaga hasła administratora do tworzenia turniejów.",
+    "restrictedToPublished": "Wymienione są tylko opublikowane turnieje.",
+    "showAll": "Zaloguj się jako administrator"
   },
   "settings": {
     "finalizedWarning": "Rejestracja została zakończona — zmiana grup MacMahon zmieni punkty wszystkich graczy oraz przyszłe kojarzenia.",
@@ -557,5 +576,12 @@
     "adjustmentReasonPlaceholder": "Powód (wymagany)",
     "cancelAdjustment": "Anuluj",
     "addAdjustment": "Dodaj"
+  },
+  "publicView": {
+    "subtitle": "Tabela i kojarzenia — na żywo",
+    "gone": "Ten turniej nie jest już dostępny.",
+    "unavailable": "Ten link jest nieprawidłowy. Mógł zostać zastąpiony nowszym albo turniej nie jest już publikowany.",
+    "notStarted": "Turniej jeszcze się nie rozpoczął. Zarejestrowani gracze:",
+    "revoked": "Ten link nie jest już prawidłowy — wydano nowy albo turniej nie jest już publikowany. Poproś o aktualny link."
   }
 }

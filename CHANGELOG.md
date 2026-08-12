@@ -27,6 +27,30 @@ rather than half-parsed; re-create the tournament.
   case-insensitively and a player with none set is never protected; in a team
   tournament it counts the compatriot *games* a match would create, exactly as
   the club rule does. It appears in the round explanation as its own rule.
+- **A public read-only page for players and spectators** (see
+  [`docs/public-access.md`](docs/public-access.md), phase 1). A tournament can
+  be *published* from the new **Public page…** toolbar button — off by default,
+  per tournament — which mints an unguessable link (`/t/{id}/public?k=…`) and
+  shows it as a QR code, with a *Print QR code* button that lays out one sheet
+  for the playing room. Anyone opening it sees the standings, the pairings of
+  every round already started, and the cup bracket, updating live, with no
+  password and no way to change anything. The round the referee is still
+  preparing is *never* shown: it is a separate field on the tournament, so
+  dropping it is the whole timing policy, while every result becomes public the
+  instant it is recorded. Publishing again issues a fresh link and revokes the
+  old one. Read-only is enforced by the server — the public routes are their
+  own group with no mutating handler in it — not by hiding buttons, and the
+  standings are the referee's own, so the wall display cannot disagree with
+  their screen. A room of phones is cheap to serve: the payload is serialized
+  once per change and pushed whole down the event stream, so readers never
+  refetch. Not offered by the desktop app, whose server is only reachable from
+  the laptop itself (that is phase 2). Referees are warned when publishing that
+  point-adjustment reasons, written referee-to-referee, are now read by players.
+- **The tournament picker no longer lists private tournaments to strangers.**
+  On a server with `OSP_ADMIN_PASSWORD` set, a caller without the admin token
+  sees only the published tournaments — and is told so, with a sign-in prompt,
+  rather than shown a silently short list. A server deliberately run open (every
+  local and desktop one) is unchanged.
 - **The tournament's city, country, dates and time control** (Settings →
   *Place, dates and time control*), reported in the header of the American Grid
   export the way the

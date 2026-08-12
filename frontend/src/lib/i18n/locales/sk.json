@@ -46,7 +46,23 @@
     "refreshRatingsTitle": "Znovu stiahnuť ratingový zoznam z webu FESA",
     "confirmDiscard": "Turnaj „{name}“ má neuložené zmeny, ktoré sa stratia. Chcete napriek tomu pokračovať?",
     "cannotReachServer": "Server je nedostupný. Beží (cargo run -p osp-server)?",
-    "conflictReloaded": "Turnaj medzitým zmenil iný rozhodca, takže vaša posledná akcia sa neuplatnila. Najnovší stav bol znovu načítaný — skúste to prosím ešte raz."
+    "conflictReloaded": "Turnaj medzitým zmenil iný rozhodca, takže vaša posledná akcia sa neuplatnila. Najnovší stav bol znovu načítaný — skúste to prosím ešte raz.",
+    "publicPage": "Verejná stránka…",
+    "publicPageTitle": "Stránka len na čítanie — pre hráčov a divákov",
+    "publicPageLive": "Tento turnaj je zverejnený. Ktokoľvek s týmto odkazom vidí poradie a nasadenia — bez hesla a bez možnosti čokoľvek zmeniť.",
+    "publicPageOff": "Nezverejnené. Zverejnením vznikne neuhádnuteľný odkaz, ktorý si hráči otvoria v telefóne. Ukazuje poradie a nasadenia každého už začatého kola — nikdy kolo, ktoré práve pripravujete.",
+    "publish": "Zverejniť",
+    "unpublish": "Ukončiť zverejnenie",
+    "copyPublicLink": "Kopírovať odkaz",
+    "publicLinkCopied": "Skopírované",
+    "rotatePublicKey": "Nový odkaz",
+    "rotatePublicKeyTitle": "Vydať nový odkaz a zneplatniť starý",
+    "confirmRotateKey": "Vydať nový odkaz? Všetky už rozdané odkazy vrátane QR kódu na stene prestanú fungovať.",
+    "confirmUnpublish": "Ukončiť zverejnenie? Verejná stránka sa zavrie všetkým, ktorí ju čítajú.",
+    "publicPageReasonsWarning": "Úpravy bodov sa zobrazujú aj s dôvodom. Ten teraz čítajú hráči, nielen rozhodcovia.",
+    "publicQrLabel": "QR kód verejnej stránky turnaja {name}",
+    "printPublicQr": "Vytlačiť QR kód",
+    "printPublicQrTitle": "Jeden list s kódom a odkazom na vyvesenie v hracej miestnosti"
   },
   "login": {
     "title": "Prihlásenie rozhodcu",
@@ -113,7 +129,8 @@
     "removeAdjustment": "Odstrániť túto úpravu",
     "adjustmentPointsPlaceholder": "±b.",
     "adjustmentReasonPlaceholder": "Dôvod",
-    "add": "Pridať"
+    "add": "Pridať",
+    "adjustmentReasonIsPublic": "Zverejnené: hráči čítajú tento dôvod na verejnej stránke."
   },
   "roundView": {
     "unknownPlayer": "(neznámy)",
@@ -318,7 +335,9 @@
     "delete": "Odstrániť",
     "confirmDelete": "Odstrániť turnaj „{name}“? Odstráni sa zo servera spolu so svojimi zálohami. Túto akciu nemožno vrátiť späť.",
     "adminPasswordTitle": "Vyžaduje sa prihlásenie správcu",
-    "adminPasswordPrompt": "Tento server vyžaduje na vytváranie turnajov heslo správcu."
+    "adminPasswordPrompt": "Tento server vyžaduje na vytváranie turnajov heslo správcu.",
+    "restrictedToPublished": "Uvedené sú len zverejnené turnaje.",
+    "showAll": "Prihlásiť sa ako správca"
   },
   "settings": {
     "finalizedWarning": "Registrácia je uzavretá — zmena skupín MacMahon zmení body všetkých hráčov aj budúce párovanie.",
@@ -557,5 +576,12 @@
     "adjustmentReasonPlaceholder": "Dôvod (povinný)",
     "cancelAdjustment": "Zrušiť",
     "addAdjustment": "Pridať"
+  },
+  "publicView": {
+    "subtitle": "Poradie a nasadenia — naživo",
+    "gone": "Tento turnaj už nie je dostupný.",
+    "unavailable": "Tento odkaz nie je platný. Mohol byť nahradený novším, alebo turnaj už nie je zverejnený.",
+    "notStarted": "Turnaj sa ešte nezačal. Prihlásení hráči:",
+    "revoked": "Tento odkaz už nie je platný — bol vydaný nový, alebo turnaj už nie je zverejnený. Vyžiadajte si aktuálny odkaz."
   }
 }

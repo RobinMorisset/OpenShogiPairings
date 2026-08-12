@@ -46,7 +46,23 @@
     "refreshRatingsTitle": "Retélécharger la liste des classements depuis le site de la FESA",
     "confirmDiscard": "« {name} » contient des modifications non enregistrées qui seront perdues. Continuer quand même ?",
     "cannotReachServer": "Impossible de contacter le serveur. Est-il lancé (cargo run -p osp-server) ?",
-    "conflictReloaded": "Un autre arbitre a modifié le tournoi avant vous : votre dernière action n'a pas été appliquée. L'état à jour a été rechargé — veuillez réessayer."
+    "conflictReloaded": "Un autre arbitre a modifié le tournoi avant vous : votre dernière action n'a pas été appliquée. L'état à jour a été rechargé — veuillez réessayer.",
+    "publicPage": "Page publique…",
+    "publicPageTitle": "La page en lecture seule pour les joueurs et le public",
+    "publicPageLive": "Ce tournoi est publié. Toute personne disposant de ce lien voit le classement et les appariements — sans mot de passe, et sans rien pouvoir modifier.",
+    "publicPageOff": "Non publié. La publication crée un lien indevinable que les joueurs peuvent ouvrir sur leur téléphone. Il montre le classement et les appariements de chaque ronde déjà lancée — jamais celle que vous êtes en train de préparer.",
+    "publish": "Publier",
+    "unpublish": "Arrêter la publication",
+    "copyPublicLink": "Copier le lien",
+    "publicLinkCopied": "Copié",
+    "rotatePublicKey": "Nouveau lien",
+    "rotatePublicKeyTitle": "Émettre un nouveau lien et révoquer l'ancien",
+    "confirmRotateKey": "Émettre un nouveau lien ? Tous les liens déjà distribués, y compris un QR code affiché au mur, cesseront de fonctionner.",
+    "confirmUnpublish": "Arrêter la publication ? La page publique se fermera pour tous ceux qui la consultent.",
+    "publicPageReasonsWarning": "Les ajustements de points sont affichés avec leur motif. Celui-ci est désormais lu par les joueurs, et plus seulement par les arbitres.",
+    "publicQrLabel": "QR code de la page publique de {name}",
+    "printPublicQr": "Imprimer le QR code",
+    "printPublicQrTitle": "Une feuille avec le code et le lien, à afficher dans la salle de jeu"
   },
   "login": {
     "title": "Connexion arbitre",
@@ -113,7 +129,8 @@
     "removeAdjustment": "Retirer cet ajustement",
     "adjustmentPointsPlaceholder": "±pts",
     "adjustmentReasonPlaceholder": "Motif",
-    "add": "Ajouter"
+    "add": "Ajouter",
+    "adjustmentReasonIsPublic": "Publié : les joueurs lisent ce motif sur la page publique."
   },
   "roundView": {
     "unknownPlayer": "(inconnu)",
@@ -318,7 +335,9 @@
     "delete": "Supprimer",
     "confirmDelete": "Supprimer « {name} » ? Le tournoi et ses sauvegardes seront retirés du serveur. Cette action est irréversible.",
     "adminPasswordTitle": "Connexion administrateur requise",
-    "adminPasswordPrompt": "Ce serveur exige le mot de passe administrateur pour créer des tournois."
+    "adminPasswordPrompt": "Ce serveur exige le mot de passe administrateur pour créer des tournois.",
+    "restrictedToPublished": "Seuls les tournois publiés sont listés ici.",
+    "showAll": "Se connecter comme administrateur"
   },
   "settings": {
     "finalizedWarning": "Les inscriptions sont finalisées — modifier les groupes MacMahon changera les points de tous les joueurs et les appariements futurs.",
@@ -557,5 +576,12 @@
     "adjustmentReasonPlaceholder": "Motif (obligatoire)",
     "cancelAdjustment": "Annuler",
     "addAdjustment": "Ajouter"
+  },
+  "publicView": {
+    "subtitle": "Classement et appariements — en direct",
+    "gone": "Ce tournoi n'est plus disponible.",
+    "unavailable": "Ce lien n'est pas valide. Il a peut-être été remplacé par un lien plus récent, ou le tournoi n'est plus publié.",
+    "notStarted": "Le tournoi n'a pas encore commencé. Joueurs inscrits :",
+    "revoked": "Ce lien n'est plus valide — un nouveau a été émis, ou le tournoi n'est plus publié. Demandez le lien actuel."
   }
 }

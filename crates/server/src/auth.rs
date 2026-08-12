@@ -130,7 +130,7 @@ async fn login_response(auth: &AuthConfig, presented: &str) -> Response {
 }
 
 /// Whether `req` carries a valid `Authorization: Bearer <token>` for `auth`.
-fn has_valid_bearer(auth: &AuthConfig, req: &Request) -> bool {
+pub(crate) fn has_valid_bearer(auth: &AuthConfig, req: &Request) -> bool {
     req.headers()
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok())

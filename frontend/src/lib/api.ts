@@ -6,6 +6,8 @@ import type {
   HealthStatus,
   NewPlayer,
   Forfeit,
+  PublicationState,
+  PublicTournamentResponse,
   RatedPlayer,
   RoundExplanation,
   SitoutValue,
@@ -308,9 +310,25 @@ export function fetchHealth(): Promise<HealthStatus> {
   return request<HealthStatus>("/api/health", undefined, NO_AUTH);
 }
 
-/** List every tournament known to the server, for the picker. Never requires auth. */
-export function listTournaments(): Promise<TournamentSummary[]> {
-  return request<TournamentSummary[]>("/api/tournaments", undefined, NO_AUTH);
+/** What the picker gets back: the tournaments, and whether that is all of them. */
+export interface TournamentListing {
+  tournaments: TournamentSummary[];
+  /**
+   * True when the server has an admin password and we didn't present it, so
+   * this list holds only the *published* tournaments. The picker turns it into
+   * an admin-password prompt — a short list with no explanation would read as
+   * "there is nothing here", which is the wrong answer.
+   */
+  restricted: boolean;
+}
+
+/**
+ * List the tournaments the picker may show. Sends the admin token if we have
+ * one: on a hosted server that is what distinguishes a referee from a stranger
+ * who found the URL (see `docs/public-access.md` §3.1).
+ */
+export function listTournaments(): Promise<TournamentListing> {
+  return request<TournamentListing>("/api/tournaments", undefined, ADMIN_AUTH);
 }
 
 /** Result of creating a tournament: its id, and a session token if it has a password. */
@@ -847,4 +865,178 @@ export function restoreBackup(id: string): Promise<TournamentResponse> {
   return request<TournamentResponse>(scopedPath(`/backups/${id}/restore`), {
     method: "POST",
   });
+}
+
+// --- Public read-only access (docs/public-access.md, phase 1) ---------------
+//
+// Two audiences share this section. The referee half (`fetchPublication`,
+// `setPublication`) is ordinary authenticated API. The reader half takes a
+// capability key instead of a token and never touches the session machinery
+// above — a reader has no tournament "open", no version to declare, and no
+// login to be sent to.
+
+/** Whether the currently open tournament is published, and under which key. */
+export function fetchPublication(): Promise<PublicationState> {
+  return request<PublicationState>(scopedPath("/publication"));
+}
+
+/**
+ * Publish the currently open tournament, or unpublish it. Publishing always
+ * mints a **fresh** key, so calling it again is how a key is rotated —
+ * revoking every link already handed out.
+ */
+export function setPublication(published: boolean): Promise<PublicationState> {
+  return request<PublicationState>(scopedPath("/publication"), {
+    method: "PUT",
+    body: JSON.stringify({ published }),
+  });
+}
+
+/**
+ * The reader page's own URL, for the referee to print or hand around. Built
+ * from the page's origin because that is where the SPA is served from — the
+ * API may sit elsewhere in dev, but the link is for a browser, not for fetch.
+ */
+export function publicPageUrl(id: string, key: string): string {
+  return `${window.location.origin}/t/${id}/public?k=${encodeURIComponent(key)}`;
+}
+
+function publicApiPath(id: string, key: string, suffix = ""): string {
+  return `/api/tournaments/${id}/public${suffix}?k=${encodeURIComponent(key)}`;
+}
+
+/**
+ * Fetch the public projection of a tournament with a capability key. A wrong
+ * or revoked key — like an unknown tournament — is a 404, deliberately: the
+ * endpoint must not tell a stranger which ids are real.
+ */
+export async function fetchPublicTournament(
+  id: string,
+  key: string,
+): Promise<PublicTournamentResponse> {
+  const url = await apiUrl(publicApiPath(id, key));
+  let response: Response;
+  try {
+    response = await fetch(url);
+  } catch (cause) {
+    throw new ApiError(0, cause instanceof Error ? cause.message : String(cause));
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, `${response.status} ${response.statusText}`);
+  }
+  return (await response.json()) as PublicTournamentResponse;
+}
+
+/** First reconnect delay for a reader's dropped stream, and the ceiling. */
+const READER_RECONNECT_MS = 1000;
+const READER_RECONNECT_MAX_MS = 30_000;
+
+/** Callbacks for {@link subscribeToPublicTournament}. */
+export interface PublicSubscription {
+  /** A fresh whole-state payload — sent on connect and on every change. */
+  onState: (state: PublicTournamentResponse) => void;
+  /** The tournament is gone (deleted while the page was open). */
+  onGone: () => void;
+  /**
+   * This link has been revoked — the referee issued a new one or stopped
+   * publishing. Terminal: the subscription stops, and reconnecting would only
+   * be refused.
+   */
+  onRevoked: () => void;
+  /** Something arrived that we could not make sense of. */
+  onError: (message: string) => void;
+}
+
+/**
+ * Subscribe a reader to a published tournament.
+ *
+ * Unlike the referee stream this carries the **whole projection** in each
+ * event, not just the version: the payload is identical for every reader and
+ * the server serializes it once, so pushing it costs one serialization and
+ * zero refetches per change, where "push the version, everyone refetches"
+ * costs a hundred of each.
+ *
+ * Reconnection is handled here rather than left to `EventSource`, which retries
+ * immediately and in lockstep. The real burst is not steady state: a server
+ * restart or a wifi blip drops every phone in the room at the same instant, and
+ * they would all come back at the same instant too. Hence exponential backoff
+ * with jitter.
+ */
+export function subscribeToPublicTournament(
+  id: string,
+  key: string,
+  { onState, onGone, onRevoked, onError }: PublicSubscription,
+): () => void {
+  let source: EventSource | null = null;
+  let retry: ReturnType<typeof setTimeout> | null = null;
+  let attempt = 0;
+  let closed = false;
+
+  function scheduleReconnect() {
+    attempt += 1;
+    const ceiling = Math.min(
+      READER_RECONNECT_MAX_MS,
+      READER_RECONNECT_MS * 2 ** (attempt - 1),
+    );
+    // Full jitter: anywhere in (0, ceiling], so a herd of clients that dropped
+    // together comes back spread out instead of in one thundering instant.
+    retry = setTimeout(
+      () => {
+        retry = null;
+        void connect();
+      },
+      Math.random() * ceiling,
+    );
+  }
+
+  async function connect() {
+    if (closed) return;
+    connectionStatus.set("connecting");
+    const base = await resolveApiBase();
+    if (closed) return;
+    const stream = new EventSource(`${base}${publicApiPath(id, key, "/events")}`);
+    source = stream;
+    stream.onopen = () => {
+      attempt = 0;
+      connectionStatus.set("online");
+    };
+    stream.addEventListener("state", (event) => {
+      try {
+        onState(JSON.parse((event as MessageEvent).data) as PublicTournamentResponse);
+      } catch (cause) {
+        // The server built this payload itself, so a parse failure is a bug,
+        // not weather. Say so rather than sitting on stale standings.
+        onError(cause instanceof Error ? cause.message : String(cause));
+      }
+    });
+    stream.addEventListener("gone", () => onGone());
+    stream.addEventListener("revoked", () => {
+      // Terminal, so stop for good: reconnecting with a key the server has
+      // already refused would just be a retry loop nobody can win, and the
+      // backoff would keep the page looking like it was merely offline.
+      stop();
+      onRevoked();
+    });
+    stream.onerror = () => {
+      // Take the retry away from EventSource and back it off ourselves. Also
+      // the path for a 503 when the tournament is at its reader cap.
+      stream.close();
+      if (source === stream) source = null;
+      if (closed) return;
+      connectionStatus.set("connecting");
+      scheduleReconnect();
+    };
+  }
+
+  /** Close the stream and stop reconnecting. Idempotent. */
+  function stop() {
+    closed = true;
+    connectionStatus.set("offline");
+    if (retry) clearTimeout(retry);
+    source?.close();
+    source = null;
+  }
+
+  void connect();
+  return stop;
 }

@@ -181,6 +181,55 @@ A login exchanges the password for a per-boot random bearer token
 `OSP_DATA_DIR` is set, tournaments (and their passwords) persist to disk and
 reload on boot; otherwise the registry is in-memory only.
 
+### Public read-only access
+
+A tournament can be **published**: the players in the room, and anyone
+following from home, then see the standings and the pairings on their phones
+with no password and no ability to change anything. Off by default, per
+tournament, from the *Public page…* button in the toolbar.
+
+Publishing mints a **capability key** and gives the referee a link —
+`/t/{id}/public?k=<192 random bits>` — shown as a QR code, with a *Print QR
+code* button that lays out one sheet (name, code, link) for the playing room.
+The code is inline SVG so it scales to the page without resampling, and it is
+deliberately never themed: reflectance reversal is optional in the QR spec, so
+a light-on-dark code is unreadable to a fair number of phone scanners. It is not a
+boundary against a determined attacker (the link will be photographed and
+forwarded, which is fine: the content is meant to be seen) but against
+*accidental* discovery, so an abandoned tournament doesn't sit in a search
+engine with forty people's names in it. Publishing again rotates the key,
+revoking every link already handed out, independently of the tournament
+password.
+
+What readers get is a projection — `PublicTournamentView`
+([`crates/server/src/public.rs`](crates/server/src/public.rs)) — of the very
+same `TournamentView` the referee sees, so the public table can never disagree
+with theirs. Two things are dropped: the referee's own session state, and
+`Tournament::draft`. That second one *is* the timing rule: the round being
+hand-tuned is never public (a pairing that gets discarded must never have been
+visible), while every result becomes public the instant it is recorded,
+board by board. The conversion destructures both structs by value naming every
+field, so adding a field to `Tournament` fails to compile until someone decides
+whether it is public — fail-closed on schema growth.
+
+Enforcement is structural, not cosmetic: the reader routes are their own router
+group with no mutating handler in it, mounted outside the auth middleware, so
+no bug in credential handling can escalate a reader into a writer. The
+solver-invoking `/rounds/{n}/counterfactual` is deliberately never public —
+two O(N³) solves per unauthenticated request is a one-line denial of service
+against a laptop in the middle of a tournament.
+
+A room of phones is a different load from three referees' laptops, so: the
+payload is serialized once per version and shared by every reader, the plain
+`GET` carries an `ETag` (making the end-of-round refresh herd cheap), the SSE
+stream pushes the *payload itself* rather than the version — which removes the
+refetch fan-out entirely, making SSE cheaper here than polling — reader clients
+reconnect with jittered backoff so a wifi blip doesn't bring the room back in
+one instant, and concurrent public streams are capped per tournament.
+
+Full design, including the static-export and webhook phases still to come, in
+[`docs/public-access.md`](docs/public-access.md).
+
 ### Where the files live
 
 Two directories, configured independently by environment variable — the desktop
@@ -329,7 +378,7 @@ Registry-level routes (not scoped to any one tournament):
 | Method & path | Purpose |
 |---------------|---------|
 | `GET /api/health` | Liveness check. |
-| `GET /api/tournaments` | List every known tournament (id, name, whether it's password-protected) — public, needed to render the picker before logging in anywhere. |
+| `GET /api/tournaments` | List tournaments for the picker: `{ "tournaments": [{ "id", "name", "has_password" }], "restricted" }`. Public, since the picker has to render before anyone has logged in anywhere — but on a server that has `OSP_ADMIN_PASSWORD` set, a caller without a valid admin token gets only the *published* tournaments and `restricted: true` (which the picker turns into an admin-password prompt rather than a silently short list). A server deliberately run open lists everything, as before. |
 | `POST /api/tournaments` | Create a new tournament: `{ "name": "...", "password"? }`. Admin-gated if `OSP_ADMIN_PASSWORD` is set. Returns `{ "id", "token"? }` (a token if the new tournament has a password, so the creator needn't immediately log in to it). |
 | `POST /api/tournaments/import` | Create a tournament from a save file (what the picker's "Load from file…" does): `{ "tournament": {…the file verbatim…}, "password"? }`. Same admin gate and same `{ "id", "token"? }` response as creating one. Deliberately a *single* request: the format version and the tournament's own invariants are checked before anything is registered, so a file this build can't read leaves nothing behind. The file's own `id` is ignored — the registry mints a fresh one, so importing the same file twice can't collide. |
 | `DELETE /api/tournaments/{id}` | Delete a tournament: its registry entry, persisted file, and backups. |
@@ -338,13 +387,18 @@ Registry-level routes (not scoped to any one tournament):
 | `POST /api/ratings/refresh` | Re-download the FESA list now (manual refresh). Admin-gated. |
 
 Per-tournament routes, all nested under `/api/tournaments/{id}` and requiring
-that tournament's bearer token if it has a password (except `/login` and
-`/events`):
+that tournament's bearer token if it has a password (except `/login`,
+`/events`, and the two `/public` reader routes, which take a capability key
+instead — see [public read-only access](#public-read-only-access)):
 
 | Method & path | Purpose |
 |---------------|---------|
 | `POST /login` | Exchange this tournament's password for a bearer token. |
 | `GET /events` | SSE stream of this tournament's change `version`, for live sync. |
+| `GET /public?k=…` | The public projection (`PublicTournamentView`), for a reader holding the capability key. `ETag` = the tournament version paired with the server's boot id; honours `If-None-Match`. A wrong key, a rotated key and an unpublished tournament are all `404`, deliberately — the endpoint must not tell a stranger which ids are real. |
+| `GET /public/events?k=…` | SSE stream carrying the **whole** public projection on connect and on every change, so a reader never refetches. `503` once the tournament is at its cap of concurrent public streams. |
+| `GET /publication` | Whether this tournament is published, and under which key: `{ "published", "key"? }`. Referee-only. |
+| `PUT /publication` | `{ "published": true｜false }`. `true` publishes and always mints a **fresh** key, so it is also how a key is rotated (revoking every link already handed out); `false` unpublishes. Not a tournament mutation: it bumps no version and is not undoable — it is access-control state, stored in the `{id}.auth.json` sidecar next to the password hash. |
 | `GET /` | Fetch the tournament (`TournamentView`; 404 if unknown). |
 | `DELETE /` | Delete the tournament. |
 | `POST /undo` | Revert the last change (server-side undo history). |

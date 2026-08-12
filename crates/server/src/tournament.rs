@@ -21,16 +21,26 @@ use crate::live::ExpectedVersion;
 use crate::ratings;
 use crate::scope::TournamentCtx;
 use crate::state::{AppState, TournamentInstance, TournamentStore};
-use crate::{auth, live};
+use crate::{auth, live, public};
 
 /// Build the router nested at `/api/tournaments/{id}`.
 ///
-/// Split into a public group (login, the SSE stream — both need to resolve the
-/// tournament but must work without a token already) and a protected group
-/// (everything else): the protected group's `route_layer`s run auth before the
-/// version check, and both need [`Path`]-param access to the `{id}` segment,
-/// which requires `route_layer` (not `layer`) — see axum's docs on the
-/// difference.
+/// Split into **three** groups that share the `{id}` prefix and nothing else:
+///
+/// - a public group (login, the change-version SSE stream — both need to
+///   resolve the tournament but must work without a token already);
+/// - the **reader** group ([`crate::public`]): the public projection and its
+///   own stream, reached with a capability key instead of a password, and
+///   containing no mutating handler at all;
+/// - a protected group (everything else), whose `route_layer`s run auth before
+///   the version check. Both middlewares need [`Path`]-param access to the
+///   `{id}` segment, which requires `route_layer` (not `layer`) — see axum's
+///   docs on the difference.
+///
+/// The property worth preserving as this grows: **no handler is reachable from
+/// more than one group.** No bug in token handling can then escalate a reader
+/// into a writer, because there is no writer to reach (`docs/public-access.md`
+/// §3).
 ///
 /// - `GET    /`               fetch the tournament
 /// - `DELETE /`               delete the tournament
@@ -71,6 +81,10 @@ use crate::{auth, live};
 /// - `POST   /backups/{backup_id}/restore` restore a backup as the current tournament
 /// - `POST   /login`  exchange this tournament's password for a session token
 /// - `GET    /events` SSE stream of this tournament's change version
+/// - `GET    /publication` whether this tournament is published, and its key
+/// - `PUT    /publication` publish / rotate the key / unpublish
+/// - `GET    /public`        the public projection (capability key, no password)
+/// - `GET    /public/events` the same projection, pushed on every change
 ///
 /// Every endpoint (except login/events/the text exports) returns a
 /// [`TournamentView`] (the tournament plus whether an undo is available), so
@@ -82,6 +96,10 @@ pub(crate) fn scope(state: AppState) -> Router<AppState> {
 
     let protected = Router::new()
         .route("/", get(get_tournament).delete(delete_tournament))
+        .route(
+            "/publication",
+            get(public::get_publication).put(public::set_publication),
+        )
         .route("/undo", post(undo))
         .route("/american-grid", get(american_grid))
         .route("/settings", put(update_settings))
@@ -172,7 +190,7 @@ pub(crate) fn scope(state: AppState) -> Router<AppState> {
             auth::require_tournament_auth,
         ));
 
-    public.merge(protected)
+    public.merge(public::scope()).merge(protected)
 }
 
 /// API response: the current tournament, undo availability, and the derived
@@ -188,46 +206,50 @@ pub(crate) fn scope(state: AppState) -> Router<AppState> {
     rename = "TournamentResponse",
     export_to = "../../../frontend/src/lib/generated/"
 )]
-struct TournamentView {
-    tournament: Tournament,
-    can_undo: bool,
+pub(crate) struct TournamentView {
+    pub(crate) tournament: Tournament,
+    pub(crate) can_undo: bool,
     /// Monotonic change version. Clients echo it in the `X-Tournament-Version`
     /// header so a stale edit is rejected (409), and use it to ignore the SSE
     /// echo of their own change (see [`crate::live`]).
-    version: u32,
-    standings: Vec<Standing>,
+    pub(crate) version: u32,
+    pub(crate) standings: Vec<Standing>,
     /// The ranked team standings, in team mode only — the table the Standings
     /// tab shows there, with the per-player figures staying in `standings` for
     /// the breakdown rows. `None` for an individual tournament.
     #[serde(skip_serializing_if = "Option::is_none")]
-    team_standings: Option<Vec<TeamStanding>>,
+    pub(crate) team_standings: Option<Vec<TeamStanding>>,
     /// The cup podium once decided (champion / runner-up / third / fourth), for the
     /// Results-tab medals. `None` when there is no cup or the final isn't finished.
     #[serde(skip_serializing_if = "Option::is_none")]
-    cup_podium: Option<CupPodium>,
+    pub(crate) cup_podium: Option<CupPodium>,
     /// The full cup bracket (structure + results), derived server-side so the Cup
     /// tab renders it directly. `None` when there is no cup.
     #[serde(skip_serializing_if = "Option::is_none")]
-    cup_bracket: Option<CupBracketView>,
+    pub(crate) cup_bracket: Option<CupBracketView>,
     /// Players the cup will pair in the round being drafted, so the draft UI can
     /// keep them out of the Swiss customization. Empty otherwise.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    draft_cup_players: Vec<TournamentId>,
+    pub(crate) draft_cup_players: Vec<TournamentId>,
     /// Suggested handicap per board, indexed like `tournament.rounds[i].boards[j]`.
     /// Computed from current ratings regardless of `handicap_policy` — the
     /// frontend decides how to surface it. `None` = no suggestion (near-equal
     /// strength, an unrated player, or a cup board).
-    suggested_handicaps: Vec<Vec<Option<Handicap>>>,
+    pub(crate) suggested_handicaps: Vec<Vec<Option<Handicap>>>,
     /// The winner that counts for standings/pairing per board (see
     /// [`osp_core::Board::effective_winner`]), indexed like
     /// `tournament.rounds[i].boards[j]`. Computed here — using the tournament's
     /// `handicap_wiel_rule` setting — so the frontend never has to re-derive it.
     /// `None` while a board is undecided.
-    effective_winners: Vec<Vec<Option<Winner>>>,
+    pub(crate) effective_winners: Vec<Vec<Option<Winner>>>,
 }
 
 /// Build the view from the store, or 404 if no tournament exists.
-fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
+///
+/// Shared with [`crate::public`], which projects it down to what a reader may
+/// see — so the public standings are the referee's own numbers, never a second
+/// computation that could disagree with them.
+pub(crate) fn build_view(store: &TournamentStore) -> Result<TournamentView, ApiError> {
     let tournament = store.current().cloned().ok_or(ApiError::NoTournament)?;
     let standings = tournament.standings();
     let team_standings = tournament.team_standings();
@@ -256,7 +278,7 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
                 .collect()
         })
         .collect();
-    Ok(Json(TournamentView {
+    Ok(TournamentView {
         tournament,
         can_undo: store.can_undo(),
         version: store.version(),
@@ -267,7 +289,12 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
         draft_cup_players,
         suggested_handicaps,
         effective_winners,
-    }))
+    })
+}
+
+/// [`build_view`], wrapped as the JSON body every referee endpoint returns.
+fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
+    build_view(store).map(Json)
 }
 
 /// Fetch the tournament.

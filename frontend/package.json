@@ -25,6 +25,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
+    "qrcode-generator": "^2.0.4",
     "svelte-i18n": "^4.0.1"
   }
 }

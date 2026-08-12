@@ -10,8 +10,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+use axum::body::Bytes;
+use constant_time_eq::constant_time_eq;
 use osp_core::{Tournament, TournamentError};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -140,6 +143,23 @@ impl TournamentStore {
     /// is currently listening, which is fine.
     fn bump_and_notify(&mut self) {
         self.version = self.version.wrapping_add(1);
+        let _ = self.notifier.send(self.version);
+    }
+
+    /// Re-send the *current* version, without advancing it: nothing about the
+    /// tournament changed, but something about who may see it did.
+    ///
+    /// This is what makes revoking a public link take effect at once (see
+    /// [`TournamentRegistry::set_publication`]). A public reader's stream
+    /// re-checks its capability key on every notification, so waking it is the
+    /// whole mechanism — without this, a rotated key would only take hold at
+    /// the *next* edit, and a revoked reader would keep receiving results in
+    /// the meantime.
+    ///
+    /// Harmless to the referee streams: their clients refetch only when the
+    /// version they are told about is *newer* than the one they hold, so a
+    /// repeat of the current one is ignored.
+    fn ping(&self) {
         let _ = self.notifier.send(self.version);
     }
 
@@ -320,6 +340,18 @@ impl TournamentStore {
     }
 }
 
+/// No tournament with this id is registered.
+#[derive(Debug, Clone, Copy)]
+pub struct NoSuchTournament(pub Uuid);
+
+impl std::fmt::Display for NoSuchTournament {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "no tournament {}", self.0)
+    }
+}
+
+impl std::error::Error for NoSuchTournament {}
+
 /// Failure of [`TournamentStore::mutate`].
 #[derive(Debug)]
 pub enum MutateError {
@@ -338,9 +370,30 @@ pub enum MutateError {
 /// the normal case in local/embedded mode) and `Some` for a password-protected
 /// one; unlike [`AppState::admin_auth`] (which gates *creating* tournaments),
 /// this gates reading/editing *this* tournament specifically.
+///
+/// `publication` is the other half of the same story, pointing the other way:
+/// the capability key of the **public reader page** (see [`crate::public`]),
+/// `None` — the default — when the tournament is not published at all.
 pub struct TournamentInstance {
     pub store: RwLock<TournamentStore>,
     pub auth: Option<AuthConfig>,
+    /// The public reader page's capability key, or `None` when this tournament
+    /// is not published. Unlike `auth` this changes at runtime (the referee
+    /// publishes, rotates the key, or unpublishes mid-tournament), so it lives
+    /// behind its own lock; it is persisted in the same `{id}.auth.json`
+    /// sidecar, since it is access-control state and must not travel inside a
+    /// save file a referee mails around.
+    publication: RwLock<Option<String>>,
+    /// The public projection, serialized, together with the store version it
+    /// was built from — so one mutation costs one serialization rather than one
+    /// per reader (see `docs/public-access.md` §4). Invalidated by version
+    /// mismatch, never explicitly.
+    public_payload: Mutex<Option<(u32, Bytes)>>,
+    /// How many public SSE streams are currently open on this tournament. Not a
+    /// scaling measure — a room of a hundred phones is fine — but an abuse one:
+    /// the referee stream was implicitly bounded by knowing the password, and
+    /// this one is not bounded by anything at all.
+    public_streams: AtomicUsize,
     /// Where this tournament's automatic backups are written (see
     /// [`crate::backup`]) — its own directory under the registry's backups
     /// root. `None` when no root could be resolved at all, which keeps no
@@ -350,7 +403,93 @@ pub struct TournamentInstance {
     pub backups_dir: Option<PathBuf>,
 }
 
+/// Holds one public SSE stream's slot against [`TournamentInstance::public_streams`],
+/// releasing it when the stream is dropped (client disconnect, server shutdown).
+pub(crate) struct PublicStreamSlot(Arc<TournamentInstance>);
+
+impl Drop for PublicStreamSlot {
+    fn drop(&mut self) {
+        self.0.public_streams.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 impl TournamentInstance {
+    /// Assemble an instance around an already-built store.
+    fn new(
+        store: TournamentStore,
+        auth: Option<AuthConfig>,
+        public_key: Option<String>,
+        backups_dir: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            store: RwLock::new(store),
+            auth,
+            publication: RwLock::new(public_key),
+            public_payload: Mutex::new(None),
+            public_streams: AtomicUsize::new(0),
+            backups_dir,
+        }
+    }
+
+    /// This tournament's public capability key, or `None` when it is not
+    /// published. Only ever handed to an authenticated referee — it is what the
+    /// QR code on the wall encodes.
+    pub fn public_key(&self) -> Option<String> {
+        self.publication
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Whether `presented` is this tournament's public capability key. Compared
+    /// in constant time, like the session token: it is a bearer credential, and
+    /// the fact that it grants only reading doesn't make leaking it through
+    /// timing any more appealing. Always false when unpublished, so an
+    /// unpublished tournament cannot be reached by guessing.
+    pub(crate) fn public_key_matches(&self, presented: &str) -> bool {
+        match self.public_key() {
+            Some(key) => constant_time_eq(presented.as_bytes(), key.as_bytes()),
+            None => false,
+        }
+    }
+
+    /// Publish (with a freshly minted key), rotate the key, or unpublish
+    /// (`None`). Does *not* persist — go through
+    /// [`TournamentRegistry::set_publication`], which owns the sidecar.
+    fn set_public_key(&self, key: Option<String>) {
+        *self.publication.write().unwrap_or_else(|e| e.into_inner()) = key;
+    }
+
+    /// The cached public payload if it was built from `version`, else `None`.
+    pub(crate) fn cached_public_payload(&self, version: u32) -> Option<Bytes> {
+        let cache = self
+            .public_payload
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        match &*cache {
+            Some((cached, payload)) if *cached == version => Some(payload.clone()),
+            _ => None,
+        }
+    }
+
+    /// Remember `payload` as the public projection of `version`.
+    pub(crate) fn cache_public_payload(&self, version: u32, payload: Bytes) {
+        *self
+            .public_payload
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some((version, payload));
+    }
+
+    /// Claim a slot for one public SSE stream, or `None` when `cap` are already
+    /// open. The returned guard releases the slot when dropped.
+    pub(crate) fn open_public_stream(self: &Arc<Self>, cap: usize) -> Option<PublicStreamSlot> {
+        if self.public_streams.fetch_add(1, Ordering::Relaxed) >= cap {
+            self.public_streams.fetch_sub(1, Ordering::Relaxed);
+            return None;
+        }
+        Some(PublicStreamSlot(Arc::clone(self)))
+    }
+
     /// Acquire the store for reading / writing, **recovering from a poisoned
     /// lock** rather than propagating the panic.
     ///
@@ -400,12 +539,35 @@ pub struct TournamentSummary {
 }
 
 /// What's persisted alongside a tournament file for the bits that live outside
-/// `osp-core` (the password hash). Kept as its own small sidecar file
-/// (`{id}.auth.json`) rather than folded into `TournamentStore`'s persistence,
-/// so the store stays ignorant of auth, same as before this feature.
+/// `osp-core`: the password hash, and the public reader page's capability key.
+/// Kept as its own small sidecar file (`{id}.auth.json`) rather than folded
+/// into `TournamentStore`'s persistence, so the store stays ignorant of auth,
+/// same as before this feature — and so neither travels inside a save file the
+/// referee mails around.
 #[derive(Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct PersistedAuth {
+    #[serde(default)]
     password_hash: Option<String>,
+    /// The public reader page's capability key; absent = not published, which
+    /// is the default and what every sidecar written before publication existed
+    /// says.
+    #[serde(default)]
+    public_key: Option<String>,
+}
+
+/// Mint a fresh public capability key: 192 random bits, hex-encoded.
+///
+/// Not a security boundary against a determined attacker — the link is meant to
+/// be photographed and forwarded — but against *accidental* discovery, which is
+/// the actual risk: an abandoned tournament must not sit in a search engine with
+/// forty people's names in it. Rotating it revokes every link that was handed
+/// out, independently of the tournament password.
+fn mint_public_key() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 24];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// All tournaments known to this server process.
@@ -471,8 +633,8 @@ impl TournamentRegistry {
                     // Fail closed: if the sidecar is present but unreadable we
                     // can't tell whether this tournament is password-protected, so
                     // refuse to load it rather than serve it open.
-                    let auth = match Self::load_auth(dir, id) {
-                        Ok(hash) => hash.map(AuthConfig::from_hash),
+                    let persisted = match Self::load_auth(dir, id) {
+                        Ok(persisted) => persisted,
                         Err(e) => {
                             tracing::error!(
                                 "refusing to load tournament {id}: its auth sidecar is \
@@ -485,13 +647,14 @@ impl TournamentRegistry {
                     };
                     instances.insert(
                         id,
-                        Arc::new(TournamentInstance {
-                            store: RwLock::new(store),
-                            auth,
-                            backups_dir: backups_root
+                        Arc::new(TournamentInstance::new(
+                            store,
+                            persisted.password_hash.map(AuthConfig::from_hash),
+                            persisted.public_key,
+                            backups_root
                                 .as_ref()
                                 .map(|root| crate::backup::dir_for(root, id)),
-                        }),
+                        )),
                     );
                 }
             }
@@ -523,27 +686,28 @@ impl TournamentRegistry {
             .map(|dir| dir.join(format!("{id}.auth.json")))
     }
 
-    /// Load the password hash from the `{id}.auth.json` sidecar, as three
-    /// distinct outcomes so the caller can **fail closed** on damage:
-    /// - the file is absent → `Ok(None)`: the tournament was created without a
-    ///   password. A create *with* a password writes the sidecar before the
-    ///   tournament file (see [`create`](Self::create)), so a present tournament
-    ///   with no sidecar is genuinely open, not a torn create;
-    /// - the file is present and valid → `Ok(Some(hash))`: password-protected;
+    /// Load the `{id}.auth.json` sidecar, as three distinct outcomes so the
+    /// caller can **fail closed** on damage:
+    /// - the file is absent → `Ok(default)`: the tournament was created without
+    ///   a password and was never published. A create *with* a password writes
+    ///   the sidecar before the tournament file (see [`create`](Self::create)),
+    ///   so a present tournament with no sidecar is genuinely open, not a torn
+    ///   create;
+    /// - the file is present and valid → `Ok(..)`: whatever it says;
     /// - the file is present but unreadable or corrupt → `Err(..)`: the caller
     ///   must refuse to load the tournament rather than expose a protected one
     ///   with no password. Atomic writes make this case a real anomaly, not the
     ///   normal torn-write it used to be.
-    fn load_auth(dir: &Path, id: Uuid) -> Result<Option<String>, String> {
+    fn load_auth(dir: &Path, id: Uuid) -> Result<PersistedAuth, String> {
         let path = dir.join(format!("{id}.auth.json"));
         let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(PersistedAuth::default())
+            }
             Err(e) => return Err(format!("read {}: {e}", path.display())),
         };
-        let parsed: PersistedAuth =
-            serde_json::from_slice(&bytes).map_err(|e| format!("parse {}: {e}", path.display()))?;
-        Ok(parsed.password_hash)
+        serde_json::from_slice(&bytes).map_err(|e| format!("parse {}: {e}", path.display()))
     }
 
     /// Write the `{id}.auth.json` sidecar atomically (temp file + rename), the
@@ -551,7 +715,7 @@ impl TournamentRegistry {
     /// — a half-written sidecar would reload as an *unreadable* sidecar, which
     /// [`load_auth`](Self::load_auth) now (correctly) refuses to serve open.
     /// Best-effort otherwise: a failure is logged, not propagated.
-    fn persist_auth(&self, id: Uuid, auth: &AuthConfig) {
+    fn persist_auth(&self, id: Uuid, file: &PersistedAuth) {
         let Some(path) = self.auth_path(id) else {
             return; // in-memory only
         };
@@ -563,10 +727,7 @@ impl TournamentRegistry {
                 tracing::warn!("could not create the data directory {}: {e}", dir.display());
             }
         }
-        let file = PersistedAuth {
-            password_hash: Some(auth.password_hash().to_string()),
-        };
-        let bytes = match serde_json::to_vec_pretty(&file) {
+        let bytes = match serde_json::to_vec_pretty(file) {
             Ok(bytes) => bytes,
             Err(e) => {
                 tracing::warn!("could not serialize auth for {id}: {e}");
@@ -585,12 +746,20 @@ impl TournamentRegistry {
         }
     }
 
-    /// List every known tournament (id, name, whether it's password-protected)
-    /// — enough for the picker, never the tournament's contents.
-    pub fn list(&self) -> Vec<TournamentSummary> {
+    /// List known tournaments (id, name, whether it's password-protected) —
+    /// enough for the picker, never the tournament's contents.
+    ///
+    /// `published_only` restricts the listing to tournaments that have opted
+    /// into public reading. That is what an unauthenticated caller gets on a
+    /// server that has an admin password: the picker is otherwise the one thing
+    /// a stranger who finds the URL can enumerate, and once there is a public
+    /// reader UI it would become that UI's front door for tournaments that
+    /// never opted in (see `docs/public-access.md` §3.1).
+    pub fn list(&self, published_only: bool) -> Vec<TournamentSummary> {
         let instances = self.instances.read().expect("registry lock poisoned");
         instances
             .iter()
+            .filter(|(_, instance)| !published_only || instance.public_key().is_some())
             .filter_map(|(id, instance)| {
                 // `instance.read()` recovers from a poisoned store lock (see its
                 // doc): one tournament whose mutation panicked must not take the
@@ -604,6 +773,38 @@ impl TournamentRegistry {
                 })
             })
             .collect()
+    }
+
+    /// Publish a tournament (minting a fresh capability key, or rotating the
+    /// existing one), or unpublish it. Returns the new key, or `None` when the
+    /// tournament is now unpublished.
+    ///
+    /// Publication is *not* a tournament mutation: it changes no content, bumps
+    /// no version, and is not undoable — it is access-control state, so it goes
+    /// straight to the sidecar next to the password hash.
+    pub fn set_publication(
+        &self,
+        id: Uuid,
+        published: bool,
+    ) -> Result<Option<String>, NoSuchTournament> {
+        let instance = self.get(id).ok_or(NoSuchTournament(id))?;
+        let key = published.then(mint_public_key);
+        instance.set_public_key(key.clone());
+        self.persist_auth(
+            id,
+            &PersistedAuth {
+                password_hash: instance
+                    .auth
+                    .as_ref()
+                    .map(|a| a.password_hash().to_string()),
+                public_key: key.clone(),
+            },
+        );
+        // Wake every open stream, so a reader holding the *old* key is cut off
+        // now rather than at the next edit. A rotation that leaves the people
+        // already watching connected is not a revocation at all.
+        instance.read().ping();
+        Ok(key)
     }
 
     /// Look up one tournament's instance by id.
@@ -662,7 +863,15 @@ impl TournamentRegistry {
         // tournament file, so nothing loads), never a tournament file with its
         // sidecar missing (which would reload as open). See [`load_auth`].
         if let Some(auth) = &auth {
-            self.persist_auth(id, auth);
+            self.persist_auth(
+                id,
+                &PersistedAuth {
+                    password_hash: Some(auth.password_hash().to_string()),
+                    // A new tournament is never published: the referee opts in
+                    // explicitly, afterwards.
+                    public_key: None,
+                },
+            );
         }
         let mut store = TournamentStore::empty(self.tournament_path(id));
         store.set_current(tournament);
@@ -671,11 +880,12 @@ impl TournamentRegistry {
             .expect("registry lock poisoned")
             .insert(
                 id,
-                Arc::new(TournamentInstance {
-                    store: RwLock::new(store),
+                Arc::new(TournamentInstance::new(
+                    store,
                     auth,
-                    backups_dir: self.backups_dir(id),
-                }),
+                    None,
+                    self.backups_dir(id),
+                )),
             );
         (id, token)
     }
@@ -722,7 +932,7 @@ impl TournamentRegistry {
 ///
 /// The registry and ratings cache are `RwLock`-guarded and `Arc`-shared so
 /// axum can clone the state cheaply per request.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct AppState {
     pub registry: Arc<TournamentRegistry>,
     /// Cached FESA rating list (see [`crate::ratings`]). Global, not
@@ -733,6 +943,27 @@ pub struct AppState {
     /// create (fine for local/embedded/dev; set this on a publicly reachable
     /// host to stop creation-spam once the URL inevitably circulates).
     pub admin_auth: Option<AuthConfig>,
+    /// Minted once per server run, like the per-boot bearer tokens.
+    ///
+    /// A tournament's `version` is session state: it starts at `0` on every
+    /// boot (see [`TournamentStore`]), so it identifies a state only *within*
+    /// one run. Anything that caches by version across runs — a public reader's
+    /// `ETag`, and the ordering key the phase-3 push will carry — must pair it
+    /// with this, or a restart would serve a reader version 5 of a different
+    /// tournament state and be told "I already have that one", silently and
+    /// forever.
+    pub boot_id: Arc<str>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            registry: Arc::default(),
+            ratings: Arc::default(),
+            admin_auth: None,
+            boot_id: Uuid::new_v4().simple().to_string().into(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -825,7 +1056,7 @@ mod tests {
         let (b, _) = registry.create("Cup B", Some("secret".into())).unwrap();
 
         let mut names: Vec<_> = registry
-            .list()
+            .list(false)
             .into_iter()
             .map(|s| (s.name, s.has_password))
             .collect();
@@ -906,6 +1137,69 @@ mod tests {
     }
 
     #[test]
+    fn publication_survives_a_restart_alongside_the_password() {
+        let dir = std::env::temp_dir().join(format!("osp-publish-{}", uuid::Uuid::new_v4()));
+
+        let (id, key) = {
+            let registry = TournamentRegistry::new(Some(dir.clone()), None);
+            let (id, _) = registry
+                .create("Published Cup", Some("secret".into()))
+                .unwrap();
+            let key = registry
+                .set_publication(id, true)
+                .unwrap()
+                .expect("published");
+            (id, key)
+        };
+
+        // The key comes back, and so does the password it sits beside — the two
+        // share one sidecar, so writing either must not drop the other.
+        let reloaded = TournamentRegistry::new(Some(dir.clone()), None);
+        let instance = reloaded.get(id).expect("reloaded from disk");
+        assert_eq!(instance.public_key().as_deref(), Some(key.as_str()));
+        assert!(instance.auth.as_ref().unwrap().password_matches("secret"));
+
+        // Unpublishing is persisted too, and the tournament is no longer listed
+        // to an unauthenticated caller.
+        reloaded.set_publication(id, false).unwrap();
+        assert!(reloaded.list(true).is_empty());
+        let again = TournamentRegistry::new(Some(dir.clone()), None);
+        assert!(again.get(id).unwrap().public_key().is_none());
+        assert!(again
+            .get(id)
+            .unwrap()
+            .auth
+            .as_ref()
+            .unwrap()
+            .password_matches("secret"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn public_stream_slots_are_capped_and_released_on_disconnect() {
+        let instance = Arc::new(TournamentInstance::new(
+            TournamentStore::empty(None),
+            None,
+            None,
+            None,
+        ));
+
+        let first = instance.open_public_stream(2).expect("under the cap");
+        let second = instance.open_public_stream(2).expect("at the cap");
+        // An unauthenticated stream anyone may open is a resource-exhaustion
+        // surface, so the third is refused rather than merely slow.
+        assert!(instance.open_public_stream(2).is_none());
+
+        // A reader who walks out of the venue frees their slot.
+        drop(first);
+        let third = instance.open_public_stream(2).expect("a slot came free");
+        assert!(instance.open_public_stream(2).is_none());
+        drop((second, third));
+        assert!(instance.open_public_stream(2).is_some());
+    }
+
+    #[test]
     fn a_corrupt_auth_sidecar_fails_closed_not_open() {
         let dir = std::env::temp_dir().join(format!("osp-authfail-{}", uuid::Uuid::new_v4()));
 
@@ -935,15 +1229,16 @@ mod tests {
 
     #[test]
     fn a_poisoned_store_lock_still_serves_later_requests() {
-        let instance = Arc::new(TournamentInstance {
-            store: RwLock::new({
+        let instance = Arc::new(TournamentInstance::new(
+            {
                 let mut s = TournamentStore::empty(None);
                 s.set_current(Tournament::new("Cup").unwrap());
                 s
-            }),
-            auth: None,
-            backups_dir: None,
-        });
+            },
+            None,
+            None,
+            None,
+        ));
 
         // Poison the store lock: panic while holding its write guard, exactly the
         // shape of an osp-core panic inside a mutation. (The panic message on

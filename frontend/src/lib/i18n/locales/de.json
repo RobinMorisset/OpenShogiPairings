@@ -46,7 +46,23 @@
     "refreshRatingsTitle": "Die Wertungsliste erneut von der FESA-Website herunterladen",
     "confirmDiscard": "„{name}“ enthält nicht gespeicherte Änderungen, die verloren gehen. Trotzdem fortfahren?",
     "cannotReachServer": "Der Server ist nicht erreichbar. Läuft er (cargo run -p osp-server)?",
-    "conflictReloaded": "Ein anderer Schiedsrichter hat das Turnier vor Ihnen geändert, daher wurde Ihre letzte Aktion nicht übernommen. Der aktuelle Stand wurde neu geladen — bitte versuchen Sie es erneut."
+    "conflictReloaded": "Ein anderer Schiedsrichter hat das Turnier vor Ihnen geändert, daher wurde Ihre letzte Aktion nicht übernommen. Der aktuelle Stand wurde neu geladen — bitte versuchen Sie es erneut.",
+    "publicPage": "Öffentliche Seite…",
+    "publicPageTitle": "Die schreibgeschützte Seite für Spieler und Zuschauer",
+    "publicPageLive": "Dieses Turnier ist veröffentlicht. Wer diesen Link hat, sieht Tabelle und Paarungen — ohne Passwort und ohne etwas ändern zu können.",
+    "publicPageOff": "Nicht veröffentlicht. Beim Veröffentlichen entsteht ein nicht erratbarer Link, den Spieler auf dem Handy öffnen können. Er zeigt Tabelle und Paarungen jeder bereits gestarteten Runde — nie die Runde, die Sie gerade vorbereiten.",
+    "publish": "Veröffentlichen",
+    "unpublish": "Veröffentlichung beenden",
+    "copyPublicLink": "Link kopieren",
+    "publicLinkCopied": "Kopiert",
+    "rotatePublicKey": "Neuer Link",
+    "rotatePublicKeyTitle": "Einen neuen Link erzeugen und den alten ungültig machen",
+    "confirmRotateKey": "Neuen Link erzeugen? Alle bereits verteilten Links, auch ein QR-Code an der Wand, funktionieren dann nicht mehr.",
+    "confirmUnpublish": "Veröffentlichung beenden? Die öffentliche Seite schließt sich für alle, die sie gerade lesen.",
+    "publicPageReasonsWarning": "Punktkorrekturen werden mit ihrer Begründung angezeigt. Diese lesen jetzt die Spieler, nicht nur die Schiedsrichter.",
+    "publicQrLabel": "QR-Code für die öffentliche Seite von {name}",
+    "printPublicQr": "QR-Code drucken",
+    "printPublicQrTitle": "Ein Blatt mit Code und Link zum Aushängen im Spielraum"
   },
   "login": {
     "title": "Anmeldung für Schiedsrichter",
@@ -113,7 +129,8 @@
     "removeAdjustment": "Diese Anpassung entfernen",
     "adjustmentPointsPlaceholder": "±Pkt.",
     "adjustmentReasonPlaceholder": "Grund",
-    "add": "Hinzufügen"
+    "add": "Hinzufügen",
+    "adjustmentReasonIsPublic": "Veröffentlicht: Die Spieler lesen diese Begründung auf der öffentlichen Seite."
   },
   "roundView": {
     "unknownPlayer": "(unbekannt)",
@@ -318,7 +335,9 @@
     "delete": "Löschen",
     "confirmDelete": "„{name}“ löschen? Das Turnier und seine Sicherungen werden vom Server entfernt. Das lässt sich nicht rückgängig machen.",
     "adminPasswordTitle": "Administrator-Anmeldung erforderlich",
-    "adminPasswordPrompt": "Dieser Server verlangt das Administrator-Passwort, um Turniere anzulegen."
+    "adminPasswordPrompt": "Dieser Server verlangt das Administrator-Passwort, um Turniere anzulegen.",
+    "restrictedToPublished": "Hier werden nur veröffentlichte Turniere aufgelistet.",
+    "showAll": "Als Administrator anmelden"
   },
   "settings": {
     "finalizedWarning": "Die Anmeldung ist finalisiert — die MacMahon-Gruppen zu ändern, ändert die Punkte aller Spieler und die künftigen Paarungen.",
@@ -557,5 +576,12 @@
     "adjustmentReasonPlaceholder": "Grund (erforderlich)",
     "cancelAdjustment": "Abbrechen",
     "addAdjustment": "Hinzufügen"
+  },
+  "publicView": {
+    "subtitle": "Tabelle und Paarungen — live",
+    "gone": "Dieses Turnier ist nicht mehr verfügbar.",
+    "unavailable": "Dieser Link ist ungültig. Möglicherweise wurde er durch einen neueren ersetzt, oder das Turnier ist nicht mehr veröffentlicht.",
+    "notStarted": "Das Turnier hat noch nicht begonnen. Gemeldete Spieler:",
+    "revoked": "Dieser Link ist nicht mehr gültig — es wurde ein neuer ausgegeben, oder das Turnier wird nicht mehr veröffentlicht. Fragen Sie nach dem aktuellen Link."
   }
 }

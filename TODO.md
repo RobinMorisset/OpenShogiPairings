@@ -33,14 +33,15 @@ Known limitations and future work, roughly ordered by area.
 
 - **Log of which user took which action**
 
-- **Read-only access to the pairings and standings** — design settled in
-  [docs/public-access.md](docs/public-access.md): a `PublicTournamentView`
-  projection (`TournamentView` minus the draft and the referee-only fields),
-  never showing a draft round but publishing each result as it lands, served
-  by its own unauthenticated router group. Three phases, each useful alone:
-  a public endpoint on the hosted server (capability URL + read-only frontend
-  mode), a static HTML export of the same projection for the desktop app, then
-  pushing it to a club's own site.
+- **Static HTML export of the public page** — phase 2 of
+  [docs/public-access.md](docs/public-access.md). Phase 1 (the
+  `PublicTournamentView` projection, the capability-keyed public endpoint and
+  its payload-carrying stream, the read-only frontend mode) has landed, and
+  serves the hosted deployment. It does nothing for the desktop app, whose
+  embedded server listens on a random loopback port — hence this: the same
+  projection written as a self-contained HTML file (data inlined, no server),
+  regenerated on every change, for the referee to upload wherever the club
+  already has a website.
 
 - **Keep one backup on tournament deletion for a while** 1 month before losing a tournament backup sounds good
 

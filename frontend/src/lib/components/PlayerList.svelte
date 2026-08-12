@@ -29,6 +29,11 @@
     onAddAdjustment?: (id: string, delta: number, reason: string) => void;
     /** Remove a previously applied point adjustment. */
     onRemoveAdjustment?: (id: string, adjustmentId: string) => void;
+    /** Whether this tournament has a public reader page (see
+     *  `docs/public-access.md`). Only affects who an adjustment's mandatory
+     *  free-text reason is written *for* — which is worth saying at the moment
+     *  it is typed. */
+    published?: boolean;
     busy?: boolean;
   }
 
@@ -45,6 +50,7 @@
     onToggleCategory,
     onAddAdjustment,
     onRemoveAdjustment,
+    published = false,
     busy = false,
   }: Props = $props();
 
@@ -550,6 +556,14 @@
                   {$_("playerList.add")}
                 </button>
               </div>
+              <!-- The reason is mandatory and free text, and it has always been
+                   written referee-to-referee. Once the tournament is published
+                   it is on a page the player can read, so say so *here*, where
+                   it is being typed — the reason is exactly what makes the
+                   adjustment legitimate, so redacting it is the wrong fix. -->
+              {#if published}
+                <p class="adj-public-warning">{$_("playerList.adjustmentReasonIsPublic")}</p>
+              {/if}
             </td>
           </tr>
         {/if}
@@ -797,6 +811,11 @@
   .adjustment-form {
     display: flex;
     gap: 0.4rem;
+  }
+  .adj-public-warning {
+    margin: 0.35rem 0 0;
+    font-size: 0.75rem;
+    color: var(--color-warning);
   }
   .adj-delta {
     width: 4.5rem;

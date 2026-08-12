@@ -31,6 +31,11 @@ pub(crate) enum ApiError {
     VersionConflict,
     /// An upstream dependency (e.g. FESA) failed and no cache is available (502).
     Upstream(String),
+    /// A resource anyone may open is already at its cap (503) — today, the
+    /// public reader streams (see [`crate::public`]). Distinct from a 429: the
+    /// caller isn't asking too often, the server is simply full, and retrying
+    /// later is the right response.
+    Overloaded(String),
     /// A CSV import failed to parse (400). Carries the domain error so the
     /// response can add a stable machine `code` (and interpolation `values`) the
     /// client localizes — the English `error` string is only a fallback.
@@ -346,6 +351,9 @@ impl IntoResponse for ApiError {
                 ),
             ),
             ApiError::Upstream(message) => (StatusCode::BAD_GATEWAY, ErrorBody::message(message)),
+            ApiError::Overloaded(message) => {
+                (StatusCode::SERVICE_UNAVAILABLE, ErrorBody::message(message))
+            }
         };
         debug_assert!(
             body.code

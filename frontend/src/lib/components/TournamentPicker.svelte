@@ -19,17 +19,27 @@
   let busy = $state(false);
   let error = $state<string | null>(null);
 
+  // True when the server answered with only the *published* tournaments,
+  // because it has an admin password and we didn't present one. Surfaced rather
+  // than swallowed: a referee looking at a list that is quietly missing their
+  // tournament would conclude it had been deleted.
+  let restricted = $state(false);
+
   // Set only when an action requires the admin password we don't have yet —
   // stashes the pending create/load so the retry after logging in can reuse it.
-  // At most one is ever set at a time.
+  // At most one is ever set at a time; `"list"` is the case with nothing to
+  // retry afterwards but the listing itself.
   let pendingCreate = $state<{ name: string; password?: string } | null>(null);
   let pendingLoad = $state<{ tournament: Tournament; password?: string } | null>(null);
+  let pendingList = $state(false);
   let adminPassword = $state("");
 
   async function refresh() {
     loading = true;
     try {
-      tournaments = await listTournaments();
+      const listing = await listTournaments();
+      tournaments = listing.tournaments;
+      restricted = listing.restricted;
       error = null;
     } catch (err) {
       error = describe(err);
@@ -69,7 +79,7 @@
 
   async function submitAdminPassword(event: SubmitEvent) {
     event.preventDefault();
-    if ((!pendingCreate && !pendingLoad) || adminPassword.length === 0) return;
+    if ((!pendingCreate && !pendingLoad && !pendingList) || adminPassword.length === 0) return;
     busy = true;
     error = null;
     try {
@@ -82,6 +92,9 @@
       } else if (pendingLoad) {
         const { tournament, password } = pendingLoad;
         await applyLoaded(tournament, password);
+      } else {
+        pendingList = false;
+        await refresh();
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -195,9 +208,23 @@
         {/each}
       </ul>
     {/if}
+    {#if restricted && !loading}
+      <p class="muted restricted">
+        {$_("picker.restrictedToPublished")}
+        <button
+          type="button"
+          class="ghost small"
+          data-testid="unlock-full-list"
+          onclick={() => (pendingList = true)}
+          disabled={busy}
+        >
+          {$_("picker.showAll")}
+        </button>
+      </p>
+    {/if}
   </section>
 
-  {#if pendingCreate || pendingLoad}
+  {#if pendingCreate || pendingLoad || pendingList}
     <section class="card admin-card">
       <h2>{$_("picker.adminPasswordTitle")}</h2>
       <p class="muted">{$_("picker.adminPasswordPrompt")}</p>
@@ -224,6 +251,7 @@
             onclick={() => {
               pendingCreate = null;
               pendingLoad = null;
+              pendingList = false;
             }}
             disabled={busy}
           >
@@ -260,6 +288,14 @@
   .muted {
     color: var(--text-secondary);
     font-size: 0.9rem;
+  }
+  .restricted {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 0.75rem 0 0;
+    font-size: 0.8rem;
   }
   .tournaments {
     list-style: none;

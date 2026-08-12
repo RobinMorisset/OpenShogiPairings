@@ -5,7 +5,7 @@
 //! picked one, and the two `POST`s are what mint new ones.
 
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -17,8 +17,9 @@ use uuid::Uuid;
 use crate::error::ApiError;
 use crate::state::{AppState, TournamentSummary};
 
-/// `GET /api/tournaments`: list every known tournament. Public — needed to
-/// render the picker before anyone has logged in anywhere.
+/// `GET /api/tournaments`: list tournaments. Public — needed to render the
+/// picker before anyone has logged in anywhere — but see [`list_tournaments`]
+/// for what "every" means to a caller with no admin token.
 pub(crate) fn public_routes() -> Router<AppState> {
     Router::new().route("/api/tournaments", get(list_tournaments))
 }
@@ -34,8 +35,39 @@ pub(crate) fn admin_routes() -> Router<AppState> {
         .route("/api/tournaments/import", post(import_tournament))
 }
 
-async fn list_tournaments(State(state): State<AppState>) -> Json<Vec<TournamentSummary>> {
-    Json(state.registry.list())
+/// What `GET /api/tournaments` answers.
+///
+/// `restricted` is why the envelope exists: without it, a referee arriving at a
+/// hosted server would see a short list and no hint that there is more, which
+/// is exactly the kind of silent wrong answer that costs trust. It says "an
+/// admin password is configured and you did not present it, so this list shows
+/// only the published tournaments", and the picker turns it into an
+/// admin-password prompt.
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+struct TournamentListing {
+    tournaments: Vec<TournamentSummary>,
+    restricted: bool,
+}
+
+/// List tournaments for the picker.
+///
+/// The picker is the one thing a stranger who finds the URL can enumerate, and
+/// once there is a public reader UI it would become that UI's front door for
+/// tournaments that never opted into being public. So on a server that has an
+/// admin password — the marker of "this host is reachable by people who are not
+/// its referees" — a caller without a valid admin token sees only the published
+/// tournaments. A server deliberately run open (no admin password, which is
+/// every local and embedded one) is unchanged: it lists everything, as before.
+async fn list_tournaments(State(state): State<AppState>, req: Request) -> Json<TournamentListing> {
+    let restricted = match &state.admin_auth {
+        None => false,
+        Some(auth) => !crate::auth::has_valid_bearer(auth, &req),
+    };
+    Json(TournamentListing {
+        tournaments: state.registry.list(restricted),
+        restricted,
+    })
 }
 
 /// Body of `POST /api/tournaments`.

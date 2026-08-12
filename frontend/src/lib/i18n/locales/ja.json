@@ -46,7 +46,23 @@
     "refreshRatingsTitle": "FESAのサイトからレーティング一覧を再取得します",
     "confirmDiscard": "「{name}」には未保存の変更があり、破棄されます。続行しますか？",
     "cannotReachServer": "サーバーに接続できません。起動していますか（cargo run -p osp-server）？",
-    "conflictReloaded": "他の運営者が先に大会を変更したため、直前の操作は適用されませんでした。最新の状態を再読み込みしました。もう一度お試しください。"
+    "conflictReloaded": "他の運営者が先に大会を変更したため、直前の操作は適用されませんでした。最新の状態を再読み込みしました。もう一度お試しください。",
+    "publicPage": "公開ページ…",
+    "publicPageTitle": "対局者と観戦者のための閲覧専用ページ",
+    "publicPageLive": "この大会は公開されています。このリンクを持つ人は誰でも、パスワードなしで順位表と組み合わせを見られます。変更はできません。",
+    "publicPageOff": "未公開です。公開すると推測できないリンクが作られ、対局者がスマートフォンで開けます。開始済みの各ラウンドの順位表と組み合わせを表示し、準備中のラウンドは決して表示しません。",
+    "publish": "公開する",
+    "unpublish": "公開をやめる",
+    "copyPublicLink": "リンクをコピー",
+    "publicLinkCopied": "コピーしました",
+    "rotatePublicKey": "新しいリンク",
+    "rotatePublicKeyTitle": "新しいリンクを発行し、古いリンクを無効にする",
+    "confirmRotateKey": "新しいリンクを発行しますか？ すでに配ったリンクは、壁に貼ったQRコードも含めてすべて使えなくなります。",
+    "confirmUnpublish": "公開をやめますか？ 閲覧中の全員に対して公開ページが閉じられます。",
+    "publicPageReasonsWarning": "点数調整は理由とともに表示されます。この理由は審判だけでなく対局者にも読まれます。",
+    "publicQrLabel": "{name} の公開ページのQRコード",
+    "printPublicQr": "QRコードを印刷",
+    "printPublicQrTitle": "コードとリンクを載せた1枚。対局室に掲示するためのもの"
   },
   "login": {
     "title": "運営者ログイン",
@@ -113,7 +129,8 @@
     "removeAdjustment": "この調整を削除",
     "adjustmentPointsPlaceholder": "±点",
     "adjustmentReasonPlaceholder": "理由",
-    "add": "追加"
+    "add": "追加",
+    "adjustmentReasonIsPublic": "公開中: この理由は公開ページで対局者に読まれます。"
   },
   "roundView": {
     "unknownPlayer": "（不明）",
@@ -318,7 +335,9 @@
     "delete": "削除",
     "confirmDelete": "「{name}」を削除しますか？ 大会とそのバックアップがサーバーから削除されます。この操作は元に戻せません。",
     "adminPasswordTitle": "管理者ログインが必要です",
-    "adminPasswordPrompt": "このサーバーで大会を作成するには管理者パスワードが必要です。"
+    "adminPasswordPrompt": "このサーバーで大会を作成するには管理者パスワードが必要です。",
+    "restrictedToPublished": "ここには公開中の大会のみが表示されます。",
+    "showAll": "管理者としてログイン"
   },
   "settings": {
     "finalizedWarning": "申込は確定済みです。マクマホングループを変更すると、全選手の持ち点と以降の組み合わせが変わります。",
@@ -557,5 +576,12 @@
     "adjustmentReasonPlaceholder": "理由（必須）",
     "cancelAdjustment": "キャンセル",
     "addAdjustment": "追加"
+  },
+  "publicView": {
+    "subtitle": "順位表と組み合わせ — ライブ",
+    "gone": "この大会はもう利用できません。",
+    "unavailable": "このリンクは無効です。新しいリンクに置き換えられたか、大会の公開が終了した可能性があります。",
+    "notStarted": "大会はまだ始まっていません。登録済みの対局者:",
+    "revoked": "このリンクは無効になりました。新しいリンクが発行されたか、大会の公開が終了しています。現在のリンクをお尋ねください。"
   }
 }
