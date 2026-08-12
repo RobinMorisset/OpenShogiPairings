@@ -315,6 +315,25 @@
     "forcedByeHintTeams": "Uplatní sa len pri nepárnom počte prítomných družstiev — to, ktoré zvýši, kolo vynechá a dostane bod bez boja. Ak chcete vynechať družstvo pri párnom počte, označte ho radšej ako neprítomné a potom v tabuľke nastavte, čo mu kolo prinieslo.",
     "forcedByeEvenWarningTeams": "Počet družstiev je teraz párny, takže by toto voľno nechalo bez súpera ďalšie družstvo a program by dal voľno aj jemu. Odstráňte ho, alebo označte niektoré družstvo ako neprítomné."
   },
+  "resultSheets": {
+    "button": "Výsledkové lístky",
+    "buttonTitle": "Vytlačí malý lístok pre každého hráča — s jeho turnajovým číslom a riadkom na každé kolo pre stôl, súpera a priebežný počet bodov — na rozstrihanie a rozdanie.",
+    "rounds": "Kolá",
+    "roundsTitle": "Koľko kôl má turnaj mať: toľko riadkov na každom lístku.",
+    "blanks": "Prázdne lístky",
+    "blanksTitle": "Ďalšie lístky s prázdnou hlavičkou, na ručné vyplnenie pre hráčov, ktorí sa prihlásia po začiatku turnaja.",
+    "pagesHint": "{slips} lístkov na {pages} stranách A4, {perPage} na stranu",
+    "print": "Tlačiť",
+    "cancel": "Zrušiť",
+    "roundColumn": "Kolo",
+    "boardColumn": "Stôl",
+    "opponentColumn": "Súper",
+    "pointsColumn": "Body",
+    "macmahon": "MacMahon",
+    "na": "N/A",
+    "elo": "ELO",
+    "grade": "Stupeň"
+  },
   "serverStatus": {
     "contacting": "Kontaktuje sa server…",
     "serverPrefix": "Server",

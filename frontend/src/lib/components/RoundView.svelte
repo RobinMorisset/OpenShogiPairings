@@ -22,6 +22,7 @@
   import { absenceKind, absent, cycledForfeit, isDecided } from "../noShow";
   import { printPage } from "../platform";
   import type { HandicapChoice } from "../handicap";
+  import ResultSheetsButton from "./ResultSheetsButton.svelte";
 
   interface Props {
     round: Round;
@@ -79,6 +80,11 @@
      *  server-side (so the Wiel rule applies); indexed like `round.boards`. Used
      *  for the running match score. */
     effectiveWinners?: (Winner | null)[];
+    /** Print the per-player result-reporting slips (see `lib/resultSheets.ts`).
+     *  Absent = no button, which is how the reader page gets none. */
+    onPrintSheets?: (rounds: number, blanks: number) => void;
+    /** Whether those slips carry a MacMahon starting-points row. */
+    sheetMacMahonRow?: boolean;
     busy?: boolean;
   }
 
@@ -102,6 +108,8 @@
     onCarriedWinner,
     teams = [],
     effectiveWinners = [],
+    onPrintSheets,
+    sheetMacMahonRow = false,
     readOnly: readOnlyProp = false,
     staticPage = false,
     busy = false,
@@ -721,6 +729,14 @@
         🔤 {$_("roundView.alphabetical")}
       </button>
       <button type="button" class="ghost" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
+      {#if onPrintSheets}
+        <ResultSheetsButton
+          playerCount={players.length}
+          macMahonRow={sheetMacMahonRow}
+          onPrint={onPrintSheets}
+          {busy}
+        />
+      {/if}
     </div>
   {/if}
   {#if hasReport}

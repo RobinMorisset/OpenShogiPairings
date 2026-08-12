@@ -315,6 +315,25 @@
     "forcedByeHintTeams": "Ne s'applique qu'avec un nombre impair d'équipes présentes — celle qui reste passe la ronde avec un point d'office. Pour faire passer une équipe dans un effectif pair, marquez-la plutôt absente, puis fixez ce que la ronde lui rapporte depuis le classement.",
     "forcedByeEvenWarningTeams": "L'effectif est maintenant pair : cette exemption laisserait une autre équipe sans adversaire, que le moteur exempterait aussi. Retirez-la, ou marquez une équipe absente."
   },
+  "resultSheets": {
+    "button": "Feuilles de résultats",
+    "buttonTitle": "Imprime un petit feuillet par joueur — son numéro de tournoi, et une ligne par ronde pour la table, l'adversaire et le total de points — à découper et à distribuer.",
+    "rounds": "Rondes",
+    "roundsTitle": "Nombre de rondes prévues pour le tournoi : une ligne par ronde sur chaque feuillet.",
+    "blanks": "Feuillets vierges",
+    "blanksTitle": "Feuillets supplémentaires à en-tête vide, à remplir à la main pour les joueurs qui s'inscrivent une fois le tournoi commencé.",
+    "pagesHint": "{slips} feuillets sur {pages} pages A4, {perPage} par page",
+    "print": "Imprimer",
+    "cancel": "Annuler",
+    "roundColumn": "Ronde",
+    "boardColumn": "Table",
+    "opponentColumn": "Adversaire",
+    "pointsColumn": "Points",
+    "macmahon": "MacMahon",
+    "na": "N/A",
+    "elo": "ELO",
+    "grade": "Grade"
+  },
   "serverStatus": {
     "contacting": "Connexion au serveur…",
     "serverPrefix": "Serveur",

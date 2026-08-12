@@ -71,7 +71,9 @@ Known limitations and future work, roughly ordered by area.
 
 - Show **predicted elo change** as the rightmost column of the Standings tab.
 
-- Print per-player small **result reporting sheets**
+- **Pre-fill the earlier rounds on the result sheets**: printing them mid-tournament
+  (for a late arrival, or to replace a lost slip) currently leaves rounds already
+  played blank, so they have to be copied over by hand.
 
 - **Cleanup the Changelog** (tons of redundant entries were made during the team tournament sequence of commits)
 

@@ -315,6 +315,25 @@
     "forcedByeHintTeams": "Działa tylko przy nieparzystej liczbie obecnych drużyn — ta, która zostanie bez pary, pauzuje i dostaje punkt. Aby wyłączyć drużynę z gry przy parzystej liczbie, oznacz ją jako nieobecną, a następnie w tabeli wyników ustal, ile punktów przyniosła jej ta runda.",
     "forcedByeEvenWarningTeams": "Liczba drużyn jest teraz parzysta, więc ta pauza zostawiłaby bez pary kolejną drużynę, której algorytm również przyznałby pauzę. Usuń ją albo oznacz drużynę jako nieobecną."
   },
+  "resultSheets": {
+    "button": "Karty wyników",
+    "buttonTitle": "Drukuje małą karteczkę dla każdego zawodnika — z jego numerem turniejowym i wierszem na każdą rundę na stolik, przeciwnika i bieżący wynik — do rozcięcia i rozdania.",
+    "rounds": "Rundy",
+    "roundsTitle": "Ile rund ma mieć turniej: tyle wierszy na każdej karcie.",
+    "blanks": "Puste karty",
+    "blanksTitle": "Dodatkowe karty z pustym nagłówkiem, do wypełnienia ręcznie dla zawodników zapisujących się po rozpoczęciu turnieju.",
+    "pagesHint": "{slips} kart na {pages} stronach A4, {perPage} na stronę",
+    "print": "Drukuj",
+    "cancel": "Anuluj",
+    "roundColumn": "Runda",
+    "boardColumn": "Stolik",
+    "opponentColumn": "Przeciwnik",
+    "pointsColumn": "Punkty",
+    "macmahon": "MacMahon",
+    "na": "N/A",
+    "elo": "ELO",
+    "grade": "Stopień"
+  },
   "serverStatus": {
     "contacting": "Łączenie z serwerem…",
     "serverPrefix": "Serwer",

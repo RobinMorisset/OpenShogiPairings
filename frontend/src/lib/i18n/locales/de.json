@@ -315,6 +315,25 @@
     "forcedByeHintTeams": "Greift nur bei einer ungeraden Anzahl anwesender Mannschaften — die übriggebliebene setzt die Runde mit einem Punkt kampflos aus. Um eine Mannschaft bei geradem Feld aussetzen zu lassen, markieren Sie sie stattdessen als abwesend und legen dann in der Rangliste fest, was ihr die Runde einbringt.",
     "forcedByeEvenWarningTeams": "Das Feld ist jetzt gerade: Dieses Freilos würde eine weitere Mannschaft ohne Gegner lassen, der die Engine ebenfalls ein Freilos gäbe. Entfernen Sie es, oder markieren Sie eine Mannschaft als abwesend."
   },
+  "resultSheets": {
+    "button": "Ergebniszettel",
+    "buttonTitle": "Druckt einen kleinen Zettel je Spieler — mit seiner Turniernummer und einer Zeile je Runde für Brett, Gegner und Punktestand — zum Ausschneiden und Verteilen.",
+    "rounds": "Runden",
+    "roundsTitle": "Wie viele Runden das Turnier haben soll: eine Zeile je Runde auf jedem Zettel.",
+    "blanks": "Leere Zettel",
+    "blanksTitle": "Zusätzliche Zettel mit leerem Kopf, von Hand auszufüllen für Spieler, die sich erst nach Turnierbeginn anmelden.",
+    "pagesHint": "{slips} Zettel auf {pages} A4-Seiten, {perPage} pro Seite",
+    "print": "Drucken",
+    "cancel": "Abbrechen",
+    "roundColumn": "Runde",
+    "boardColumn": "Brett",
+    "opponentColumn": "Gegner",
+    "pointsColumn": "Punkte",
+    "macmahon": "MacMahon",
+    "na": "N/A",
+    "elo": "ELO",
+    "grade": "Grad"
+  },
   "serverStatus": {
     "contacting": "Verbindung zum Server…",
     "serverPrefix": "Server",

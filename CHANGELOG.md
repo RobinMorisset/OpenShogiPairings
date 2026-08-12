@@ -51,6 +51,21 @@ rather than half-parsed; re-create the tournament.
 
 ### Added
 
+- **Printable per-player result sheets** (round tab → *Result sheets*): a small
+  slip per player carrying their tournament number, ELO and grade, and a row per
+  planned round for the board, the opponent and the running score. The referee
+  writes the board and opponent numbers in at the start of a round, the players
+  add the handicap and the result and drop the slips back on the desk, and the
+  referee writes the new total — so results can be reported while the referee is
+  busy, the tournament survives losing the computer, and the slips can be sorted
+  by score to pair the next round by hand. Six to an A4 (four once the round
+  count needs the extra room), with dashed cut lines. The referee is asked how
+  many rounds the tournament will have, since nothing records that, and how many
+  blank slips to print for players registering late. Slips carry a MacMahon
+  starting-points row when there are thresholds and the points come from the
+  registration ratings — not from the live ELO estimate, which moves every round.
+  Only available from the round tabs, which is exactly once registration has been
+  finalized and the tournament numbers exist.
 - **Nationality protection** (Settings → *Nationality protection*), club
   protection's weaker sibling: avoid pairing two players of the same
   nationality, optionally only for the first N rounds and with nationalities

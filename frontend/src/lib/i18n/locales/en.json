@@ -315,6 +315,25 @@
     "forcedByeHintTeams": "Only applies with an odd number of present teams — the leftover one sits out with a free point. To sit a team out of an even field, mark it absent instead, then set what the round scored it from the standings.",
     "forcedByeEvenWarningTeams": "The field is now even, so this bye would leave another team unpaired and the engine would bye it too. Remove it, or mark a team absent."
   },
+  "resultSheets": {
+    "button": "Result sheets",
+    "buttonTitle": "Print one small slip per player — their tournament number, and a row per round for the board, the opponent and the running score — to cut apart and hand out.",
+    "rounds": "Rounds",
+    "roundsTitle": "How many rounds the tournament is planned to have: one row per round on every slip.",
+    "blanks": "Blank sheets",
+    "blanksTitle": "Extra slips with an empty header, to fill in by hand for players who register once the tournament has started.",
+    "pagesHint": "{slips} slips on {pages} A4 pages, {perPage} per page",
+    "print": "Print",
+    "cancel": "Cancel",
+    "roundColumn": "Round",
+    "boardColumn": "Board",
+    "opponentColumn": "Opponent",
+    "pointsColumn": "Points",
+    "macmahon": "MacMahon",
+    "na": "N/A",
+    "elo": "ELO",
+    "grade": "Grade"
+  },
   "serverStatus": {
     "contacting": "Contacting server…",
     "serverPrefix": "Server",

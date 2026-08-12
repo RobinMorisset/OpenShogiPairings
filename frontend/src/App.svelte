@@ -75,6 +75,11 @@
   import { pickCsvFile } from "./lib/csvImport";
   import { handicapChoice } from "./lib/handicap";
   import { isTauri, printPage } from "./lib/platform";
+  import {
+    buildSheetPlayers,
+    macMahonRowShown,
+    type SheetPlayer,
+  } from "./lib/resultSheets";
   import { publicPage } from "./lib/publicAccess";
   import { exportPublicPage } from "./lib/publicExport";
   import PublicView from "./lib/components/PublicView.svelte";
@@ -89,6 +94,7 @@
   import RoundView from "./lib/components/RoundView.svelte";
   import RoundDraftView from "./lib/components/RoundDraftView.svelte";
   import ResultsView from "./lib/components/ResultsView.svelte";
+  import ResultSheets from "./lib/components/ResultSheets.svelte";
   import CupBracket from "./lib/components/CupBracket.svelte";
   import TournamentSettingsView from "./lib/components/TournamentSettingsView.svelte";
   import LocaleSwitcher from "./lib/components/LocaleSwitcher.svelte";
@@ -988,6 +994,37 @@
     });
   }
 
+  // Set only for the duration of a "print the result sheets", like `printingQr`
+  // above: it both supplies the slips and switches the print stylesheet over to
+  // them. The slips are built here rather than derived so that a player without
+  // a tournament number or a standing — which cannot happen once registration is
+  // finalized, and the round tabs only exist then — surfaces as an error banner
+  // instead of taking the round tab down with it.
+  let sheetPrint = $state<{ players: SheetPlayer[]; rounds: number; blanks: number } | null>(
+    null,
+  );
+
+  const sheetMacMahonRow = $derived(!!tournament && macMahonRowShown(tournament.settings));
+
+  function handlePrintSheets(rounds: number, blanks: number) {
+    run(async () => {
+      const t = tournament!;
+      sheetPrint = {
+        players: buildSheetPlayers(t.players, t.settings, standings),
+        rounds,
+        blanks,
+      };
+      // As for the QR code: `window.print()` snapshots the DOM synchronously, so
+      // the sheets have to be in it before the dialog opens.
+      await tick();
+      try {
+        await printPage();
+      } finally {
+        sheetPrint = null;
+      }
+    });
+  }
+
   function handleRefreshRatings() {
     run(async () => {
       ratings = await refreshRatings();
@@ -1023,7 +1060,7 @@
        See `lib/publicAccess.ts`. -->
   <PublicView page={publicPage} />
 {:else}
-<div class="app" class:printing-qr={printingQr}>
+<div class="app" class:printing-qr={printingQr} class:printing-sheets={sheetPrint !== null}>
   <header>
     <div class="header-top">
       <div class="header-titles">
@@ -1499,6 +1536,8 @@
             teams={teamMode ? (tournament.teams ?? []) : []}
             onUpdate={handleUpdateDraft}
             onConfirm={handleConfirmRound}
+            onPrintSheets={handlePrintSheets}
+            {sheetMacMahonRow}
             {busy}
           />
         {:else if activeRound}
@@ -1528,11 +1567,25 @@
               handleSetResult(carriedRoundNumber, boardIndex, clicked)}
             teams={teamMode ? (tournament.teams ?? []) : []}
             effectiveWinners={activeRoundWinners}
+            onPrintSheets={handlePrintSheets}
+            {sheetMacMahonRow}
             {busy}
           />
         {/if}
       </div>
     </section>
+  {/if}
+
+  {#if sheetPrint && tournament}
+    <!-- A direct child of `.app`, so the print stylesheet below can hide its
+         siblings and leave the slips alone whatever tab is open. -->
+    <ResultSheets
+      tournamentName={tournament.name}
+      players={sheetPrint.players}
+      rounds={sheetPrint.rounds}
+      blanks={sheetPrint.blanks}
+      macMahonRow={sheetMacMahonRow}
+    />
   {/if}
 
   <footer>
@@ -1883,6 +1936,23 @@
     }
     .app.printing-qr .public-url {
       font-size: 0.9rem;
+    }
+
+    /* Printing the result sheets is a document of its own too: pages of slips to
+       cut apart, and nothing of the screen around them. The slips sit beside the
+       card rather than inside it, so hiding every other child of `.app` — rather
+       than naming the parts of whichever tab happens to be open — is what leaves
+       them alone. The width and padding go as well: the grid inside sizes itself
+       to the printable area. */
+    .app.printing-sheets > header,
+    .app.printing-sheets > .error-banner,
+    .app.printing-sheets > section,
+    .app.printing-sheets > footer {
+      display: none;
+    }
+    .app.printing-sheets {
+      width: auto;
+      padding: 0;
     }
   }
 </style>

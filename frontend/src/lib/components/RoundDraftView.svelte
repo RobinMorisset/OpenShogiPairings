@@ -3,6 +3,7 @@
   import type { DraftUpdate } from "../api";
   import { attendingPlayers, MIN_PRESENT_PLAYERS, MIN_PRESENT_TEAMS } from "../roundDraft";
   import type { Player, RoundDraft, Team } from "../types";
+  import ResultSheetsButton from "./ResultSheetsButton.svelte";
 
   interface Props {
     draft: RoundDraft;
@@ -23,6 +24,11 @@
     onUpdate: (update: DraftUpdate) => void;
     /** Confirm the draft: pair remaining players and start the round. */
     onConfirm: () => void;
+    /** Print the per-player result-reporting slips (see `lib/resultSheets.ts`).
+     *  Drafting round 1 is when the referee hands them out. */
+    onPrintSheets?: (rounds: number, blanks: number) => void;
+    /** Whether those slips carry a MacMahon starting-points row. */
+    sheetMacMahonRow?: boolean;
     busy?: boolean;
   }
 
@@ -34,6 +40,8 @@
     teams = [],
     onUpdate,
     onConfirm,
+    onPrintSheets,
+    sheetMacMahonRow = false,
     busy = false,
   }: Props = $props();
 
@@ -349,6 +357,16 @@
 {/snippet}
 
 <div class="draft">
+  {#if onPrintSheets}
+    <div class="draft-toolbar">
+      <ResultSheetsButton
+        playerCount={players.length}
+        macMahonRow={sheetMacMahonRow}
+        onPrint={onPrintSheets}
+        {busy}
+      />
+    </div>
+  {/if}
   <p class="summary">
     {#if teamMode}
       <!-- The pool is measured in teams here, because teams are what get
@@ -571,6 +589,13 @@
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
+  }
+  /* Matches the round view's toolbar, so the print buttons sit in the same
+     corner whether the round is being drafted or played. */
+  .draft-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: -0.75rem;
   }
   .summary {
     margin: 0;

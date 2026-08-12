@@ -315,6 +315,25 @@
     "forcedByeHintTeams": "出場チームが奇数の場合にのみ適用されます。余った1チームがその回戦を不戦勝で通過します。出場チームが偶数のときに1チームを休ませるには、代わりに欠場と指定し、その回戦の扱いを順位表から設定してください。",
     "forcedByeEvenWarningTeams": "出場チームが偶数になりました。この指定では別の1チームが余り、そのチームも不戦勝になります。指定を解除するか、どこかのチームを欠場にしてください。"
   },
+  "resultSheets": {
+    "button": "結果記入用紙",
+    "buttonTitle": "選手ごとに小さな記入用紙を印刷します。大会番号と、卓・対戦相手・持ち点を書き込む回戦ごとの行が入ります。切り分けて配布してください。",
+    "rounds": "回戦数",
+    "roundsTitle": "予定している回戦数。各用紙にその数だけ行が入ります。",
+    "blanks": "白紙の用紙",
+    "blanksTitle": "見出しが空欄の予備の用紙。大会開始後に参加する選手のために手書きで記入します。",
+    "pagesHint": "用紙{slips}枚、A4{pages}ページ（1ページあたり{perPage}枚）",
+    "print": "印刷",
+    "cancel": "キャンセル",
+    "roundColumn": "回戦",
+    "boardColumn": "卓",
+    "opponentColumn": "対戦相手",
+    "pointsColumn": "持ち点",
+    "macmahon": "マクマホン",
+    "na": "—",
+    "elo": "ELO",
+    "grade": "段級"
+  },
   "serverStatus": {
     "contacting": "サーバーに接続中…",
     "serverPrefix": "サーバー",
