@@ -653,6 +653,15 @@ fn estimate_order(players: &[Player], estimate: &HashMap<Uuid, f64>) -> Vec<Tour
     ids.into_iter().filter_map(|p| p.tournament_id).collect()
 }
 
+/// The first `--threshold`, which several reports key on. Clap declares the flag
+/// with a default value and rejects an empty list, so the vector is never empty —
+/// re-stating the 400 default here would be a third place to keep it in sync.
+fn first_threshold(thresholds: &[f64]) -> f64 {
+    *thresholds
+        .first()
+        .expect("clap guarantees at least one --threshold")
+}
+
 /// Append one CSV row per run: the run's mean |diff|, fraction of games over the
 /// first threshold, standings fidelity, and Open winner. Winners are written as
 /// the report's player label so paired analysis reads the same names as the table.
@@ -663,7 +672,7 @@ fn append_run_rows(
     thresholds: &[f64],
     names: &HashMap<TournamentId, String>,
 ) {
-    let first_t = thresholds.first().copied().unwrap_or(400.0);
+    let first_t = first_threshold(thresholds);
     for (i, o) in outcomes.iter().enumerate() {
         let mean_diff = mean(&o.game_diffs);
         let frac_exceed = if o.game_diffs.is_empty() {
@@ -735,7 +744,7 @@ fn aggregate(name: String, outcomes: &[RunOutcome], thresholds: &[f64]) -> Varia
     // Per-run replications for the inferential comparison: each run is one
     // independent draw, so CIs and paired Δ are computed over these, not over the
     // pooled per-game diffs (which are correlated within a run).
-    let first_t = thresholds.first().copied().unwrap_or(400.0);
+    let first_t = first_threshold(thresholds);
     let per_run_mean_diff: Vec<f64> = outcomes.iter().map(|o| mean(&o.game_diffs)).collect();
     let per_run_exceed: Vec<f64> = outcomes
         .iter()
@@ -1053,7 +1062,7 @@ fn print_report(
             .exceed
             .first()
             .map(|(t, _)| *t as i64)
-            .unwrap_or(400);
+            .expect("every DiffSummary carries one entry per --threshold");
         // (label, per-run accessor, display scale, decimals, base-unit, Δ-unit)
         type Acc = fn(&VariantReport) -> &Vec<f64>;
         let rows: [(String, Acc, f64, usize, &str, &str); 5] = [
