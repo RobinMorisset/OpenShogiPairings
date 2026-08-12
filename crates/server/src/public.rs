@@ -276,6 +276,35 @@ async fn get_public(
         .into_response())
 }
 
+/// `GET /api/tournaments/{id}/public-snapshot` — the same projection, for the
+/// **referee**, so the desktop app can write it out as plain web pages
+/// (`docs/public-access.md` phase 2).
+///
+/// It lives in the protected group rather than behind the capability key, for
+/// two reasons. The laptop deployment is the whole point of the static export —
+/// its embedded server listens on `127.0.0.1:<random>`, so the reader endpoint
+/// is unreachable there and publishing would mint a key pointing at nothing.
+/// And the referee is already authenticated, so there is nothing for a key to
+/// add. Saving the file is itself the act of publishing, for this transport.
+///
+/// It is deliberately *this* projection and not the referee's own view: the
+/// exhaustive destructuring in [`From<TournamentView>`] is what keeps a new
+/// field out of a public file until someone decides it belongs there, and a
+/// client-side re-implementation of the filter would fail open instead.
+///
+/// The `route_layer`-installed version guard is a no-op for a `GET`, so there
+/// is no conflict header to send.
+pub(crate) async fn get_public_snapshot(
+    TournamentCtx(instance): TournamentCtx,
+) -> Result<Response, ApiError> {
+    let (_, body) = payload(&instance)?;
+    Ok((
+        [(header::CONTENT_TYPE, "application/json".to_string())],
+        body,
+    )
+        .into_response())
+}
+
 /// `GET /api/tournaments/{id}/public/events?k=…` — the same projection, pushed
 /// on every change.
 ///

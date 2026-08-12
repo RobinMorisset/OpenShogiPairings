@@ -62,7 +62,12 @@
     "publicPageReasonsWarning": "Úpravy bodov sa zobrazujú aj s dôvodom. Ten teraz čítajú hráči, nielen rozhodcovia.",
     "publicQrLabel": "QR kód verejnej stránky turnaja {name}",
     "printPublicQr": "Vytlačiť QR kód",
-    "printPublicQrTitle": "Jeden list s kódom a odkazom na vyvesenie v hracej miestnosti"
+    "printPublicQrTitle": "Jeden list s kódom a odkazom na vyvesenie v hracej miestnosti",
+    "publicPageDesktop": "Desktopová aplikácia spúšťa server iba na tomto počítači, takže niet odkazu na rozdanie. Namiesto toho vyexportujte stránky a umiestnite ich na web svojho klubu.",
+    "publicExportHint": "Uložte verejnú stránku ako bežné webové stránky — jednu s poradím a po jednej na kolo, navzájom prepojené, bez servera. Vyberte priečinok, potom nahrajte jeho obsah tam, kde už klub má web, a po každom kole exportujte znova.",
+    "publicExport": "Exportovať webové stránky…",
+    "publicExportTitle": "Jeden súbor HTML na kartu, pripravený nahrať na klubový web",
+    "publicExportDone": "Uložených stránok: {count}"
   },
   "login": {
     "title": "Prihlásenie rozhodcu",
@@ -591,5 +596,9 @@
     "unavailable": "Tento odkaz nie je platný. Mohol byť nahradený novším, alebo turnaj už nie je zverejnený.",
     "notStarted": "Turnaj sa ešte nezačal. Prihlásení hráči:",
     "revoked": "Tento odkaz už nie je platný — bol vydaný nový, alebo turnaj už nie je zverejnený. Vyžiadajte si aktuálny odkaz."
+  },
+  "publicExport": {
+    "subtitle": "Poradie a nasadenia",
+    "generatedAt": "Snímka z {when}. Turnaj sa odvtedy mohol posunúť."
   }
 }

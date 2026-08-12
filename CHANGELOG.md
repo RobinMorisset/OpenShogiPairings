@@ -77,9 +77,26 @@ rather than half-parsed; re-create the tournament.
   standings are the referee's own, so the wall display cannot disagree with
   their screen. A room of phones is cheap to serve: the payload is serialized
   once per change and pushed whole down the event stream, so readers never
-  refetch. Not offered by the desktop app, whose server is only reachable from
-  the laptop itself (that is phase 2). Referees are warned when publishing that
-  point-adjustment reasons, written referee-to-referee, are now read by players.
+  refetch. The live link is not offered by the desktop app, whose server is only
+  reachable from the laptop itself — the export below is what serves it.
+  Referees are warned, before either transport, that point-adjustment reasons
+  written referee-to-referee are now read by players.
+- **Export the public page as ordinary web pages** (see
+  [`docs/public-access.md`](docs/public-access.md), phase 2), from *Public
+  page…* → **Export web pages…**. The standings, the cup bracket and each
+  round's pairings are written out as one HTML file per tab — no server, no
+  scripts, nothing fetched from anywhere — linked to each other by a tab strip
+  of ordinary links. Choose a folder, upload its contents wherever the club
+  already has a website, and export again after each round. This is what makes
+  the public page work on the **desktop app**, where the live link cannot: it
+  needs no reachable server at all. The pages are produced by the same
+  components that render the live page, so they cannot drift out of step with
+  the referee's screen; every control is dropped, since none would work in a
+  file; the tie-break and opponent tooltips are kept, as CSS ones; and each
+  page says when the snapshot was taken, so nobody mistakes an old upload for
+  the current standings. They carry `noindex`, since they will sit on a web
+  server long after the tournament. The pages of one export must stay in the
+  same folder — they reference each other by file name.
 - **The tournament picker no longer lists private tournaments to strangers.**
   On a server with `OSP_ADMIN_PASSWORD` set, a caller without the admin token
   sees only the published tournaments — and is told so, with a sign-in prompt,

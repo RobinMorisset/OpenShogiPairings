@@ -1968,6 +1968,68 @@ mod tests {
         }
     }
 
+    /// Phase 2's static export reads the projection through the referee's own
+    /// credentials, because the deployment it exists for — the desktop app —
+    /// has no reachable reader endpoint to key into.
+    #[tokio::test]
+    async fn the_referee_can_read_the_projection_without_publishing_it() {
+        let state = AppState::default();
+        let (id, token) = create_with_password(&state, "Locked", "secret").await;
+        send(
+            router(state.clone()),
+            json_req_auth(
+                "POST",
+                &t(id, "/players"),
+                json!({ "last_name": "Alice" }),
+                &token,
+            ),
+        )
+        .await;
+
+        // Never published: no key exists, and none is asked for.
+        let (status, body) = send(
+            router(state.clone()),
+            get_with_token(&t(id, "/public-snapshot"), &token),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tournament"]["name"], "Locked");
+        assert!(body["can_undo"].is_null());
+        assert!(body["tournament"]["draft"].is_null());
+
+        // It is the referee's route, so it wants the referee's password — the
+        // file it feeds is written by whoever is running the tournament.
+        let (status, _) = send(router(state.clone()), get(&t(id, "/public-snapshot"))).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        // And it is byte-for-byte the projection a reader would be served —
+        // one filter, not two.
+        let key = {
+            let (_, body) = send(
+                router(state.clone()),
+                json_req_auth(
+                    "PUT",
+                    &t(id, "/publication"),
+                    json!({ "published": true }),
+                    &token,
+                ),
+            )
+            .await;
+            body["key"].as_str().unwrap().to_string()
+        };
+        let (_, reader) = send(
+            router(state.clone()),
+            get(&t(id, &format!("/public?k={key}"))),
+        )
+        .await;
+        let (_, referee) = send(
+            router(state.clone()),
+            get_with_token(&t(id, "/public-snapshot"), &token),
+        )
+        .await;
+        assert_eq!(reader, referee);
+    }
+
     #[tokio::test]
     async fn the_public_payload_is_cached_by_version_and_revalidates_with_an_etag() {
         let state = AppState::default();

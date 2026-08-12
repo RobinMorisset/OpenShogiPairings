@@ -56,6 +56,10 @@
      *  Real enforcement is the server's: the reader endpoint has no mutating
      *  handler at all, so this only spares them buttons that would 404. */
     readOnly?: boolean;
+    /** Rendering into a static HTML file (docs/public-access.md phase 2), where
+     *  no script will ever run: drop the toolbar, whose sort toggle and print
+     *  button would be dead there. Turns `readOnly` on by itself. */
+    staticPage?: boolean;
     /** Whether long (two-round) games are enabled — shows the per-board checkbox. */
     longEnabled?: boolean;
     /** Whether the viewed round is the current round (the long flag is only
@@ -98,9 +102,17 @@
     onCarriedWinner,
     teams = [],
     effectiveWinners = [],
-    readOnly = false,
+    readOnly: readOnlyProp = false,
+    staticPage = false,
     busy = false,
   }: Props = $props();
+
+  // A static page is a read-only one that additionally cannot run a script, so
+  // it gets everything `readOnly` does and one thing more (the toolbar goes).
+  // Derived rather than left to the caller: passing `staticPage` alone and
+  // silently getting clickable player names is exactly the kind of default this
+  // codebase does not want.
+  const readOnly = $derived(readOnlyProp || staticPage);
 
   // Every control on the board table is disabled by the same condition: an
   // in-flight request, or a reader who has nothing to submit in the first place.
@@ -696,19 +708,21 @@
 </script>
 
 <div class="round">
-  <div class="round-toolbar print-hide">
-    <button
-      type="button"
-      class="ghost"
-      class:active={alphabetical}
-      aria-pressed={alphabetical}
-      title={$_("roundView.alphabeticalTitle")}
-      onclick={() => (alphabetical = !alphabetical)}
-    >
-      🔤 {$_("roundView.alphabetical")}
-    </button>
-    <button type="button" class="ghost" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
-  </div>
+  {#if !staticPage}
+    <div class="round-toolbar print-hide">
+      <button
+        type="button"
+        class="ghost"
+        class:active={alphabetical}
+        aria-pressed={alphabetical}
+        title={$_("roundView.alphabeticalTitle")}
+        onclick={() => (alphabetical = !alphabetical)}
+      >
+        🔤 {$_("roundView.alphabetical")}
+      </button>
+      <button type="button" class="ghost" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
+    </div>
+  {/if}
   {#if hasReport}
     <div class="report print-hide">
       <button
@@ -762,31 +776,51 @@
         <tbody>
           {#each carriedLongBoards as { index, board } (index)}
             <tr>
+              <!-- Plain text for a reader, exactly as in the main table above:
+                   a disabled button is dimmed and carries a not-allowed
+                   cursor, which is a poor way to render a name nobody was
+                   invited to click. -->
               <td class="p1-col">
-                <button
-                  type="button"
-                  class="player"
-                  class:winner={isWinner(board, "player1")}
-                  class:loser={isLoser(board, "player1")}
-                  disabled={locked || !onCarriedWinner}
-                  title={$_("roundView.clickToSetWinner")}
-                  onclick={() => onCarriedWinner?.(index, "player1")}
-                >
-                  {name(board.player1)}
-                </button>
+                {#if readOnly}
+                  <span
+                    class="player"
+                    class:winner={isWinner(board, "player1")}
+                    class:loser={isLoser(board, "player1")}>{name(board.player1)}</span
+                  >
+                {:else}
+                  <button
+                    type="button"
+                    class="player"
+                    class:winner={isWinner(board, "player1")}
+                    class:loser={isLoser(board, "player1")}
+                    disabled={locked || !onCarriedWinner}
+                    title={$_("roundView.clickToSetWinner")}
+                    onclick={() => onCarriedWinner?.(index, "player1")}
+                  >
+                    {name(board.player1)}
+                  </button>
+                {/if}
               </td>
               <td>
-                <button
-                  type="button"
-                  class="player"
-                  class:winner={isWinner(board, "player2")}
-                  class:loser={isLoser(board, "player2")}
-                  disabled={locked || !onCarriedWinner}
-                  title={$_("roundView.clickToSetWinner")}
-                  onclick={() => onCarriedWinner?.(index, "player2")}
-                >
-                  {name(board.player2)}
-                </button>
+                {#if readOnly}
+                  <span
+                    class="player"
+                    class:winner={isWinner(board, "player2")}
+                    class:loser={isLoser(board, "player2")}>{name(board.player2)}</span
+                  >
+                {:else}
+                  <button
+                    type="button"
+                    class="player"
+                    class:winner={isWinner(board, "player2")}
+                    class:loser={isLoser(board, "player2")}
+                    disabled={locked || !onCarriedWinner}
+                    title={$_("roundView.clickToSetWinner")}
+                    onclick={() => onCarriedWinner?.(index, "player2")}
+                  >
+                    {name(board.player2)}
+                  </button>
+                {/if}
               </td>
             </tr>
           {/each}

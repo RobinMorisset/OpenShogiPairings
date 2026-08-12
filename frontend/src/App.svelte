@@ -76,6 +76,7 @@
   import { handicapChoice } from "./lib/handicap";
   import { isTauri, printPage } from "./lib/platform";
   import { publicPage } from "./lib/publicAccess";
+  import { exportPublicPage } from "./lib/publicExport";
   import PublicView from "./lib/components/PublicView.svelte";
   import QrCode from "./lib/components/QrCode.svelte";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
@@ -555,6 +556,7 @@
     publication = null;
     showPublication = false;
     copiedLink = false;
+    exportedPages = 0;
     error = null;
     // Read (and clear) the requested tab *untracked*: this effect must depend
     // only on `currentTournamentId`. Subscribing to `initialTab` here would let
@@ -905,9 +907,12 @@
   // capability key; the URL built from it is what goes on the wall, and
   // publishing again rotates the key, revoking every link already handed out.
   //
-  // Not offered in the desktop app: its server listens on a random loopback
-  // port, so nobody outside the laptop could reach the link. Serving the
-  // laptop deployment is phase 2 (a static export the referee uploads).
+  // The *live link* is not offered in the desktop app: its server listens on a
+  // random loopback port, so nobody outside the laptop could reach it. What
+  // serves that deployment is the other half of this panel — the static export
+  // (phase 2), a folder of plain web pages the referee uploads to wherever the
+  // club already has a website. That half is offered everywhere, so the panel
+  // itself is too.
   const canPublish = !isTauri();
   let showPublication = $state(false);
   let publication = $state<PublicationState | null>(null);
@@ -921,9 +926,21 @@
 
   function handleTogglePublication() {
     showPublication = !showPublication;
-    if (!showPublication) return;
+    if (!showPublication || !canPublish) return;
     run(async () => {
       publication = await fetchPublication();
+    });
+  }
+
+  /** How many pages the last export wrote, so the button can confirm it
+   *  happened — and say how many files to upload. `0` means never, or
+   *  cancelled. */
+  let exportedPages = $state(0);
+
+  function handleExportPublicPage() {
+    exportedPages = 0;
+    run(async () => {
+      exportedPages = await exportPublicPage();
     });
   }
 
@@ -1073,19 +1090,17 @@
           >
             {$_("app.backups")}
           </button>
-          {#if canPublish}
-            <button
-              type="button"
-              class="ghost"
-              class:active={showPublication}
-              data-testid="toggle-publication"
-              onclick={handleTogglePublication}
-              disabled={busy}
-              title={$_("app.publicPageTitle")}
-            >
-              {$_("app.publicPage")}
-            </button>
-          {/if}
+          <button
+            type="button"
+            class="ghost"
+            class:active={showPublication}
+            data-testid="toggle-publication"
+            onclick={handleTogglePublication}
+            disabled={busy}
+            title={$_("app.publicPageTitle")}
+          >
+            {$_("app.publicPage")}
+          </button>
           <button
             type="button"
             class="ghost"
@@ -1101,7 +1116,12 @@
 
       {#if showPublication}
         <div class="publication-panel">
-          {#if publication === null}
+          {#if !canPublish}
+            <!-- The desktop app: no live link is possible from a server on a
+                 random loopback port, so say so once rather than leave the
+                 referee looking for a button that cannot exist here. -->
+            <p class="small">{$_("app.publicPageDesktop")}</p>
+          {:else if publication === null}
             <p class="small">{$_("app.loading")}</p>
           {:else if publication.published && publicUrl}
             <p class="small">{$_("app.publicPageLive")}</p>
@@ -1157,10 +1177,6 @@
                 {$_("app.unpublish")}
               </button>
             </div>
-            <!-- The adjustment reasons are referee-to-referee prose today, and
-                 this is where they stop being that. Said here rather than next
-                 to the field, so it is read at the moment it starts to matter. -->
-            <p class="small warn">{$_("app.publicPageReasonsWarning")}</p>
           {:else}
             <p class="small">{$_("app.publicPageOff")}</p>
             <div class="publication-actions">
@@ -1175,6 +1191,36 @@
               </button>
             </div>
           {/if}
+
+          <!-- The other transport (docs/public-access.md phase 2): a file, not
+               a link. Offered whatever the deployment, and not gated on the
+               publication flag above — that flag governs *this server's* reader
+               endpoint, while saving the file is itself the act of publishing.
+               Tying them together would make the desktop referee mint a
+               capability key pointing at a loopback port to get a file. -->
+          <div class="publication-export">
+            <p class="small">{$_("app.publicExportHint")}</p>
+            <div class="publication-actions">
+              <button
+                type="button"
+                class="ghost small"
+                data-testid="export-public-page"
+                onclick={handleExportPublicPage}
+                disabled={busy}
+                title={$_("app.publicExportTitle")}
+              >
+                {exportedPages > 0
+                  ? $_("app.publicExportDone", { values: { count: exportedPages } })
+                  : $_("app.publicExport")}
+              </button>
+            </div>
+          </div>
+
+          <!-- The adjustment reasons are referee-to-referee prose today, and
+               this panel is where they stop being that — by either transport.
+               Said here rather than next to the field, so it is read at the
+               moment it starts to matter. -->
+          <p class="small warn">{$_("app.publicPageReasonsWarning")}</p>
         </div>
       {/if}
 
@@ -1647,6 +1693,14 @@
      the toolbar behind, so it carries its own heading. */
   .qr-print-title {
     display: none;
+  }
+  /* The second transport, ruled off from the live link above it: they solve
+     the same problem by different means, and only one of them exists on the
+     desktop app. */
+  .publication-export {
+    margin-top: 0.8rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border-divider);
   }
   .publication-actions {
     display: flex;

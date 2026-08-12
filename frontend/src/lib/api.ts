@@ -936,6 +936,22 @@ export function setPublication(published: boolean): Promise<PublicationState> {
 }
 
 /**
+ * The public projection of the currently open tournament, for the static HTML
+ * export (`docs/public-access.md` phase 2).
+ *
+ * The referee's own credentials, not a capability key: the export exists for
+ * the desktop deployment, where the reader endpoint listens on a loopback port
+ * nobody can reach, so requiring publication first would mean minting a key
+ * that points at nothing. Saving the file *is* the act of publishing there.
+ *
+ * It goes to the server rather than projecting the open tournament here, so the
+ * one fail-closed filter decides what a public file may contain.
+ */
+export function fetchPublicSnapshot(): Promise<PublicTournamentResponse> {
+  return request<PublicTournamentResponse>(scopedPath("/public-snapshot"));
+}
+
+/**
  * The reader page's own URL, for the referee to print or hand around. Built
  * from the page's origin because that is where the SPA is served from — the
  * API may sit elsewhere in dev, but the link is for a browser, not for fetch.

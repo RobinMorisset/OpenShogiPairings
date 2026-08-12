@@ -62,7 +62,12 @@
     "publicPageReasonsWarning": "Point adjustments are shown with their reason. Those are now read by players, not only by referees.",
     "publicQrLabel": "QR code for the public page of {name}",
     "printPublicQr": "Print QR code",
-    "printPublicQrTitle": "One sheet with the code and the link, to put up in the playing room"
+    "printPublicQrTitle": "One sheet with the code and the link, to put up in the playing room",
+    "publicPageDesktop": "The desktop app runs its own server on this computer only, so there is no link to hand out. Export pages instead, and put them on your club's website.",
+    "publicExportHint": "Save the public page as ordinary web pages — one for the standings and one per round, linked to each other, needing no server. Choose a folder, then upload its contents wherever your club already has a website, and export again after each round.",
+    "publicExport": "Export web pages…",
+    "publicExportTitle": "One HTML file per tab, ready to upload to your club's site",
+    "publicExportDone": "{count} pages saved"
   },
   "login": {
     "title": "Referee sign-in",
@@ -591,5 +596,9 @@
     "unavailable": "This link is not valid. It may have been replaced by a newer one, or the tournament may no longer be published.",
     "notStarted": "The tournament has not started yet. Registered players:",
     "revoked": "This link is no longer valid — a new one has been issued, or the tournament is no longer published. Ask for the current link."
+  },
+  "publicExport": {
+    "subtitle": "Standings and pairings",
+    "generatedAt": "Snapshot taken {when}. The tournament may have moved on since."
   }
 }

@@ -1,9 +1,9 @@
 # Public read-only access to standings and pairings — design
 
-Status: **phase 1 implemented** (the projection, the capability-keyed public
-endpoint and its payload-carrying stream, the publication flag, the picker
-audit, and the read-only frontend mode — see §6). Phases 2 and 3 are still
-design only. Supersedes the `TODO.md` line
+Status: **phases 1 and 2 implemented** (the projection, the capability-keyed
+public endpoint and its payload-carrying stream, the publication flag, the
+picker audit, the read-only frontend mode, and the static HTML export — see §6).
+Phase 3 is still design only. Supersedes the `TODO.md` line
 "Read-only access to the pairings and standings" and covers the read half of
 the "Webhook for pushing results and pulling players" line (the *pulling
 players* half — HelloAsso registration import — is a separate direction and is
@@ -363,10 +363,85 @@ defaults:
   loads the same bundle, on a phone, on venue wifi, a hundred at a time. Making
   readers pay for it would undo a chunk of §4.
 
-**Phase 2 — static export.** The same projection written as a self-contained
-HTML file (data inlined, no server), regenerated on every change, for the
-desktop app to upload wherever the club already has a website. This is the
-only thing that serves the laptop deployment without new infrastructure.
+**Phase 2 — static export. Done.** The same projection written as ordinary web
+pages — one per tab, needing no server — regenerated on demand, for the desktop
+app to upload wherever the club already has a website. This is the only thing
+that serves the laptop deployment without new infrastructure.
+
+Landed in `frontend/src/lib/publicExport.ts` (the renderer and the document
+assembly), `frontend/src/lib/components/PublicSnapshot.svelte` (one page of it),
+`frontend/src/lib/publicPage.ts` (the projection-to-props wiring and the page
+list, shared with the live reader page), and one referee-side route,
+`GET /public-snapshot`, in [`crates/server/src/public.rs`](../crates/server/src/public.rs).
+
+Six decisions inside it are worth recording, three of them deviations from the
+sketch above:
+
+- **The pages are pre-rendered HTML, not inlined data plus a script.** "Data
+  inlined" above assumed the SPA would ship inside the file and render it. It
+  would work, and it would be ~700 kB per page (every locale has to be inlined
+  too, since nothing may be fetched), against ~65–110 kB pre-rendered.
+  Rendering ahead of time also buys the properties that matter for a file
+  dropped onto somebody else's web server: it survives any
+  Content-Security-Policy, prints, is searchable and indexable as text, and
+  still shows the standings with JavaScript off. The pages needed no
+  interactivity anyway — a snapshot has nothing to be live about.
+- **Rendered by mounting the real components and serialising the DOM.** The
+  obvious way to emit static HTML is a string-building renderer, and it is the
+  thing §5 argues hardest against: a second renderer drifts, and the day it
+  drifts the club's website disagrees with the referee's screen and neither
+  side knows. So the export mounts `PublicSnapshot` — which composes the very
+  same `ResultsView`, `RoundView` and `CupBracket` the live page uses — into an
+  off-screen host, flushes, and reads back the DOM. What the components gained
+  is a `staticPage` prop that drops the controls (toolbars, filters, pickers)
+  that would otherwise sit in the file looking clickable; a test asserts the
+  output contains no `<button>`, `<input>` or `<select>` at all. The stylesheet
+  is collected from the live document the same way and for the same reason, so
+  a rule added to any component is in the export without anyone remembering.
+- **Tabs become one file per tab, linked to each other.** The first attempt
+  stacked every section into one document, on the grounds that a tab strip is a
+  script. At 45 players and two rounds that is unreadable, and it is not what a
+  tab strip was ever imitating — *links between pages* is. So `publicSections`
+  turns the projection into one page per tab (standings, cup, then each round
+  ascending, exactly the app's order), and the strip is a row of `<a href>`
+  styled like the live one, with the page you are on rendered as plain selected
+  text rather than a link offering to reload what you are reading. The cost is
+  that the pages of one export are only correct **together**: they reference
+  each other by bare file name, so the save flow asks for a directory rather
+  than a file name, and the names are fixed rather than the referee's to choose.
+- **Tooltips become CSS, anchored at export time.** The tables explain
+  themselves through `data-tip` — who an opponent was, how a tie-break was
+  built, why a sit-out scored what it did — and the app turns that into a
+  floating panel with a mousemove handler. Native `title` was the first answer
+  and is genuinely worse than it sounds: a browser shows it only after about a
+  second, in the OS's styling, which reads as "the tooltips are gone". So the
+  export ships the app's own tooltip box as a `:hover::after` rule instead. The
+  one thing that rule cannot do is the handler's viewport clamping, so that is
+  done when the file is written: each tooltip is told to open left, centre or
+  right from where its cell sits in its row, since in a file nothing ever moves
+  again. Without it a tooltip on the last tie-break column hangs off the page
+  and gives the whole document a horizontal scrollbar.
+- **Not gated on the publication flag.** That flag governs *this server's*
+  reader endpoint. The export's whole audience is the deployment where that
+  endpoint is unreachable, so requiring publication first would mean minting a
+  capability key pointing at a loopback port in order to get a file. Saving the
+  files is itself the act of publishing, for this transport. The one thing the
+  flag did carry that the export also needs — the warning that point-adjustment
+  reasons stop being referee-to-referee prose — moved up to cover the whole
+  panel.
+- **Every page says when it was taken, and is written `noindex`.** A static
+  page that has silently gone stale is this transport's characteristic failure,
+  and a reader cannot tell an old file from a live one unless the file says so.
+  It is on *every* page because a reader may be sent straight to round 2. The
+  `noindex` is §3.2's reasoning applied to files that will outlive the
+  tournament by years on someone's web server: putting them on the club's site
+  is the referee's decision, leaving forty people's names in a search index for
+  good is a different one.
+
+Not done, and deliberately: **uploading**. The referee saves a folder and puts
+it where they already put things. Automating that means credentials, a protocol
+choice (FTP? WebDAV? scp? a CMS API?) and a retry story, none of which can be
+designed without a real club's hosting in front of us.
 
 **Phase 3 — push.** POST the same projection, with `{boot_id, version}`, to a
 URL the club configures, on every change. The receiver is *their* site: this

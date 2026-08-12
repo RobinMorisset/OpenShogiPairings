@@ -37,6 +37,10 @@
     effectiveWinners: (Winner | null)[][];
     /** Referee-defined categories, for the highlight filter and leader marks. */
     categories?: PlayerCategory[];
+    /** Rendering into a static HTML file (docs/public-access.md phase 2), where
+     *  no script will ever run: drop the controls that would be dead there —
+     *  the same ones `print-hide` drops on paper, for the same reason. */
+    staticPage?: boolean;
     /** Re-score one player's sit-out in one round. Omitted for a read-only
      *  table, which leaves the sit-out cells as plain text. */
     onSetSitoutValue?: (roundNumber: number, player: number, value: SitoutValue) => void;
@@ -52,6 +56,7 @@
     cupPodium = null,
     effectiveWinners,
     categories = [],
+    staticPage = false,
     onSetSitoutValue,
     onSetTeamSitoutValue,
   }: Props = $props();
@@ -805,9 +810,11 @@
   <p class="muted">{$_("resultsView.noPlayers")}</p>
 {:else}
   <div class="results">
-  <div class="results-toolbar print-hide">
-    <button type="button" class="ghost" onclick={() => printPage(true)}>🖨 {$_("roundView.print")}</button>
-  </div>
+  {#if !staticPage}
+    <div class="results-toolbar print-hide">
+      <button type="button" class="ghost" onclick={() => printPage(true)}>🖨 {$_("roundView.print")}</button>
+    </div>
+  {/if}
   {#if cupPodium && (cupPodium.champion || cupPodium.runner_up || cupPodium.third)}
     <div class="podium">
       <span class="cup-title">{$_("resultsView.cup")}</span>
@@ -822,7 +829,7 @@
       {/if}
     </div>
   {/if}
-  {#if categories.length > 0}
+  {#if categories.length > 0 && !staticPage}
     <div class="category-filter print-hide">
       <span class="filter-label">{$_("resultsView.highlightCategory")}</span>
       {#each categories as cat (cat.id)}

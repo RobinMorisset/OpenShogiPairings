@@ -62,7 +62,12 @@
     "publicPageReasonsWarning": "Les ajustements de points sont affichés avec leur motif. Celui-ci est désormais lu par les joueurs, et plus seulement par les arbitres.",
     "publicQrLabel": "QR code de la page publique de {name}",
     "printPublicQr": "Imprimer le QR code",
-    "printPublicQrTitle": "Une feuille avec le code et le lien, à afficher dans la salle de jeu"
+    "printPublicQrTitle": "Une feuille avec le code et le lien, à afficher dans la salle de jeu",
+    "publicPageDesktop": "L'application de bureau exécute son serveur sur cet ordinateur uniquement : il n'y a donc pas de lien à distribuer. Exportez plutôt des pages et mettez-les sur le site de votre club.",
+    "publicExportHint": "Enregistrez la page publique sous forme de pages web ordinaires — une pour le classement et une par ronde, reliées entre elles, sans aucun serveur. Choisissez un dossier, puis déposez son contenu là où votre club a déjà un site, et exportez à nouveau après chaque ronde.",
+    "publicExport": "Exporter les pages web…",
+    "publicExportTitle": "Un fichier HTML par onglet, prêt à déposer sur le site du club",
+    "publicExportDone": "{count} pages enregistrées"
   },
   "login": {
     "title": "Connexion arbitre",
@@ -591,5 +596,9 @@
     "unavailable": "Ce lien n'est pas valide. Il a peut-être été remplacé par un lien plus récent, ou le tournoi n'est plus publié.",
     "notStarted": "Le tournoi n'a pas encore commencé. Joueurs inscrits :",
     "revoked": "Ce lien n'est plus valide — un nouveau a été émis, ou le tournoi n'est plus publié. Demandez le lien actuel."
+  },
+  "publicExport": {
+    "subtitle": "Classement et appariements",
+    "generatedAt": "Instantané pris le {when}. Le tournoi a pu avancer depuis."
   }
 }

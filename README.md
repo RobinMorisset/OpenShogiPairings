@@ -183,12 +183,13 @@ reload on boot; otherwise the registry is in-memory only.
 
 ### Public read-only access
 
-A tournament can be **published**: the players in the room, and anyone
-following from home, then see the standings and the pairings on their phones
-with no password and no ability to change anything. Off by default, per
-tournament, from the *Public page…* button in the toolbar.
+A tournament can be made public two ways — a **live link** served by this
+server, or a **web page exported to a file** — and the players in the room, and
+anyone following from home, then see the standings and the pairings on their
+phones with no password and no ability to change anything. Both live behind the
+*Public page…* button in the toolbar; both are off until the referee acts.
 
-Publishing mints a **capability key** and gives the referee a link —
+**The live link.** Publishing mints a **capability key** and gives the referee a link —
 `/t/{id}/public?k=<192 random bits>` — shown as a QR code, with a *Print QR
 code* button that lays out one sheet (name, code, link) for the playing room.
 The code is inline SVG so it scales to the page without resampling, and it is
@@ -201,7 +202,29 @@ engine with forty people's names in it. Publishing again rotates the key,
 revoking every link already handed out, independently of the tournament
 password.
 
-What readers get is a projection — `PublicTournamentView`
+**The exported pages.** *Export web pages…* writes the same standings and
+pairings out as ordinary web pages — one per tab, so the standings and each
+round are their own file, linked to each other and needing no server, no
+scripts and no external request. The referee picks a folder, uploads its
+contents wherever their club already has a website, and exports again after
+each round. This is what serves the **desktop app**, whose embedded server
+listens on a random loopback port that nothing in the room can reach; there the
+live link above is not offered at all.
+
+Four things about those files are decisions rather than defaults. Their bodies
+are produced by mounting the very same components the live page uses and
+serialising the DOM they build, so a second renderer cannot drift away from the
+first. Every control is dropped, since none would work — and the tab strip
+becomes real `<a href>` links, which is what it was imitating anyway, so the
+pages must stay side by side in one directory. The app's floating tooltips
+become CSS ones, with each anchored left, centre or right at export time
+according to where its cell sits, because CSS alone cannot keep a tooltip on
+the last column from hanging off the page. And every page states when the
+snapshot was taken, because a page that has quietly gone stale is this
+transport's failure mode. They are written `noindex` by default — they outlive
+the tournament by years on somebody's web server.
+
+What readers get, by either route, is a projection — `PublicTournamentView`
 ([`crates/server/src/public.rs`](crates/server/src/public.rs)) — of the very
 same `TournamentView` the referee sees, so the public table can never disagree
 with theirs. Two things are dropped: the referee's own session state, and
@@ -227,7 +250,7 @@ refetch fan-out entirely, making SSE cheaper here than polling — reader client
 reconnect with jittered backoff so a wifi blip doesn't bring the room back in
 one instant, and concurrent public streams are capped per tournament.
 
-Full design, including the static-export and webhook phases still to come, in
+Full design, including the webhook phase still to come, in
 [`docs/public-access.md`](docs/public-access.md).
 
 ### Where the files live
@@ -424,6 +447,7 @@ instead — see [public read-only access](#public-read-only-access)):
 | `GET /public/events?k=…` | SSE stream carrying the **whole** public projection on connect and on every change, so a reader never refetches. `503` once the tournament is at its cap of concurrent public streams. |
 | `GET /publication` | Whether this tournament is published, and under which key: `{ "published", "key"? }`. Referee-only. |
 | `PUT /publication` | `{ "published": true｜false }`. `true` publishes and always mints a **fresh** key, so it is also how a key is rotated (revoking every link already handed out); `false` unpublishes. Not a tournament mutation: it bumps no version and is not undoable — it is access-control state, stored in the `{id}.auth.json` sidecar next to the password hash. |
+| `GET /public-snapshot` | The same `PublicTournamentView`, for the referee's *Export web pages…* — so the client renders the static pages from the one fail-closed projection rather than re-deriving it. Referee-only, and deliberately **not** gated on `/publication`: the export exists for the desktop app, where the reader endpoint is unreachable and a key would point at nothing. |
 | `GET /` | Fetch the tournament (`TournamentView`; 404 if unknown). |
 | `DELETE /` | Delete the tournament. |
 | `POST /undo` | Revert the last change (server-side undo history). |

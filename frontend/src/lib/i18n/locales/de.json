@@ -62,7 +62,12 @@
     "publicPageReasonsWarning": "Punktkorrekturen werden mit ihrer Begründung angezeigt. Diese lesen jetzt die Spieler, nicht nur die Schiedsrichter.",
     "publicQrLabel": "QR-Code für die öffentliche Seite von {name}",
     "printPublicQr": "QR-Code drucken",
-    "printPublicQrTitle": "Ein Blatt mit Code und Link zum Aushängen im Spielraum"
+    "printPublicQrTitle": "Ein Blatt mit Code und Link zum Aushängen im Spielraum",
+    "publicPageDesktop": "Die Desktop-App betreibt ihren Server nur auf diesem Rechner, es gibt also keinen Link zum Verteilen. Exportieren Sie stattdessen Seiten und stellen Sie sie auf die Website Ihres Vereins.",
+    "publicExportHint": "Speichern Sie die öffentliche Seite als gewöhnliche Webseiten — eine für die Tabelle und eine je Runde, untereinander verlinkt, ganz ohne Server. Wählen Sie einen Ordner und laden Sie dessen Inhalt dorthin, wo Ihr Verein schon eine Website hat; exportieren Sie nach jeder Runde erneut.",
+    "publicExport": "Webseiten exportieren…",
+    "publicExportTitle": "Eine HTML-Datei je Reiter, fertig zum Hochladen auf die Vereinsseite",
+    "publicExportDone": "{count} Seiten gespeichert"
   },
   "login": {
     "title": "Anmeldung für Schiedsrichter",
@@ -591,5 +596,9 @@
     "unavailable": "Dieser Link ist ungültig. Möglicherweise wurde er durch einen neueren ersetzt, oder das Turnier ist nicht mehr veröffentlicht.",
     "notStarted": "Das Turnier hat noch nicht begonnen. Gemeldete Spieler:",
     "revoked": "Dieser Link ist nicht mehr gültig — es wurde ein neuer ausgegeben, oder das Turnier wird nicht mehr veröffentlicht. Fragen Sie nach dem aktuellen Link."
+  },
+  "publicExport": {
+    "subtitle": "Tabelle und Paarungen",
+    "generatedAt": "Momentaufnahme vom {when}. Das Turnier kann seitdem weitergegangen sein."
   }
 }

@@ -16,9 +16,11 @@
   import { describeApiError } from "../errorCodes";
   import { handicapChoice } from "../handicap";
   import type { PublicPage } from "../publicAccess";
+  import { publicRounds } from "../publicPage";
   import type { PublicTournamentResponse, Round } from "../types";
   import ConnectionStatus from "./ConnectionStatus.svelte";
   import CupBracket from "./CupBracket.svelte";
+  import EntrantList from "./EntrantList.svelte";
   import LocaleSwitcher from "./LocaleSwitcher.svelte";
   import ResultsView from "./ResultsView.svelte";
   import RoundView from "./RoundView.svelte";
@@ -55,18 +57,13 @@
     rounds.find((r) => `round-${r.number}` === activeTab) ?? null,
   );
 
-  // The suggested-handicap slice for the active round, matched by position —
-  // empty unless the referee chose to publish the suggestion at all.
-  const activeRoundSuggested = $derived.by(() => {
-    if (!activeRound) return [];
-    const idx = rounds.findIndex((r) => r.number === activeRound.number);
-    return idx >= 0 ? ((view?.suggested_handicaps ?? [])[idx] ?? []) : [];
-  });
-  const activeRoundWinners = $derived.by(() => {
-    if (!activeRound) return [];
-    const idx = rounds.findIndex((r) => r.number === activeRound.number);
-    return idx >= 0 ? ((view?.effective_winners ?? [])[idx] ?? []) : [];
-  });
+  // Each round with its slice of the per-board arrays, joined by position —
+  // shared with the static export so the two pages cannot disagree about which
+  // handicap belongs to which board.
+  const sections = $derived(view ? publicRounds(view) : []);
+  const activeSection = $derived(
+    sections.find((s) => s.round.number === activeRound?.number) ?? null,
+  );
 
   // Land on the newest round — what someone in the room is looking for — and
   // keep the selection valid as rounds come and go (an undo or a backup restore
@@ -175,15 +172,7 @@
              MacMahon start. The entrant list is still worth showing — players
              check that they are registered. -->
         <p class="muted">{$_("publicView.notStarted")}</p>
-        <ol class="entrants">
-          {#each tournament.players as player (player.id)}
-            <li>
-              <span class="entrant-name">{player.last_name} {player.first_name}</span>
-              {#if player.club}<span class="entrant-club">{player.club}</span>{/if}
-              {#if player.rating != null}<span class="entrant-rating">{player.rating}</span>{/if}
-            </li>
-          {/each}
-        </ol>
+        <EntrantList players={tournament.players} />
       {:else}
         <div class="tabs" role="tablist">
           {#if showResults}
@@ -239,14 +228,14 @@
               cup={tournament.cup}
               players={tournament.players}
             />
-          {:else if activeRound}
+          {:else if activeSection}
             <RoundView
-              round={activeRound}
+              round={activeSection.round}
               players={tournament.players}
               handicapPolicy={handicapChoice(tournament.settings.handicap_policy)}
-              suggestedHandicaps={activeRoundSuggested}
+              suggestedHandicaps={activeSection.suggestedHandicaps}
               teams={teamMode ? (tournament.teams ?? []) : []}
-              effectiveWinners={activeRoundWinners}
+              effectiveWinners={activeSection.effectiveWinners}
               longEnabled={tournament.settings.long_boards_enabled}
               readOnly
             />
@@ -316,24 +305,6 @@
     color: var(--text);
     border-color: var(--border);
     background: var(--bg-surface);
-  }
-  .entrants {
-    margin: 1rem 0 0;
-    padding-left: 1.5rem;
-  }
-  .entrants li {
-    padding: 0.2rem 0;
-    display: flex;
-    gap: 0.75rem;
-    align-items: baseline;
-  }
-  .entrant-name {
-    font-weight: 600;
-  }
-  .entrant-club,
-  .entrant-rating {
-    color: var(--text-secondary);
-    font-size: 0.85rem;
   }
   .error-banner {
     background: var(--bg-danger);

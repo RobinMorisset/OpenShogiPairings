@@ -62,7 +62,12 @@
     "publicPageReasonsWarning": "Korekty punktów są pokazywane wraz z powodem. Czytają go teraz gracze, nie tylko sędziowie.",
     "publicQrLabel": "Kod QR strony publicznej turnieju {name}",
     "printPublicQr": "Drukuj kod QR",
-    "printPublicQrTitle": "Jedna kartka z kodem i linkiem do powieszenia w sali gry"
+    "printPublicQrTitle": "Jedna kartka z kodem i linkiem do powieszenia w sali gry",
+    "publicPageDesktop": "Aplikacja desktopowa uruchamia serwer tylko na tym komputerze, więc nie ma linku do rozdania. Zamiast tego wyeksportuj strony i umieść je na witrynie swojego klubu.",
+    "publicExportHint": "Zapisz stronę publiczną jako zwykłe strony WWW — jedną z tabelą i po jednej na rundę, połączone odnośnikami, bez żadnego serwera. Wybierz folder, a potem wgraj jego zawartość tam, gdzie klub ma już witrynę, i eksportuj ponownie po każdej rundzie.",
+    "publicExport": "Eksportuj strony WWW…",
+    "publicExportTitle": "Jeden plik HTML na zakładkę, gotowy do wgrania na stronę klubu",
+    "publicExportDone": "Zapisano stron: {count}"
   },
   "login": {
     "title": "Logowanie sędziego",
@@ -591,5 +596,9 @@
     "unavailable": "Ten link jest nieprawidłowy. Mógł zostać zastąpiony nowszym albo turniej nie jest już publikowany.",
     "notStarted": "Turniej jeszcze się nie rozpoczął. Zarejestrowani gracze:",
     "revoked": "Ten link nie jest już prawidłowy — wydano nowy albo turniej nie jest już publikowany. Poproś o aktualny link."
+  },
+  "publicExport": {
+    "subtitle": "Tabela i kojarzenia",
+    "generatedAt": "Migawka z {when}. Turniej mógł się od tego czasu posunąć."
   }
 }

@@ -83,6 +83,7 @@ use crate::{auth, live, public};
 /// - `GET    /events` SSE stream of this tournament's change version
 /// - `GET    /publication` whether this tournament is published, and its key
 /// - `PUT    /publication` publish / rotate the key / unpublish
+/// - `GET    /public-snapshot` the public projection, for the static HTML export
 /// - `GET    /public`        the public projection (capability key, no password)
 /// - `GET    /public/events` the same projection, pushed on every change
 ///
@@ -100,6 +101,7 @@ pub(crate) fn scope(state: AppState) -> Router<AppState> {
             "/publication",
             get(public::get_publication).put(public::set_publication),
         )
+        .route("/public-snapshot", get(public::get_public_snapshot))
         .route("/undo", post(undo))
         .route("/american-grid", get(american_grid))
         .route("/settings", put(update_settings))
