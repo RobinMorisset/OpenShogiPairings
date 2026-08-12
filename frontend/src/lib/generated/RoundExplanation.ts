@@ -6,7 +6,7 @@ import type { RuleTotal } from "./RuleTotal";
  * A human-facing explanation of one round's Swiss pairings: a per-board ledger,
  * the bye's ledger, and the per-rule round totals (in priority order).
  *
- * Frozen onto the [`Round`](crate::Round) when it is confirmed, because it is a
+ * Frozen onto the [`Round`] when it is confirmed, because it is a
  * record of a past event rather than a function of the present state: the model
  * it scores against is the one that actually paired the round, and that model's
  * inputs (results, ratings, settings) are all editable afterwards. See the
