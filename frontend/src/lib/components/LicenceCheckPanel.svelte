@@ -141,7 +141,6 @@
         {#each missing as { player, nearMisses } (player.id)}
           <li>
             <span class="name">{player.last_name} {player.first_name}</span>
-            {#if player.club}<span class="club">{player.club}</span>{/if}
             {#if nearMisses.length > 0}
               <span class="near-miss">
                 {$_("licenceCheck.nearMiss", { values: { names: nearMisses.join(", ") } })}
@@ -209,11 +208,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.15rem;
-  }
-  ul.missing .club {
-    color: var(--text-secondary);
-    font-size: 0.85em;
-    margin-left: 0.5rem;
   }
   /* On its own line under the name: it is a second thought about that player,
      and it is long enough to push the club off the row otherwise. */

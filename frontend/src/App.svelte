@@ -1215,41 +1215,48 @@
             <PlayerRegistration onAdd={handleAddPlayer} {ratings} {busy} />
           </div>
           <div class="ratings-status print-hide">
-            <span>
-              {#if ratings.length > 0}
-                {$_("app.ratingsLoaded", { values: { count: ratings.length } })}
-              {:else}
-                {$_("app.ratingsNotLoaded")}
-              {/if}
-            </span>
-            <button
-              type="button"
-              class="ghost small"
-              onclick={handleRefreshRatings}
-              disabled={busy}
-              title={$_("app.refreshRatingsTitle")}
-            >
-              {$_("app.refreshRatings")}
-            </button>
-            <button
-              type="button"
-              class="ghost small"
-              onclick={handleImportCsv}
-              disabled={busy}
-              title={$_("playerRegistration.importCsvTitle")}
-            >
-              {$_("playerRegistration.importCsv")}
-            </button>
-            <button
-              type="button"
-              class="ghost small"
-              class:active={showLicenceCheck}
-              data-testid="check-licences"
-              onclick={() => (showLicenceCheck = !showLicenceCheck)}
-              title={$_("playerRegistration.checkLicencesTitle")}
-            >
-              {$_("playerRegistration.checkLicences")}
-            </button>
+            <!-- Left: the FESA list and the button that refreshes it — a state
+                 and the action on that state. Right: the two roster-file
+                 buttons, which have nothing to do with either. -->
+            <div class="ratings-group">
+              <span>
+                {#if ratings.length > 0}
+                  {$_("app.ratingsLoaded", { values: { count: ratings.length } })}
+                {:else}
+                  {$_("app.ratingsNotLoaded")}
+                {/if}
+              </span>
+              <button
+                type="button"
+                class="ghost small"
+                onclick={handleRefreshRatings}
+                disabled={busy}
+                title={$_("app.refreshRatingsTitle")}
+              >
+                {$_("app.refreshRatings")}
+              </button>
+            </div>
+            <div class="ratings-group">
+              <button
+                type="button"
+                class="ghost small"
+                class:active={showLicenceCheck}
+                data-testid="check-licences"
+                onclick={() => (showLicenceCheck = !showLicenceCheck)}
+                title={$_("playerRegistration.checkLicencesTitle")}
+              >
+                {$_("playerRegistration.checkLicences")}
+              </button>
+              <button
+                type="button"
+                class="ghost small"
+                onclick={handleImportCsv}
+                disabled={busy}
+                title={$_("playerRegistration.importCsvTitle")}
+              >
+                {$_("playerRegistration.importCsv")}
+              </button>
+            </div>
           </div>
           {#if showLicenceCheck}
             <div class="licence-check print-hide">
@@ -1680,6 +1687,11 @@
     margin-top: 0.6rem;
     font-size: 0.8rem;
     color: var(--text-secondary);
+  }
+  .ratings-group {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
   }
   .ratings-status button.small {
     padding: 0.25rem 0.6rem;
