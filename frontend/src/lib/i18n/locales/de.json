@@ -513,6 +513,7 @@
     "emptyAdjustmentReason": "Eine Punktanpassung braucht einen Grund.",
     "zeroPointAdjustment": "Eine Punktanpassung von null hätte keine Wirkung.",
     "unsupportedFormatVersion": "Diese Datei verwendet das Turnierformat {found}, das diese Version nicht lesen kann (sie liest Format {supported}).",
+    "oldSaveAlreadyStarted": "Diese Datei wurde von einer älteren Version von OpenShogiPairings gespeichert (Format {found}) und ihr Turnier hatte bereits begonnen. Nur ein Turnier, dessen erste Runde noch nicht gestartet ist, kann als Format {supported} gelesen werden — öffnen Sie diese Datei mit der Version, die sie gespeichert hat.",
     "malformedSave": "Diese Datei ist keine lesbare Turnierdatei: {details}",
     "eloEstimateUnanchored": "Der ELO-Schätzung fehlt ein Anker für ihre Skala. Fügen Sie einen gewerteten Spieler hinzu, fixieren Sie die Wertungen (K-Multiplikator 0), oder wählen Sie einen nicht-flachen Prior für Ungewertete.",
     "teamModeRejectsCup": "Ein Mannschaftsturnier kann nicht zusätzlich einen K.-o.-Cup enthalten. Schalten Sie eines von beiden aus.",

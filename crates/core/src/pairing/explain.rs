@@ -22,6 +22,7 @@ use super::rules::{Rule, RuleId};
 /// penalty *units* it emitted, before the priority multiplier.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct RuleContribution {
     pub rule: RuleId,
     /// Small penalty count; serialized as a JSON number (fits in a JS number).
@@ -38,6 +39,7 @@ pub struct RuleContribution {
 /// whatever the engine was given.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct BoardLedger {
     pub player1: UnitKey,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -52,6 +54,7 @@ pub struct BoardLedger {
 /// How often one rule had to be relaxed across a whole round, and the total units.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct RuleTotal {
     pub rule: RuleId,
     pub boards: u32,
@@ -69,6 +72,7 @@ pub struct RuleTotal {
 /// appendix of `docs/public-access.md`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct RoundExplanation {
     pub round: u32,
     pub boards: Vec<BoardLedger>,

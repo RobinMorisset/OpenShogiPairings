@@ -70,6 +70,7 @@ pub(crate) const LOCALIZED_ERROR_CODES: &[&str] = &[
     "not_enough_present_teams",
     // Saved files and settings
     "unsupported_format_version",
+    "old_save_already_started",
     "malformed_save",
     "elo_estimate_unanchored",
 ];

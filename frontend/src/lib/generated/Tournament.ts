@@ -12,6 +12,11 @@ import type { TournamentSettings } from "./TournamentSettings";
 export type Tournament = { 
 /**
  * Format version of this record (see [`TOURNAMENT_FORMAT_VERSION`]).
+ *
+ * Required, deliberately. It used to default to "whatever this build
+ * writes", which is the one answer a file with no version cannot support:
+ * the field exists to say which shape the rest of the bytes are in, so
+ * assuming the current one turns "I don't know" into a confident misread.
  */
 format_version: number, 
 /**
@@ -77,7 +82,11 @@ teams?: Array<Team>,
  * it describes.
  *
  * Not defaulted on load, for the same reason [`Round::explanation`] is not:
- * the only save that can lack it is one this build already rejects on its
- * format version.
+ * a save that lacks it predates explanations entirely, and guessing a
+ * watermark for it would vouch for ledgers that aren't there. The one older
+ * save this build reads (v5, see [`TOURNAMENT_FORMAT_VERSION`]) has no
+ * rounds by construction, so the upgrade supplies the only honest value,
+ * `0` — it does not default it, which would just as happily paper over a
+ * hand-edited current save that dropped the field.
  */
 explanations_faithful_through: number, };

@@ -30,40 +30,6 @@ use crate::ratings::CachedRatings;
 /// simply told to resync (see [`crate::live`]).
 const NOTIFY_CAPACITY: usize = 16;
 
-/// Peek at only the `format_version` of a serialized tournament and reject an
-/// incompatible one *before* a full deserialize is attempted.
-///
-/// A format bump can reshape a field's serde representation (v5, for instance,
-/// made `handicap_policy` an internally-tagged enum, so an old bare-string value
-/// no longer deserializes at all). A full `from_slice::<Tournament>` of such a
-/// file therefore fails deep inside a changed field with an opaque, misleading
-/// error — hiding the real cause, the format version, which the version field
-/// exists precisely to surface. Every path that loads an untrusted save (server
-/// startup, `POST /api/tournaments/import`) runs this first, so an old file is
-/// rejected loudly with a clear version message rather than mis-parsed or
-/// silently dropped. Lives in the server (not `osp-core`) because it is the
-/// server that parses JSON — core has no runtime JSON dependency.
-pub(crate) fn check_format_version(bytes: &[u8]) -> Result<(), TournamentError> {
-    #[derive(Deserialize)]
-    struct VersionProbe {
-        format_version: Option<u32>,
-    }
-    let probe: VersionProbe =
-        serde_json::from_slice(bytes).map_err(|e| TournamentError::MalformedSave(e.to_string()))?;
-    // A missing field means "current" (matches the `Tournament` field's own
-    // serde default), so only a present, mismatched version is rejected.
-    let found = probe
-        .format_version
-        .unwrap_or(osp_core::TOURNAMENT_FORMAT_VERSION);
-    if found != osp_core::TOURNAMENT_FORMAT_VERSION {
-        return Err(TournamentError::UnsupportedFormatVersion {
-            found,
-            supported: osp_core::TOURNAMENT_FORMAT_VERSION,
-        });
-    }
-    Ok(())
-}
-
 /// Why a tournament file on disk could not be loaded, kept so the tournament
 /// can be *listed* rather than silently vanish.
 ///
@@ -237,54 +203,37 @@ impl TournamentStore {
     /// worse than refusing to serve it.
     fn load_from_disk(path: &Path) -> Result<Option<Tournament>, LoadProblem> {
         let bytes = match fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                // Genuinely absent is the normal empty-start case; anything else
-                // (permissions, I/O) is worth surfacing. Neither is a *save*
-                // problem — there is nothing here to show the referee, and
-                // nothing they could delete from the app either.
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    tracing::error!("could not read {}: {e}", path.display());
-                }
-                return Ok(None);
-            }
-        };
-        // Check the format version before the full parse, so an incompatible old
-        // save fails with a clear version message rather than an opaque
-        // field-level serde error (see [`check_format_version`]).
-        if let Err(error) = check_format_version(&bytes) {
-            tracing::error!(
-                "refusing to load {}: {error}. The file is left untouched — load it \
-                 with a matching build, or delete that tournament from the picker.",
-                path.display()
-            );
-            return Err(LoadProblem::new(error, &bytes));
-        }
-        match serde_json::from_slice::<Tournament>(&bytes) {
-            // Parsing proves the shape, not the invariants, and the read path
-            // trusts both: a bracket that disagrees with its cup size panics when
-            // the first `GET` derives it. So a file off the disk passes the same
-            // gate an imported one does, and a record that fails it is listed as
-            // a problem rather than served.
-            Ok(tournament) => match tournament.validate_loaded() {
-                Ok(()) => Ok(Some(tournament)),
-                Err(error) => {
-                    tracing::error!(
-                        "refusing to load {}: {error}. The file is left untouched.",
-                        path.display()
-                    );
-                    Err(LoadProblem::new(error, &bytes))
-                }
-            },
+            // Genuinely absent is the normal empty-start case: no file, no
+            // tournament, nothing to tell anyone about.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            // Present but unreadable (permissions, a bad sector, a disappearing
+            // network mount) is a *save* problem like any other. The registry
+            // only asks about a file it has just seen in the directory listing,
+            // so silently answering "no tournament here" would drop an event the
+            // referee can see on disk from the picker they use to find it.
             Err(e) => {
                 tracing::error!(
-                    "could not parse {}: {e}. The file is left untouched.",
+                    "could not read {}: {e}. The file is left untouched.",
                     path.display()
                 );
-                Err(LoadProblem::new(
-                    TournamentError::MalformedSave(e.to_string()),
-                    &bytes,
-                ))
+                return Err(LoadProblem::new(
+                    TournamentError::MalformedSave(format!("could not read the file: {e}")),
+                    &[],
+                ));
+            }
+            Ok(bytes) => bytes,
+        };
+        // A file off the disk passes exactly the gate an imported one does — the
+        // version window, the parse, and the invariants (see [`crate::save`]).
+        match crate::save::load(&bytes) {
+            Ok(tournament) => Ok(Some(tournament)),
+            Err(error) => {
+                tracing::error!(
+                    "refusing to load {}: {error}. The file is left untouched — load it \
+                     with a matching build, or delete that tournament from the picker.",
+                    path.display()
+                );
+                Err(LoadProblem::new(error, &bytes))
             }
         }
     }
@@ -773,7 +722,25 @@ impl TournamentRegistry {
         let backups_root = backups_root.or_else(crate::backup::default_root);
         let mut instances = HashMap::new();
         if let Some(dir) = &data_dir {
-            if let Ok(entries) = fs::read_dir(dir) {
+            // An absent directory is the normal first-boot case. Anything else —
+            // an unmounted volume, a permissions change — would otherwise present
+            // as "you have no tournaments", moments after `main` logged where it
+            // is keeping them, and the picker's empty state is exactly where a
+            // referee would start creating replacements for events that are
+            // still on disk.
+            let entries = match fs::read_dir(dir) {
+                Ok(entries) => Some(entries),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+                Err(e) => {
+                    tracing::error!(
+                        "could not read the data directory {}: {e}. No saved tournament \
+                         can be loaded — this is not an empty server.",
+                        dir.display()
+                    );
+                    None
+                }
+            };
+            if let Some(entries) = entries {
                 for entry in entries.filter_map(Result::ok) {
                     let path = entry.path();
                     let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
@@ -1291,10 +1258,8 @@ impl TournamentRegistry {
             crate::backup::LoadError::Unreadable(e) => RestoreError::Invalid(e),
         })?;
         // A backup this server wrote should always be loadable, but it is a file
-        // on disk that anything could have edited since — vet it like an import.
-        tournament
-            .validate_loaded()
-            .map_err(RestoreError::Invalid)?;
+        // on disk that anything could have edited since — so it is vetted like an
+        // import, which `backup::load` does by going through [`crate::save`].
         let restored = self.insert_at(id, tournament, password.map(str::to_string));
         // Only now that it is registered: until this point a failure had to
         // leave the entry in the bin, and from here on the directory is a live
@@ -1851,6 +1816,45 @@ mod tests {
         fs::remove_dir_all(data_dir.parent().unwrap()).ok();
     }
 
+    /// The picker is the third way a save reaches this build (after import and a
+    /// backup restore), and a referee upgrading a hosted server has their v1.3.0
+    /// files sitting in its data directory — so the upgrade has to happen on the
+    /// boot path too, not only on the one the file dialog uses.
+    #[test]
+    fn a_v1_3_0_file_in_the_data_directory_opens_at_boot() {
+        let (data_dir, backups_root) = isolated_roots();
+        fs::create_dir_all(&data_dir).unwrap();
+        let id = uuid::Uuid::new_v4();
+        fs::write(
+            data_dir.join(format!("{id}.json")),
+            include_str!("../tests/fixtures/v1.3.0-settings.json"),
+        )
+        .unwrap();
+
+        let registry = TournamentRegistry::with_retention(
+            Some(data_dir.clone()),
+            Some(backups_root.clone()),
+            30 * DAY,
+        );
+        let listed = registry.list(false);
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].problem.is_none(), "it must simply open");
+        assert_eq!(listed[0].name, "Maximal v1.3.0 Open");
+
+        let instance = registry.get(id).expect("listed, therefore known");
+        let store = instance.read();
+        let tournament = store.current().expect("it opened");
+        assert_eq!(
+            tournament.format_version,
+            osp_core::TOURNAMENT_FORMAT_VERSION
+        );
+        assert_eq!(tournament.players.len(), 2);
+        assert_eq!(tournament.settings.categories.len(), 1);
+        drop(store);
+
+        fs::remove_dir_all(data_dir.parent().unwrap()).ok();
+    }
+
     /// A save this build cannot read stays in the picker — listed, explaining
     /// itself, and deletable. Hiding it is how a tournament silently stops
     /// existing while its files sit on disk with nothing to remove them.
@@ -1990,31 +1994,6 @@ mod tests {
         );
 
         fs::remove_dir_all(data_dir.parent().unwrap()).ok();
-    }
-
-    #[test]
-    fn check_format_version_rejects_old_and_accepts_current() {
-        // A current serialization round-trips through the version check.
-        let current = serde_json::to_vec(&Tournament::new("Cup").unwrap()).unwrap();
-        assert!(check_format_version(&current).is_ok());
-
-        // A present-but-wrong version (the v1.0.0 files were format 4) is rejected
-        // with the clear version error — this is the case a full deserialize would
-        // instead fail on with an opaque field-level error.
-        let old = br#"{"format_version":4,"handicap_policy":"allowed"}"#;
-        assert!(matches!(
-            check_format_version(old),
-            Err(TournamentError::UnsupportedFormatVersion { found: 4, .. })
-        ));
-
-        // A missing version means "current" (matches the field's serde default).
-        assert!(check_format_version(b"{}").is_ok());
-
-        // Bytes that aren't even JSON are a malformed save, not a version error.
-        assert!(matches!(
-            check_format_version(b"not json"),
-            Err(TournamentError::MalformedSave(_))
-        ));
     }
 
     #[test]

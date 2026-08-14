@@ -70,6 +70,7 @@ export const ERROR_CODE_KEYS: Record<string, string> = {
   not_enough_present_teams: "serverError.notEnoughPresentTeams",
 
   unsupported_format_version: "serverError.unsupportedFormatVersion",
+  old_save_already_started: "serverError.oldSaveAlreadyStarted",
   malformed_save: "serverError.malformedSave",
   elo_estimate_unanchored: "serverError.eloEstimateUnanchored",
 };

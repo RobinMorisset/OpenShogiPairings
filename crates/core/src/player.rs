@@ -23,6 +23,7 @@ pub enum GradeKind {
 /// [`crate::settings::ThresholdCriterion`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct Grade {
     pub kind: GradeKind,
     /// 1-based level within the kind (e.g. `3` for "3 dan").
@@ -101,6 +102,7 @@ impl Ord for Grade {
 /// avoid pairing team-mates early). `nationality` is a country code (e.g. `JP`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct Player {
     /// Stable unique identifier, assigned by the server on registration.
     pub id: Uuid,
@@ -180,6 +182,7 @@ pub struct Player {
 /// applied to a player by a referee, with a mandatory human-readable reason.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct PointAdjustment {
     /// Stable id, so a specific entry can be removed later.
     pub id: Uuid,
@@ -195,6 +198,7 @@ pub struct PointAdjustment {
 /// with a freshly minted [`Uuid`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct NewPlayer {
     pub last_name: String,
     #[serde(default)]

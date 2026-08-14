@@ -69,6 +69,7 @@ pub const fn cup_field_size(size: u32, format: CupFormat) -> u32 {
 /// A hybrid tournament's cup, fixed at finalization.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct Cup {
     /// Bracket size (8/16/32/64) — *not* the number of players taken, which is
     /// [`cup_field_size`] of this and `format`.

@@ -1,0 +1,124 @@
+{
+  "format_version": 5,
+  "id": "11111111-2222-3333-4444-555555555555",
+  "name": "Maximal v1.3.0 Open",
+  "settings": {
+    "pairing": {
+      "kind": "swiss",
+      "floater_style": "median",
+      "airtight_groups": 3,
+      "club_protection": {
+        "kind": "on",
+        "rounds": 2,
+        "exempt_clubs": [
+          "Nancy",
+          "Paris"
+        ]
+      },
+      "macmahon": {
+        "thresholds": [
+          {
+            "criterion": {
+              "kind": "elo",
+              "value": 1800
+            },
+            "drops_after_round": 4
+          },
+          {
+            "criterion": {
+              "kind": "grade",
+              "grade": {
+                "kind": "dan",
+                "level": 1
+              }
+            }
+          }
+        ],
+        "source": {
+          "kind": "from_estimate",
+          "estimator": {
+            "k_multiplier": 120,
+            "provisional_multiplier": 150,
+            "unrated_prior_center": 1500,
+            "unrated_k": 80,
+            "prior_shape_established": "gaussian",
+            "prior_shape_provisional": "gaussian",
+            "prior_shape_unrated": "gaussian",
+            "upward_looseness_established": 110,
+            "upward_looseness_provisional": 120,
+            "upward_looseness_unrated": 130
+          }
+        }
+      }
+    },
+    "cup_enabled": true,
+    "long_boards_enabled": true,
+    "handicap_policy": {
+      "kind": "enabled",
+      "display": "suggested",
+      "wiel_rule": true
+    },
+    "half_point_absences": true,
+    "tiebreaks": [
+      "points",
+      "sos_w",
+      "cuss_m",
+      "dc",
+      "est_elo"
+    ],
+    "categories": [
+      {
+        "id": "66666666-7777-8888-9999-aaaaaaaaaaaa",
+        "name": "Juniors"
+      }
+    ]
+  },
+  "players": [
+    {
+      "id": "aaaaaaaa-0000-0000-0000-000000000001",
+      "tournament_id": 1,
+      "last_name": "Dupont",
+      "first_name": "Jean",
+      "rating": 1850,
+      "grade": {
+        "kind": "dan",
+        "level": 2
+      },
+      "fesa_games": 42,
+      "nationality": "FR",
+      "club": "Nancy",
+      "eligible": true,
+      "categories": [
+        "66666666-7777-8888-9999-aaaaaaaaaaaa"
+      ],
+      "adjustments": [
+        {
+          "id": "bbbbbbbb-0000-0000-0000-000000000001",
+          "delta": 2,
+          "reason": "late arrival"
+        }
+      ]
+    },
+    {
+      "id": "aaaaaaaa-0000-0000-0000-000000000002",
+      "tournament_id": 2,
+      "last_name": "Yamada",
+      "first_name": ""
+    }
+  ],
+  "registration_finalized": true,
+  "rounds": [
+    {
+      "number": 1,
+      "boards": [
+        {
+          "player1": 1,
+          "player2": 2,
+          "points_diff": 8
+        }
+      ],
+      "sitouts": [],
+      "completed": false
+    }
+  ]
+}

@@ -102,6 +102,7 @@ impl Handicap {
 /// normal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct HandicapGame {
     pub handicap: Handicap,
     pub giver: Winner,
@@ -369,6 +370,7 @@ impl Outcome {
 /// result. See [`Outcome`] for the states a board can be in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct Board {
     /// The two players, by **tournament number** (`Player::tournament_id`), the
     /// dense per-tournament key — not the registration `Uuid`. Rounds are only
@@ -594,6 +596,7 @@ impl SitoutKind {
 /// A player with no board in a round: why they sat out, and what it scores.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct Sitout {
     pub player: TournamentId,
     pub kind: SitoutKind,
@@ -604,6 +607,7 @@ pub struct Sitout {
 /// the byes and the absentees ([`Sitout`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct Round {
     /// 1-based round number.
     pub number: u32,
@@ -635,7 +639,9 @@ pub struct Round {
     ///
     /// Deliberately not `#[serde(default)]`: a save without it is a save from
     /// before [`TOURNAMENT_FORMAT_VERSION`](crate::TOURNAMENT_FORMAT_VERSION) 10
-    /// and must be rejected, not silently given an empty ledger.
+    /// and must be rejected, not silently given an empty ledger. This is a large
+    /// part of why the server's format upgrade covers only tournaments that have
+    /// not started — a round is the thing it could not honestly convert.
     pub explanation: RoundExplanation,
 }
 
@@ -698,6 +704,7 @@ impl Round {
 /// boards when the round is confirmed, exactly as an engine-chosen one does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct ForcedMatch {
     pub team1: TeamId,
     pub team2: TeamId,
@@ -713,6 +720,7 @@ pub struct ForcedMatch {
 /// decided when the round is confirmed (see [`Sitout`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct RoundDraft {
     /// The number the round will have once confirmed.
     pub number: u32,

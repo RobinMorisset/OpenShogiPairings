@@ -36,6 +36,7 @@ mod live;
 mod public;
 mod ratings;
 mod registry;
+mod save;
 mod scope;
 mod state;
 mod tournament;

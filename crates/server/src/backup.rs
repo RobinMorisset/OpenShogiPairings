@@ -135,11 +135,18 @@ pub(crate) fn dir_for(root: &Path, tournament_id: Uuid) -> PathBuf {
     root.join(tournament_id.to_string())
 }
 
+/// Seconds since the epoch, which every backup is named and dated by.
+///
+/// Panics rather than falling back on a clock set before 1970, because the
+/// fallback was `0` and `0` is not merely wrong here: it is the timestamp
+/// [`sweep`] reads as "deleted 56 years ago", so a tournament deleted on such a
+/// machine has its backups — the only remaining copy — swept on the next boot.
+/// A clock that far off is a broken machine, not a state to keep running in.
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .expect("the system clock is set before 1970")
+        .as_secs()
 }
 
 /// A filename-safe version of `label`: lowercased, non-alphanumerics collapsed
@@ -199,8 +206,17 @@ pub(crate) fn take_bytes(dir: Option<&Path>, bytes: &[u8], label: &str) {
 /// the `(secs, seq)` encoded in each filename — *not* a plain lexicographic
 /// sort, since `seq` isn't zero-padded ("10" would otherwise sort before "9").
 fn rotate(dir: &Path) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        // No directory yet means nothing to rotate. Any other failure means
+        // rotation has stopped, and a backups directory that grows without
+        // bound is exactly what this exists to prevent — same treatment as
+        // [`sweep`].
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return,
+        Err(e) => {
+            tracing::warn!("backup: could not scan {} to rotate it: {e}", dir.display());
+            return;
+        }
     };
     let mut files: Vec<(u64, u64, PathBuf)> = entries
         .filter_map(|e| e.ok())
@@ -230,8 +246,16 @@ pub(crate) fn list(dir: Option<&Path>) -> Vec<BackupInfo> {
     let Some(dir) = dir else {
         return Vec::new();
     };
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        // Absent is "no backups taken yet", which is what an empty list means.
+        // Anything else is "I cannot see your backups", which is emphatically
+        // not the same answer — and this list is what the restore UI offers.
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Vec::new(),
+        Err(e) => {
+            tracing::warn!("backup: could not list {}: {e}", dir.display());
+            return Vec::new();
+        }
     };
     // Sort by (seconds, sequence) — several backups can share the same second,
     // and `seq` is what breaks the tie in the order they were actually taken.
@@ -533,17 +557,17 @@ pub(crate) enum LoadError {
 /// A backup too old for this build is [`Unreadable`](LoadError::Unreadable),
 /// not missing: "no such backup" for a file the referee is looking straight at
 /// in the list is the kind of answer that sends someone hunting for a bug in
-/// the wrong place. The version is checked before the parse, for the reason
-/// spelled out on [`crate::state::check_format_version`].
+/// the wrong place. The bytes go through [`crate::save`] like any other
+/// untrusted save — this store is a directory anything could have edited, and a
+/// backup taken before an upgrade is exactly the file that needs the version
+/// window applied to it.
 pub(crate) fn load(dir: Option<&Path>, id: &str) -> Result<Tournament, LoadError> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return Err(LoadError::NotFound);
     }
     let bytes = fs::read(dir.ok_or(LoadError::NotFound)?.join(format!("{id}.json")))
         .map_err(|_| LoadError::NotFound)?;
-    crate::state::check_format_version(&bytes).map_err(LoadError::Unreadable)?;
-    serde_json::from_slice(&bytes)
-        .map_err(|e| LoadError::Unreadable(TournamentError::MalformedSave(e.to_string())))
+    crate::save::load(&bytes).map_err(LoadError::Unreadable)
 }
 
 #[cfg(test)]

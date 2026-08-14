@@ -513,6 +513,7 @@
     "emptyAdjustmentReason": "Un ajustement de points doit avoir un motif.",
     "zeroPointAdjustment": "Un ajustement de zéro point n'aurait aucun effet.",
     "unsupportedFormatVersion": "Ce fichier utilise le format de tournoi {found}, que cette version ne sait pas lire (elle lit le format {supported}).",
+    "oldSaveAlreadyStarted": "Ce fichier a été enregistré par une version antérieure d'OpenShogiPairings (format {found}) et son tournoi avait déjà commencé. Seul un tournoi dont aucune ronde n'a démarré peut être lu au format {supported} — ouvrez ce fichier avec la version qui l'a enregistré.",
     "malformedSave": "Ce fichier n'est pas une sauvegarde de tournoi lisible : {details}",
     "eloEstimateUnanchored": "L'estimation ELO n'a rien pour ancrer son échelle. Ajoutez un joueur classé, figez les classements (multiplicateur K à 0), ou choisissez un prior non plat pour les non classés.",
     "teamModeRejectsCup": "Un tournoi par équipes ne peut pas aussi comporter une coupe à élimination directe. Désactivez l'un des deux.",

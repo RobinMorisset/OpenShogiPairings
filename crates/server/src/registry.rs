@@ -9,7 +9,6 @@ use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use osp_core::Tournament;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use uuid::Uuid;
@@ -118,12 +117,10 @@ async fn create_tournament(
 /// Body of `POST /api/tournaments/import`.
 ///
 /// The save file is held as a [`RawValue`] rather than a `Tournament` so its
-/// bytes survive the wrapper's deserialize untouched, letting
-/// [`check_format_version`](crate::state::check_format_version) probe them
-/// *before* anything tries to parse the tournament itself. That ordering is the
-/// entire point of the probe: a format bump can reshape a field, so a full
-/// parse of an old file fails deep inside that field with an error naming
-/// anything but the real cause.
+/// bytes survive the wrapper's deserialize untouched and can be handed to
+/// [`crate::save::load`] whole — which needs them to read the format version
+/// before anything parses the tournament, and to upgrade an older save in place
+/// if it is one this build still reads.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ImportTournamentRequest {
@@ -148,12 +145,8 @@ async fn import_tournament(
 ) -> Result<(StatusCode, Json<CreateTournamentResponse>), ApiError> {
     let req: ImportTournamentRequest = serde_json::from_slice(&body)
         .map_err(|e| ApiError::BadRequest(format!("could not parse import request: {e}")))?;
-    // Version first, for the reason spelled out on `ImportTournamentRequest`.
-    crate::state::check_format_version(req.tournament.get().as_bytes())?;
-    let tournament: Tournament = serde_json::from_str(req.tournament.get())
-        .map_err(|e| ApiError::BadRequest(format!("could not parse tournament: {e}")))?;
     // The only gate between an untrusted file and the registry.
-    tournament.validate_loaded()?;
+    let tournament = crate::save::load(req.tournament.get().as_bytes())?;
     let (id, token) = state.registry.insert(tournament, req.password);
     Ok((
         StatusCode::CREATED,

@@ -513,6 +513,7 @@
     "emptyAdjustmentReason": "Bodová úprava potrebuje dôvod.",
     "zeroPointAdjustment": "Bodová úprava s hodnotou nula by nemala žiadny účinok.",
     "unsupportedFormatVersion": "Tento súbor používa turnajový formát {found}, ktorý toto zostavenie nevie prečítať (číta {supported}).",
+    "oldSaveAlreadyStarted": "Tento súbor uložila staršia verzia OpenShogiPairings (formát {found}) a jeho turnaj sa už začal. Ako formát {supported} sa dá prečítať iba turnaj, v ktorom sa nezačalo žiadne kolo — otvorte tento súbor verziou, ktorá ho uložila.",
     "malformedSave": "Tento súbor nie je čitateľný uložený turnaj: {details}",
     "eloEstimateUnanchored": "Odhad ELO nemá čím ukotviť svoju škálu. Pridajte ratingovaného hráča, zafixujte ratingy (násobiteľ K na 0) alebo zvoľte neploché apriórne rozdelenie pre hráčov bez ratingu.",
     "teamModeRejectsCup": "Družstvový turnaj nemôže zároveň obsahovať vyraďovací pohár. Vypnite jedno z dvoch.",

@@ -9,7 +9,12 @@ will be explicitly mentioned in the changelog for that version though.
 
 ## [Unreleased]
 
-NOT backwards compatible with any earlier version.
+The save format changed again, but a **v1.3.0 tournament that has not started
+yet can be opened** — its players and all of its settings are carried over, and
+it is saved in the new format from then on. A v1.3.0 save whose tournament had
+rounds played, or a round in preparation, says so plainly when you try to open
+it: finish that event with v1.3.0. Saves from v1.2.0 and earlier cannot be
+opened at all.
 
 ### Added
 
@@ -80,6 +85,22 @@ NOT backwards compatible with any earlier version.
   file is now checked when it is loaded, exactly as an imported one is, and
   appears in the picker with the reason it could not be opened; the file itself
   is left untouched.
+- **The rest of a damaged save could still bring the server down, or quietly
+  report the wrong tournament.** The same check now also refuses a file whose
+  players share a registration id or a tournament number, whose players have no
+  tournament number although registration is finalized, whose rounds are not
+  numbered in order, or whose boards and sit-outs name somebody the file does
+  not contain — the first three of which crashed the server on the first look at
+  that tournament, and the rest of which produced standings for a tournament
+  nobody played. A key this version does not recognise anywhere in a save is now
+  an error too, rather than being skipped over: a renamed `outcome` used to load
+  as a board with no result, silently erasing it.
+- A file with no format version at all was assumed to be in the current format
+  and read anyway. It is now refused, since that field is the only thing that
+  says what shape the rest of the file is in.
+- A backup directory that could not be read was reported as "no backups yet",
+  and a data directory that could not be read (an unmounted volume, say) as a
+  server with no tournaments on it. Both now say what actually happened.
 - **The public page and its exported copy showed different things once a cup was
   drawn but round 1 had not started.** The bracket is frozen when registration is
   finalized, and in the gap before the first round the live page showed the

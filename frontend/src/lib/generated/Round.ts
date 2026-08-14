@@ -42,6 +42,8 @@ completed: boolean,
  *
  * Deliberately not `#[serde(default)]`: a save without it is a save from
  * before [`TOURNAMENT_FORMAT_VERSION`](crate::TOURNAMENT_FORMAT_VERSION) 10
- * and must be rejected, not silently given an empty ledger.
+ * and must be rejected, not silently given an empty ledger. This is a large
+ * part of why the server's format upgrade covers only tournaments that have
+ * not started — a round is the thing it could not honestly convert.
  */
 explanation: RoundExplanation, };

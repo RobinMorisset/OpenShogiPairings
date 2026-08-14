@@ -1,0 +1,111 @@
+{
+  "format_version": 5,
+  "id": "741a80dc-ee36-4fce-a2e3-40d99bd7e84d",
+  "name": "Cup Open 2026",
+  "settings": {
+    "pairing": {
+      "kind": "swiss",
+      "floater_style": "classic",
+      "macmahon": {
+        "thresholds": [],
+        "source": {
+          "kind": "static"
+        }
+      }
+    },
+    "cup_enabled": true,
+    "long_boards_enabled": false,
+    "handicap_policy": {
+      "kind": "enabled",
+      "display": "allowed"
+    },
+    "half_point_absences": false,
+    "tiebreaks": [
+      "points",
+      "sos_m",
+      "sodos_m",
+      "sosos_m"
+    ]
+  },
+  "players": [
+    {
+      "id": "1f20323a-4dc6-4334-aef0-4499a7604be3",
+      "tournament_id": 1,
+      "last_name": "Player0",
+      "first_name": "",
+      "rating": 2000,
+      "eligible": true
+    },
+    {
+      "id": "c7df19cc-8f06-4968-946a-91940f6c80c4",
+      "tournament_id": 2,
+      "last_name": "Player1",
+      "first_name": "",
+      "rating": 1950,
+      "eligible": true
+    },
+    {
+      "id": "6e2ee39c-b5a8-49d3-b48f-da59953a3d72",
+      "tournament_id": 3,
+      "last_name": "Player2",
+      "first_name": "",
+      "rating": 1900,
+      "eligible": true
+    },
+    {
+      "id": "b72e7edd-4603-41a2-a665-a2fb0691c039",
+      "tournament_id": 4,
+      "last_name": "Player3",
+      "first_name": "",
+      "rating": 1850,
+      "eligible": true
+    },
+    {
+      "id": "045baa37-82a7-4736-b002-a41d0eb94262",
+      "tournament_id": 5,
+      "last_name": "Player4",
+      "first_name": "",
+      "rating": 1800,
+      "eligible": true
+    },
+    {
+      "id": "62cd513a-94f0-405f-a01d-48e6d9fd9ddd",
+      "tournament_id": 6,
+      "last_name": "Player5",
+      "first_name": "",
+      "rating": 1750,
+      "eligible": true
+    },
+    {
+      "id": "d343f102-c566-4268-90bd-e69d9f886639",
+      "tournament_id": 7,
+      "last_name": "Player6",
+      "first_name": "",
+      "rating": 1700,
+      "eligible": true
+    },
+    {
+      "id": "bf4a2418-c757-40e0-ae4f-8e8ea80cb652",
+      "tournament_id": 8,
+      "last_name": "Player7",
+      "first_name": "",
+      "rating": 1650,
+      "eligible": true
+    }
+  ],
+  "registration_finalized": true,
+  "rounds": [],
+  "cup": {
+    "size": 8,
+    "seed_order": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  }
+}

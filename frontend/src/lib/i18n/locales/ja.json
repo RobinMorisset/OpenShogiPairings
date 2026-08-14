@@ -513,6 +513,7 @@
     "emptyAdjustmentReason": "点数の調整には理由が必要です。",
     "zeroPointAdjustment": "0点の調整は意味がありません。",
     "unsupportedFormatVersion": "このファイルは大会フォーマット{found}を使っていますが、このバージョンでは読み込めません（対応するのは{supported}です）。",
+    "oldSaveAlreadyStarted": "このファイルは OpenShogiPairings の旧バージョンで保存されたもので（フォーマット{found}）、大会はすでに始まっていました。フォーマット{supported}として読み込めるのは、まだ一回戦も始まっていない大会だけです。保存したバージョンで開いてください。",
     "malformedSave": "このファイルは大会データとして読み込めません: {details}",
     "eloEstimateUnanchored": "レーティング推定の基準となる値がありません。レーティングのある選手を追加するか、レーティングを固定する（K倍率を0にする）か、レーティングなしの事前分布を平坦以外にしてください。",
     "teamModeRejectsCup": "団体戦とトーナメント（勝ち抜き戦）は併用できません。どちらかをオフにしてください。",

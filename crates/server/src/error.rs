@@ -249,6 +249,16 @@ pub(crate) fn domain_payload(
                 ("supported", supported.to_string()),
             ],
         ),
+        // An old save this build would upgrade if only the tournament hadn't
+        // started. The referee's way out is their old build, so this has to say
+        // more than "unsupported" — hence a code of its own.
+        TournamentError::OldSaveAlreadyStarted { found, supported } => with(
+            "old_save_already_started",
+            [
+                ("found", found.to_string()),
+                ("supported", supported.to_string()),
+            ],
+        ),
         // The inner text comes from the deserializer, so it can't be translated;
         // the catalogues wrap it in a translated sentence and show it as detail.
         TournamentError::MalformedSave(details) => {
@@ -297,6 +307,18 @@ pub(crate) fn domain_payload(
         | TournamentError::CupSeedCountMismatch { .. }
         | TournamentError::DuplicateCupSeed { .. }
         | TournamentError::UnknownCupSeed { .. }
+        // And the same again for the rest of a save's referential integrity:
+        // duplicate ids or numbers, an unnumbered player after finalization,
+        // rounds that skip a number, a board or sit-out naming somebody who is
+        // not in the file. Nothing this program writes produces any of them, so
+        // a file carrying one was edited by hand — the English message names the
+        // exact row, which is what someone in a position to fix it needs.
+        | TournamentError::DuplicatePlayerId { .. }
+        | TournamentError::DuplicateTournamentNumber { .. }
+        | TournamentError::UnnumberedPlayer { .. }
+        | TournamentError::MisnumberedRound { .. }
+        | TournamentError::UnknownRoundPlayer { .. }
+        | TournamentError::BoardAgainstSelf { .. }
         // Deliberately English: unfinished scaffolding (the UI offers no team
         // probe yet), not a state the product is meant to have.
         // TODO: `InvalidDraft` carries a free-form English string built at ~8
@@ -436,6 +458,10 @@ mod tests {
             TournamentError::UnsupportedFormatVersion {
                 found: 9,
                 supported: 3,
+            },
+            TournamentError::OldSaveAlreadyStarted {
+                found: 5,
+                supported: 10,
             },
             TournamentError::MalformedSave("trailing comma".to_string()),
             TournamentError::EloEstimateUnanchored,

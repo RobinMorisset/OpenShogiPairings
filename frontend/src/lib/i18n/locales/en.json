@@ -513,6 +513,7 @@
     "emptyAdjustmentReason": "A point adjustment needs a reason.",
     "zeroPointAdjustment": "A point adjustment of zero would have no effect.",
     "unsupportedFormatVersion": "This file uses tournament format {found}, which this build cannot read (it reads {supported}).",
+    "oldSaveAlreadyStarted": "This file was saved by an older version of OpenShogiPairings (format {found}) and its tournament had already started. Only one that has not started a round can be read as format {supported} — open this file with the version that saved it.",
     "malformedSave": "This file is not a readable tournament save: {details}",
     "eloEstimateUnanchored": "The ELO estimate has nothing to anchor its scale. Add a rated player, pin ratings (K multiplier 0), or choose a non-flat unrated prior.",
     "teamModeRejectsCup": "A team tournament can't also run the direct-elimination cup. Turn one of the two off.",

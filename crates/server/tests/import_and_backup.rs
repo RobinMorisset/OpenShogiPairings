@@ -194,6 +194,77 @@ async fn import_rejects_a_blank_name_that_no_constructor_would_have_allowed() {
     assert_eq!(registered, 0);
 }
 
+/// Real v1.3.0 saves, written by v1.3.0's own serializer rather than
+/// hand-shaped here — a fixture that only *looks* like the old format would
+/// stop testing the thing the moment either end drifted.
+const V130_NOT_STARTED: &str = include_str!("fixtures/v1.3.0-settings.json");
+const V130_STARTED: &str = include_str!("fixtures/v1.3.0-started.json");
+
+/// v1.3.0 was the first release with referees on it, so their saved-but-not-yet
+/// -started tournaments have to open here — through the endpoint the file picker
+/// actually posts to, not just through the upgrade in isolation.
+#[tokio::test]
+async fn import_opens_a_v1_3_0_save_of_a_tournament_that_has_not_started() {
+    let state = AppState::default();
+    let saved: serde_json::Value = serde_json::from_str(V130_NOT_STARTED).unwrap();
+
+    let (status, body) = send(
+        router(state.clone()),
+        json_req(
+            "POST",
+            "/api/tournaments/import",
+            json!({ "tournament": saved }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = send(
+        router(state.clone()),
+        get(&format!("/api/tournaments/{id}")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let t = &body["tournament"];
+    assert_eq!(t["name"], "Maximal v1.3.0 Open");
+    // Stored at the current version, so the next save is an ordinary one.
+    assert_eq!(t["format_version"], 10);
+    // The referee's players and settings survive the upgrade — its whole point.
+    assert_eq!(t["players"].as_array().unwrap().len(), 2);
+    assert_eq!(t["players"][0]["club"], "Nancy");
+    assert_eq!(t["settings"]["pairing"]["floater_style"], "median");
+    assert_eq!(t["settings"]["categories"][0]["name"], "Juniors");
+}
+
+/// The other half of the promise: a tournament that was already under way is
+/// refused by name, so the referee is told to go back to the build that saved
+/// it rather than shown a plausible-looking tournament missing its rounds.
+#[tokio::test]
+async fn import_refuses_a_v1_3_0_save_of_a_started_tournament() {
+    let state = AppState::default();
+    let saved: serde_json::Value = serde_json::from_str(V130_STARTED).unwrap();
+
+    let (status, body) = send(
+        router(state.clone()),
+        json_req(
+            "POST",
+            "/api/tournaments/import",
+            json!({ "tournament": saved }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "old_save_already_started");
+    assert_eq!(body["values"]["found"], "5");
+
+    let (_, listed) = send(router(state.clone()), get("/api/tournaments")).await;
+    assert!(
+        listed["tournaments"].as_array().unwrap().is_empty(),
+        "a refused import must register nothing"
+    );
+}
+
 #[tokio::test]
 async fn import_rejects_an_unknown_field_rather_than_dropping_it() {
     let state = AppState::default();

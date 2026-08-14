@@ -51,11 +51,13 @@ use typed_index_collections::TiVec;
 /// v9: teams carry manual point `adjustments`.
 /// v10: rounds carry the `explanation` of their pairing, frozen at confirmation,
 /// and the tournament an `explanations_faithful_through` watermark.
+///
+/// A save is normally only readable at the exact version this build writes. The
+/// one exception is v5 — what v1.3.0, the first released version with users,
+/// wrote — whose **not-yet-started** tournaments the server upgrades on load;
+/// see `UPGRADABLE_FROM` in `crates/server/src/save.rs` for the window and why it
+/// stops at the first round.
 pub const TOURNAMENT_FORMAT_VERSION: u32 = 10;
-
-fn default_format_version() -> u32 {
-    TOURNAMENT_FORMAT_VERSION
-}
 
 /// Minimum number of players required to start a round.
 pub(crate) const MIN_PLAYERS_PER_ROUND: usize = 2;
@@ -68,9 +70,14 @@ pub(crate) const MIN_TEAMS_PER_ROUND: usize = 2;
 /// A tournament: a name and its registered players.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct Tournament {
     /// Format version of this record (see [`TOURNAMENT_FORMAT_VERSION`]).
-    #[serde(default = "default_format_version")]
+    ///
+    /// Required, deliberately. It used to default to "whatever this build
+    /// writes", which is the one answer a file with no version cannot support:
+    /// the field exists to say which shape the rest of the bytes are in, so
+    /// assuming the current one turns "I don't know" into a confident misread.
     pub format_version: u32,
     /// Stable unique identifier for the tournament.
     pub id: Uuid,
@@ -123,8 +130,12 @@ pub struct Tournament {
     /// it describes.
     ///
     /// Not defaulted on load, for the same reason [`Round::explanation`] is not:
-    /// the only save that can lack it is one this build already rejects on its
-    /// format version.
+    /// a save that lacks it predates explanations entirely, and guessing a
+    /// watermark for it would vouch for ledgers that aren't there. The one older
+    /// save this build reads (v5, see [`TOURNAMENT_FORMAT_VERSION`]) has no
+    /// rounds by construction, so the upgrade supplies the only honest value,
+    /// `0` — it does not default it, which would just as happily paper over a
+    /// hand-edited current save that dropped the field.
     pub explanations_faithful_through: u32,
 }
 
@@ -205,10 +216,39 @@ pub enum TournamentError {
     /// The serialized record uses a format version this build cannot read.
     #[error("unsupported tournament format version {found} (this build supports {supported})")]
     UnsupportedFormatVersion { found: u32, supported: u32 },
+    /// The save is from an older format this build *can* upgrade, but only for a
+    /// tournament that hasn't started — and this one had rounds played, or a
+    /// round in preparation. See `UPGRADABLE_FROM` in the server's `save` module
+    /// for why the upgrade stops at the first round.
+    #[error(
+        "this save is from an older version (format {found}) and its tournament was already \
+         under way; only one that has not started a round can be upgraded to format {supported}"
+    )]
+    OldSaveAlreadyStarted { found: u32, supported: u32 },
     /// The bytes couldn't be parsed as a tournament save at all (not even far
     /// enough to read its format version).
     #[error("malformed tournament save: {0}")]
     MalformedSave(String),
+    /// Two players in the file share a registration id.
+    #[error("player id {player} appears more than once")]
+    DuplicatePlayerId { player: Uuid },
+    /// Two players in the file share a tournament number — the key every score
+    /// is stored by, so they would share one score.
+    #[error("tournament number {number} is used by more than one player")]
+    DuplicateTournamentNumber { number: TournamentId },
+    /// Registration is finalized but a player has no tournament number, which
+    /// everything downstream assumes they have.
+    #[error("player {player} has no tournament number, but registration is finalized")]
+    UnnumberedPlayer { player: Uuid },
+    /// The rounds in the file are not numbered `1..=n` in order.
+    #[error("expected round {expected} at this position, found round {found}")]
+    MisnumberedRound { expected: u32, found: u32 },
+    /// A board or sit-out names a tournament number no player in the file has.
+    #[error("round {round} names tournament number {player}, who is not in this tournament")]
+    UnknownRoundPlayer { round: u32, player: TournamentId },
+    /// A board pairs a player with themselves.
+    #[error("round {round} pairs player {player} against themselves")]
+    BoardAgainstSelf { round: u32, player: TournamentId },
     /// The ELO estimate is enabled but nothing anchors its scale: every player is
     /// on a flat prior and none is pinned, so the estimate has no absolute
     /// reference (see [`crate::elo::has_scale_anchor`]).
@@ -2335,6 +2375,8 @@ impl Tournament {
         if self.name.trim().is_empty() {
             return Err(TournamentError::EmptyTournamentName);
         }
+        self.validate_field()?;
+        self.validate_rounds_name_the_field()?;
         // A justified absence on a board is a team-mode fact: an individual
         // tournament excludes an absent player before a board exists. A file
         // carrying one outside team mode would export `0-` cells nothing in the
@@ -2383,6 +2425,94 @@ impl Tournament {
                 .collect();
             if let Some(&seed) = cup.seed_order.iter().find(|s| !known.contains(s)) {
                 return Err(TournamentError::UnknownCupSeed { seed });
+            }
+        }
+        Ok(())
+    }
+
+    /// The registered players themselves: distinct ids, distinct tournament
+    /// numbers, and a number each once registration is finalized.
+    ///
+    /// [`compute_scores`](crate::scoring::compute_scores) keys every score by
+    /// tournament number and reaches for it with `tournament_id.unwrap()`, so a
+    /// finalized file with an unnumbered player panics the first `GET` that
+    /// derives standings. Two players sharing a number is quieter and worse:
+    /// they share one score slot, and the table simply reports the wrong
+    /// results. Both are states [`finalize_registration_with`] cannot produce
+    /// and a file has never been held to.
+    ///
+    /// [`finalize_registration_with`]: Self::finalize_registration_with
+    fn validate_field(&self) -> Result<(), TournamentError> {
+        let mut ids = HashSet::with_capacity(self.players.len());
+        let mut numbers = HashSet::with_capacity(self.players.len());
+        for player in &self.players {
+            if !ids.insert(player.id) {
+                return Err(TournamentError::DuplicatePlayerId { player: player.id });
+            }
+            match player.tournament_id {
+                Some(number) => {
+                    if !numbers.insert(number) {
+                        return Err(TournamentError::DuplicateTournamentNumber { number });
+                    }
+                }
+                // Before finalization nobody has a number yet, and nothing reads
+                // one — `standings` returns empty rather than score an
+                // unnumbered field.
+                None if !self.registration_finalized => {}
+                None => {
+                    return Err(TournamentError::UnnumberedPlayer { player: player.id });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The rounds: numbered `1..=n` in order, and naming only players the file
+    /// actually registers.
+    ///
+    /// A board or sit-out citing a number nobody has indexes past the end of the
+    /// score vector — another panic on the read path rather than a rejection.
+    /// A board pairing a player with themselves would count one game twice for
+    /// them. The numbering matters because a round is identified by its
+    /// `number` in every request, while the pairing model, the staleness
+    /// watermark and the cup stages all read `rounds` as a positional prefix:
+    /// where the two disagree, an edit lands on a different round than the one
+    /// the referee is looking at.
+    fn validate_rounds_name_the_field(&self) -> Result<(), TournamentError> {
+        let known: HashSet<TournamentId> = self
+            .players
+            .iter()
+            .filter_map(|p| p.tournament_id)
+            .collect();
+        for (index, round) in self.rounds.iter().enumerate() {
+            let expected = index as u32 + 1;
+            if round.number != expected {
+                return Err(TournamentError::MisnumberedRound {
+                    expected,
+                    found: round.number,
+                });
+            }
+            for board in &round.boards {
+                for player in [board.player1, board.player2] {
+                    if !known.contains(&player) {
+                        return Err(TournamentError::UnknownRoundPlayer {
+                            round: round.number,
+                            player,
+                        });
+                    }
+                }
+                if board.player1 == board.player2 {
+                    return Err(TournamentError::BoardAgainstSelf {
+                        round: round.number,
+                        player: board.player1,
+                    });
+                }
+            }
+            if let Some(sitout) = round.sitouts.iter().find(|s| !known.contains(&s.player)) {
+                return Err(TournamentError::UnknownRoundPlayer {
+                    round: round.number,
+                    player: sitout.player,
+                });
             }
         }
         Ok(())
@@ -3780,6 +3910,132 @@ mod tests {
                 t.validate_loaded(),
                 Err(TournamentError::EmptyTournamentName),
                 "a file named {blank:?} must not import"
+            );
+        }
+    }
+
+    /// A two-player tournament with one confirmed round — the smallest thing
+    /// whose rounds a corrupted file could misdescribe.
+    fn played_one_round() -> Tournament {
+        let mut t = Tournament::new("Paris Open").unwrap();
+        t.add_player(named("Alice")).unwrap();
+        t.add_player(named("Bob")).unwrap();
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        t
+    }
+
+    /// Everything downstream of a load indexes players by tournament number and
+    /// assumes the numbers are there, distinct, and the only ones any round
+    /// names. Each of these used to reach the read path: the first three panic
+    /// (`compute_scores` unwraps the number, and indexes a vector sized by the
+    /// largest one), and the rest quietly report the wrong tournament.
+    #[test]
+    fn validate_loaded_rejects_a_file_whose_rounds_dont_name_its_field() {
+        // A finalized player with no number: `standings()` unwraps it.
+        let mut unnumbered = played_one_round();
+        let id = unnumbered.players[0].id;
+        unnumbered.players[0].tournament_id = None;
+        assert_eq!(
+            unnumbered.validate_loaded(),
+            Err(TournamentError::UnnumberedPlayer { player: id })
+        );
+
+        // Two players on one number share a single score slot.
+        let mut shared = played_one_round();
+        shared.players[1].tournament_id = shared.players[0].tournament_id;
+        assert_eq!(
+            shared.validate_loaded(),
+            Err(TournamentError::DuplicateTournamentNumber {
+                number: TournamentId(1)
+            })
+        );
+
+        // Two rows for one player: an edit to either would silently pick one.
+        let mut twice = played_one_round();
+        twice.players[1].id = twice.players[0].id;
+        assert_eq!(
+            twice.validate_loaded(),
+            Err(TournamentError::DuplicatePlayerId {
+                player: twice.players[0].id
+            })
+        );
+
+        // A board naming somebody who isn't here indexes past the score vector.
+        let mut stranger = played_one_round();
+        stranger.rounds[0].boards[0].player2 = TournamentId(99);
+        assert_eq!(
+            stranger.validate_loaded(),
+            Err(TournamentError::UnknownRoundPlayer {
+                round: 1,
+                player: TournamentId(99)
+            })
+        );
+
+        // So does a sit-out.
+        let mut sitout = played_one_round();
+        sitout.rounds[0].sitouts.push(crate::round::Sitout {
+            player: TournamentId(99),
+            kind: crate::round::SitoutKind::Bye,
+            value: crate::round::SitoutValue::Full,
+        });
+        assert_eq!(
+            sitout.validate_loaded(),
+            Err(TournamentError::UnknownRoundPlayer {
+                round: 1,
+                player: TournamentId(99)
+            })
+        );
+
+        // A player paired with themselves would be counted twice.
+        let mut alone = played_one_round();
+        alone.rounds[0].boards[0].player2 = alone.rounds[0].boards[0].player1;
+        assert_eq!(
+            alone.validate_loaded(),
+            Err(TournamentError::BoardAgainstSelf {
+                round: 1,
+                player: TournamentId(1)
+            })
+        );
+
+        // Rounds are addressed by number but read as a positional prefix, so the
+        // two disagreeing puts an edit on a different round than the referee saw.
+        let mut misnumbered = played_one_round();
+        misnumbered.rounds[0].number = 7;
+        misnumbered.rounds[0].explanation.round = 7;
+        assert_eq!(
+            misnumbered.validate_loaded(),
+            Err(TournamentError::MisnumberedRound {
+                expected: 1,
+                found: 7
+            })
+        );
+
+        // And the tournament these were all derived from is fine.
+        played_one_round().validate_loaded().unwrap();
+    }
+
+    /// A save is external input, so a key this build doesn't know is drift, not
+    /// something to skip past: `outcome` renamed on a `Board` would erase every
+    /// recorded result, `rounds` renamed on the tournament would erase the event.
+    #[test]
+    fn a_drifted_key_is_refused_rather_than_dropped() {
+        let mut t = played_one_round();
+        // A result, so `outcome` is actually in the JSON — it is skipped while
+        // the board is pending, and it is the field whose loss would be worst.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        let json = serde_json::to_string(&t).unwrap();
+
+        for (from, to) in [("\"rounds\"", "\"round\""), ("\"outcome\"", "\"outome\"")] {
+            assert!(
+                json.contains(from),
+                "the fixture should contain {from} to misspell"
+            );
+            let drifted = json.replacen(from, to, 1);
+            assert!(
+                serde_json::from_str::<Tournament>(&drifted).is_err(),
+                "{to} must be refused, not silently dropped"
             );
         }
     }

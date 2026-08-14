@@ -32,6 +32,7 @@ use crate::units::{TeamId, TournamentId, UnitKey};
 /// non-empty) only in team mode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct Team {
     /// Stable identity, like [`Player::id`] — survives a rename or a roster edit.
     pub id: Uuid,

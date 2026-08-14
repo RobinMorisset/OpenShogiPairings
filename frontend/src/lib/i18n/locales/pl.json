@@ -513,6 +513,7 @@
     "emptyAdjustmentReason": "Korekta punktów wymaga podania powodu.",
     "zeroPointAdjustment": "Korekta o zero punktów nie miałaby żadnego efektu.",
     "unsupportedFormatVersion": "Ten plik używa formatu turnieju {found}, którego ta wersja programu nie potrafi odczytać (obsługuje {supported}).",
+    "oldSaveAlreadyStarted": "Ten plik został zapisany przez starszą wersję OpenShogiPairings (format {found}), a jego turniej już się rozpoczął. Jako format {supported} można odczytać tylko turniej, w którym nie rozpoczęto żadnej rundy — otwórz ten plik wersją, która go zapisała.",
     "malformedSave": "Ten plik nie jest czytelnym zapisem turnieju: {details}",
     "eloEstimateUnanchored": "Estymacja ELO nie ma nic, co zakotwiczyłoby jej skalę. Dodaj gracza z rankingiem, zablokuj rankingi (mnożnik K równy 0) albo wybierz niepłaski rozkład a priori dla graczy bez rankingu.",
     "teamModeRejectsCup": "Turniej drużynowy nie może jednocześnie zawierać pucharu pucharowego. Wyłącz jedno z dwóch.",
