@@ -621,10 +621,10 @@
 
   <div class="io-footer">
     <div class="settings-io">
-      <button type="button" class="ghost small" onclick={exportSettings}>
+      <button type="button" class="ghost control-xs control-quiet" onclick={exportSettings}>
         {$_("settings.exportSettings")}
       </button>
-      <button type="button" class="ghost small" onclick={importSettings} disabled={busy}>
+      <button type="button" class="ghost control-xs control-quiet" onclick={importSettings} disabled={busy}>
         {$_("settings.importSettings")}
       </button>
     </div>
@@ -755,31 +755,9 @@
   }
   .settings :global(.threshold) {
     width: 6rem;
-    background: var(--bg-inset);
-    color: inherit;
-    border: 1px solid var(--border-soft);
-    border-radius: 0.4rem;
-    padding: 0.3rem 0.45rem;
-    font: inherit;
   }
   .settings :global(.threshold.narrow) {
     width: 4rem;
-  }
-  .settings :global(.threshold-kind) {
-    background: var(--bg-inset);
-    color: inherit;
-    border: 1px solid var(--border-soft);
-    border-radius: 0.4rem;
-    padding: 0.3rem 0.45rem;
-    font: inherit;
-  }
-  .settings :global(.tb-select) {
-    background: var(--bg-inset);
-    color: inherit;
-    border: 1px solid var(--border-soft);
-    border-radius: 0.4rem;
-    padding: 0.3rem 0.45rem;
-    font: inherit;
   }
   .settings :global(.remove) {
     background: transparent;
@@ -792,18 +770,6 @@
   .settings :global(.remove:hover:not(:disabled)) {
     color: var(--color-danger);
     border-color: var(--border-soft);
-  }
-  .settings :global(.ghost) {
-    background: transparent;
-    border: 1px solid var(--border-soft);
-    color: inherit;
-    border-radius: 0.4rem;
-    padding: 0.3rem 0.6rem;
-    cursor: pointer;
-    font: inherit;
-  }
-  .settings :global(.ghost.small) {
-    font-size: 0.85rem;
   }
   .settings :global(.ghost:hover:not(:disabled)) {
     background: var(--bg-hover);

@@ -187,7 +187,7 @@
               type="number"
               min="1"
               step="1"
-              class="threshold narrow"
+              class="threshold narrow control-sm control-quiet"
               value={clubRounds ?? 1}
               disabled={busy || clubRounds == null}
               onchange={(e) => editClubRounds(e.currentTarget.value)}
@@ -203,7 +203,7 @@
               <div class="threshold-row">
                 <input
                   type="text"
-                  class="club-input"
+                  class="club-input control-sm control-quiet"
                   list="known-clubs"
                   placeholder={$_("settings.clubNamePlaceholder")}
                   value={c}
@@ -224,7 +224,7 @@
             {/if}
             <button
               type="button"
-              class="ghost small"
+              class="ghost control-xs control-quiet"
               disabled={busy}
               onclick={addExempt}>{$_("settings.addExemptClub")}</button
             >
@@ -274,7 +274,7 @@
               type="number"
               min="1"
               step="1"
-              class="threshold narrow"
+              class="threshold narrow control-sm control-quiet"
               value={nationalityRounds ?? 1}
               disabled={busy || nationalityRounds == null}
               onchange={(e) => editNationalityRounds(e.currentTarget.value)}
@@ -290,7 +290,7 @@
               <div class="threshold-row">
                 <input
                   type="text"
-                  class="club-input"
+                  class="club-input control-sm control-quiet"
                   list="known-nationalities"
                   placeholder={$_("settings.nationalityPlaceholder")}
                   value={c}
@@ -311,7 +311,7 @@
             {/if}
             <button
               type="button"
-              class="ghost small"
+              class="ghost control-xs control-quiet"
               disabled={busy}
               onclick={addExemptNationality}>{$_("settings.addExemptNationality")}</button
             >
@@ -345,12 +345,5 @@
   .club-input {
     width: 12rem;
     max-width: 100%;
-    box-sizing: border-box;
-    background: var(--bg-inset);
-    color: inherit;
-    border: 1px solid var(--border-soft);
-    border-radius: 0.4rem;
-    padding: 0.3rem 0.45rem;
-    font: inherit;
   }
 </style>

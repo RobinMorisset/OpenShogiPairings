@@ -112,13 +112,58 @@ code {
   background: var(--bg-surface);
 }
 
-button {
-  padding: 0.45rem 0.9rem;
+/* Form controls -------------------------------------------------------------
+ *
+ * One box for every kind of control — button, text input, select, textarea —
+ * so a row of them lines up whatever mix of elements it happens to be made of.
+ * Each component used to restate this block for its own inputs, in four
+ * different paddings and two radii; those copies are what let a button end up
+ * visibly shorter than the select beside it.
+ *
+ * Size is a **single class**, and the same class whatever the element:
+ * `.control-sm` on a select is exactly as tall as `.control-sm` on a button.
+ * Write it on every control that shares a row with another one. A control with
+ * no size class gets this box and this padding, but not the height the size
+ * classes normalize to (that cannot live here: an icon button undoes the
+ * padding above and would be stretched by a `min-height` it never asked for).
+ * So an unclassed control lands a pixel or two short of a `.control-lg` one,
+ * and a row that mixes the two shows it. Saying the size out loud is also what
+ * makes a mismatched row visible in the markup, which is where it is
+ * introduced — nothing about the old markup said anything at all, and the
+ * sizes only disagreed once rendered.
+ *
+ * Anything else a control needs — width, flex, a colour for a destructive
+ * action — stays in the component. Only the shared box lives here.
+ */
+/* The checkbox/radio exclusion is wrapped in `:where()` so it costs no
+   specificity: written as a bare `:not()` this selector would outweigh the
+   `.control-sm` class below and silently win on inputs — the size class would
+   work on selects and buttons and do nothing at all on a text field. */
+button,
+input:where(:not([type="checkbox"], [type="radio"])),
+select,
+textarea {
+  padding: 0.45rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: 0.5rem;
-  background: var(--bg-raised);
+  background: var(--bg-inset);
   color: inherit;
   font: inherit;
+  /* Stated rather than inherited: with the same padding and font a select still
+     came out three pixels shorter than the button beside it, because it was
+     laying its label out at the browser's `normal` while the button inherited
+     the page's. `normal` for all of them, rather than a number, because Chrome's
+     UA sheet forces it on <select> with `!important` — a number here would line
+     up every control except the one that started this. */
+  line-height: normal;
+  box-sizing: border-box;
+}
+
+button {
+  /* A button's label is a word rather than a value being edited, so it gets
+     more room either side, and a raised rather than a sunken background. */
+  padding-inline: 0.9rem;
+  background: var(--bg-raised);
   cursor: pointer;
   /* Delay the disabled-state dim (opacity below): a quick action toggles `busy`
      true→false within the delay, so buttons never flash to 50% and back. A
@@ -135,6 +180,68 @@ button:disabled {
 button.ghost {
   background: transparent;
 }
+
+/* The three sizes, which are two questions rather than one: how much room round
+ * the label, and how big the label is.
+ *
+ *   control-lg   roomy box, page text     a form the referee fills in
+ *   control-sm   tight box, page text     a field in a dense grid or table row
+ *   control-xs   tight box, small text    a toolbar button beside a line of prose
+ *
+ * The middle one is the one worth naming carefully. Before this file existed,
+ * every dense field in the app — the settings grid, a team's row, the draft's
+ * forced-pairing pickers — was tight padding around *normal* text, while the
+ * toolbar buttons were tight padding around small text. Reading those as one
+ * size (they differ by less than a pixel of padding) shrank the text of every
+ * field in the app by a fifth. Padding and font size travel together here
+ * precisely so that mistake is not available.
+ *
+ * All three set the block padding rather than the whole shorthand, so
+   a control keeps the horizontal padding its own kind wants (a button's roomier
+   one, an input's tighter one) while the heights still match.
+ *
+ * The `min-height` is what makes "match" literal. Even given identical font and
+ * padding, a <select> comes out about two pixels taller than a button or an
+ * input — its label sits in a line box the browser draws itself, and by how
+ * much varies by engine. So each size states the height every control settles
+ * on: the tallest of them, rounded up. The spare pixels land as centring rather
+ * than as a taller box, and a row stays flush whatever mix of controls it is
+ * made of. (A textarea is sized by its rows and simply clears this.) */
+.control-lg {
+  padding-block: 0.45rem;
+  font-size: inherit;
+  min-height: 2.35rem;
+}
+.control-sm {
+  padding-block: 0.25rem;
+  font-size: inherit;
+  min-height: 1.95rem;
+}
+.control-xs {
+  padding-block: 0.25rem;
+  font-size: 0.78rem;
+  min-height: 1.7rem;
+}
+button.control-sm,
+button.control-xs {
+  padding-inline: 0.6rem;
+}
+
+/* A quieter tone, for the places that are mostly controls — the settings grid,
+   a team's row of fields, the header's language picker. At full strength every
+   box there draws its own hard outline and the region reads as a wall of
+   borders. Composes with either size and changes no dimension, so a quiet
+   control still lines up exactly with a loud one beside it. */
+.control-quiet {
+  border-color: var(--border-soft);
+  border-radius: 0.4rem;
+}
+
+/* Not every <button> is a control in this sense. The sortable column headers,
+   the click-to-edit cells, the × and ± icon buttons and the pill badges are
+   deliberately box-less and undo the padding above with their own `padding: 0`.
+   They take no size class: giving them one would hand them back the box they
+   are defined by not having. */
 
 @media print {
   :root,

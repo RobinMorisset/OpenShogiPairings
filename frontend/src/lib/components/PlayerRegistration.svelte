@@ -150,6 +150,7 @@
   <div class="name-field">
     <input
       type="text"
+      class="control-lg"
       bind:this={lastNameInput}
       bind:value={lastName}
       oninput={onLastNameInput}
@@ -192,6 +193,7 @@
 
   <input
     type="text"
+    class="control-lg"
     bind:value={firstName}
     placeholder={$_("playerRegistration.firstName")}
     autocomplete="off"
@@ -205,7 +207,7 @@
     min="0"
     disabled={busy}
     aria-label={$_("playerRegistration.rating")}
-    class="rating"
+    class="rating control-lg"
   />
   <input
     type="text"
@@ -214,7 +216,7 @@
     autocomplete="off"
     disabled={busy}
     aria-label={$_("playerRegistration.grade")}
-    class="grade"
+    class="grade control-lg"
   />
   <input
     type="text"
@@ -223,7 +225,7 @@
     autocomplete="off"
     disabled={busy}
     aria-label={$_("playerRegistration.nationality")}
-    class="nat"
+    class="nat control-lg"
     maxlength="3"
   />
   <input
@@ -233,9 +235,9 @@
     autocomplete="off"
     disabled={busy}
     aria-label={$_("playerRegistration.club")}
-    class="club"
+    class="club control-lg"
   />
-  <button type="submit" disabled={busy || lastName.trim() === ""}
+  <button type="submit" class="control-lg" disabled={busy || lastName.trim() === ""}
     >{$_("playerRegistration.addPlayer")}</button
   >
 </form>
@@ -247,14 +249,6 @@
     flex-wrap: wrap;
     align-items: flex-start;
   }
-  input {
-    padding: 0.45rem 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    background: var(--bg-inset);
-    color: inherit;
-    font: inherit;
-  }
   .name-field {
     position: relative;
     flex: 1 1 12rem;
@@ -262,7 +256,6 @@
   }
   .name-field input {
     width: 100%;
-    box-sizing: border-box;
   }
   input[type="text"].club {
     flex: 1 1 8rem;

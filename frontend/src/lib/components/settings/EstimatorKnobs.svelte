@@ -25,7 +25,7 @@
   <label class="check elo-k">
     {$_("settings.eloApplyTo")}
     <select
-      class="tb-select"
+      class="tb-select control-sm control-quiet"
       value={eloApplyTo}
       disabled={busy}
       onchange={(e) => setEloApplyTo(e.currentTarget.value as "unrated" | "all")}
@@ -40,7 +40,7 @@
   <label class="check elo-k">
     {$_("settings.eloUnratedPrior")}
     <select
-      class="tb-select"
+      class="tb-select control-sm control-quiet"
       value={unratedPrior}
       disabled={busy}
       onchange={(e) => setUnratedPrior(e.currentTarget.value as "flat" | "laplace")}

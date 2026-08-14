@@ -469,6 +469,7 @@
     {/if}
     <div class="add-pair">
       <select
+        class="control-sm"
         value={pairA}
         disabled={busy}
         onchange={(e) => selectPairA(parseId(e.currentTarget.value))}
@@ -488,6 +489,7 @@
       </select>
       <span class="vs">{$_("roundDraftView.vs")}</span>
       <select
+        class="control-sm"
         value={pairB}
         disabled={busy}
         onchange={(e) => selectPairB(parseId(e.currentTarget.value))}
@@ -546,6 +548,7 @@
          above takes it back. -->
     {#if forcedByeList.length === 0}
       <select
+        class="control-sm"
         value=""
         disabled={busy || byesClosed || (teamMode ? forceableTeams : forceable).length === 0}
         onchange={(e) => addForcedBye(parseId(e.currentTarget.value))}
@@ -681,14 +684,6 @@
     align-items: center;
     gap: 0.5rem;
     flex-wrap: wrap;
-  }
-  select {
-    padding: 0.35rem 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    background: var(--bg-inset);
-    color: inherit;
-    font: inherit;
   }
   .vs {
     color: var(--text-secondary);

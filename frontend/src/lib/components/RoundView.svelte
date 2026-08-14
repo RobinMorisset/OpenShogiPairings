@@ -730,7 +730,7 @@
       >
         🔤 {$_("roundView.alphabetical")}
       </button>
-      <button type="button" class="ghost" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
+      <button type="button" class="ghost control-lg" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
       {#if onPrintSheets}
         <ResultSheetsButton
           playerCount={players.length}
@@ -1105,7 +1105,7 @@
                 {:else if !isCup(board)}
                   {#if handicapAllowed(board)}
                     <select
-                      class="handicap"
+                      class="handicap control-sm control-quiet"
                       disabled={locked}
                       value={board.handicap?.handicap ?? ""}
                       onchange={(e) => onHandicapChange(index, e.currentTarget.value)}
@@ -1231,7 +1231,7 @@
           <div class="probe-modes">
             <button
               type="button"
-              class="probe-mode"
+              class="probe-mode control-sm control-quiet"
               class:active={probeMode === "force"}
               disabled={probeBusy}
               onclick={() => (probeMode = "force")}
@@ -1240,7 +1240,7 @@
             </button>
             <button
               type="button"
-              class="probe-mode"
+              class="probe-mode control-sm control-quiet"
               class:active={probeMode === "forbid"}
               disabled={probeBusy}
               onclick={() => (probeMode = "forbid")}
@@ -1254,7 +1254,7 @@
               : $_(teamMode ? "roundView.probe.hintForbidTeams" : "roundView.probe.hintForbid")}
           </p>
           <div class="probe-controls">
-            <select bind:value={probeA} disabled={probeBusy}>
+            <select class="control-sm control-quiet" bind:value={probeA} disabled={probeBusy}>
               <option value="">{probePickLabel}</option>
               {#each swissPlayers as id (id)}
                 <option value={id}>{unitName(id)}</option>
@@ -1262,7 +1262,7 @@
             </select>
             {#if probeMode === "force"}
               <span class="probe-vs">{$_("roundView.probe.and")}</span>
-              <select bind:value={probeB} disabled={probeBusy}>
+              <select class="control-sm control-quiet" bind:value={probeB} disabled={probeBusy}>
                 <option value="">{probePickLabel}</option>
                 {#each swissPlayers as id (id)}
                   <option value={id}>{unitName(id)}</option>
@@ -1544,9 +1544,6 @@
     margin-bottom: 0.5rem;
   }
   .probe-mode {
-    padding: 0.25rem 0.6rem;
-    border: 1px solid var(--border-soft);
-    border-radius: 0.4rem;
     background: transparent;
     color: var(--text-secondary);
     font: inherit;
@@ -1588,17 +1585,10 @@
     flex-wrap: wrap;
     gap: 0.5rem;
   }
-  .probe-controls select {
-    padding: 0.25rem 0.4rem;
-    border: 1px solid var(--border-soft);
-    border-radius: 0.4rem;
-    /* Theme-aware inset (like .tb-select), not `transparent`: a transparent
-       native <select> falls back to the OS light combobox on Windows/WebView2,
-       giving white-on-white with the inherited light text in dark mode. */
-    background: var(--bg-inset);
-    color: inherit;
-    font: inherit;
-  }
+  /* The inset background is the shared one, and deliberately not `transparent`:
+     a transparent native <select> falls back to the OS light combobox on
+     Windows/WebView2, giving white-on-white with the inherited light text in
+     dark mode. */
   .probe-vs {
     color: var(--text-secondary);
   }
@@ -1807,12 +1797,6 @@
 
   .handicap {
     width: 4.5rem;
-    background: var(--bg-inset);
-    color: inherit;
-    border: 1px solid var(--border-soft);
-    border-radius: 0.4rem;
-    padding: 0.2rem 0.35rem;
-    font: inherit;
   }
   .giver {
     margin-left: 0.5rem;

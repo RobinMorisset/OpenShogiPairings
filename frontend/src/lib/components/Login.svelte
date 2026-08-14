@@ -42,12 +42,13 @@
   <form onsubmit={submit}>
     <input
       type="password"
+      class="control-lg"
       bind:value={password}
       placeholder={$_("login.passwordPlaceholder")}
       autocomplete="current-password"
       disabled={busy}
     />
-    <button type="submit" data-testid="login-submit" disabled={busy || password.length === 0}>
+    <button type="submit" class="control-lg" data-testid="login-submit" disabled={busy || password.length === 0}>
       {busy ? $_("login.signingIn") : $_("login.submit")}
     </button>
   </form>
@@ -75,13 +76,6 @@
   }
   input[type="password"] {
     flex: 1;
-    box-sizing: border-box;
-    padding: 0.5rem 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    background: var(--bg-inset);
-    color: inherit;
-    font: inherit;
   }
   .error-banner {
     margin: 0.9rem 0 0;

@@ -74,6 +74,7 @@
       <label class="field">
         <span title={$_("resultSheets.roundsTitle")}>{$_("resultSheets.rounds")}</span>
         <input
+          class="control-sm control-quiet"
           type="number"
           min="1"
           max={MAX_ROUNDS}
@@ -84,6 +85,7 @@
       <label class="field">
         <span title={$_("resultSheets.blanksTitle")}>{$_("resultSheets.blanks")}</span>
         <input
+          class="control-sm control-quiet"
           type="number"
           min="0"
           max={MAX_BLANK_SHEETS}
@@ -134,14 +136,10 @@
     margin-bottom: 0.4rem;
     font-size: 0.9rem;
   }
+  /* Raised: this popover sits above the page, not in a form on it. */
   .field input {
     width: 4.5rem;
-    padding: 0.25rem 0.4rem;
-    border: 1px solid var(--border);
-    border-radius: 0.35rem;
     background: var(--bg-raised);
-    color: inherit;
-    font: inherit;
   }
   .hint {
     margin: 0 0 0.5rem;

@@ -357,14 +357,14 @@
 {/snippet}
 
 <div class="player-toolbar print-hide">
-  <button type="button" class="ghost" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
+  <button type="button" class="ghost control-lg" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
 </div>
 {#if showEligible}
   <p class="elig-count">{$_("playerList.eligibleCount", { values: { count: eligibleCount } })}</p>
   {#if !finalized && nationalities.length > 0}
     <div class="elig-bulk print-hide">
       <span>{$_("playerList.eligibilityByNationality")}</span>
-      <select bind:value={bulkNationality} disabled={busy}>
+      <select class="control-xs control-quiet" bind:value={bulkNationality} disabled={busy}>
         <option value="">{$_("playerList.chooseNationality")}</option>
         {#each nationalities as [nat, count] (nat)}
           <option value={nat}>{nat} ({count})</option>
@@ -372,7 +372,7 @@
       </select>
       <button
         type="button"
-        class="ghost small"
+        class="ghost control-xs control-quiet"
         disabled={busy || !bulkNationality}
         onclick={() => applyBulkEligible(true)}
       >
@@ -380,7 +380,7 @@
       </button>
       <button
         type="button"
-        class="ghost small"
+        class="ghost control-xs control-quiet"
         disabled={busy || !bulkNationality}
         onclick={() => applyBulkEligible(false)}
       >
@@ -674,26 +674,6 @@
     margin: 0 0 0.75rem;
     font-size: 0.85rem;
     color: var(--text-strong);
-  }
-  .elig-bulk select {
-    background: var(--bg-inset);
-    color: inherit;
-    border: 1px solid var(--border-soft);
-    border-radius: 0.35rem;
-    padding: 0.2rem 0.35rem;
-    font: inherit;
-  }
-  .ghost {
-    background: transparent;
-    border: 1px solid var(--border-soft);
-    color: inherit;
-    border-radius: 0.35rem;
-    padding: 0.2rem 0.55rem;
-    cursor: pointer;
-    font: inherit;
-  }
-  .ghost.small {
-    font-size: 0.8rem;
   }
   .ghost:hover:not(:disabled) {
     background: var(--bg-hover);

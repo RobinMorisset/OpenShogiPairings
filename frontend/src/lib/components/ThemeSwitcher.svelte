@@ -9,7 +9,7 @@
 
 <button
   type="button"
-  class="theme-switcher ghost"
+  class="theme-switcher ghost control-xs control-quiet"
   data-testid="theme-switcher"
   onclick={toggle}
   title={$_($theme === "dark" ? "themeSwitcher.switchToLight" : "themeSwitcher.switchToDark")}
@@ -20,7 +20,6 @@
 
 <style>
   .theme-switcher {
-    padding: 0.3rem 0.5rem;
     font-size: 0.9rem;
     line-height: 1;
   }

@@ -186,7 +186,7 @@
         {#each thresholds as row, i (i)}
           <div class="threshold-row">
             <select
-              class="threshold-kind"
+              class="threshold-kind control-sm control-quiet"
               value={row.kind}
               disabled={busy}
               onchange={(e) => editThresholdKind(i, e.currentTarget.value as "elo" | "grade")}
@@ -203,7 +203,7 @@
                 type="number"
                 min="1"
                 step="1"
-                class="threshold"
+                class="threshold control-sm control-quiet"
                 value={row.value}
                 disabled={busy}
                 onchange={(e) => editThresholdValue(i, e.currentTarget.value)}
@@ -213,13 +213,13 @@
                 type="number"
                 min="1"
                 step="1"
-                class="threshold narrow"
+                class="threshold narrow control-sm control-quiet"
                 value={row.gradeLevel}
                 disabled={busy}
                 onchange={(e) => editThresholdGradeLevel(i, e.currentTarget.value)}
               />
               <select
-                class="threshold-kind"
+                class="threshold-kind control-sm control-quiet"
                 value={row.gradeKind}
                 disabled={busy}
                 onchange={(e) => editThresholdGradeKind(i, e.currentTarget.value as GradeKind)}
@@ -240,7 +240,7 @@
                 type="number"
                 min="1"
                 step="1"
-                class="threshold narrow"
+                class="threshold narrow control-sm control-quiet"
                 value={row.dropsAfterRound ?? 1}
                 disabled={busy || row.dropsAfterRound == null}
                 onchange={(e) => editThresholdDropRound(i, e.currentTarget.value)}
@@ -260,7 +260,7 @@
         {/if}
         <button
           type="button"
-          class="ghost small"
+          class="ghost control-xs control-quiet"
           disabled={busy}
           onclick={addThreshold}>{$_("settings.addThreshold")}</button
         >
@@ -353,7 +353,7 @@
           type="number"
           min="1"
           step="1"
-          class="threshold narrow"
+          class="threshold narrow control-sm control-quiet"
           value={airtightRounds ?? 1}
           disabled={busy || airtightRounds == null}
           onchange={(e) => editAirtightRounds(e.currentTarget.value)}

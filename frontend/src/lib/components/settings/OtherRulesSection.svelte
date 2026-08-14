@@ -150,7 +150,7 @@
           <div class="category-row">
             <input
               type="text"
-              class="category-name"
+              class="category-name control-sm control-quiet"
               value={row.name}
               placeholder={$_("settings.categoryNamePlaceholder")}
               disabled={busy}
@@ -170,7 +170,7 @@
         {/if}
         <button
           type="button"
-          class="ghost small"
+          class="ghost control-xs control-quiet"
           disabled={busy}
           onclick={addCategory}>{$_("settings.addCategory")}</button
         >
@@ -217,12 +217,5 @@
   .category-name {
     width: 14rem;
     max-width: 100%;
-    box-sizing: border-box;
-    background: var(--bg-inset);
-    color: inherit;
-    border: 1px solid var(--border-soft);
-    border-radius: 0.4rem;
-    padding: 0.3rem 0.45rem;
-    font: inherit;
   }
 </style>

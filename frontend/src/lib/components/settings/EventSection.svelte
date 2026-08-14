@@ -89,6 +89,7 @@
     <label class="field">
       <span>{$_("settings.eventCity")}</span>
       <input
+        class="control-sm control-quiet"
         type="text"
         value={city}
         disabled={busy}
@@ -98,6 +99,7 @@
     <label class="field">
       <span>{$_("settings.eventCountry")}</span>
       <input
+        class="control-sm control-quiet"
         type="text"
         value={country}
         disabled={busy}
@@ -107,6 +109,7 @@
     <label class="field">
       <span>{$_("settings.eventFirstDay")}</span>
       <input
+        class="control-sm control-quiet"
         type="date"
         value={firstDate}
         disabled={busy}
@@ -116,6 +119,7 @@
     <label class="field">
       <span>{$_("settings.eventLastDay")}</span>
       <input
+        class="control-sm control-quiet"
         type="date"
         value={lastDate}
         disabled={busy}
@@ -125,6 +129,7 @@
     <label class="field">
       <span>{$_("settings.eventTimeControl")}</span>
       <input
+        class="control-sm control-quiet"
         type="text"
         value={timeControl}
         placeholder={$_("settings.eventTimeControlPlaceholder")}
@@ -157,15 +162,8 @@
     color: var(--text-secondary);
   }
   .field input {
-    box-sizing: border-box;
     width: 100%;
     min-width: 0;
-    background: var(--bg-inset);
-    color: inherit;
-    border: 1px solid var(--border-soft);
-    border-radius: 0.4rem;
-    padding: 0.3rem 0.45rem;
-    font: inherit;
   }
   .preview-details {
     margin-top: 0.9rem;

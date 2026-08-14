@@ -386,6 +386,7 @@
     <form class="new-team" onsubmit={submitNew}>
       <input
         type="text"
+        class="control-sm control-quiet"
         bind:this={newTeamInput}
         bind:value={newName}
         placeholder={$_("teams.namePlaceholder")}
@@ -411,7 +412,7 @@
           {#if renaming === team.id}
             <input
               type="text"
-              class="rename"
+              class="rename control-sm control-quiet"
               bind:value={renameText}
               disabled={busy}
               onblur={() => commitRename(team)}
@@ -504,7 +505,7 @@
             {/if}
             <div class="adjustment-form">
               <input
-                class="adj-delta"
+                class="adj-delta control-quiet"
                 type="number"
                 placeholder={$_("teams.adjustmentPointsPlaceholder")}
                 bind:value={adjustmentDelta}
@@ -512,7 +513,7 @@
                 onkeydown={(e) => adjustmentKeydown(e, team.id)}
               />
               <input
-                class="adj-reason"
+                class="adj-reason control-quiet"
                 type="text"
                 placeholder={$_("teams.adjustmentReasonPlaceholder")}
                 bind:value={adjustmentReason}
@@ -602,7 +603,7 @@
           <div class="assign">
             <input
               type="text"
-              class="assign-input"
+              class="assign-input control-sm control-quiet"
               bind:this={pickerInputs[team.id]}
               placeholder={$_("teams.addMember")}
               value={open ? pickerQuery : ""}
@@ -707,15 +708,6 @@
      browser's own form font, visibly smaller than the app's. `border-box` keeps
      the widths declared below meaning the whole control, so the picker still
      fits its card. */
-  input {
-    padding: 0.3rem 0.45rem;
-    border: 1px solid var(--border);
-    border-radius: 0.4rem;
-    background: var(--bg-inset);
-    color: inherit;
-    font: inherit;
-    box-sizing: border-box;
-  }
   .new-team {
     display: flex;
     gap: 0.5rem;

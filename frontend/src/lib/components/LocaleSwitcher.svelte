@@ -5,7 +5,7 @@
 
 <label class="locale-switcher">
   <span class="sr-only">{$_("localeSwitcher.label")}</span>
-  <select value={$locale} onchange={(e) => setLocale(e.currentTarget.value)}>
+  <select class="control-xs control-quiet" value={$locale} onchange={(e) => setLocale(e.currentTarget.value)}>
     {#each SUPPORTED_LOCALES as l (l.code)}
       <option value={l.code}>{l.label}</option>
     {/each}
@@ -13,14 +13,9 @@
 </label>
 
 <style>
+  /* Raised rather than inset: it sits on the page header, not in a form. */
   .locale-switcher select {
     background: var(--bg-raised);
-    color: inherit;
-    border: 1px solid var(--border);
-    border-radius: 0.4rem;
-    padding: 0.3rem 0.5rem;
-    font: inherit;
-    font-size: 0.8rem;
   }
   .sr-only {
     position: absolute;

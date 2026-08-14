@@ -40,6 +40,7 @@
       {$_("createTournament.name")}
       <input
         type="text"
+        class="control-lg"
         bind:value={name}
         placeholder={$_("createTournament.namePlaceholder")}
         autocomplete="off"
@@ -51,6 +52,7 @@
         {$_("createTournament.password")}
         <input
           type="password"
+          class="control-lg"
           bind:value={password}
           placeholder={$_("createTournament.passwordPlaceholder")}
           autocomplete="new-password"
@@ -59,7 +61,7 @@
       </label>
     {/if}
     <div class="actions">
-      <button type="submit" data-testid="create-tournament" disabled={busy || name.trim() === ""}>
+      <button type="submit" class="control-lg" data-testid="create-tournament" disabled={busy || name.trim() === ""}>
         {$_("createTournament.create")}
       </button>
     </div>
@@ -71,7 +73,7 @@
 
     <button
       type="button"
-      class="ghost"
+      class="ghost control-lg"
       data-testid="load-tournament"
       disabled={busy}
       onclick={() => onLoad(chosenPassword())}
@@ -103,14 +105,7 @@
   input[type="password"] {
     display: block;
     width: 100%;
-    box-sizing: border-box;
     margin-top: 0.3rem;
-    padding: 0.5rem 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    background: var(--bg-inset);
-    color: inherit;
-    font: inherit;
   }
   .actions {
     display: flex;

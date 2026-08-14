@@ -58,12 +58,8 @@
   // Only ever show an answer that belongs to what is selected now.
   const shown = $derived(result && result.nationality === nationality ? result.check : null);
 
-  // An answer describes the roster it was run against. If that roster has since
-  // gained or lost a player of this nationality — a late registration, a
-  // withdrawal, a nationality typed in afterwards — the answer is not about the
-  // field any more, and a stale "everyone is on the list" is precisely the
-  // reassurance nobody should be given. So it is dropped rather than shown
-  // qualified, and the check has to be re-run.
+  // How many players of the selected nationality the roster holds right now,
+  // which is what an answer's own `checked` is compared against below.
   const registeredNow = $derived(nationalities.find(([nat]) => nat === nationality)?.[1] ?? 0);
 
   // Each missing player, resolved against the roster being rendered.
@@ -102,7 +98,7 @@
   {:else}
     <div class="controls">
       <label for="licence-nat">{$_("licenceCheck.nationality")}</label>
-      <select id="licence-nat" bind:value={nationality} disabled={busy}>
+      <select id="licence-nat" class="control-lg" bind:value={nationality} disabled={busy}>
         <option value="">{$_("licenceCheck.chooseNationality")}</option>
         {#each nationalities as [nat, count] (nat)}
           <option value={nat}>{nat} ({count})</option>
@@ -110,7 +106,7 @@
       </select>
       <button
         type="button"
-        class="ghost small"
+        class="ghost control-lg"
         data-testid="licence-load-list"
         disabled={busy || !nationality}
         onclick={() => onCheck(nationality)}
@@ -176,14 +172,6 @@
     align-items: center;
     gap: 0.5rem;
     flex-wrap: wrap;
-  }
-  select {
-    padding: 0.35rem 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    background: var(--bg-inset);
-    color: inherit;
-    font: inherit;
   }
   .summary,
   .covered,

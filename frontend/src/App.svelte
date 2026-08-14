@@ -863,7 +863,7 @@
         <div class="toolbar-actions">
           <button
             type="button"
-            class="ghost"
+            class="ghost control-lg"
             data-testid="undo"
             onclick={handleUndo}
             disabled={busy || !canUndo}
@@ -873,7 +873,7 @@
           </button>
           <button
             type="button"
-            class="ghost"
+            class="ghost control-lg"
             data-testid="save"
             onclick={handleSave}
             disabled={busy}
@@ -882,7 +882,7 @@
           </button>
           <button
             type="button"
-            class="ghost"
+            class="ghost control-lg"
             class:active={showBackups}
             data-testid="toggle-backups"
             onclick={handleToggleBackups}
@@ -893,7 +893,7 @@
           </button>
           <button
             type="button"
-            class="ghost"
+            class="ghost control-lg"
             class:active={publication.open}
             data-testid="toggle-publication"
             onclick={() => publication.toggle()}
@@ -904,7 +904,7 @@
           </button>
           <button
             type="button"
-            class="ghost"
+            class="ghost control-lg"
             data-testid="switch-tournament"
             onclick={() => currentTournamentId.set(null)}
             disabled={busy}
@@ -941,7 +941,7 @@
             <div class="publication-actions">
               <button
                 type="button"
-                class="ghost small"
+                class="ghost control-xs"
                 data-testid="copy-public-link"
                 onclick={() => publication.copyLink(publicUrl)}
                 disabled={busy}
@@ -950,7 +950,7 @@
               </button>
               <button
                 type="button"
-                class="ghost small"
+                class="ghost control-xs"
                 data-testid="print-public-qr"
                 onclick={() => prints.printQr()}
                 disabled={busy}
@@ -960,7 +960,7 @@
               </button>
               <button
                 type="button"
-                class="ghost small"
+                class="ghost control-xs"
                 data-testid="rotate-public-key"
                 onclick={() => publication.setPublished(true)}
                 disabled={busy}
@@ -970,7 +970,7 @@
               </button>
               <button
                 type="button"
-                class="ghost small danger"
+                class="ghost control-xs danger"
                 data-testid="unpublish"
                 onclick={() => publication.setPublished(false)}
                 disabled={busy}
@@ -983,7 +983,7 @@
             <div class="publication-actions">
               <button
                 type="button"
-                class="ghost small"
+                class="ghost control-xs"
                 data-testid="publish"
                 onclick={() => publication.setPublished(true)}
                 disabled={busy}
@@ -1004,7 +1004,7 @@
             <div class="publication-actions">
               <button
                 type="button"
-                class="ghost small"
+                class="ghost control-xs"
                 data-testid="export-public-page"
                 onclick={() => publication.exportPages()}
                 disabled={busy}
@@ -1054,7 +1054,7 @@
                   <span class="backup-label">{b.label}</span>
                   <button
                     type="button"
-                    class="ghost small"
+                    class="ghost control-xs"
                     disabled={busy}
                     onclick={() => handleRestoreBackup(b.id)}
                   >
@@ -1148,7 +1148,7 @@
             <label class="cup-size" title={$_("app.cupTitle")}>
               {$_("app.cupLabel")}
               {#if validCupSizes.length > 0}
-                <select bind:value={cupSizeChoice} disabled={busy}>
+                <select class="control-lg" bind:value={cupSizeChoice} disabled={busy}>
                   {#each validCupSizes as s (s)}
                     <option value={s}>
                       {$_(
@@ -1169,7 +1169,7 @@
           {/if}
           <button
             type="button"
-            class="ctrl primary"
+            class="ctrl control-lg primary"
             data-testid="prepare-round"
             onclick={handlePrepareRound}
             disabled={!startEnabled}
@@ -1179,7 +1179,7 @@
           </button>
           <button
             type="button"
-            class="ctrl"
+            class="ctrl control-lg"
             data-testid="export-grid"
             onclick={handleExportGrid}
             disabled={!exportEnabled}
@@ -1189,7 +1189,7 @@
           </button>
           <button
             type="button"
-            class="ctrl danger"
+            class="ctrl control-lg danger"
             data-testid="cancel-round"
             onclick={handleCancelRound}
             disabled={!canCancel}
@@ -1228,7 +1228,7 @@
               </span>
               <button
                 type="button"
-                class="ghost small"
+                class="ghost control-xs"
                 onclick={handleRefreshRatings}
                 disabled={busy}
                 title={$_("app.refreshRatingsTitle")}
@@ -1239,7 +1239,7 @@
             <div class="ratings-group">
               <button
                 type="button"
-                class="ghost small"
+                class="ghost control-xs"
                 class:active={showLicenceCheck}
                 data-testid="check-licences"
                 onclick={() => (showLicenceCheck = !showLicenceCheck)}
@@ -1249,7 +1249,7 @@
               </button>
               <button
                 type="button"
-                class="ghost small"
+                class="ghost control-xs"
                 onclick={handleImportCsv}
                 disabled={busy}
                 title={$_("playerRegistration.importCsvTitle")}
@@ -1528,10 +1528,6 @@
   .backup-label {
     flex: 1;
   }
-  .backups-list button.small {
-    padding: 0.2rem 0.6rem;
-    font-size: 0.78rem;
-  }
 
   .publication-panel {
     margin-bottom: 1.25rem;
@@ -1587,10 +1583,6 @@
     gap: 0.5rem;
     flex-wrap: wrap;
   }
-  .publication-actions button.small {
-    padding: 0.2rem 0.6rem;
-    font-size: 0.78rem;
-  }
   .publication-actions button.danger {
     color: var(--text-on-danger);
   }
@@ -1639,25 +1631,12 @@
     font-size: 0.85rem;
     color: var(--text-secondary);
   }
+  /* Raised like the lifecycle buttons it sits with, not sunken like a field. */
   .cup-size select {
     background: var(--bg-raised);
-    color: inherit;
-    border: 1px solid var(--border);
-    border-radius: 0.4rem;
-    padding: 0.3rem 0.4rem;
-    font: inherit;
   }
   .cup-warn {
     color: var(--color-warning);
-  }
-  .ctrl {
-    padding: 0.35rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    background: var(--bg-raised);
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
   }
   .ctrl:hover:not(:disabled) {
     border-color: var(--border-hover);
@@ -1692,10 +1671,6 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
-  }
-  .ratings-status button.small {
-    padding: 0.25rem 0.6rem;
-    font-size: 0.78rem;
   }
   .ratings-status .ghost.active {
     border-color: var(--border-accent);

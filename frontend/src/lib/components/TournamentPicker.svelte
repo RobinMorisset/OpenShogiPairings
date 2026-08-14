@@ -290,7 +290,7 @@
             </button>
             <button
               type="button"
-              class="ghost small danger"
+              class="ghost control-xs danger"
               data-testid="delete-tournament"
               onclick={() => handleDelete(t)}
               disabled={busy}
@@ -307,7 +307,7 @@
         {$_("picker.restrictedToPublished")}
         <button
           type="button"
-          class="ghost small"
+          class="ghost control-xs"
           data-testid="unlock-full-list"
           onclick={() => (pendingList = true)}
           disabled={busy}
@@ -350,7 +350,7 @@
             {#if !d.problem}
               <button
                 type="button"
-                class="ghost small"
+                class="ghost control-xs"
                 data-testid="restore-tournament"
                 onclick={() => startRestore(d)}
                 disabled={busy}
@@ -365,7 +365,7 @@
                 {#if d.backups.length > 1}
                   <label class="muted">
                     {$_("picker.restoreFrom")}
-                    <select bind:value={restoreBackupId} data-testid="restore-backup" disabled={busy}>
+                    <select class="control-xs control-quiet" bind:value={restoreBackupId} data-testid="restore-backup" disabled={busy}>
                       {#each d.backups as b (b.id)}
                         <option value={b.id}>{when(b.taken_at)} — {b.label}</option>
                       {/each}
@@ -378,6 +378,7 @@
                   </p>
                   <input
                     type="password"
+                    class="control-lg"
                     bind:value={restorePassword}
                     placeholder={$_("login.passwordPlaceholder")}
                     autocomplete="current-password"
@@ -418,6 +419,7 @@
       <form onsubmit={submitAdminPassword}>
         <input
           type="password"
+          class="control-lg"
           bind:value={adminPassword}
           placeholder={$_("login.passwordPlaceholder")}
           autocomplete="current-password"
@@ -495,13 +497,6 @@
   .restore-row select {
     flex: 1;
     min-width: 0;
-    padding: 0.35rem 0.4rem;
-    border: 1px solid var(--border);
-    border-radius: 0.4rem;
-    background: var(--bg-inset);
-    color: inherit;
-    font: inherit;
-    font-size: 0.8rem;
   }
   h2 {
     margin: 0 0 1rem;
@@ -554,10 +549,6 @@
   .pick.unopenable {
     cursor: not-allowed;
   }
-  .small {
-    padding: 0.25rem 0.6rem;
-    font-size: 0.78rem;
-  }
   .danger {
     color: var(--text-on-danger);
   }
@@ -567,13 +558,6 @@
   }
   input[type="password"] {
     flex: 1;
-    box-sizing: border-box;
-    padding: 0.5rem 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    background: var(--bg-inset);
-    color: inherit;
-    font: inherit;
   }
   .actions {
     display: flex;

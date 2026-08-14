@@ -93,7 +93,7 @@
         min="2"
         max="9"
         step="1"
-        class="threshold narrow"
+        class="threshold narrow control-sm control-quiet"
         value={teamSize}
         disabled={busy || locked}
         onchange={(e) => setTeamSize(Number(e.currentTarget.value))}

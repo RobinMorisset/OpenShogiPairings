@@ -138,7 +138,7 @@
     {#if availableTiebreaks.length > 0}
       <div class="threshold-row tb-add">
         <select
-          class="tb-select"
+          class="tb-select control-sm control-quiet"
           disabled={busy}
           value=""
           onchange={(e) => {
