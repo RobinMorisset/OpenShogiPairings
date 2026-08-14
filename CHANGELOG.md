@@ -29,6 +29,9 @@ NOT backwards compatible with any earlier version.
 - **Printable per-player result sheets**, accessible from a button in each
   round tab.
 - Optional **nationality protection**, a weaker variant of club protection.
+- **An application icon of its own** — a shogi piece bearing a pairing list —
+  in place of the generic Tauri placeholder, and a matching favicon for the
+  browser client, which had none at all.
 
 ### Fixed
 

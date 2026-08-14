@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="t">
+  <title id="t">OpenShogiPairings</title>
+  <path d="M240 44 L272 44 L400 104 L456 472 L56 472 L112 104 Z"
+        fill="#e2b268" stroke="#7a4f22" stroke-width="22" stroke-linejoin="round"/>
+  <path d="M145 210 H214 M298 210 H367
+           M131 302 H214 M298 302 H381
+           M117 394 H214 M298 394 H395"
+        fill="none" stroke="#2b1808" stroke-width="40" stroke-linecap="round"/>
+</svg>
