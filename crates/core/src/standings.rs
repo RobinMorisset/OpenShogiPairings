@@ -288,22 +288,23 @@ impl Standing {
             // the estimate both is maintained and estimates rated players (see the
             // `EstElo` skip in ranking), so it is `Some` for every player; a
             // missing one sorts as 0.
-            // Unreachable in a normalized individual tournament:
-            // `TournamentSettings::normalized` drops board wins outside team
-            // mode, precisely because a player's board wins *are* their own
-            // wins and the criterion could never break a tie. Answered rather
-            // than panicked because that is still the honest value for anyone
-            // who builds settings by hand and skips normalization — but reaching
-            // it means normalization was skipped, so say so in debug (the
-            // `EstElo` sibling below states its own invariant the same way).
-            Tiebreak::BoardWins => {
-                debug_assert!(
-                    false,
-                    "board_wins ranks no individual player; `normalized` drops it \
-                     outside team mode"
-                );
-                self.victories.halves()
-            }
+            // A player's board wins *are* their own wins, so this is the honest
+            // answer wherever it is asked for.
+            //
+            // It is asked for regularly: `normalized` keeps the criterion in
+            // team mode, and the individual table sitting beside the team one is
+            // ranked by that same list — so every team tournament reaches this
+            // arm. It once carried a `debug_assert!(false)` claiming the
+            // opposite, which turned the ordinary state of a team tournament
+            // into a panic in any debug build: the request computing standings
+            // died without a response, so the client kept a version it could
+            // never refresh and every later edit came back as a phantom
+            // "another referee changed this".
+            //
+            // Outside team mode it stays unreachable, since `normalized` drops
+            // the criterion there — but that is now the reason a *column* is
+            // absent, not an invariant this arm may rely on.
+            Tiebreak::BoardWins => self.victories.halves(),
             Tiebreak::EstElo => {
                 debug_assert!(
                     self.estimated_elo.is_some(),
@@ -562,7 +563,7 @@ mod tests {
     use super::*;
     use crate::pairing::RoundExplanation;
     use crate::round::{Board, Outcome, PairingSource, Winner};
-    use crate::settings::{MacMahonThreshold, ThresholdCriterion};
+    use crate::settings::{MacMahonThreshold, TeamSettings, ThresholdCriterion};
 
     fn player(tid: u32, rating: Option<u32>) -> Player {
         Player {
@@ -654,6 +655,49 @@ mod tests {
         assert_eq!(of(a.id).tiebreaks.sosm, 4);
         assert_eq!(of(a.id).tiebreaks.sodosm, 4);
         assert_eq!(of(a.id).tiebreaks.sosw, 4); // B has 1 win (2 halves), counted twice
+    }
+
+    #[test]
+    fn team_mode_ranks_the_individual_table_without_tripping_over_board_wins() {
+        // A team tournament ranks by board wins (the default team order), and
+        // the *individual* table beside the team one is ranked by that same
+        // list — so `Standing::tiebreak` is asked for board wins about a single
+        // player, which the criterion was documented as never being. Answering
+        // it must not be a debug-only crash: this is the ordinary state of every
+        // team tournament, and it took down every request that computed
+        // standings, leaving the client on a version it could not refresh.
+        let a = player(1, None);
+        let b = player(2, None);
+        let rounds = vec![round(
+            1,
+            vec![board(
+                a.tournament_id.unwrap(),
+                b.tournament_id.unwrap(),
+                Winner::Player1,
+            )],
+        )];
+        let mut settings = TournamentSettings {
+            teams: Some(TeamSettings::default()),
+            tiebreaks: Tiebreak::default_team_order(),
+            ..TournamentSettings::default()
+        }
+        .normalized();
+        // Normalization keeps board wins in team mode — that is the point.
+        assert!(settings.tiebreaks.contains(&Tiebreak::BoardWins));
+
+        let standings = compute_standings(&[a.clone(), b.clone()], &settings, &rounds);
+        // The winner ranks first, and their board wins read as their own wins.
+        assert_eq!(standings[0].player_id, a.id);
+        assert_eq!(
+            standings[0].tiebreak(Tiebreak::BoardWins),
+            standings[0].victories.halves()
+        );
+
+        // Leaving team mode drops the criterion, so the individual tournament
+        // never ranks by it at all.
+        settings.teams = None;
+        let settings = settings.normalized();
+        assert!(!settings.tiebreaks.contains(&Tiebreak::BoardWins));
     }
 
     #[test]
