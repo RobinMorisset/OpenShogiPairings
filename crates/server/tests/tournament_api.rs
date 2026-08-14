@@ -125,6 +125,86 @@ async fn import_players_csv_rejects_a_malformed_file() {
 }
 
 #[tokio::test]
+async fn licence_check_reports_the_unlicensed_players_of_one_nationality() {
+    let state = AppState::default();
+    let id = create(&state, "Paris Open").await;
+
+    // Two French players and a Japanese one; the licence list carries only one
+    // of the French pair.
+    let csv = "Prénom;Nom\nAnn;Alpha\n";
+    for (last, first, nat) in [
+        ("Alpha", "Ann", "FR"),
+        ("Beta", "Bo", "fr"), // stored uppercased, so this is the same nationality
+        ("Kobayashi", "Taichi", "JP"),
+    ] {
+        send(
+            router(state.clone()),
+            json_req(
+                "POST",
+                &t(id, "/players"),
+                json!({ "last_name": last, "first_name": first, "nationality": nat }),
+            ),
+        )
+        .await;
+    }
+    let (_, body) = send(router(state.clone()), get(&t(id, ""))).await;
+    let players = body["tournament"]["players"].as_array().unwrap().clone();
+    let beta_id = players[1]["id"].as_str().unwrap();
+
+    let (status, body) = send(
+        router(state.clone()),
+        json_req(
+            "POST",
+            &t(id, "/players/licence-check"),
+            json!({ "nationality": "FR", "csv": csv }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["listed"], 1);
+    assert_eq!(body["checked"], 2); // the Japanese player is out of scope
+    assert_eq!(body["missing"], json!([beta_id]));
+
+    // Read-only: the check registered nobody and left nothing to undo.
+    let (_, body) = send(router(state.clone()), get(&t(id, ""))).await;
+    assert_eq!(body["tournament"]["players"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn licence_check_rejects_a_blank_nationality_and_a_malformed_list() {
+    let state = AppState::default();
+    let id = create(&state, "Paris Open").await;
+
+    // No nationality to check: a 400 rather than silently checking the players
+    // who have none.
+    let (status, body) = send(
+        router(state.clone()),
+        json_req(
+            "POST",
+            &t(id, "/players/licence-check"),
+            json!({ "nationality": "  ", "csv": "Last name,First name\nAlpha,Ann\n" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("nationality"));
+
+    // An unusable list is a 400 with the same machine code the import uses —
+    // never an empty `missing` that would read as "everyone has paid".
+    let (status, body) = send(
+        router(state.clone()),
+        json_req(
+            "POST",
+            &t(id, "/players/licence-check"),
+            json!({ "nationality": "FR", "csv": "Licence,Club\n12345,Paris\n" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "csv_missing_name_columns");
+}
+
+#[tokio::test]
 async fn add_and_remove_point_adjustment_over_http() {
     let state = AppState::default();
     let id = create(&state, "Cup").await;

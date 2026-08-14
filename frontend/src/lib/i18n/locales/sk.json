@@ -104,9 +104,23 @@
     "addPlayer": "Pridať hráča",
     "importCsv": "Načítať CSV…",
     "importCsvTitle": "Importovať hráčov zo súboru CSV (priezvisko a meno sú povinné; ELO, stupeň, národnosť a klub nepovinné). Chýbajúce ELO, stupeň a národnosť sa doplnia zo zoznamu FESA, ak sa meno zhoduje.",
-    "csvErrorEmpty": "Súbor CSV neobsahuje žiadnych hráčov na import.",
+    "checkLicences": "Skontrolovať licencie…",
+    "checkLicencesTitle": "Porovnať prihlásených hráčov jednej národnosti so zoznamom CSV zaplatených licencií (priezvisko, meno) a ukázať, kto v ňom chýba.",
+    "csvErrorEmpty": "Súbor CSV neobsahuje žiadnych hráčov.",
     "csvErrorMissingColumns": "Súbor CSV musí mať stĺpec s priezviskom a stĺpec s menom.",
     "csvErrorRowsMissingLastName": "V týchto riadkoch chýba priezvisko: {rows}"
+  },
+  "licenceCheck": {
+    "hint": "Načítajte zoznam CSV federácie s hráčmi, ktorí majú zaplatenú licenciu (priezvisko, meno). Každý prihlásený hráč vybranej národnosti, ktorý v ňom nie je, sa vypíše tu. Mená sa porovnávajú podľa priezviska a mena, bez ohľadu na veľkosť písmen a diakritiku.",
+    "nationality": "Národnosť",
+    "chooseNationality": "Vyberte národnosť…",
+    "loadList": "Načítať zoznam licencií…",
+    "noNationalities": "Žiadny prihlásený hráč nemá národnosť, takže niet čo kontrolovať.",
+    "summary": "Skontrolovaní prihlásení hráči ({nat}): {checked}; položiek v zozname: {listed}.",
+    "allCovered": "Všetci prihlásení hráči ({nat}) sú v zozname.",
+    "missingHeading": "Chýbajú v zozname:",
+    "unchecked": "Prihlásení hráči bez národnosti, neskontrolovaní: {count}.",
+    "rosterChanged": "Zoznam prihlásených hráčov sa od tejto kontroly zmenil — načítajte zoznam znova."
   },
   "playerList": {
     "clickToEdit": "Kliknutím upravíte",

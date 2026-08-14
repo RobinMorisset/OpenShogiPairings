@@ -2,6 +2,7 @@
   import { _ } from "svelte-i18n";
   import type { CupFormat, NewPlayer, Player, PlayerCategory } from "../types";
   import { formatGrade, gradeRank, parseGrade } from "../grade";
+  import { registeredNationalities } from "../nationalities";
   import { printPage } from "../platform";
 
   interface Props {
@@ -97,16 +98,9 @@
     return CUP_SIZES.find((size) => cupFieldSize(size) === rank) ?? null;
   }
 
-  // Distinct nationalities present (non-empty), with a per-nationality count,
-  // for the bulk "mark eligible" control. Sorted alphabetically.
-  const nationalities = $derived.by(() => {
-    const counts = new Map<string, number>();
-    for (const p of players) {
-      const nat = p.nationality?.trim();
-      if (nat) counts.set(nat, (counts.get(nat) ?? 0) + 1);
-    }
-    return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  });
+  // The nationalities to offer in the bulk "mark eligible" control, with a
+  // per-nationality count (see `nationalities.ts`).
+  const nationalities = $derived(registeredNationalities(players));
 
   let bulkNationality = $state("");
 

@@ -6,6 +6,7 @@
     addPointAdjustment,
     ApiError,
     cancelRound,
+    checkLicences,
     confirmRound,
     editPlayer,
     fetchAmericanGrid,
@@ -42,6 +43,7 @@
   import type {
     BackupList,
     Handicap,
+    LicenceCheck,
     NewPlayer,
     Forfeit,
     RatedPlayer,
@@ -66,6 +68,7 @@
   import { authRequired, currentTournamentId, initialTab } from "./lib/session";
   import PlayerRegistration from "./lib/components/PlayerRegistration.svelte";
   import PlayerList from "./lib/components/PlayerList.svelte";
+  import LicenceCheckPanel from "./lib/components/LicenceCheckPanel.svelte";
   import TeamsPanel from "./lib/components/TeamsPanel.svelte";
   import RoundView from "./lib/components/RoundView.svelte";
   import RoundDraftView from "./lib/components/RoundDraftView.svelte";
@@ -527,6 +530,29 @@
       const text = await pickCsvFile();
       if (text === null) return; // cancelled
       apply(await importPlayersCsv(text));
+    });
+  }
+
+  // The licence check (see `LicenceCheckPanel.svelte`): a toggled panel that
+  // reports which registered players of one nationality are absent from a
+  // federation's list of paid-up licences. Purely a question about the roster —
+  // it registers nothing and edits nothing, so the answer is kept here rather
+  // than folded into the tournament state.
+  let showLicenceCheck = $state(false);
+  let licenceCheck = $state<{ nationality: string; check: LicenceCheck } | null>(null);
+
+  /**
+   * Check `nationality` against a licence list the referee picks. The file's text
+   * goes to the server, which parses it with the same rules as a CSV roster
+   * import; a malformed file surfaces as an error banner and no answer at all,
+   * so an unusable list can never read as "everybody has paid".
+   */
+  function handleCheckLicences(nationality: string) {
+    licenceCheck = null;
+    run(async () => {
+      const text = await pickCsvFile();
+      if (text === null) return; // cancelled
+      licenceCheck = { nationality, check: await checkLicences(nationality, text) };
     });
   }
 
@@ -1214,7 +1240,27 @@
             >
               {$_("playerRegistration.importCsv")}
             </button>
+            <button
+              type="button"
+              class="ghost small"
+              class:active={showLicenceCheck}
+              data-testid="check-licences"
+              onclick={() => (showLicenceCheck = !showLicenceCheck)}
+              title={$_("playerRegistration.checkLicencesTitle")}
+            >
+              {$_("playerRegistration.checkLicences")}
+            </button>
           </div>
+          {#if showLicenceCheck}
+            <div class="licence-check print-hide">
+              <LicenceCheckPanel
+                players={tournament.players}
+                result={licenceCheck}
+                onCheck={handleCheckLicences}
+                {busy}
+              />
+            </div>
+          {/if}
           <div class="players">
             <PlayerList
               players={tournament.players}
@@ -1638,6 +1684,12 @@
   .ratings-status button.small {
     padding: 0.25rem 0.6rem;
     font-size: 0.78rem;
+  }
+  .ratings-status .ghost.active {
+    border-color: var(--border-accent);
+  }
+  .licence-check {
+    margin-top: 0.6rem;
   }
   .players {
     margin-top: 1.25rem;

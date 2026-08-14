@@ -90,7 +90,10 @@ fn match_column(header: &str) -> Option<Field> {
 /// Fold to a bare, lower-case, accent-free key with punctuation collapsed to
 /// single spaces — used for both header-alias and FESA-name matching, so
 /// `"Frédéric"` matches `"Frederic"` and `"Le-Roux"` matches `"Le Roux"`.
-fn normalize(text: &str) -> String {
+///
+/// Shared with [`crate::licence`], which folds names and nationalities the same
+/// way so a list that imports also checks.
+pub(crate) fn normalize(text: &str) -> String {
     let folded: String = text
         .to_lowercase()
         .chars()
@@ -115,8 +118,9 @@ fn normalize(text: &str) -> String {
     folded.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The accent-folded `last + first` key used to look a player up in the FESA list.
-fn name_key(last: &str, first: &str) -> String {
+/// The accent-folded `last + first` key used to look a player up in the FESA
+/// list — and, in [`crate::licence`], in a federation's licence list.
+pub(crate) fn name_key(last: &str, first: &str) -> String {
     format!("{} {}", normalize(last), normalize(first))
 }
 

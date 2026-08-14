@@ -61,6 +61,11 @@ tournament. For how it's built, see [Architecture](#architecture) below.
   cross-table can be exported as an **American Grid** for the federation's
   ELO update, headed by the tournament's name, place, dates and time control
   (all but the name entered in the settings).
+- **Licence check**: point the Players tab at a CSV list of the players whose
+  federation licence is paid up (Last name, First name — whatever a federation's
+  back office exports), pick a nationality, and it names the registered players
+  of that nationality who are missing from it. Read-only: it tells the referee
+  who to chase, it doesn't touch the roster.
 - **Manual point adjustments** (a bonus or penalty with a mandatory reason),
   for corrections outside the normal scoring.
 - **Two-round "long games"** (niche): for tournaments that give the top boards
@@ -474,6 +479,7 @@ instead — see [public read-only access](#public-read-only-access)):
 | `PUT /rounds/{n}/team-sitouts/{team_id}` | The same for a whole team, writing the value to every member's entry at once — a team sits out together and its score for the round is read from entries that must agree, so this is how a team's bye or absence is re-scored. Team mode only; rejects a team that played that round. |
 | `POST /players` | Register a player: `{ "last_name", "first_name?", "rating?", "grade?", "nationality?", "club?" }` (`grade` is `{ "kind": "dan"｜"kyu", "level": … }`). |
 | `POST /players/import-csv` | Register a roster from a raw CSV text body (parsed server-side, ratings matched against the FESA cache), as a single undo step. |
+| `POST /players/licence-check` | Which registered players of one nationality are **not** on a federation's licence list: `{ "nationality", "csv" }` → `{ "listed", "checked", "missing": [player id, …] }`. Read-only, and 400 on a list that doesn't parse — never an empty `missing` standing in for one. |
 | `PUT /players/{id}` | Edit a player's fields in place. |
 | `DELETE /players/{id}` | Remove a player (400 if they are seeded in the cup bracket). |
 | `POST /players/{id}/eligible` | Set cup eligibility: `{ "eligible": true｜false }`. |

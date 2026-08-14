@@ -5,6 +5,7 @@ import type {
   DeletedTournament,
   Handicap,
   HealthStatus,
+  LicenceCheck,
   NewPlayer,
   Forfeit,
   PublicationState,
@@ -827,6 +828,23 @@ export function importPlayersCsv(csv: string): Promise<TournamentResponse> {
     method: "POST",
     headers: { "content-type": "text/plain" },
     body: csv,
+  });
+}
+
+/**
+ * Check the registered players of one nationality against a federation's licence
+ * list, and report the ones it doesn't carry — who therefore have not paid their
+ * yearly fee. Read-only: nothing about the tournament changes, so the answer is
+ * the check itself rather than a new tournament state.
+ *
+ * The list is parsed server-side with the same rules as a roster import, so an
+ * unusable file comes back as a 400 {@link ApiError} rather than as an empty
+ * result that would read as "everybody has paid".
+ */
+export function checkLicences(nationality: string, csv: string): Promise<LicenceCheck> {
+  return request<LicenceCheck>(scopedPath("/players/licence-check"), {
+    method: "POST",
+    body: JSON.stringify({ nationality, csv }),
   });
 }
 

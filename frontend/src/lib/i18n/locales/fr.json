@@ -104,9 +104,23 @@
     "addPlayer": "Ajouter un joueur",
     "importCsv": "Charger un CSV…",
     "importCsvTitle": "Importer des joueurs depuis un fichier CSV (Nom, Prénom requis ; ELO, Grade, Nationalité, Club facultatifs). L'ELO/Grade/Nationalité manquant est complété depuis la liste FESA si le nom correspond.",
-    "csvErrorEmpty": "Le fichier CSV ne contient aucun joueur à importer.",
+    "checkLicences": "Vérifier les licences…",
+    "checkLicencesTitle": "Vérifier les joueurs inscrits d'une nationalité donnée face à une liste CSV des licences à jour (Nom, Prénom), et montrer lesquels n'y figurent pas.",
+    "csvErrorEmpty": "Le fichier CSV ne contient aucun joueur.",
     "csvErrorMissingColumns": "Le CSV doit comporter une colonne Nom et une colonne Prénom.",
     "csvErrorRowsMissingLastName": "Ces lignes n'ont pas de nom de famille : {rows}"
+  },
+  "licenceCheck": {
+    "hint": "Chargez la liste CSV de la fédération des joueurs dont la licence est à jour (Nom, Prénom). Tout joueur inscrit de la nationalité choisie qui n'y figure pas est listé ici. Les noms sont comparés sur nom + prénom, sans tenir compte de la casse ni des accents.",
+    "nationality": "Nationalité",
+    "chooseNationality": "Choisir une nationalité…",
+    "loadList": "Charger la liste des licences…",
+    "noNationalities": "Aucun joueur inscrit n'a de nationalité : il n'y a rien à vérifier.",
+    "summary": "Joueurs {nat} inscrits vérifiés : {checked} ; entrées dans la liste : {listed}.",
+    "allCovered": "Tous les joueurs {nat} inscrits figurent dans la liste.",
+    "missingHeading": "Absents de la liste :",
+    "unchecked": "Joueurs inscrits sans nationalité, non vérifiés : {count}.",
+    "rosterChanged": "Les joueurs inscrits ont changé depuis cette vérification — rechargez la liste."
   },
   "playerList": {
     "clickToEdit": "Cliquer pour modifier",

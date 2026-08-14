@@ -9,8 +9,8 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use osp_core::{
     Board, Counterfactual, CounterfactualMode, CupBracketView, CupPodium, ForcedMatch, Forfeit,
-    Handicap, NewPlayer, SitoutValue, Standing, TeamId, TeamMatchView, TeamStanding, Tournament,
-    TournamentId, TournamentSettings, UnitKey, Winner,
+    Handicap, LicenceCheck, NewPlayer, SitoutValue, Standing, TeamId, TeamMatchView, TeamStanding,
+    Tournament, TournamentId, TournamentSettings, UnitKey, Winner,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -62,6 +62,7 @@ use crate::{auth, live, public};
 /// - `PUT    /rounds/{n}/team-sitouts/{team_id}` the same for a whole team
 /// - `POST   /players`       register a player
 /// - `POST   /players/import-csv` register a roster from a raw CSV body
+/// - `POST   /players/licence-check` who of one nationality is missing from a licence list
 /// - `PUT    /players/{player_id}`  edit a player
 /// - `DELETE /players/{player_id}`  remove a player
 /// - `POST   /players/{player_id}/eligible`  set cup eligibility
@@ -145,6 +146,7 @@ pub(crate) fn scope(state: AppState) -> Router<AppState> {
         )
         .route("/players", post(add_player))
         .route("/players/import-csv", post(import_players_csv))
+        .route("/players/licence-check", post(check_licences))
         .route(
             "/players/{player_id}",
             axum::routing::put(edit_player).delete(remove_player),
@@ -910,6 +912,45 @@ async fn import_players_csv(
         Ok(())
     })?;
     Ok((StatusCode::CREATED, view(&store)?))
+}
+
+/// Body of the licence-check endpoint: which nationality to check, and the
+/// federation's list to check it against.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LicenceCheckRequest {
+    /// The nationality to check, as registered (e.g. `FR`); matched case- and
+    /// accent-insensitively. Required and non-blank — "the players with no
+    /// nationality" is not something this endpoint answers.
+    nationality: String,
+    /// The raw text of the licence-list CSV.
+    csv: String,
+}
+
+/// Report which registered players of one nationality are **not** on a
+/// federation's licence list — the ones who have not paid their yearly fee.
+///
+/// Read-only: nothing is registered, edited or removed, so no version guard and
+/// no backup. The list is parsed by `osp-core` ([`osp_core::check_licences`]) with
+/// the same rules as a roster import, and 400 says the file was unusable (empty,
+/// no name columns, a row with no last name) rather than that everyone is
+/// licensed.
+async fn check_licences(
+    TournamentCtx(instance): TournamentCtx,
+    Json(req): Json<LicenceCheckRequest>,
+) -> Result<Json<LicenceCheck>, ApiError> {
+    let nationality = req.nationality.trim();
+    if nationality.is_empty() {
+        return Err(ApiError::BadRequest(
+            "a licence check needs a nationality to check".into(),
+        ));
+    }
+    let store = instance.read();
+    let tournament = store.current().ok_or(ApiError::NoTournament)?;
+    // A parse failure carries a machine code so the client can localize it.
+    let check = osp_core::check_licences(&req.csv, &tournament.players, nationality)
+        .map_err(ApiError::CsvImport)?;
+    Ok(Json(check))
 }
 
 /// The player's own id from the path (see [`BackupParams`] on why this is a

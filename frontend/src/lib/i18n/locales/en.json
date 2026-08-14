@@ -104,9 +104,23 @@
     "addPlayer": "Add player",
     "importCsv": "Load CSV…",
     "importCsvTitle": "Import players from a CSV file (Last name, First name required; ELO, Grade, Nationality, Club optional). Missing ELO/Grade/Nationality is filled in from the FESA list when a name matches.",
-    "csvErrorEmpty": "The CSV file has no players to import.",
+    "checkLicences": "Check licences…",
+    "checkLicencesTitle": "Check the registered players of one nationality against a CSV list of up-to-date licences (Last name, First name), and show which of them are missing from it.",
+    "csvErrorEmpty": "The CSV file contains no players.",
     "csvErrorMissingColumns": "The CSV must have a last-name column and a first-name column.",
     "csvErrorRowsMissingLastName": "These rows are missing a last name: {rows}"
+  },
+  "licenceCheck": {
+    "hint": "Load the federation's CSV list of the players whose licence is paid up (Last name, First name). Every registered player of the chosen nationality who is not on it is listed here. Names are matched on last + first name, ignoring case and accents.",
+    "nationality": "Nationality",
+    "chooseNationality": "Choose a nationality…",
+    "loadList": "Load licence list…",
+    "noNationalities": "No registered player has a nationality, so there is nothing to check.",
+    "summary": "Registered {nat} players checked: {checked}; entries in the list: {listed}.",
+    "allCovered": "Every registered {nat} player is on the list.",
+    "missingHeading": "Not on the list:",
+    "unchecked": "Registered players with no nationality, not checked: {count}.",
+    "rosterChanged": "The registered players have changed since this check — load the list again."
   },
   "playerList": {
     "clickToEdit": "Click to edit",

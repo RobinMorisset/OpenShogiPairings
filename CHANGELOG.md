@@ -38,6 +38,11 @@ cannot be opened at all.
 - **An application icon of its own** — a shogi piece bearing a pairing list —
   in place of the generic Tauri placeholder, and a matching favicon for the
   browser client, which had none at all.
+- A **licence check** in the Players tab: give it a CSV list of the players
+  whose federation licence is up to date and a nationality, and it names the
+  registered players of that nationality who are not on the list — the ones who
+  forgot to pay their yearly fee. It only reports; nothing is registered,
+  edited or removed.
 
 ### Fixed
 

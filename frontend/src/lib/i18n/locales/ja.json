@@ -104,9 +104,23 @@
     "addPlayer": "選手を追加",
     "importCsv": "CSVを読み込み…",
     "importCsvTitle": "CSVファイルから選手を取り込みます（姓・名は必須。レーティング・段級・国籍・所属は任意）。レーティング・段級・国籍が未記入の場合、氏名が一致すればFESA一覧から補完されます。",
-    "csvErrorEmpty": "このCSVファイルには取り込める選手がいません。",
+    "checkLicences": "会員資格を確認…",
+    "checkLicencesTitle": "指定した国籍の登録選手を、会費納入済みの選手のCSV一覧（姓・名）と照合し、一覧にない選手を表示します。",
+    "csvErrorEmpty": "このCSVファイルには選手がいません。",
     "csvErrorMissingColumns": "CSVには姓の列と名の列が必要です。",
     "csvErrorRowsMissingLastName": "次の行に姓がありません: {rows}"
+  },
+  "licenceCheck": {
+    "hint": "会費が納入済みの選手のCSV一覧（姓・名）を読み込んでください。選択した国籍の登録選手のうち、一覧にない選手をここに表示します。氏名は姓と名で照合し、大文字・小文字とアクセント記号は区別しません。",
+    "nationality": "国籍",
+    "chooseNationality": "国籍を選択…",
+    "loadList": "会員一覧を読み込み…",
+    "noNationalities": "国籍が設定された登録選手がいないため、照合できません。",
+    "summary": "照合した{nat}の登録選手：{checked}名、一覧の件数：{listed}件。",
+    "allCovered": "{nat}の登録選手はすべて一覧にあります。",
+    "missingHeading": "一覧にない選手：",
+    "unchecked": "国籍が未設定のため照合しなかった登録選手：{count}名。",
+    "rosterChanged": "この照合のあとで登録選手が変わりました。一覧を読み込み直してください。"
   },
   "playerList": {
     "clickToEdit": "クリックで編集",
