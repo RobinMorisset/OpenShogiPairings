@@ -119,6 +119,7 @@
     "summary": "Registered {nat} players checked: {checked}; entries in the list: {listed}.",
     "allCovered": "Every registered {nat} player is on the list.",
     "missingHeading": "Not on the list:",
+    "nearMiss": "One character from {names} on the list — possibly a misspelling rather than an unpaid licence.",
     "unchecked": "Registered players with no nationality, not checked: {count}.",
     "rosterChanged": "The registered players have changed since this check — load the list again."
   },

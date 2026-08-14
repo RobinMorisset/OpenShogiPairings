@@ -119,6 +119,7 @@
     "summary": "照合した{nat}の登録選手：{checked}名、一覧の件数：{listed}件。",
     "allCovered": "{nat}の登録選手はすべて一覧にあります。",
     "missingHeading": "一覧にない選手：",
+    "nearMiss": "一覧の{names}と1文字違いです。会費未納ではなく誤記の可能性があります。",
     "unchecked": "国籍が未設定のため照合しなかった登録選手：{count}名。",
     "rosterChanged": "この照合のあとで登録選手が変わりました。一覧を読み込み直してください。"
   },

@@ -130,8 +130,8 @@ async fn licence_check_reports_the_unlicensed_players_of_one_nationality() {
     let id = create(&state, "Paris Open").await;
 
     // Two French players and a Japanese one; the licence list carries only one
-    // of the French pair.
-    let csv = "Prénom;Nom\nAnn;Alpha\n";
+    // of the French pair, and spells the other one a letter off.
+    let csv = "Prénom;Nom\nAnn;Alpha\nBo;Beto\n";
     for (last, first, nat) in [
         ("Alpha", "Ann", "FR"),
         ("Beta", "Bo", "fr"), // stored uppercased, so this is the same nationality
@@ -161,9 +161,15 @@ async fn licence_check_reports_the_unlicensed_players_of_one_nationality() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["listed"], 1);
+    assert_eq!(body["listed"], 2);
     assert_eq!(body["checked"], 2); // the Japanese player is out of scope
-    assert_eq!(body["missing"], json!([beta_id]));
+
+    // Beta is still missing — a near miss never counts as a licence — and the
+    // list's own spelling rides along for the referee to judge.
+    assert_eq!(
+        body["missing"],
+        json!([{ "id": beta_id, "near_misses": ["Beto Bo"] }])
+    );
 
     // Read-only: the check registered nobody and left nothing to undo.
     let (_, body) = send(router(state.clone()), get(&t(id, ""))).await;

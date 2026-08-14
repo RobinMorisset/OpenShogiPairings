@@ -56,7 +56,7 @@ pub use cup::{
 pub use elo::estimate_elos;
 pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
 pub use fesa_results::import_fesa_results;
-pub use licence::{check_licences, LicenceCheck};
+pub use licence::{check_licences, LicenceCheck, UnlicensedPlayer};
 pub use pairing::{
     AffectedCycle, BoardLedger, Counterfactual, CounterfactualMode, RoundExplanation,
     RuleContribution, RuleDelta, RuleId, RuleTotal, ScopeReason,

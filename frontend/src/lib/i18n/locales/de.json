@@ -119,6 +119,7 @@
     "summary": "Geprüfte gemeldete Spieler ({nat}): {checked}; Einträge in der Liste: {listed}.",
     "allCovered": "Alle gemeldeten Spieler mit Nationalität {nat} stehen auf der Liste.",
     "missingHeading": "Nicht auf der Liste:",
+    "nearMiss": "Ein Zeichen von {names} in der Liste entfernt — möglicherweise ein Schreibfehler statt einer unbezahlten Lizenz.",
     "unchecked": "Gemeldete Spieler ohne Nationalität, nicht geprüft: {count}.",
     "rosterChanged": "Die gemeldeten Spieler haben sich seit dieser Prüfung geändert — laden Sie die Liste erneut."
   },

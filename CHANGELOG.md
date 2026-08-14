@@ -41,8 +41,10 @@ cannot be opened at all.
 - A **licence check** in the Players tab: give it a CSV list of the players
   whose federation licence is up to date and a nationality, and it names the
   registered players of that nationality who are not on the list — the ones who
-  forgot to pay their yearly fee. It only reports; nothing is registered,
-  edited or removed.
+  forgot to pay their yearly fee. Each of them also carries any name on the list
+  that is one character from theirs, since these files are typed by hand and a
+  misspelling looks exactly like an unpaid licence. It only reports; nothing is
+  registered, edited or removed, and a near miss never counts as a licence.
 
 ### Fixed
 

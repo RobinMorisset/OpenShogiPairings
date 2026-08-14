@@ -934,7 +934,8 @@ struct LicenceCheckRequest {
 /// no backup. The list is parsed by `osp-core` ([`osp_core::check_licences`]) with
 /// the same rules as a roster import, and 400 says the file was unusable (empty,
 /// no name columns, a row with no last name) rather than that everyone is
-/// licensed.
+/// licensed. Each missing player carries any list entry one edit from their name
+/// (`near_misses`), for the misspellings these exports are full of.
 async fn check_licences(
     TournamentCtx(instance): TournamentCtx,
     Json(req): Json<LicenceCheckRequest>,

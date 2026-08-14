@@ -20,6 +20,19 @@
 //! strict: a player whose name is spelled differently in the two places is
 //! reported as missing rather than quietly matched, because the failure the
 //! referee must not have is a player who *looks* covered and isn't.
+//!
+//! # Near misses
+//!
+//! Federation exports are typed by hand and misspellings in them are common, so
+//! a player reported as missing also carries every list entry whose name is
+//! [one edit](within_one_edit) from theirs — as the *list* spells it, which is
+//! the spelling the referee has to look at to judge.
+//!
+//! A near miss annotates, it never resolves: the player stays in the missing
+//! list. One edit apart is routinely two different people (`Nguyen Anh` and
+//! `Nguyen Ana`, and short names generally), so this can only mean "look at this
+//! one" — treating it as payment would reintroduce exactly the silent false
+//! clear the strict match exists to avoid.
 
 use std::collections::HashSet;
 
@@ -42,7 +55,21 @@ pub struct LicenceCheck {
     /// How many registered players had the nationality being checked.
     pub checked: usize,
     /// Those of them with no entry in the list, in registration order.
-    pub missing: Vec<Uuid>,
+    pub missing: Vec<UnlicensedPlayer>,
+}
+
+/// A registered player the licence list does not carry, and the entries it does
+/// carry that are nearly their name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub struct UnlicensedPlayer {
+    /// The registered player, by [`Player::id`].
+    pub id: Uuid,
+    /// Entries one edit from their name, **as the list spells them** — the
+    /// referee compares the two spellings, so ours would tell them nothing.
+    /// Usually empty; more than one entry is itself worth seeing, so none are
+    /// dropped. A near miss is a prompt to check, never a licence found.
+    pub near_misses: Vec<String>,
 }
 
 /// Check every registered player of `nationality` against the licence list in
@@ -68,12 +95,21 @@ pub fn check_licences(
     );
 
     // No FESA list: the ELO/grade enrichment it drives is irrelevant here, only
-    // the names are read.
+    // the names are read. Each entry is kept as (folded key, spelling as given):
+    // the key answers "is this player on the list?", the spelling is what a near
+    // miss shows the referee.
     let listed = parse_players_csv(csv, &[])?;
-    let licensed: HashSet<String> = listed
+    let entries: Vec<(String, String)> = listed
         .iter()
-        .map(|p| name_key(&p.last_name, p.first_name.as_deref().unwrap_or("")))
+        .map(|p| {
+            let first = p.first_name.as_deref().unwrap_or("");
+            (
+                name_key(&p.last_name, first),
+                format!("{} {}", p.last_name, first).trim().to_string(),
+            )
+        })
         .collect();
+    let licensed: HashSet<&str> = entries.iter().map(|(key, _)| key.as_str()).collect();
 
     let wanted = normalize(nationality);
     let mut checked = 0;
@@ -86,9 +122,24 @@ pub fn check_licences(
             continue;
         }
         checked += 1;
-        if !licensed.contains(&name_key(&player.last_name, &player.first_name)) {
-            missing.push(player.id);
+        let key = name_key(&player.last_name, &player.first_name);
+        if licensed.contains(key.as_str()) {
+            continue;
         }
+        // Only the players already known to be missing are scanned against the
+        // list, and `within_one_edit` walks the two names once rather than
+        // filling a distance matrix — so the whole scan stays a rounding error
+        // next to parsing the file.
+        let mut near_misses: Vec<String> = Vec::new();
+        for (entry_key, spelling) in &entries {
+            if within_one_edit(&key, entry_key) && !near_misses.contains(spelling) {
+                near_misses.push(spelling.clone());
+            }
+        }
+        missing.push(UnlicensedPlayer {
+            id: player.id,
+            near_misses,
+        });
     }
 
     Ok(LicenceCheck {
@@ -96,6 +147,55 @@ pub fn check_licences(
         checked,
         missing,
     })
+}
+
+/// Whether `a` and `b` are at most one edit apart: one substitution, one
+/// insertion, one deletion, or one swap of adjacent characters — the optimal
+/// string alignment distance, bounded at 1. (Identical strings are zero edits
+/// apart and so also "within one"; the caller has already excluded them.)
+///
+/// A swap counts as one edit rather than the two plain Levenshtein charges it,
+/// because transposed letters are one of the commonest hand-typing errors and
+/// `Damein` for `Damien` is exactly the case this is here to catch.
+///
+/// Bounded at 1 by construction rather than by computing a distance and
+/// comparing: at most three differing positions are ever examined, so this walks
+/// the names once instead of filling an `n × m` matrix.
+fn within_one_edit(a: &str, b: &str) -> bool {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    match a.len().abs_diff(b.len()) {
+        // Same length: equal, one substitution, or one adjacent swap.
+        0 => {
+            let mut differing = a.iter().zip(&b).enumerate().filter(|(_, (x, y))| x != y);
+            let Some((i, _)) = differing.next() else {
+                return true; // identical
+            };
+            let Some((j, _)) = differing.next() else {
+                return true; // one substitution
+            };
+            // Two differences are a single edit only as a swap: adjacent, and
+            // each character found where the other one is.
+            differing.next().is_none() && j == i + 1 && a[i] == b[j] && a[j] == b[i]
+        }
+        // One longer: an insertion in the shorter, i.e. the longer with one
+        // character dropped is the shorter. Everything after the first
+        // difference must line up once that character is skipped.
+        1 => {
+            let (short, long) = if a.len() < b.len() {
+                (&a, &b)
+            } else {
+                (&b, &a)
+            };
+            let skip = short
+                .iter()
+                .zip(long.iter())
+                .position(|(x, y)| x != y)
+                .unwrap_or(short.len());
+            short[skip..] == long[skip + 1..]
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -126,11 +226,21 @@ mod tests {
         check
             .missing
             .iter()
-            .map(|id| {
-                let p = players.iter().find(|p| p.id == *id).expect("known player");
+            .map(|m| {
+                let p = players.iter().find(|p| p.id == m.id).expect("known player");
                 format!("{} {}", p.last_name, p.first_name)
             })
             .collect()
+    }
+
+    /// The near misses reported for the single missing player.
+    fn only_near_misses(check: &LicenceCheck) -> &[String] {
+        assert_eq!(
+            check.missing.len(),
+            1,
+            "expected exactly one missing player"
+        );
+        &check.missing[0].near_misses
     }
 
     #[test]
@@ -266,6 +376,104 @@ mod tests {
             check_licences("Last name,First name\nAlpha,Ann\n,Bo\n", &players, "FR"),
             Err(CsvImportError::RowsMissingLastName { rows: vec![3] })
         );
+    }
+
+    #[test]
+    fn a_misspelling_in_the_list_is_reported_as_a_near_miss() {
+        // The federation typed DUPOND for DUPONT. The player is *still* missing
+        // — nobody is marked paid on the strength of a guess — but the list's
+        // own spelling comes back with them, which is what the referee needs to
+        // see to judge it.
+        let players = vec![player("Dupont", "Jean", Some("FR"))];
+        let csv = "Last name,First name\nDUPOND,Jean\n";
+        let check = check_licences(csv, &players, "FR").unwrap();
+        assert_eq!(only_near_misses(&check), ["DUPOND Jean"]);
+    }
+
+    #[test]
+    fn every_single_edit_shape_counts_as_a_near_miss() {
+        let players = vec![player("Martin", "Damien", Some("FR"))];
+        // In turn: a substitution, a dropped letter, an extra letter, and two
+        // letters swapped — the last being the one plain Levenshtein would
+        // charge two edits for and miss.
+        for typo in [
+            "Martin,Damian",
+            "Martin,Damen",
+            "Martin,Damiien",
+            "Martin,Damein",
+        ] {
+            let csv = format!("Last name,First name\n{typo}\n");
+            let check = check_licences(&csv, &players, "FR").unwrap();
+            assert_eq!(
+                only_near_misses(&check).len(),
+                1,
+                "{typo} should be one edit from Martin Damien"
+            );
+        }
+    }
+
+    #[test]
+    fn two_edits_away_is_not_a_near_miss() {
+        // The line has to be somewhere, and past one edit the suggestions are
+        // noise the referee has to dismiss one by one.
+        let players = vec![player("Martin", "Damien", Some("FR"))];
+        let csv = "Last name,First name\nMartin,Dominic\nBernard,Damien\n";
+        let check = check_licences(csv, &players, "FR").unwrap();
+        assert!(only_near_misses(&check).is_empty());
+    }
+
+    #[test]
+    fn a_near_miss_is_found_across_the_two_names_and_the_folding() {
+        // The key is the folded `last + first`, so a typo lands wherever it
+        // lands — and a difference the fold erases (an accent, a hyphen) is not
+        // an edit at all: that player matches outright and is not missing.
+        let players = vec![
+            player("Le Roux", "Jean-Pierre", Some("FR")),
+            player("Róvekamp", "Frédéric", Some("FR")),
+        ];
+        let csv = "Last name,First name\nLe Rous,Jean Pierre\nROVEKAMP,Frederic\n";
+        let check = check_licences(csv, &players, "FR").unwrap();
+        assert_eq!(missing_names(&check, &players), ["Le Roux Jean-Pierre"]);
+        assert_eq!(only_near_misses(&check), ["Le Rous Jean Pierre"]);
+    }
+
+    #[test]
+    fn several_near_misses_are_all_reported() {
+        // Two candidates is itself the answer — the referee needs to see both
+        // to tell a typo from a genuinely different player — so neither is
+        // dropped in favour of a "best" one.
+        let players = vec![player("Li", "Bo", Some("FR"))];
+        let csv = "Last name,First name\nLi,Ba\nLi,Ho\nWang,Wei\n";
+        let check = check_licences(csv, &players, "FR").unwrap();
+        assert_eq!(only_near_misses(&check), ["Li Ba", "Li Ho"]);
+    }
+
+    #[test]
+    fn a_player_on_the_list_is_never_a_near_miss_of_anything() {
+        // Exact match wins outright: no entry is scanned for someone who is on
+        // the list, so a near-twin cannot cast doubt on a player who has paid.
+        let players = vec![player("Martin", "Damien", Some("FR"))];
+        let csv = "Last name,First name\nMartin,Damien\nMartin,Damian\n";
+        let check = check_licences(csv, &players, "FR").unwrap();
+        assert!(check.missing.is_empty());
+    }
+
+    #[test]
+    fn within_one_edit_holds_its_line() {
+        // The helper on its own, including the ends of the strings, which the
+        // walk handles separately from the middle.
+        assert!(within_one_edit("dupont jean", "dupont jean")); // identical
+        assert!(within_one_edit("abc", "abd")); // substitution at the end
+        assert!(within_one_edit("abc", "xbc")); // substitution at the start
+        assert!(within_one_edit("abc", "abcd")); // insertion at the end
+        assert!(within_one_edit("abc", "xabc")); // insertion at the start
+        assert!(within_one_edit("abcd", "abc")); // deletion, arguments the other way
+        assert!(within_one_edit("ab", "ba")); // swap of the whole string
+        assert!(within_one_edit("", "a")); // one empty side
+        assert!(!within_one_edit("abc", "acb x")); // two edits: swap plus insert
+        assert!(!within_one_edit("abcd", "badc")); // two swaps
+        assert!(!within_one_edit("abc", "abcde")); // two insertions
+        assert!(!within_one_edit("abab", "baba")); // same letters, four positions apart
     }
 
     #[test]

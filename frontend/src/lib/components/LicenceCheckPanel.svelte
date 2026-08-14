@@ -65,13 +65,33 @@
   // reassurance nobody should be given. So it is dropped rather than shown
   // qualified, and the check has to be re-run.
   const registeredNow = $derived(nationalities.find(([nat]) => nat === nationality)?.[1] ?? 0);
-  const stale = $derived(shown !== null && shown.checked !== registeredNow);
 
+  // Each missing player, resolved against the roster being rendered.
   const missing = $derived.by(() => {
     if (!shown) return [];
     const byId = new Map(players.map((p) => [p.id, p]));
-    return shown.missing.map((id) => byId.get(id)).filter((p) => p !== undefined);
+    return shown.missing.flatMap((m) => {
+      const player = byId.get(m.id);
+      return player ? [{ player, nearMisses: m.near_misses }] : [];
+    });
   });
+
+  // An answer describes the roster it was run against. It is dropped, rather
+  // than shown for what can still be made of it, when either half stops
+  // matching: the count of registered players of this nationality has moved (a
+  // late registration, a withdrawal, a nationality typed in afterwards), or a
+  // reported player cannot be found in the roster at all.
+  //
+  // The second half is not paranoia about a passing race. Whatever the cause —
+  // a player removed by another referee, or a server that does not answer in
+  // the shape this build expects — quietly dropping what cannot be resolved
+  // turns "three of them have not paid" into "everyone is on the list", which
+  // is the one wrong answer this whole feature exists to avoid. A shortened
+  // list is not an answer, so it is not shown as one.
+  const stale = $derived(
+    shown !== null &&
+      (shown.checked !== registeredNow || missing.length !== shown.missing.length),
+  );
 </script>
 
 <div class="licence-panel">
@@ -118,10 +138,15 @@
     {:else}
       <p class="small missing-heading">{$_("licenceCheck.missingHeading")}</p>
       <ul class="missing" data-testid="licence-missing">
-        {#each missing as player (player.id)}
+        {#each missing as { player, nearMisses } (player.id)}
           <li>
             <span class="name">{player.last_name} {player.first_name}</span>
             {#if player.club}<span class="club">{player.club}</span>{/if}
+            {#if nearMisses.length > 0}
+              <span class="near-miss">
+                {$_("licenceCheck.nearMiss", { values: { names: nearMisses.join(", ") } })}
+              </span>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -189,5 +214,12 @@
     color: var(--text-secondary);
     font-size: 0.85em;
     margin-left: 0.5rem;
+  }
+  /* On its own line under the name: it is a second thought about that player,
+     and it is long enough to push the club off the row otherwise. */
+  ul.missing .near-miss {
+    display: block;
+    color: var(--color-warning);
+    font-size: 0.85em;
   }
 </style>

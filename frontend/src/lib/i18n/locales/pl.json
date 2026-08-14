@@ -119,6 +119,7 @@
     "summary": "Sprawdzeni zgłoszeni gracze ({nat}): {checked}; pozycji na liście: {listed}.",
     "allCovered": "Wszyscy zgłoszeni gracze ({nat}) są na liście.",
     "missingHeading": "Brak na liście:",
+    "nearMiss": "O jeden znak od {names} na liście — być może literówka, a nie nieopłacona licencja.",
     "unchecked": "Zgłoszeni gracze bez narodowości, niesprawdzeni: {count}.",
     "rosterChanged": "Lista zgłoszonych graczy zmieniła się od tego sprawdzenia — wczytaj listę ponownie."
   },

@@ -119,6 +119,7 @@
     "summary": "Joueurs {nat} inscrits vérifiés : {checked} ; entrées dans la liste : {listed}.",
     "allCovered": "Tous les joueurs {nat} inscrits figurent dans la liste.",
     "missingHeading": "Absents de la liste :",
+    "nearMiss": "À un caractère de {names} dans la liste — peut-être une faute de frappe plutôt qu'une licence impayée.",
     "unchecked": "Joueurs inscrits sans nationalité, non vérifiés : {count}.",
     "rosterChanged": "Les joueurs inscrits ont changé depuis cette vérification — rechargez la liste."
   },

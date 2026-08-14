@@ -119,6 +119,7 @@
     "summary": "Skontrolovaní prihlásení hráči ({nat}): {checked}; položiek v zozname: {listed}.",
     "allCovered": "Všetci prihlásení hráči ({nat}) sú v zozname.",
     "missingHeading": "Chýbajú v zozname:",
+    "nearMiss": "O jeden znak od {names} v zozname — možno preklep, nie nezaplatená licencia.",
     "unchecked": "Prihlásení hráči bez národnosti, neskontrolovaní: {count}.",
     "rosterChanged": "Zoznam prihlásených hráčov sa od tejto kontroly zmenil — načítajte zoznam znova."
   },
