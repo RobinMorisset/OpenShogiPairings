@@ -25,15 +25,19 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 /// The one older format version this build still reads: what OpenShogiPairings
-/// v1.3.0 wrote.
+/// v1.1.0, v1.2.0 and v1.3.0 all wrote.
 ///
-/// The window is deliberately this narrow. Only *v1.3.0* saves exist in the
-/// wild, and only their **not-yet-started** tournaments are upgraded — a list of
-/// players and settings, whose fields turn out to be a pure subset of today's
-/// (see [`upgrade_from_v5`]). Rounds are where the five intervening bumps
-/// actually bite (boards gained an outcome sum in v6, forfeit reasons in v8,
-/// frozen pairing explanations in v10), and a referee does not upgrade the
-/// binary mid-event — so a started v5 save is refused with
+/// Those three releases share this format — v1.2.0 added player and tournament
+/// `categories` without a bump, because the field defaults, so a v1.1.0 save is
+/// a strict subset of a v1.3.0 one and both land here. Only v1.0.0 (format 4) is
+/// out of reach.
+///
+/// What is deliberately narrow is *which tournaments* are upgraded: only the
+/// **not-yet-started** ones, a list of players and settings whose fields turn out
+/// to be a pure subset of today's (see [`upgrade_from_v5`]). Rounds are where the
+/// five intervening bumps actually bite (boards gained an outcome sum in v6,
+/// forfeit reasons in v8, frozen pairing explanations in v10), and a referee does
+/// not upgrade the binary mid-event — so a started v5 save is refused with
 /// [`TournamentError::OldSaveAlreadyStarted`] rather than half-converted.
 ///
 /// Versions 6..9 were never released and are rejected like any other unknown
@@ -170,6 +174,11 @@ mod tests {
     /// The same tournament as `V5_SETTINGS` with one round played: the shape the
     /// upgrade must refuse rather than half-convert.
     const V5_STARTED: &str = include_str!("../tests/fixtures/v1.3.0-started.json");
+    /// The *same* format written by v1.1.0, the oldest release that wrote v5 —
+    /// so it lacks the two `categories` lists v1.2.0 added without a bump. It is
+    /// the fewest-keys v5 save that exists, which is what makes it the one that
+    /// catches a field added here without a serde default.
+    const V5_OLDEST: &str = include_str!("../tests/fixtures/v1.1.0-settings.json");
 
     #[test]
     fn a_current_save_round_trips() {
@@ -204,6 +213,24 @@ mod tests {
         assert_eq!(t.players[0].adjustments.len(), 1);
         assert_eq!(t.players[0].categories.len(), 1);
         assert_eq!(t.players[0].pairing_rating, None);
+    }
+
+    /// v1.1.0 and v1.2.0 wrote this same format 5, so their saves open here too —
+    /// the version is the contract, not the release that happened to write it.
+    #[test]
+    fn the_oldest_v5_save_opens_with_the_keys_it_never_had_defaulted() {
+        let t = load(V5_OLDEST.as_bytes()).expect("a v1.1.0 save is still a v5 save");
+        assert_eq!(t.format_version, TOURNAMENT_FORMAT_VERSION);
+        assert_eq!(t.name, "Maximal v1.1.0 Open");
+        assert_eq!(t.players.len(), 2);
+        // Set in v1.1.0 and still meant the same thing.
+        assert_eq!(t.settings.floater_style(), osp_core::FloaterStyle::Median);
+        assert_eq!(t.players[0].rating, Some(1850));
+        assert_eq!(t.players[0].adjustments.len(), 1);
+        // Added in v1.2.0 without a format bump, so this file predates them and
+        // they have to default rather than fail the parse.
+        assert!(t.settings.categories.is_empty());
+        assert!(t.players[0].categories.is_empty());
     }
 
     #[test]

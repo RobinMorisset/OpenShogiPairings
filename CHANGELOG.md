@@ -9,12 +9,13 @@ will be explicitly mentioned in the changelog for that version though.
 
 ## [Unreleased]
 
-The save format changed again, but a **v1.3.0 tournament that has not started
-yet can be opened** — its players and all of its settings are carried over, and
-it is saved in the new format from then on. A v1.3.0 save whose tournament had
-rounds played, or a round in preparation, says so plainly when you try to open
-it: finish that event with v1.3.0. Saves from v1.2.0 and earlier cannot be
-opened at all.
+The save format changed again, but a **tournament that has not started yet can
+still be opened from v1.1.0, v1.2.0 or v1.3.0** — those three share one save
+format, and its players and all of its settings are carried over, the file being
+saved in the new format from then on. A save from any of them whose tournament
+had rounds played, or a round in preparation, says so plainly when you try to
+open it: finish that event with the version that has it. Saves from v1.0.0
+cannot be opened at all.
 
 ### Added
 

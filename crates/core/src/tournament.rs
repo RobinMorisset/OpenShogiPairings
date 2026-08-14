@@ -53,9 +53,9 @@ use typed_index_collections::TiVec;
 /// and the tournament an `explanations_faithful_through` watermark.
 ///
 /// A save is normally only readable at the exact version this build writes. The
-/// one exception is v5 — what v1.3.0, the first released version with users,
-/// wrote — whose **not-yet-started** tournaments the server upgrades on load;
-/// see `UPGRADABLE_FROM` in `crates/server/src/save.rs` for the window and why it
+/// one exception is v5 — what v1.1.0, v1.2.0 and v1.3.0 all wrote — whose
+/// **not-yet-started** tournaments the server upgrades on load; see
+/// `UPGRADABLE_FROM` in `crates/server/src/save.rs` for the window and why it
 /// stops at the first round.
 pub const TOURNAMENT_FORMAT_VERSION: u32 = 10;
 

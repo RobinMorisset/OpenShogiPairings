@@ -200,9 +200,9 @@ async fn import_rejects_a_blank_name_that_no_constructor_would_have_allowed() {
 const V130_NOT_STARTED: &str = include_str!("fixtures/v1.3.0-settings.json");
 const V130_STARTED: &str = include_str!("fixtures/v1.3.0-started.json");
 
-/// v1.3.0 was the first release with referees on it, so their saved-but-not-yet
-/// -started tournaments have to open here — through the endpoint the file picker
-/// actually posts to, not just through the upgrade in isolation.
+/// A referee's saved-but-not-yet-started tournament from v1.3.0 (or v1.1.0 or
+/// v1.2.0, which wrote the same format) has to open through the endpoint the file
+/// picker actually posts to, not just through the upgrade in isolation.
 #[tokio::test]
 async fn import_opens_a_v1_3_0_save_of_a_tournament_that_has_not_started() {
     let state = AppState::default();
