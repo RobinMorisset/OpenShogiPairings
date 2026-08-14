@@ -268,7 +268,8 @@
     "noRoundsCompleted": "Nie ukończono jeszcze żadnej rundy — wyniki pojawią się tutaj w miarę kończenia kolejnych rund.",
     "justifiedTitle": "Nieobecność z ważnego powodu z {name} (0−; liczy się jako porażka)",
     "teamMatchTitle": "{name} — {wins}–{losses} przy stolikach",
-    "roundInProgressNote": "Runda {number} trwa: jej kolumna wypełnia się w miarę wpisywania wyników, a klasyfikacja jest przeliczana po ukończeniu rundy."
+    "roundInProgressNote": "Runda {number} trwa: jej kolumna wypełnia się w miarę wpisywania wyników, a klasyfikacja jest przeliczana po ukończeniu rundy.",
+    "roundsInProgressNote": "Rundy {numbers} trwają: ich kolumny wypełniają się w miarę wpisywania wyników, a klasyfikacja jest przeliczana po ukończeniu każdej rundy."
   },
   "pairingSource": {
     "swiss": "Szwajcarski",

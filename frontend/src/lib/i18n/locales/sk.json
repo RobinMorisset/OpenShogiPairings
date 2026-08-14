@@ -268,7 +268,8 @@
     "noRoundsCompleted": "Zatiaľ nebolo dokončené žiadne kolo — výsledky sa tu objavia, ako budú kolá pribúdať.",
     "justifiedTitle": "Ospravedlnená neprítomnosť proti {name} (0−; počíta sa ako prehra)",
     "teamMatchTitle": "{name} — {wins}–{losses} na šachovniciach",
-    "roundInProgressNote": "Kolo {number} prebieha: jeho stĺpec sa dopĺňa, ako pribúdajú výsledky, a poradie sa prepočíta po dokončení kola."
+    "roundInProgressNote": "Kolo {number} prebieha: jeho stĺpec sa dopĺňa, ako pribúdajú výsledky, a poradie sa prepočíta po dokončení kola.",
+    "roundsInProgressNote": "Kolá {numbers} prebiehajú: ich stĺpce sa dopĺňajú, ako pribúdajú výsledky, a poradie sa prepočíta po dokončení každého kola."
   },
   "pairingSource": {
     "swiss": "Švajčiarsky systém",

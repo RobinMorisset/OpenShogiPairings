@@ -268,7 +268,8 @@
     "noRoundsCompleted": "Aucune ronde terminée pour l'instant — les résultats apparaîtront ici au fur et à mesure.",
     "justifiedTitle": "Absent pour un motif valable contre {name} (0− ; compte comme une défaite)",
     "teamMatchTitle": "{name} — {wins}–{losses} sur les échiquiers",
-    "roundInProgressNote": "Ronde {number} en cours : sa colonne se remplit au fur et à mesure des résultats, et le classement est recalculé une fois la ronde terminée."
+    "roundInProgressNote": "Ronde {number} en cours : sa colonne se remplit au fur et à mesure des résultats, et le classement est recalculé une fois la ronde terminée.",
+    "roundsInProgressNote": "Rondes {numbers} en cours : leurs colonnes se remplissent au fur et à mesure des résultats, et le classement est recalculé une fois chaque ronde terminée."
   },
   "pairingSource": {
     "swiss": "Suisse",

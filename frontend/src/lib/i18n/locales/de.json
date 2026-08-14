@@ -268,7 +268,8 @@
     "noRoundsCompleted": "Noch keine Runde abgeschlossen — die Ergebnisse erscheinen hier, sobald Runden abgeschlossen werden.",
     "justifiedTitle": "Entschuldigt abwesend gegen {name} (0−; zählt als Niederlage)",
     "teamMatchTitle": "{name} — {wins}–{losses} an den Brettern",
-    "roundInProgressNote": "Runde {number} läuft: Ihre Spalte füllt sich mit den eingetragenen Ergebnissen, und die Rangliste wird neu berechnet, sobald die Runde abgeschlossen ist."
+    "roundInProgressNote": "Runde {number} läuft: Ihre Spalte füllt sich mit den eingetragenen Ergebnissen, und die Rangliste wird neu berechnet, sobald die Runde abgeschlossen ist.",
+    "roundsInProgressNote": "Runden {numbers} laufen: Ihre Spalten füllen sich mit den eingetragenen Ergebnissen, und die Rangliste wird neu berechnet, sobald die jeweilige Runde abgeschlossen ist."
   },
   "pairingSource": {
     "swiss": "Schweizer System",

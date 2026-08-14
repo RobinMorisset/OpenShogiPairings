@@ -268,7 +268,8 @@
     "noRoundsCompleted": "終了した回戦はまだありません。回戦が終わるごとにここに表示されます。",
     "justifiedTitle": "{name} との対局を事由ありで欠席（0−。負けとして扱います）",
     "teamMatchTitle": "{name} — 盤上 {wins}–{losses}",
-    "roundInProgressNote": "{number}回戦が進行中です。結果が記録されるごとにこの列が埋まり、回戦が終了すると順位が再計算されます。"
+    "roundInProgressNote": "{number}回戦が進行中です。結果が記録されるごとにこの列が埋まり、回戦が終了すると順位が再計算されます。",
+    "roundsInProgressNote": "{numbers}回戦が進行中です。結果が記録されるごとにこれらの列が埋まり、各回戦が終了すると順位が再計算されます。"
   },
   "pairingSource": {
     "swiss": "スイス式",

@@ -174,9 +174,12 @@
   // churning under the referee's eyes mid-round.
   const shownRounds = $derived(tournament.rounds);
   const completedCount = $derived(tournament.rounds.filter((r) => r.completed).length);
-  // The round in progress, if any — its column is marked and footnoted, since
-  // its results aren't in the ranking yet.
-  const liveRound = $derived(tournament.rounds.find((r) => !r.completed) ?? null);
+  // Every round that isn't completed — normally just the one being played, but
+  // an earlier round drops back in here the moment a referee clears one of its
+  // results for a correction. Each such column is marked, and the note names
+  // them all: their results aren't in the ranking yet, and saying only the first
+  // would point at the wrong round in exactly the case that needs explaining.
+  const liveRounds = $derived(tournament.rounds.filter((r) => !r.completed));
 
   // Rows follow the server's ranked order, joined to each player's details.
   const byId = $derived(new Map(tournament.players.map((p) => [p.id, p])));
@@ -879,6 +882,29 @@
       {/if}
     </div>
   {/if}
+  <!-- The live columns show results the ranking hasn't taken in yet, so say so
+       rather than leaving the referee to wonder why a recorded win moved
+       nothing — above the table, where it is read before the numbers it
+       qualifies rather than after. It supersedes the "nothing completed yet"
+       note, which says less and would only ever appear alongside it (a round is
+       in progress in both cases); that note survives for the completed-but-empty
+       table. -->
+  {#if liveRounds.length === 1}
+    <p class="muted note">
+      {$_("resultsView.roundInProgressNote", { values: { number: liveRounds[0].number } })}
+    </p>
+  {:else if liveRounds.length > 1}
+    <p class="muted note">
+      {$_("resultsView.roundsInProgressNote", {
+        values: { numbers: liveRounds.map((r) => r.number).join(", ") },
+      })}
+    </p>
+  {:else if completedCount === 0}
+    <p class="muted note">
+      {$_("resultsView.noRoundsCompleted")}
+    </p>
+  {/if}
+
   <table class:teamed={teamMode} onmousemove={trackTip} onmouseleave={clearTip}>
     <thead>
       <tr>
@@ -1143,20 +1169,6 @@
     </tbody>
   </table>
 
-  <!-- The live column shows results the ranking hasn't taken in yet, so say so
-       rather than leaving the referee to wonder why a recorded win moved
-       nothing. It supersedes the "nothing completed yet" note, which says less
-       and would only ever appear alongside it (a round is in progress in both
-       cases); that note survives for the completed-but-empty table. -->
-  {#if liveRound}
-    <p class="muted note">
-      {$_("resultsView.roundInProgressNote", { values: { number: liveRound.number } })}
-    </p>
-  {:else if completedCount === 0}
-    <p class="muted note">
-      {$_("resultsView.noRoundsCompleted")}
-    </p>
-  {/if}
   </div>
 {/if}
 
@@ -1508,9 +1520,10 @@
   .muted {
     color: var(--text-secondary);
   }
+  /* Sits above the table, so the gap goes below it. */
   .note {
     font-size: 0.85rem;
-    margin-top: 0.75rem;
+    margin: 0.25rem 0 0.75rem;
     text-align: center;
   }
 

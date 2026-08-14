@@ -142,7 +142,10 @@ opened at all.
   a game still being played shows `5?` rather than a win or a loss. The wins,
   points and tie-break columns — and the ranking itself — still count
   completed rounds only, so the table re-sorts in one step at the end of the
-  round rather than shuffling under the referee mid-round.
+  round rather than shuffling under the referee mid-round. A note above the
+  table names every round that isn't in the ranking yet: normally just the one
+  being played, but also an earlier one whose result a referee cleared to
+  correct it.
 - **A reorganized Settings tab**, with useless sections hidden, settings grouped
   logically, and better handling of very wide windows.
 - **Much better handling of narrow windows (e.g. phones)**, especially in the
