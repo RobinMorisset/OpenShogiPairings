@@ -13,6 +13,15 @@ exclude = ["frontend/src-tauri"]
 [workspace.package]
 version = "1.3.0"
 edition = "2021"
+# The oldest Rust that builds this workspace, and the single place that number
+# lives — the README quotes it and CI pins a toolchain to it (the `msrv` job in
+# .github/workflows/ci.yml), so a dependency that raises the floor fails a build
+# instead of quietly making the docs wrong. It is a *maximum* over the dependency
+# graph: today `typed-index-collections` is what sets it. Raise it only with the
+# evidence that something needs it. `integer-blossom` opts out and declares its
+# own lower floor — it has no dependencies, and being buildable further back is
+# part of the point of keeping it standalone.
+rust-version = "1.90"
 license = "MIT"
 repository = "https://github.com/RobinMorisset/OpenShogiPairings"
 

@@ -6,7 +6,13 @@ authors = ["you"]
 license = ""
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+# Stale at 1.77.2 (the tauri template's default) until 2026-08: this crate path-
+# depends on osp-core, so its real floor has always been the workspace's. Kept in
+# step with `rust-version` in the repo-root Cargo.toml by hand — being its own
+# workspace, it cannot inherit, and the `msrv` CI job checks the root workspace
+# only (building Tauri needs the whole webview toolchain, which that job is
+# deliberately too cheap to install).
+rust-version = "1.90"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

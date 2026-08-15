@@ -51,6 +51,41 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+  # The declared MSRV is real: build the workspace on exactly the toolchain
+  # `rust-version` in Cargo.toml names. Every other Rust job here runs `stable`,
+  # so without this nothing ever compiles against the old toolchain and the
+  # number is free to be wrong — which is how the README came to claim 1.77 while
+  # the graph had needed 1.90 for some time. The version is read from the
+  # manifest rather than written here, so there is still one place to change it;
+  # a dependency bump that raises the real floor fails this job instead of
+  # silently invalidating the docs. The fix when it fails is a decision, not a
+  # formality: raise `rust-version` (and tell users), or pin the dependency back.
+  #
+  # `cargo check` without `--all-targets`, so dev-dependencies don't gate the
+  # MSRV — what matters is that someone on 1.90 can *build and depend on* these
+  # crates, not that the test harness compiles there. No rust-cache: this
+  # toolchain's artifacts would otherwise evict the stable ones the other jobs
+  # share, and a cold check is cheaper than that.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Read MSRV from Cargo.toml
+        id: msrv
+        run: |
+          set -euo pipefail
+          v=$(cargo metadata --format-version 1 --no-deps \
+              | jq -r '.packages[] | select(.name == "osp-core") | .rust_version')
+          test -n "$v" && test "$v" != null  # fail loud rather than install "stable"
+          echo "Declared MSRV: $v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Install Rust ${{ steps.msrv.outputs.version }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - name: Check (workspace builds on the declared MSRV)
+        run: cargo check --workspace --locked
+
   # Frontend: type-check, lint, unit tests, and the i18n locale-key parity check.
   frontend:
     runs-on: ubuntu-latest
