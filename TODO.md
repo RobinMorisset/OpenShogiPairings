@@ -15,6 +15,8 @@ Known limitations and future work, roughly ordered by area.
   plain matching can't express, and by very large fields. Plan: `good_lp` + HiGHS
   first, then CP-SAT.
 
+- "force_pairing on a past round reads the current player list, so re-pairing a round that a late joiner missed would now pair them into it.", found by the long-boards redesign session.
+
 ## Multi-referee server
 
 - **OAuth authentication**
@@ -38,11 +40,6 @@ Known limitations and future work, roughly ordered by area.
 
 ## Other
 
-- **Webhook for pushing results** — phase 3 of
-  [docs/public-access.md](docs/public-access.md) (push the public projection
-  whole, with a `{boot_id, version}` ordering key, never deltas). Reference:
-  https://github.com/ffrgo/pairgoth/blob/master/doc/reference.md#pairgoth-webhook-specification
-
 - **Pull the players list from a HelloAsso billetterie** Start from the back-office
   CSV export mapped onto the existing `POST /players/import-csv`, not the API: no
   secrets to store and no new dependency. The hard parts are identity, not format —
@@ -53,10 +50,19 @@ Known limitations and future work, roughly ordered by area.
   Do not import email addresses (see the non-goals in
   [docs/public-access.md](docs/public-access.md)).
 
-- **Keyboard shortcut to undo** is Ctrl+Z even on Mac, maybe Command+Z would be better ?
-
 - Show **predicted elo change** as the rightmost column of the Standings tab.
 
 - **Pre-fill the earlier rounds on the result sheets**: printing them mid-tournament
   (for a late arrival, or to replace a lost slip) currently leaves rounds already
   played blank, so they have to be copied over by hand.
+
+- The difference between HalfPoints and Wins is no longer important since b69d35e, think about
+  getting rid of the Wins unit.
+
+- At the bottom of the screen, rather than just the version number, maybe also a commit hash if it does not match the version number's tag ?
+
+- More cost details in Question this pairing
+
+- Reuse the team roster UI to pick forced pairings/byes
+
+- Better invalidation for the Why these pairings at the top of each round's pairings: not really a prefix, instead should be a bitfield, so starting a new round always gives a valid result for this new round. Also a bunch of changes should not affect it, e.g. altering the tiebreak criteria.
