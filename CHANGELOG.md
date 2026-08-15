@@ -48,6 +48,13 @@ cannot be opened at all.
 
 ### Fixed
 
+- **Discarding the draft of round 1 left registration closed for good.**
+  Preparing round 1 is one click that closes registration *and* opens the
+  draft; cancelling put only the draft back, leaving a tournament with
+  registration closed, no draft and no round — a state nothing but undo could
+  get out of, and one that refuses late registration outright in team mode.
+  Cancelling that first draft now reopens registration, exactly as cancelling
+  round 1 itself already did.
 - **An internal server error used to hang up instead of answering**, which a
   client cannot tell from the network failing — and if it happened after an
   edit had been applied, the acknowledgement was lost with it, so every later

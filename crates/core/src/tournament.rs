@@ -1003,13 +1003,14 @@ impl Tournament {
 
     /// Cancel the most recent round, stepping the tournament back one stage.
     ///
-    /// Peels off exactly one step: if a round is currently being drafted, the
-    /// draft is discarded; otherwise the last round is removed. Removing round 1
-    /// also undoes `finalize_registration` (tournament numbers and any cup
-    /// bracket are cleared) — back to open registration. Earlier rounds keep
-    /// their results, so a removed round N>1 simply lands back on round N-1,
-    /// which stays complete (its games are all still recorded) and ready to
-    /// re-prepare the next round.
+    /// Peels off exactly one step *as the referee took it*: if a round is
+    /// currently being drafted, the draft is discarded; otherwise the last round
+    /// is removed. Either way, once nothing is left before round 1 this also
+    /// undoes `finalize_registration` (tournament numbers and any cup bracket
+    /// are cleared) — back to open registration, which is where the click that
+    /// prepared round 1 started. Earlier rounds keep their results, so a removed
+    /// round N>1 simply lands back on round N-1, which stays complete (its games
+    /// are all still recorded) and ready to re-prepare the next round.
     ///
     /// This makes it easy to re-pair and replay a round in simulations, and lets
     /// a referee undo a round in the rare cases that call for it. It is undoable
@@ -1019,6 +1020,20 @@ impl Tournament {
     /// nor any round to remove.
     pub fn cancel_last_round(&mut self) -> Result<(), TournamentError> {
         if self.draft.take().is_some() {
+            // Discarding the *first* draft reopens registration too. Preparing
+            // round 1 is one referee action that takes two steps — it finalizes
+            // registration and then opens the draft — so peeling only the draft
+            // off would leave the tournament a step ahead of where that click
+            // found it, with registration closed and nothing to show for it and
+            // no way back but undo. In team mode that state refuses late
+            // registration outright, so a referee who discards a draft to add
+            // someone cannot.
+            //
+            // With a round already played, finalization belongs to that round
+            // rather than to this draft, and stays.
+            if self.rounds.is_empty() {
+                self.reopen_registration();
+            }
             return Ok(());
         }
         if self.rounds.pop().is_none() {
@@ -1030,13 +1045,27 @@ impl Tournament {
         // Removing the very first round reopens registration; later rounds leave
         // the preceding one untouched (and thus still complete).
         if self.rounds.is_empty() {
-            self.registration_finalized = false;
-            self.cup = None;
-            for player in &mut self.players {
-                player.tournament_id = None;
-            }
+            self.reopen_registration();
         }
         Ok(())
+    }
+
+    /// Undo [`finalize_registration`](Self::finalize_registration): tournament
+    /// numbers and any frozen cup bracket are cleared, and the roster is open to
+    /// edit again.
+    ///
+    /// Only meaningful with no rounds left — a played round references players
+    /// by the numbers this clears.
+    fn reopen_registration(&mut self) {
+        debug_assert!(
+            self.rounds.is_empty(),
+            "reopening registration would strip the numbers the remaining rounds reference",
+        );
+        self.registration_finalized = false;
+        self.cup = None;
+        for player in &mut self.players {
+            player.tournament_id = None;
+        }
     }
 
     /// Begin preparing the next round (the `RoundDraft` state).
@@ -3082,14 +3111,18 @@ mod tests {
         // Nothing to cancel right after finalizing.
         assert_eq!(t.cancel_last_round(), Err(TournamentError::NoRoundToCancel));
 
-        // A draft is peeled first, leaving the completed rounds untouched.
+        // A draft is peeled first. With no round behind it, this is the whole of
+        // what preparing round 1 did, so registration reopens with it — see
+        // `cancel_the_first_draft_reopens_registration`.
         t.prepare_round().unwrap();
         assert!(t.draft.is_some());
         t.cancel_last_round().unwrap();
         assert!(t.draft.is_none());
         assert!(t.rounds.is_empty());
+        assert!(!t.registration_finalized);
 
         // Play round 1 (recording the game completes it).
+        t.finalize_registration().unwrap();
         start_next_round(&mut t);
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
         assert_eq!(t.rounds.len(), 1);
@@ -3108,6 +3141,51 @@ mod tests {
         assert!(!t.registration_finalized);
         assert!(t.players.iter().all(|p| p.tournament_id.is_none()));
         assert_eq!(t.cancel_last_round(), Err(TournamentError::NoRoundToCancel));
+    }
+
+    #[test]
+    fn cancelling_the_first_draft_reopens_registration() {
+        // Preparing round 1 is one click that finalizes registration *and* opens
+        // the draft. Discarding that draft has to undo both, or the referee is
+        // left with registration closed, no draft, no round — a step ahead of
+        // where they clicked, with no way back but undo.
+        let mut t = Tournament::new("Open").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+
+        t.cancel_last_round().unwrap();
+        assert!(!t.registration_finalized, "registration is open again");
+        assert!(t.draft.is_none());
+        assert!(t.rounds.is_empty());
+        // The numbers go with it, exactly as when round 1 itself is cancelled.
+        assert!(t.players.iter().all(|p| p.tournament_id.is_none()));
+        // And the roster is editable again — the case that is outright blocked
+        // in team mode, where late registration is refused.
+        assert!(t.add_player(named("C")).is_ok());
+    }
+
+    #[test]
+    fn cancelling_a_later_draft_leaves_registration_closed() {
+        // The mirror image: with round 1 played, finalization belongs to that
+        // round and not to the draft being discarded, so it stays — and the
+        // numbers round 1 references stay with it.
+        let mut t = Tournament::new("Open").unwrap();
+        for name in ["A", "B"] {
+            t.add_player(named(name)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+
+        t.prepare_round().unwrap();
+        t.cancel_last_round().unwrap();
+        assert!(t.registration_finalized, "round 1 still needs its numbers");
+        assert!(t.draft.is_none());
+        assert_eq!(t.rounds.len(), 1);
+        assert!(t.players.iter().all(|p| p.tournament_id.is_some()));
     }
 
     #[test]
