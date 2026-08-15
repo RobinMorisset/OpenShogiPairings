@@ -508,6 +508,14 @@
         await refetch();
       } else {
         error = describe(err);
+        // A 500 is the server telling us it broke *somewhere* in handling this
+        // request — which may be after the edit itself had already been applied
+        // (a panic while building the response is exactly that case). So the
+        // view on screen can already be behind, and its version certainly is.
+        // Reload rather than leave the referee reading a state that has moved,
+        // and stale enough that their next edit would come back as somebody
+        // else's conflict.
+        if (err instanceof ApiError && err.status === 500) await refetch();
       }
     } finally {
       busy = false;

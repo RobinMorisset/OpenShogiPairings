@@ -60,6 +60,7 @@ use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::http::{request, HeaderName, HeaderValue, Method};
 use axum::{middleware, routing::get, Json, Router};
 use osp_core::HealthStatus;
+use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -174,7 +175,13 @@ fn router_inner(state: AppState, static_dir: Option<PathBuf>) -> Router {
         app = app.fallback_service(ServeDir::new(dir).not_found_service(ServeFile::new(index)));
     }
 
-    app.layer(cors).layer(TraceLayer::new_for_http())
+    // Outermost, so it covers every route including the static fallback: a
+    // panic anywhere below becomes a 500 the client can report, rather than a
+    // dropped connection it cannot tell from a network failure (see
+    // `error::panic_response` for why that distinction wedged a client).
+    app.layer(cors)
+        .layer(TraceLayer::new_for_http())
+        .layer(CatchPanicLayer::custom(error::panic_response))
 }
 
 /// Serve the API on an already-bound listener until the process ends, with an

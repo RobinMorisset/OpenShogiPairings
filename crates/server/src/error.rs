@@ -416,6 +416,53 @@ impl IntoResponse for ApiError {
     }
 }
 
+/// Turn a panic that escaped a handler into a `500`, instead of letting the
+/// connection die unanswered.
+///
+/// A panicking handler drops its connection mid-response by default, and a
+/// dropped connection is the one failure a client cannot interpret. Losing the
+/// reply to a *mutation* is worse than losing the mutation: the edit has already
+/// landed, but the version that acknowledges it never arrives, so the client
+/// keeps declaring a version the server has moved past and every later edit comes
+/// back as a version conflict — "another referee changed the tournament first",
+/// forever, to a referee working alone. That is not hypothetical; it is what a
+/// stray `debug_assert!` in the standings did (see `Standing::tiebreak`).
+///
+/// Recovering here is sound for the same reason [`TournamentInstance::read`]
+/// recovers from a poisoned lock: every write path installs an already-complete
+/// tournament in one move, so an unwind cannot leave a half-updated one behind.
+/// A panic therefore costs exactly the request it happened in.
+///
+/// The body stays English and carries no code, like the other plumbing errors: a
+/// panic is a bug to be reported verbatim, not a rule the referee broke. It does
+/// say the tournament may have changed, because a panic *after* a mutation is
+/// exactly the case that hurts, and the client refreshes rather than assuming
+/// its edit was rejected.
+///
+/// [`TournamentInstance::read`]: crate::state::TournamentInstance::read
+pub(crate) fn panic_response(panic: Box<dyn std::any::Any + Send + 'static>) -> Response {
+    // A panic payload is `&str` for `panic!("literal")` and `String` once it
+    // formats arguments; anything else is a payload we cannot read.
+    let detail = panic
+        .downcast_ref::<&'static str>()
+        .map(|s| s.to_string())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "non-string panic payload".to_string());
+    // The panic location is already on stderr from the default hook; this is the
+    // line that ties it to a request having been answered with a 500.
+    tracing::error!(%detail, "handler panicked; answering 500");
+
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ErrorBody::message(format!(
+            "the server hit an internal error and could not finish this request \
+             ({detail}). The tournament may or may not have changed — reload to see \
+             its current state, and please report this."
+        ))),
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,6 +642,55 @@ mod tests {
     fn internal_errors_are_not_localized() {
         assert!(domain_payload(&TournamentError::CupBracketInconsistent).is_none());
         assert!(domain_payload(&TournamentError::BoardNotFound { round: 1, board: 0 }).is_none());
+    }
+
+    /// A panicking handler answers `500` instead of dropping the connection.
+    ///
+    /// The connection is the thing under test: before the layer, this request
+    /// produced no response at all, which a client cannot tell from the network
+    /// failing — and which left it holding a version the server had moved past.
+    #[tokio::test]
+    async fn a_panicking_handler_answers_500_rather_than_hanging_up() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use axum::routing::get;
+        use axum::Router;
+        use tower::ServiceExt; // for `oneshot`
+        use tower_http::catch_panic::CatchPanicLayer;
+
+        // A named handler with a concrete return type: an inline `async {
+        // panic!() }` has type `!`, which the never-type fallback rules reject.
+        async fn boom() -> String {
+            panic!("standings blew up mid-response")
+        }
+
+        let app = Router::new()
+            .route("/boom", get(boom))
+            .layer(CatchPanicLayer::custom(panic_response));
+
+        let response = app
+            .oneshot(Request::builder().uri("/boom").body(Body::empty()).unwrap())
+            .await
+            .expect("the layer answers; without it the connection is dropped");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let message = body["error"].as_str().unwrap();
+        // The panic's own text rides along, so the referee's bug report names
+        // what broke...
+        assert!(
+            message.contains("standings blew up mid-response"),
+            "{message}"
+        );
+        // ...and the message does not claim the edit was rejected, because a
+        // panic after a successful mutation is the case that wedged a client.
+        assert!(message.contains("reload"), "{message}");
+        // No `code`: nothing to localize, and the text is meant to be copied
+        // verbatim into an issue.
+        assert!(body.get("code").is_none(), "{body}");
     }
 
     /// The 400/404 split has to survive the move out of the `From` impl.

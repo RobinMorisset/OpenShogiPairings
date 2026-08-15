@@ -48,6 +48,13 @@ cannot be opened at all.
 
 ### Fixed
 
+- **An internal server error used to hang up instead of answering**, which a
+  client cannot tell from the network failing — and if it happened after an
+  edit had been applied, the acknowledgement was lost with it, so every later
+  edit came back as "another referee changed the tournament first" until the
+  page was reloaded. Such a request now answers with the error, naming what
+  broke so it can be reported, and the app reloads the tournament rather than
+  assuming the edit was rejected.
 - Half points from a `0=` influenced Points and tie-breaks like SOS, SODOS, but
   they were not included in Wins, SOSW, SODOSW, etc.
 - "Why these pairings?" now warns if unreliable; this can occur if a referee
