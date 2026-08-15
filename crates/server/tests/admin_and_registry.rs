@@ -1,11 +1,9 @@
 //! The admin password, and the registry it gates: creating, listing,
 //! deleting and restoring tournaments.
 
-use std::sync::Arc;
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use osp_server::{router, AppState, AuthConfig, TournamentRegistry};
+use osp_server::{router, AppState, AuthConfig};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -58,21 +56,6 @@ async fn admin_password_gates_tournament_creation() {
     assert_eq!(status, StatusCode::OK);
 }
 
-/// A state whose backups root is this test's alone: the deleted-tournament
-/// listing is per *root*, so on the shared test root these tests would see
-/// each other's bins.
-fn state_with_own_bin() -> AppState {
-    let root = std::env::temp_dir().join(format!("osp-bin-{}", Uuid::new_v4()));
-    AppState {
-        registry: Arc::new(TournamentRegistry::with_retention(
-            None,
-            Some(root),
-            std::time::Duration::from_secs(30 * 24 * 60 * 60),
-        )),
-        ..Default::default()
-    }
-}
-
 /// A `DELETE` carrying an `Authorization: Bearer <token>` header.
 fn delete_with_token(uri: &str, token: &str) -> Request<Body> {
     Request::builder()
@@ -85,7 +68,7 @@ fn delete_with_token(uri: &str, token: &str) -> Request<Body> {
 
 #[tokio::test]
 async fn a_deleted_tournament_is_listed_and_can_be_restored() {
-    let state = state_with_own_bin();
+    let state = state_with_backups();
     let id = create(&state, "Doomed Cup").await;
     let (status, _) = send(
         router(state.clone()),
@@ -185,7 +168,7 @@ async fn a_deleted_tournament_is_listed_and_can_be_restored() {
 
 #[tokio::test]
 async fn restoring_a_protected_tournament_needs_the_password_it_had() {
-    let state = state_with_own_bin();
+    let state = state_with_backups();
     let (id, token) = create_with_password(&state, "Locked Cup", "secret").await;
     let (status, _) = send(
         router(state.clone()),

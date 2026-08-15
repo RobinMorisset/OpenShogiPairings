@@ -5,13 +5,33 @@
 //! applies to this module and nothing else.
 #![allow(dead_code)]
 
+use std::sync::Arc;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::Router;
-use osp_server::{router, AppState};
+use osp_server::{router, AppState, TournamentRegistry};
 use serde_json::json;
 use tower::ServiceExt; // for `oneshot`
 use uuid::Uuid;
+
+/// A state whose automatic backups go to a root of this test's own, under the
+/// OS temp dir.
+///
+/// [`AppState::default`] keeps *no* backups, deliberately: a test that never
+/// mentions them must not be able to write into the real per-user data
+/// directory, which is what these tests did for as long as the registry
+/// resolved its own default. So a test that exercises the backup or
+/// deleted-tournament endpoints has to ask for a root — and gets a private
+/// one, since both listings are per-root and a shared one would show each test
+/// its neighbours' files.
+pub fn state_with_backups() -> AppState {
+    let root = std::env::temp_dir().join(format!("osp-test-backups-{}", Uuid::new_v4()));
+    AppState {
+        registry: Arc::new(TournamentRegistry::new(None, Some(root))),
+        ..Default::default()
+    }
+}
 
 /// Send one request through the router and return (status, parsed JSON body).
 pub async fn send(app: Router, req: Request<Body>) -> (StatusCode, serde_json::Value) {

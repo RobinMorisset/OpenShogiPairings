@@ -113,21 +113,23 @@ pub(crate) struct DeletedTournament {
     pub problem: Option<TournamentProblem>,
 }
 
-/// Where backups go when the server was given no explicit root: the per-user
+/// Where backups go when the *host* was given no explicit root: the per-user
 /// data directory, as every release has used. `None` on a platform with no
 /// known data directory — the caller then keeps no backups at all rather than
 /// inventing a location.
 ///
-/// Under `cargo test`, diverts to the OS temp dir instead — every
-/// round-lifecycle test in this crate exercises the endpoints that call
-/// [`take`], and none of them should touch the developer's actual
-/// OpenShogiPairings data.
+/// Called only where a host resolves its configuration — [`crate::serve_with_config`]
+/// and the binaries that report the effective location. Deliberately *not*
+/// called from [`crate::state::TournamentRegistry`]: a registry built with no
+/// root keeps no backups, full stop. It used to fall back here, which meant
+/// every `AppState::default()` in a test wrote into the developer's real
+/// OpenShogiPairings data directory. A `cfg!(test)` diversion to the temp dir
+/// was supposed to prevent that and could not: this crate's integration tests
+/// link against the library compiled *without* `cfg(test)`, so the diversion
+/// was dead exactly where the writes were coming from. Resolving the default
+/// once, at the boundary that has a host to speak for, is what closes it.
 pub(crate) fn default_root() -> Option<PathBuf> {
-    if cfg!(test) {
-        Some(std::env::temp_dir().join("osp-test-backups"))
-    } else {
-        Some(dirs::data_dir()?.join("openshogipairings").join("backups"))
-    }
+    Some(dirs::data_dir()?.join("openshogipairings").join("backups"))
 }
 
 /// The directory holding one tournament's backups: its own id under `root`.
@@ -574,10 +576,17 @@ pub(crate) fn load(dir: Option<&Path>, id: &str) -> Result<Tournament, LoadError
 mod tests {
     use super::*;
 
-    /// A backups directory of this tournament's own, under the test root — so
-    /// concurrently-running tests can't see each other's files.
+    /// A root of this test's own, under the OS temp dir — so a `list` or a
+    /// `sweep` here can never see (or delete) what a concurrently-running test
+    /// is doing, and nothing lands in the real per-user data directory.
+    fn isolated_root() -> PathBuf {
+        std::env::temp_dir().join(format!("osp-backup-test-{}", Uuid::new_v4()))
+    }
+
+    /// A backups directory of this tournament's own, under a root of this
+    /// test's own.
     fn dir_of(t: &Tournament) -> PathBuf {
-        dir_for(&default_root().expect("a test root"), t.id)
+        dir_for(&isolated_root(), t.id)
     }
 
     #[test]
@@ -636,7 +645,7 @@ mod tests {
 
     #[test]
     fn list_is_empty_for_a_tournament_with_no_backups() {
-        let dir = dir_for(&default_root().expect("a test root"), Uuid::new_v4());
+        let dir = dir_for(&isolated_root(), Uuid::new_v4());
         assert!(list(Some(&dir)).is_empty());
     }
 
@@ -650,12 +659,6 @@ mod tests {
         assert!(load(None, "0-0-nowhere-to-go").is_err());
         mark_deleted(None, "Homeless Test", None);
         sweep(None, Duration::ZERO, &HashSet::new());
-    }
-
-    /// A root of this test's own, so a sweep here can't see (or delete) what a
-    /// concurrently-running test is doing under the shared test root.
-    fn isolated_root() -> PathBuf {
-        std::env::temp_dir().join(format!("osp-sweep-{}", Uuid::new_v4()))
     }
 
     /// Backdate a marker that [`mark_deleted`] just stamped with "now", so a

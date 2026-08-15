@@ -185,9 +185,10 @@ fn router_inner(state: AppState, static_dir: Option<PathBuf>) -> Router {
 }
 
 /// Serve the API on an already-bound listener until the process ends, with an
-/// empty in-memory registry and no admin auth — the fully open, throwaway
-/// configuration (tests, quick manual runs). The Tauri desktop app uses
-/// [`serve_with_config`] instead, so its tournaments persist across restarts.
+/// empty in-memory registry, no admin auth and no backups kept — the fully
+/// open, throwaway configuration (tests, quick manual runs), which writes
+/// nothing anywhere. The Tauri desktop app uses [`serve_with_config`] instead,
+/// so its tournaments persist across restarts and its backups are kept.
 ///
 /// Taking a bound [`TcpListener`](tokio::net::TcpListener) (rather than an
 /// address) lets the caller bind first and read back the chosen port — which the
@@ -245,7 +246,11 @@ pub async fn serve_with_config(
     let state = AppState {
         registry: Arc::new(TournamentRegistry::with_retention(
             config.data_dir,
-            config.backup_dir,
+            // Resolve the per-user default here, at the one boundary that has a
+            // host behind it. The registry itself treats `None` as "keep no
+            // backups" precisely so that the in-process states tests build
+            // cannot land in a real data directory.
+            config.backup_dir.or_else(backup::default_root),
             config
                 .backup_retention
                 .unwrap_or(backup::DEFAULT_DELETED_RETENTION),

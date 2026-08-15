@@ -92,7 +92,7 @@ async fn import_can_set_the_tournament_password() {
 
 #[tokio::test]
 async fn backups_are_taken_on_round_transitions_and_can_be_restored() {
-    let state = AppState::default();
+    let state = state_with_backups();
     let id = create(&state, "Backup Cup").await;
     for name in ["Alice", "Bob"] {
         send(

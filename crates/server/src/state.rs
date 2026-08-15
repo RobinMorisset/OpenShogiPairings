@@ -696,10 +696,12 @@ impl TournamentRegistry {
     /// skipped with a warning, same as a single corrupt `OSP_DATA_FILE` used to
     /// be.
     ///
-    /// `backups_root` overrides where the automatic backups go; `None` falls
-    /// back to [`crate::backup::default_root`] (the per-user data directory),
-    /// which is what every release before it was configurable used. Deleted
-    /// tournaments' backups are kept for
+    /// `backups_root` says where the automatic backups go; `None` keeps none at
+    /// all. It is *not* resolved to a default here — a registry given no root
+    /// writes nowhere, so that constructing one (as every test does) can never
+    /// scatter files through the developer's real data directory. The per-user
+    /// default lives at the host boundary, in [`crate::serve_with_config`].
+    /// Deleted tournaments' backups are kept for
     /// [`DEFAULT_DELETED_RETENTION`](crate::backup::DEFAULT_DELETED_RETENTION);
     /// use [`with_retention`](Self::with_retention) to say otherwise.
     pub fn new(data_dir: Option<PathBuf>, backups_root: Option<PathBuf>) -> Self {
@@ -719,7 +721,6 @@ impl TournamentRegistry {
         backups_root: Option<PathBuf>,
         deleted_retention: Duration,
     ) -> Self {
-        let backups_root = backups_root.or_else(crate::backup::default_root);
         let mut instances = HashMap::new();
         if let Some(dir) = &data_dir {
             // An absent directory is the normal first-boot case. Anything else —
@@ -1711,6 +1712,33 @@ mod tests {
     }
 
     const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+
+    /// A registry given no backups root resolves none of its own — it keeps no
+    /// backups at all, and in particular does not reach for the per-user data
+    /// directory.
+    ///
+    /// This is the whole of the fix for integration tests writing into the
+    /// developer's real OpenShogiPairings data: `AppState::default()` — which
+    /// every one of them builds, most without a thought for backups — comes
+    /// through here. Guarding it needs a *unit* test rather than an assertion
+    /// over the real directory, because an integration test could not tell a
+    /// file it wrote from one already there.
+    #[test]
+    fn a_registry_given_no_backups_root_keeps_no_backups() {
+        let registry = TournamentRegistry::default();
+        assert!(
+            registry.backups_root.is_none(),
+            "a registry with no root must not invent one"
+        );
+
+        let (id, _) = registry.create("Rootless Cup", None).unwrap();
+        assert!(
+            registry.backups_dir(id).is_none(),
+            "and so no tournament under it has anywhere to write"
+        );
+        assert!(registry.list_deleted().is_empty());
+        assert!(registry.remove(id), "deleting it is still fine");
+    }
 
     #[test]
     fn removing_a_tournament_keeps_its_backups_and_its_password_hash() {
