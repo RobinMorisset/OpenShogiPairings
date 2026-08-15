@@ -177,6 +177,7 @@
     "giverTitle": "The higher-rated player gives the odds",
     "giverGives": "{name} gives",
     "needsDifferentRatings": "Needs two players with different ratings",
+    "handicapForfeitedTitle": "Nobody played, so nobody gave odds: clear the no-show first",
     "alreadyCompletedWarning": "Every game in this round is recorded, so it counts in the standings — changing a result here updates them.",
     "clickToRecordWinner": "Click a player to record them as the winner.",
     "byeOpponent": "BYE",

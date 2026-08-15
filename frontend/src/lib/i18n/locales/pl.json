@@ -177,6 +177,7 @@
     "giverTitle": "Forę daje gracz o wyższym rankingu",
     "giverGives": "{name} daje",
     "needsDifferentRatings": "Wymaga dwóch graczy o różnym rankingu",
+    "handicapForfeitedTitle": "Partia nie została rozegrana, więc nikt nie dał fory: najpierw usuń walkower",
     "alreadyCompletedWarning": "Wszystkie partie w tej rundzie są zapisane, więc runda liczy się do tabeli wyników — zmiana wyniku w tym miejscu ją zaktualizuje.",
     "clickToRecordWinner": "Kliknij gracza, aby zapisać go jako zwycięzcę.",
     "byeOpponent": "PAUZA",

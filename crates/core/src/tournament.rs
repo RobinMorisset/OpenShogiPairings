@@ -213,6 +213,11 @@ pub enum TournamentError {
     /// are always played even.
     #[error("cup games cannot have a handicap")]
     HandicapNotAllowedForCup,
+    /// A handicap was set on a board that was forfeited — nobody played, so
+    /// nobody conceded odds. The UI disables the control, so this is a client
+    /// bug.
+    #[error("board {board} of round {round} was forfeited, so it cannot have a handicap")]
+    HandicapOnForfeitedBoard { round: u32, board: usize },
     /// The serialized record uses a format version this build cannot read.
     #[error("unsupported tournament format version {found} (this build supports {supported})")]
     UnsupportedFormatVersion { found: u32, supported: u32 },
@@ -2104,8 +2109,8 @@ impl Tournament {
     /// [`Forfeit`] — or `None` to clear it back to a normal unplayed board. A
     /// single missing side credits the opponent a free point exactly like a bye;
     /// [`Forfeit::Both`] leaves no winner (both take a zero loss). A forfeit
-    /// isn't a played game, so recording one clears any actual result and draw
-    /// flag on the board. Like recording a winner, this keeps the round's
+    /// isn't a played game, so recording one clears any actual result, draw flag
+    /// and handicap on the board. Like recording a winner, this keeps the round's
     /// `completed` flag in sync — a forfeit counts toward closing the round.
     ///
     /// A [`justified`](crate::round::AbsenceKind::Justified) absence is rejected
@@ -2144,6 +2149,15 @@ impl Tournament {
             None if board.outcome.forfeit().is_some() => Outcome::PENDING,
             None => board.outcome,
         };
+        // Nobody played, so nobody conceded odds: a forfeit drops the handicap
+        // too, the same way it drops the result and the draw flag. The handicap
+        // is a separate field rather than part of the outcome, so it has to be
+        // cleared explicitly — leaving it would keep a "X gives 2-piece" hint on
+        // a board that was never played, publish it in the cross-table, and
+        // resurrect it if the forfeit is later cleared.
+        if absent.is_some() {
+            board.handicap = None;
+        }
         round.completed = round.is_complete();
         self.explanations_stale_after(round_number);
         Ok(&self.rounds[idx].boards[board_index])
@@ -2256,12 +2270,30 @@ impl Tournament {
     /// ratings are equal (or both unrated), since then there is no giver, or
     /// [`TournamentError::HandicapNotAllowedForCup`] for a cup board — cup games
     /// are always played even.
+    ///
+    /// Nobody played, so nobody conceded odds: a forfeited board is rejected with
+    /// [`TournamentError::HandicapOnForfeitedBoard`], exactly like the draw flag.
+    /// Clear the forfeit first.
     pub fn set_board_handicap(
         &mut self,
         round_number: u32,
         board_index: usize,
         handicap: Option<Handicap>,
     ) -> Result<&Board, TournamentError> {
+        // Rejected in both directions, like the draw flag: the picker is disabled
+        // on a forfeited board, and the forfeit already dropped whatever handicap
+        // the board carried, so even a clear means the client is out of sync.
+        if self
+            .board(round_number, board_index)?
+            .outcome
+            .forfeit()
+            .is_some()
+        {
+            return Err(TournamentError::HandicapOnForfeitedBoard {
+                round: round_number,
+                board: board_index,
+            });
+        }
         // Resolve the giver up front (immutable borrow of `players`) so the board
         // can then be borrowed mutably without conflict.
         let game = match handicap {
@@ -2295,12 +2327,18 @@ impl Tournament {
         handicap: Handicap,
         giver: Winner,
     ) -> Result<(), TournamentError> {
-        if matches!(
-            self.board(round_number, board_index)?.source,
-            PairingSource::Cup { .. }
-        ) {
+        let board = self.board(round_number, board_index)?;
+        if matches!(board.source, PairingSource::Cup { .. }) {
             return Err(TournamentError::HandicapNotAllowedForCup);
         }
+        // The importer forces every board and resolves it straight away, so it
+        // never meets a forfeited one — a cross-table's forfeit wins come in as
+        // byes. Stated so a future importer that *does* record forfeits can't
+        // quietly build the state `set_board_handicap` refuses.
+        debug_assert!(
+            board.outcome.forfeit().is_none(),
+            "round {round_number} board {board_index} is forfeited, so it cannot take a handicap"
+        );
         self.board_mut(round_number, board_index)?.handicap =
             Some(HandicapGame { handicap, giver });
         self.explanations_stale_after(round_number);
@@ -2419,6 +2457,22 @@ impl Tournament {
                 .any(Forfeit::has_justified)
         {
             return Err(TournamentError::JustifiedAbsenceOutsideTeamMode);
+        }
+        // Nobody played, so nobody conceded odds: a forfeited board carrying a
+        // handicap is a state no setter here can produce (`set_board_no_show`
+        // drops the handicap, `set_board_handicap` refuses a forfeited board).
+        // Rejected rather than tolerated because the two disagree about whether
+        // the game happened, and every reader — the cross-table, the FESA export,
+        // the "X gives" hint — believes a different one. Nothing older loads into
+        // this state either: the only backwards compatibility this build offers is
+        // for a tournament that has not started, which has no boards at all.
+        if let Some((round, board)) = self.rounds.iter().find_map(|r| {
+            r.boards
+                .iter()
+                .position(|b| b.handicap.is_some() && b.outcome.forfeit().is_some())
+                .map(|i| (r.number, i))
+        }) {
+            return Err(TournamentError::HandicapOnForfeitedBoard { round, board });
         }
         // A frozen explanation names the round it explains. A file where the two
         // disagree, or whose watermark points past the last round, would put a
@@ -3827,6 +3881,61 @@ mod tests {
         // Clearing the forfeit makes the board an ordinary pending one again.
         t.set_board_no_show(1, 0, None).unwrap();
         assert!(t.set_board_drawn(1, 0, true).unwrap().outcome.drawn());
+    }
+
+    /// Nobody played, so nobody conceded odds: the handicap follows the draw
+    /// flag. It is refused on a forfeited board — in both directions, since the
+    /// picker is disabled there — and declaring a no-show drops a handicap the
+    /// board already carried rather than leaving it to be published (or to come
+    /// back if the forfeit is cleared).
+    #[test]
+    fn a_forfeit_refuses_a_handicap_and_drops_the_one_already_set() {
+        let mut t = Tournament::new("Cup").unwrap();
+        t.add_player(rated("High", 2000)).unwrap();
+        t.add_player(rated("Low", 1000)).unwrap();
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+
+        t.set_board_handicap(1, 0, Some(Handicap::TwoPiece))
+            .unwrap();
+        assert!(t.rounds[0].boards[0].handicap.is_some());
+
+        // Declaring the no-show removes it, exactly as it removes the draw flag.
+        t.set_board_no_show(1, 0, Some(Forfeit::Player2(AbsenceKind::NoShow)))
+            .unwrap();
+        assert_eq!(t.rounds[0].boards[0].handicap, None);
+
+        // And it cannot be set again while the forfeit stands. Nor cleared: the
+        // UI offers neither, so either request is a client out of sync.
+        assert!(matches!(
+            t.set_board_handicap(1, 0, Some(Handicap::TwoPiece)),
+            Err(TournamentError::HandicapOnForfeitedBoard { round: 1, board: 0 })
+        ));
+        assert!(matches!(
+            t.set_board_handicap(1, 0, None),
+            Err(TournamentError::HandicapOnForfeitedBoard { round: 1, board: 0 })
+        ));
+
+        // Clearing the forfeit reopens the picker, but does not resurrect the
+        // handicap — the referee re-enters it.
+        t.set_board_no_show(1, 0, None).unwrap();
+        assert_eq!(t.rounds[0].boards[0].handicap, None);
+        t.set_board_handicap(1, 0, Some(Handicap::TwoPiece))
+            .unwrap();
+        assert!(t.rounds[0].boards[0].handicap.is_some());
+        assert!(t.validate_loaded().is_ok());
+
+        // ...and a save that pairs the two anyway is rejected on load. No file
+        // this build can otherwise read reaches that state: the handicap and the
+        // forfeit are exclusive through every setter, and the only older saves
+        // accepted are of tournaments that have not started, which have no boards.
+        t.rounds[0].boards[0].outcome = Outcome::Forfeit {
+            absent: Forfeit::Player2(AbsenceKind::NoShow),
+        };
+        assert_eq!(
+            t.validate_loaded(),
+            Err(TournamentError::HandicapOnForfeitedBoard { round: 1, board: 0 })
+        );
     }
 
     #[test]

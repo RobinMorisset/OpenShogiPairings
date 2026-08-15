@@ -1104,9 +1104,16 @@
                   {/if}
                 {:else if !isCup(board)}
                   {#if handicapAllowed(board)}
+                    <!-- A forfeited board was never played, so nobody conceded
+                         odds — the server rejects the request outright, and
+                         declaring the no-show has already dropped any handicap
+                         the board carried. -->
                     <select
                       class="handicap control-sm control-quiet"
-                      disabled={locked}
+                      disabled={locked || forfeitOf(board) != null}
+                      title={forfeitOf(board) != null
+                        ? $_("roundView.handicapForfeitedTitle")
+                        : undefined}
                       value={board.handicap?.handicap ?? ""}
                       onchange={(e) => onHandicapChange(index, e.currentTarget.value)}
                     >

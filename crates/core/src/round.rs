@@ -383,6 +383,12 @@ pub struct Board {
     #[serde(default, skip_serializing_if = "Outcome::is_pending_undrawn")]
     pub outcome: Outcome,
     /// The handicap conceded on this board, if any (see [`HandicapGame`]).
+    ///
+    /// Never set together with a forfeited [`outcome`](Self::outcome): nobody
+    /// played, so nobody conceded odds. Unlike the draw flag this is a field of
+    /// its own rather than part of the outcome, so the pairing of the two is an
+    /// invariant `Tournament::set_board_no_show` and
+    /// `Tournament::set_board_handicap` maintain, not one the types enforce.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handicap: Option<HandicapGame>,
     /// The float for this board: `points(player1) − points(player2)` at the time

@@ -177,6 +177,7 @@
     "giverTitle": "Hendikep dáva hráč s vyšším ratingom",
     "giverGives": "{name} dáva",
     "needsDifferentRatings": "Vyžaduje dvoch hráčov s rozdielnym ratingom",
+    "handicapForfeitedTitle": "Partia sa nehrala, takže nikto nedal hendikep: najprv zrušte nedostavenie sa",
     "alreadyCompletedWarning": "Všetky partie tohto kola sú zapísané, takže sa počíta do tabuľky — zmena výsledku ju tu rovno aktualizuje.",
     "clickToRecordWinner": "Kliknutím na hráča ho zapíšete ako víťaza.",
     "byeOpponent": "VOĽNO",

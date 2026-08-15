@@ -177,6 +177,7 @@
     "giverTitle": "Le joueur le mieux classé donne le handicap",
     "giverGives": "{name} donne",
     "needsDifferentRatings": "Nécessite deux joueurs de classements différents",
+    "handicapForfeitedTitle": "Personne n'a joué, donc personne n'a donné de handicap : retirez d'abord l'absence",
     "alreadyCompletedWarning": "Toutes les parties de cette ronde sont enregistrées, elle compte donc au classement — modifier un résultat ici le met à jour.",
     "clickToRecordWinner": "Cliquez sur un joueur pour l'enregistrer comme vainqueur.",
     "byeOpponent": "EXEMPT",

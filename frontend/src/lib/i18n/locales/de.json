@@ -177,6 +177,7 @@
     "giverTitle": "Der höher gewertete Spieler gibt die Vorgabe",
     "giverGives": "{name} gibt vor",
     "needsDifferentRatings": "Erfordert zwei Spieler mit unterschiedlicher Wertung",
+    "handicapForfeitedTitle": "Es wurde nicht gespielt, also gab es keine Vorgabe: Zuerst das Nichtantreten aufheben",
     "alreadyCompletedWarning": "Alle Partien dieser Runde sind erfasst, sie zählt also für die Rangliste — ein Ergebnis hier zu ändern, aktualisiert sie.",
     "clickToRecordWinner": "Klicken Sie auf einen Spieler, um ihn als Sieger einzutragen.",
     "byeOpponent": "FREILOS",

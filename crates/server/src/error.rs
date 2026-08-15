@@ -273,6 +273,7 @@ pub(crate) fn domain_payload(
         | TournamentError::RoundNotFound(_)
         | TournamentError::BoardNotFound { .. }
         | TournamentError::DrawnOnForfeitedBoard { .. }
+        | TournamentError::HandicapOnForfeitedBoard { .. }
         | TournamentError::PlayerNotSittingOut { .. }
         | TournamentError::AdjustmentNotFound { .. }
         | TournamentError::DraftAlreadyExists
@@ -570,6 +571,7 @@ mod tests {
             TournamentError::PlayerAdjustmentInTeamMode,
             TournamentError::JustifiedAbsenceOutsideTeamMode,
             TournamentError::DrawnOnForfeitedBoard { round: 1, board: 0 },
+            TournamentError::HandicapOnForfeitedBoard { round: 1, board: 0 },
         ]
     }
 
