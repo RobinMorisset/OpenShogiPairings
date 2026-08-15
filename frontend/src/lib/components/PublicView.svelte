@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The public reader page (docs/public-access.md §5): standings, the pairings
+  // The public reader page (docs/archive/public-access.md §5): standings, the pairings
   // of every round played so far, and the cup bracket if there is one. No
   // settings, no player editing, no backups, no undo, no "why these pairings?".
   //

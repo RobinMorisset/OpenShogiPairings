@@ -17,7 +17,7 @@
 //! and survives result edits / undo.
 //!
 //! The design, including why the single K multiplier is the only knob and how the
-//! per-game drift auto-decelerates, is written up in `docs/elo-pairing-mode.md`.
+//! per-game drift auto-decelerates, is written up in `docs/archive/elo-pairing-mode.md`.
 
 use std::collections::HashMap;
 

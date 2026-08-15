@@ -386,7 +386,7 @@ pub enum TournamentError {
     #[error("a pairing ELO is only meaningful in team mode with MacMahon starting points")]
     PairingRatingNotApplicable,
     /// Registration of any kind after finalization, in team mode (see
-    /// `docs/team-tournaments.md`: a late individual would be teamless, and a
+    /// `docs/archive/team-tournaments.md`: a late individual would be teamless, and a
     /// late team would need teamless players first).
     #[error("a team tournament cannot take late registrations")]
     NoLateRegistrationInTeamMode,
@@ -456,7 +456,7 @@ impl Tournament {
         // Team mode takes no late registration at all: a player registered now
         // would be teamless, breaking the frozen "everyone is in exactly one
         // team" invariant, and a whole new team would need its players registered
-        // teamless first. See `docs/team-tournaments.md`.
+        // teamless first. See `docs/archive/team-tournaments.md`.
         if self.registration_finalized && self.settings.team_mode() {
             return Err(TournamentError::NoLateRegistrationInTeamMode);
         }
@@ -1599,7 +1599,7 @@ impl Tournament {
     ///
     /// Deliberately coarse: changing one player's club drops the mark even when
     /// no board's ledger would move. The exact version (recompute each round and
-    /// compare) is noted as a follow-on in `docs/public-access.md`; a warning
+    /// compare) is noted as a follow-on in `docs/archive/public-access.md`; a warning
     /// that over-fires is recoverable, one that under-fires is not.
     ///
     /// What is *not* here is as deliberate: a category membership and a cup
@@ -2165,7 +2165,7 @@ impl Tournament {
 
     /// Flag (or unflag) a board as a "long game": double time control, lasting two
     /// rounds and scoring two points for the winner (see
-    /// `docs/two-round-boards.md`).
+    /// `docs/archive/two-round-boards.md`).
     ///
     /// Allowed only on the **current** (last) round, and only when the tournament
     /// enables long boards. Flagging *on* requires the board undecided; flagging

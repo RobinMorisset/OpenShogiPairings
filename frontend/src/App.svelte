@@ -216,7 +216,7 @@
   // Why the engine chose the active round's pairings. Frozen onto the round when
   // it was confirmed, so it travels with the tournament and needs no round-trip
   // of its own — and stays the ledger the round was really paired from, whatever
-  // has been edited since (see the appendix of docs/public-access.md).
+  // has been edited since (see the appendix of docs/archive/public-access.md).
   //
   // What *can* go stale is the data it cites: the tournament's watermark says how
   // far the explanations still match the present, and every round above it is
@@ -1001,7 +1001,7 @@
             </div>
           {/if}
 
-          <!-- The other transport (docs/public-access.md phase 2): a file, not
+          <!-- The other transport (docs/archive/public-access.md phase 2): a file, not
                a link. Offered whatever the deployment, and not gated on the
                publication flag above — that flag governs *this server's* reader
                endpoint, while saving the file is itself the act of publishing.

@@ -1,5 +1,10 @@
 # Team tournaments — design
 
+> **Archived design doc — do not trust the details.** Written before the feature
+> was implemented and not maintained since, so it has drifted from the code. It
+> is kept for the rationale it records; for how the software actually behaves,
+> see [`docs/reference/`](../reference) and the code.
+
 Status: **implemented**. A team tournament can be configured, rostered,
 finalized, paired, played, customized, adjusted and read end to end, through the
 interface — including a member absent for a reason, recorded as such rather than
@@ -22,7 +27,7 @@ boards.
 - **Team match** — the pairing of two teams in a round. It consists of N
   ordinary boards: board k of team A plays board k of team B.
 - **Board** — a single game between two players, exactly the existing
-  [`Board`](../crates/core/src/round.rs) struct. Boards stay the atom of the
+  [`Board`](../../crates/core/src/round.rs) struct. Boards stay the atom of the
   whole system.
 - **Match points** — what a team scores from a match: a win (1 point) if its
   board wins strictly exceed the opponent's, half a point each if equal, a loss

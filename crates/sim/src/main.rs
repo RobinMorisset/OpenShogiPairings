@@ -4,7 +4,7 @@
 //! settings variant runs many simulated tournaments and reports how the variants
 //! differ on game mismatch (are there fewer foregone-conclusion games?) and on
 //! who tends to win / how faithfully the final ranking tracks true strength. See
-//! `docs/simulation-cli.md` for the design.
+//! `docs/guides/simulation-cli.md` for the design.
 //!
 //! Public items link to the private helpers that explain them (see the note in
 //! `osp_core`'s crate docs); rustdoc renders those unlinked unless it is run with

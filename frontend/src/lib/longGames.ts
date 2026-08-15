@@ -1,4 +1,4 @@
-// Rules for "long" (two-round) games — see `docs/two-round-boards.md`.
+// Rules for "long" (two-round) games — see `docs/archive/two-round-boards.md`.
 //
 // A long board spans exactly two rounds: started in R, it is played while the
 // rest of the field plays R and R+1, and its two players sit out R+1's pairing.

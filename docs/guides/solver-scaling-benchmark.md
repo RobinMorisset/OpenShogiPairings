@@ -1,12 +1,12 @@
 # Solver scaling benchmark
 
 How the pairing cost scales with **field size N**. The matching in
-[`integer-blossom`](../crates/matching/src/lib.rs) is O(N³) in the worst case;
+[`integer-blossom`](../../crates/matching/src/lib.rs) is O(N³) in the worst case;
 this measures what it actually does on realistic tournament graphs, which the real
 corpus can't reach (its largest event is ~100 players).
 
 Instances are synthetic tournaments from
-[`scripts/gen_fake_tournament.py`](../scripts/gen_fake_tournament.py), which
+[`scripts/gen_fake_tournament.py`](../../scripts/gen_fake_tournament.py), which
 samples real FESA players (joined pre/post ELO + per-player attendance) so the
 graphs stay realistic well past 100 players. See the `profile-osp-sim` skill (§5)
 for the method this follows.

@@ -3,7 +3,7 @@
 /**
  * Team-tournament configuration. Present exactly when the tournament is a team
  * tournament — teams become the unit of pairing and ranking, while the games
- * stay ordinary individual boards (see `docs/team-tournaments.md`).
+ * stay ordinary individual boards (see `docs/archive/team-tournaments.md`).
  *
  * Orthogonal to [`PairingMode`], like the cup: a team tournament is still
  * paired Swiss or MacMahon, over teams instead of players.

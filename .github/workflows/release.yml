@@ -52,7 +52,7 @@ jobs:
       - name: Changelog must be closed for this tag
         # The changelog is the only place a save-format break is announced, and
         # nothing else forces it to be updated: renaming [Unreleased] is a manual
-        # step (see docs/cutting-a-release.md). Refuse to build a release whose
+        # step (see docs/guides/cutting-a-release.md). Refuse to build a release whose
         # changelog still says "Unreleased", or whose topmost section is for some
         # other version — a stale top section means this release ships with the
         # previous release's notes.

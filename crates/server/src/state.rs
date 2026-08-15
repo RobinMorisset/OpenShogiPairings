@@ -1,6 +1,6 @@
 //! Shared server state: a registry of tournament instances.
 //!
-//! See `docs/multi-tournament.md`. One process can now hold several
+//! See `docs/archive/multi-tournament.md`. One process can now hold several
 //! tournaments; [`TournamentRegistry`] is the map from each tournament's own
 //! id (already a stable `Uuid` on [`Tournament`]) to its
 //! [`TournamentInstance`] (live state + its own optional password). Handlers
@@ -416,7 +416,7 @@ pub struct TournamentInstance {
     publication: RwLock<Option<String>>,
     /// The public projection, serialized, together with the store version it
     /// was built from — so one mutation costs one serialization rather than one
-    /// per reader (see `docs/public-access.md` §4). Invalidated by version
+    /// per reader (see `docs/archive/public-access.md` §4). Invalidated by version
     /// mismatch, never explicitly.
     public_payload: Mutex<Option<(u32, Bytes)>>,
     /// How many public SSE streams are currently open on this tournament. Not a
@@ -902,7 +902,7 @@ impl TournamentRegistry {
     /// server that has an admin password: the picker is otherwise the one thing
     /// a stranger who finds the URL can enumerate, and once there is a public
     /// reader UI it would become that UI's front door for tournaments that
-    /// never opted in (see `docs/public-access.md` §3.1).
+    /// never opted in (see `docs/archive/public-access.md` §3.1).
     pub fn list(&self, published_only: bool) -> Vec<TournamentSummary> {
         let instances = self.instances.read().expect("registry lock poisoned");
         instances

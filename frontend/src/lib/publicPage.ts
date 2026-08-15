@@ -4,7 +4,7 @@
 // the static export (`PublicSnapshot`, phase 2). They differ only in how the
 // sections are reached — tabs in one, one HTML file per section in the other —
 // so the *wiring* between the projection and the leaf components lives here
-// rather than twice over. See docs/public-access.md §5.
+// rather than twice over. See docs/archive/public-access.md §5.
 
 import type { Handicap, PublicTournamentResponse, Round, TeamMatchView } from "./types";
 
@@ -65,7 +65,7 @@ export type PublicSection =
  * Standings first: it is the live page's first tab and the export's entry point,
  * the file a referee links to. It is always there, because it is also the page
  * that answers "am I registered?" — before round 1 there is nothing to rank and
- * it shows the entrant list instead (docs/public-access.md §2). Then the cup, if
+ * it shows the entrant list instead (docs/archive/public-access.md §2). Then the cup, if
  * there is one; then the rounds, ascending, as in the app.
  *
  * A cup with no round behind it is not an odd state to guard against: the

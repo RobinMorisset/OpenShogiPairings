@@ -796,7 +796,7 @@ impl<W: Weight> Blossom<W> {
             // zero-dual termination just below returns `Some(false)`), but on the
             // perfect path there is no such exit, so the label shifts below apply
             // `MAX / 4` twice and overflow *silently* in release — a corrupted
-            // matching, not an error. `docs/blossom-v2-plan.md` calls for this
+            // matching, not an error. `docs/proposals/blossom-v2-plan.md` calls for this
             // assert: impossible on the complete graphs this API takes, which is
             // exactly why it is stated rather than handled.
             debug_assert!(

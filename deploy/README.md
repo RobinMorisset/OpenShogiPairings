@@ -1,13 +1,13 @@
 # Deploying the OpenShogiPairings server
 
 This is the hosted **remote mode** from
-[`docs/multi-referee-internet.md`](../docs/multi-referee-internet.md): one
+[`docs/archive/multi-referee-internet.md`](../docs/archive/multi-referee-internet.md): one
 always-on server with a public HTTPS URL that referees open in a browser, pick a
 tournament from, and log into. It serves both the API and the app (the SPA),
 same-origin, and persists every tournament to disk so a restart loses nothing.
 
 One instance holds **any number of tournaments** at once (see
-[`docs/multi-tournament.md`](../docs/multi-tournament.md), which superseded the
+[`docs/archive/multi-tournament.md`](../docs/archive/multi-tournament.md), which superseded the
 one-tournament-per-instance scope of the doc above).
 
 You need a host with a public IP and a domain name pointed at it (an A/AAAA DNS

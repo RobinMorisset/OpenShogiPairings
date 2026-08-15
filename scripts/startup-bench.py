@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A/B benchmark for desktop app startup — see docs/desktop-startup-profiling.md.
+"""A/B benchmark for desktop app startup — see docs/guides/desktop-startup-profiling.md.
 
 Measures wall-clock time from `exec` to the moment the tournament picker has
 actually *painted*, by listening for a one-shot HTTP ping that temporarily
@@ -62,7 +62,7 @@ DEFAULT_PORT = 47999
 # one. Windows is verified too, but the opposite way: WebView2 keys its user-data
 # folder on the app IDENTIFIER, not the exe name, so renaming the copy does NOT
 # get a fresh profile — the fixed identifier path below is what must be purged.
-# (See docs/desktop-startup-profiling.md; note also that cold mode does not
+# (See docs/guides/desktop-startup-profiling.md; note also that cold mode does not
 # reproduce the Windows first-launch penalty at all, since that is Defender
 # scanning novel *content*, which a byte-identical copy caches past.)
 # The Linux path is still a best-effort guess — check it against your build.

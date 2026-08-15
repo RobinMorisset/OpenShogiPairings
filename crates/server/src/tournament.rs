@@ -39,7 +39,7 @@ use crate::{auth, live, public};
 ///
 /// The property worth preserving as this grows: **no handler is reachable from
 /// more than one group.** No bug in token handling can then escalate a reader
-/// into a writer, because there is no writer to reach (`docs/public-access.md`
+/// into a writer, because there is no writer to reach (`docs/archive/public-access.md`
 /// §3).
 ///
 /// - `GET    /`               fetch the tournament
@@ -826,7 +826,7 @@ struct SetLongRequest {
 }
 
 /// Flag (or unflag) a board as a two-round "long game" (see
-/// `docs/two-round-boards.md`).
+/// `docs/archive/two-round-boards.md`).
 ///
 /// Like recording a winner, flagging the last-undecided board long can complete
 /// the round, so the automatic "round N completed" backup is taken here too, only

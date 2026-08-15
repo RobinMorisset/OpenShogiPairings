@@ -18,7 +18,7 @@ export type PublicTournament = { format_version: number, id: string, name: strin
  * Each round carries its frozen pairing `explanation`, so the ledger rides
  * along with the projection — nothing in it goes beyond what is published
  * here anyway (it names the same players and the same rules). No public UI
- * reads it yet; showing it is phase 4 in `docs/public-access.md`.
+ * reads it yet; showing it is phase 4 in `docs/archive/public-access.md`.
  */
 rounds: Array<Round>, cup: Cup | null, teams: Array<Team>, 
 /**

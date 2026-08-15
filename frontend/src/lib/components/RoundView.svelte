@@ -59,12 +59,12 @@
     /** Set (or clear, with null) a board's handicap. */
     onSetHandicap?: (boardIndex: number, handicap: Handicap | null) => void;
     /** Show the round without any way to change it — the public reader page
-     *  (see `docs/public-access.md`). Every control is inert; the results,
+     *  (see `docs/archive/public-access.md`). Every control is inert; the results,
      *  draws and absences it shows are exactly what the referee recorded.
      *  Real enforcement is the server's: the reader endpoint has no mutating
      *  handler at all, so this only spares them buttons that would 404. */
     readOnly?: boolean;
-    /** Rendering into a static HTML file (docs/public-access.md phase 2), where
+    /** Rendering into a static HTML file (docs/archive/public-access.md phase 2), where
      *  no script will ever run: drop the toolbar, whose sort toggle and print
      *  button would be dead there. Turns `readOnly` on by itself. */
     staticPage?: boolean;

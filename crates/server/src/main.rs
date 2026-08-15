@@ -2,8 +2,8 @@
 //!
 //! Runs the API (see the `osp_server` library) as its own process — used for
 //! browser development and for the hosted remote server that referees share over
-//! the internet (see `docs/multi-referee-internet.md` and
-//! `docs/multi-tournament.md`). The Tauri desktop app does not use this binary;
+//! the internet (see `docs/archive/multi-referee-internet.md` and
+//! `docs/archive/multi-tournament.md`). The Tauri desktop app does not use this binary;
 //! it embeds the library directly.
 //!
 //! Configuration is entirely via environment variables:

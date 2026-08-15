@@ -1,7 +1,7 @@
 # Blossom v2 plan: sparse core with preserved trees
 
 Target: the two structural levers left after the 1.3.0 constant-factor
-work on [`integer-blossom`](../crates/matching/src/lib.rs) — **sparsification**
+work on [`integer-blossom`](../../crates/matching/src/lib.rs) — **sparsification**
 (shrink each scan from O(n) to O(k)) and **tree preservation across
 augmentations** (shrink the number of scans) — combined into one staged rewrite.
 

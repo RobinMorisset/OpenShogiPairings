@@ -24,8 +24,8 @@ osp-sim \
 
 ## Architecture
 
-All the logic lives in [`osp_core::sim`](../crates/core/src/sim.rs) as pure
-functions; the [`crates/sim`](../crates/sim) CLI links `osp_core` directly and
+All the logic lives in [`osp_core::sim`](../../crates/core/src/sim.rs) as pure
+functions; the [`crates/sim`](../../crates/sim) CLI links `osp_core` directly and
 runs the replay loop **in-process, in parallel** (`rayon`), seeded, touching no
 live server state. The same engine functions the referee's actions ultimately
 call — `prepare_round` → `confirm_round` → record results — are reused verbatim,
@@ -45,7 +45,7 @@ osp_core::sim   pure: strength oracle, result model, single-run driver, metrics
 - `--base FILE.osp` — an `.osp` save (JSON).
 - `--results FILE.txt` — a **FESA post-tournament result table** (the artefact
   tournaments usually publish; see
-  [`fesa_results`](../crates/core/src/fesa_results.rs)). This source is special:
+  [`fesa_results`](../../crates/core/src/fesa_results.rs)). This source is special:
   it reconstructs the rounds *and* supplies every player's **true strength**
   directly — pre-ELO + points gained for a rated player, or the assigned `*`
   rating for a pre-unrated one — so it needs no separate `--strength` flag and
@@ -69,7 +69,7 @@ changes the pairing ratings.
 
 Separate from *how strong* a player is: how much their rating can be trusted. A
 player is **established** once their FESA entry shows at least
-[`PROVISIONAL_GAMES_THRESHOLD`](../crates/core/src/elo.rs) (18) games. A
+[`PROVISIONAL_GAMES_THRESHOLD`](../../crates/core/src/elo.rs) (18) games. A
 provisional one gets a wider true-strength prior from the oracle
 (`--oracle-provisional`, § The strength oracle) and is leaned on less by the ELO
 estimator — so it moves pure-ELO pairing, estimate-based MacMahon, and the
@@ -115,7 +115,7 @@ pairing ratings are untouched, and an unmatched player simply stays provisional.
 ### Config files
 
 Each `--configs` file is a complete
-[`TournamentSettings`](../crates/core/src/settings.rs) JSON object (not a patch) —
+[`TournamentSettings`](../../crates/core/src/settings.rs) JSON object (not a patch) —
 the same shape the server accepts and `normalized()` cleans up. Unset fields take
 their defaults, so a minimal variant is small, e.g. a single ELO MacMahon band
 (MacMahon lives nested under the tagged `pairing` union, **not** at the top level —
@@ -140,7 +140,7 @@ Each player's ground-truth strength for a run is drawn from
   `--oracle-unrated-center`, default 600). With `--results`, *every* player has an
   override, so the center is their post-tournament ELO.
 - **σ₀** — the oracle prior width from
-  [`oracle_prior`](../crates/core/src/elo.rs): the same rating-/reliability-
+  [`oracle_prior`](../../crates/core/src/elo.rs): the same rating-/reliability-
   dependent shape the ELO estimator uses, but pinned to the **raw FESA K** (×1),
   widened for a provisionally-rated player by `--oracle-provisional`. Tighter for
   strong/established players, wider for weak/provisional/unrated ones; an unrated
@@ -165,7 +165,7 @@ Two properties matter:
 
 ## How a run works
 
-[`simulate_run`](../crates/core/src/sim.rs) clones the base, resets it to
+[`simulate_run`](../../crates/core/src/sim.rs) clones the base, resets it to
 *registration-finalized, zero rounds* under the variant's settings, samples the
 true strengths, then for each round: `prepare_round` → apply that round's
 attendance → `confirm_round` → auto-fill the boards.
@@ -228,7 +228,7 @@ favourite) — the headline "fraction of games that were foregone conclusions."
 
 Two Spearman rank-correlations against the true-strength order, averaged over
 runs: **fidelity(score)** for the final standings, and **fidelity(est)** for the
-[`estimate_elos`](../crates/core/src/elo.rs) posterior order. Reporting both
+[`estimate_elos`](../../crates/core/src/elo.rs) posterior order. Reporting both
 matters because they need not move together: for the *estimate*, an even game
 (`p ≈ 0.5`) is the **most** informative (Fisher information `p(1−p)` peaks at
 0.5), whereas the score standings recover a global order only from *decisive*
@@ -318,8 +318,8 @@ at `jitter > 0` its mismatch uses registration ratings, so compare it loosely.
 - **Draws** are unmodelled (fine for shogi, but note it before reading the tables
   as a claim that draws never happen).
 - **Determinism** requires both the seed and a deterministic pairing engine; the
-  matching in [`pairing.rs`](../crates/core/src/pairing.rs) /
-  [`integer-blossom`](../crates/matching/src/lib.rs) is deterministic.
+  matching in [`pairing`](../../crates/core/src/pairing) /
+  [`integer-blossom`](../../crates/matching/src/lib.rs) is deterministic.
 - **Rounds `N`** defaults from the base; the effective `N` is printed in the report
   header so a stale default can't silently change results.
 

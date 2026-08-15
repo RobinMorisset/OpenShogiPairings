@@ -411,7 +411,7 @@ pub struct Board {
     /// This board is a "long game": double time control, lasting two rounds, and
     /// its winner scores two points instead of one. Off by default and omitted
     /// from JSON when false. The two players sit out the next round's pairing
-    /// while an undecided long board is in flight. See `docs/two-round-boards.md`.
+    /// while an undecided long board is in flight. See `docs/archive/two-round-boards.md`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub long: bool,
 }
@@ -641,7 +641,7 @@ pub struct Round {
     /// earlier rounds' results, the players' ratings and clubs and the pairing
     /// settings, every one of which a referee may legitimately edit afterwards.
     /// Recomputing would then describe a model that never paired anything, while
-    /// looking entirely plausible — see the appendix of `docs/public-access.md`.
+    /// looking entirely plausible — see the appendix of `docs/archive/public-access.md`.
     ///
     /// Deliberately not `#[serde(default)]`: a save without it is a save from
     /// before [`TOURNAMENT_FORMAT_VERSION`](crate::TOURNAMENT_FORMAT_VERSION) 10

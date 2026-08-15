@@ -1,5 +1,5 @@
 <script lang="ts">
-  // One page of the static export (docs/public-access.md phase 2).
+  // One page of the static export (docs/archive/public-access.md phase 2).
   //
   // Same projection and same leaf components as the live reader page — the
   // difference is that this one is rendered once, to a file, and no script will

@@ -10,7 +10,7 @@
 //!
 //! The server holds any number of tournaments in memory as the single source of
 //! truth shared by all connected clients; see [`AppState`] and
-//! `docs/multi-tournament.md`.
+//! `docs/archive/multi-tournament.md`.
 //!
 //! The routes themselves are exercised end-to-end from `crates/server/tests/`,
 //! one binary per area (`tournament_api`, `auth`, `public_access`, …) over the

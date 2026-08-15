@@ -1,5 +1,5 @@
 //! The public read-only projection and its reader page (see
-//! `docs/public-access.md`).
+//! `docs/archive/public-access.md`).
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -11,7 +11,7 @@ use uuid::Uuid;
 mod common;
 use common::*;
 
-// --- Public read-only access (docs/public-access.md, phase 1) -----------
+// --- Public read-only access (docs/archive/public-access.md, phase 1) -----------
 
 /// Publish `id`, returning its capability key.
 async fn publish(state: &AppState, id: Uuid) -> String {

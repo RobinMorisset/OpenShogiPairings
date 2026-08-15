@@ -1,6 +1,11 @@
 # Experimental ELO-based (non-Swiss) pairing mode — design
 
-Status: **V1 implemented** — the estimator ([`crates/core/src/elo.rs`](../crates/core/src/elo.rs)),
+> **Archived design doc — do not trust the details.** Written before the feature
+> was implemented and not maintained since, so it has drifted from the code. It
+> is kept for the rationale it records; for how the software actually behaves,
+> see [`docs/reference/`](../reference) and the code.
+
+Status: **V1 implemented** — the estimator ([`crates/core/src/elo.rs`](../../crates/core/src/elo.rs)),
 the ELO rule ladder in the pairing engine, the settings toggle + K multiplier +
 provisional-rating multiplier (with the Swiss sections greyed out), the Results-tab
 "Est. ELO" column, estimated ELO as a selectable ranking criterion
@@ -8,8 +13,8 @@ provisional-rating multiplier (with the Swiss sections greyed out), the Results-
 the V2 items in §8. Tracks the TODO item
 "Experimental ELO-based, non-swiss system". This document pins down the Bayesian
 estimation math and how the mode plugs into the existing pairing engine
-([`crates/core/src/pairing.rs`](../crates/core/src/pairing.rs)) and scoring
-replay ([`crates/core/src/scoring.rs`](../crates/core/src/scoring.rs)).
+([`crates/core/src/pairing`](../../crates/core/src/pairing)) and scoring
+replay ([`crates/core/src/scoring.rs`](../../crates/core/src/scoring.rs)).
 
 Scope markers: **V1** = the first shippable version; **V2** = deferred, listed at
 the end.
@@ -389,7 +394,7 @@ is a Swiss-only knob (`pairing.club_protection`, present only on the
 An orthogonal way to hybridize — this one touches **scoring**, not the pairing
 rule list, so it composes with plain Swiss pairing (it's moot under pure ELO,
 which ignores MacMahon). When MacMahon's source is `from_estimate`, `compute_scores`
-([`crates/core/src/scoring.rs`](../crates/core/src/scoring.rs)) awards each
+([`crates/core/src/scoring.rs`](../../crates/core/src/scoring.rs)) awards each
 player's MacMahon starting points from the **live ELO estimate** instead of their
 registration rating: it calls `estimate_elos(...)` once and, for each player,
 passes `round(estimate)` in place of `Player.rating` to
@@ -420,9 +425,9 @@ so under plain Swiss the estimator runs with the stored defaults.
 > **Post-refactor note.** This section originally added flat `elo_*` /
 > `elo_pairing_enabled` / `macmahon_from_estimated_elo` fields directly to
 > `TournamentSettings`. The settings have since been refactored into the sum type
-> [`PairingMode`](../crates/core/src/settings.rs): the pairing model is now the
+> [`PairingMode`](../../crates/core/src/settings.rs): the pairing model is now the
 > tagged `pairing` union (not a boolean), and the estimator knobs moved onto an
-> [`EloEstimator`](../crates/core/src/settings.rs) struct carried by whichever model
+> [`EloEstimator`](../../crates/core/src/settings.rs) struct carried by whichever model
 > maintains a live estimate. The accessor methods below (`settings.elo_k_multiplier()`
 > etc.) are unchanged — they read whichever estimator is in play — so only the field
 > names differ. The mapping:

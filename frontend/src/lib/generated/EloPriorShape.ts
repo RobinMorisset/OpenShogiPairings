@@ -19,6 +19,6 @@
  * per-category `elo_upward_looseness_*` knobs, which widen the upward arm so an
  * *upward* revision clears on less evidence than a downward one (for the Gaussian
  * this is a two-piece normal; for the Laplace, a wider upward scale); `Flat` has
- * no arm to widen. See `docs/elo-pairing-mode.md`.
+ * no arm to widen. See `docs/archive/elo-pairing-mode.md`.
  */
 export type EloPriorShape = "gaussian" | "laplace" | "flat";

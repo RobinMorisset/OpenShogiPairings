@@ -1,5 +1,5 @@
 // Reader mode: is this browser tab a public reader page, and for which
-// tournament? See docs/public-access.md §5.
+// tournament? See docs/archive/public-access.md §5.
 //
 // The capability URL the referee hands out is `/t/{id}/public?k=…`. Parsing it
 // here — once, from `location`, at module load — is all the routing this app

@@ -38,7 +38,7 @@ completed: boolean,
  * earlier rounds' results, the players' ratings and clubs and the pairing
  * settings, every one of which a referee may legitimately edit afterwards.
  * Recomputing would then describe a model that never paired anything, while
- * looking entirely plausible — see the appendix of `docs/public-access.md`.
+ * looking entirely plausible — see the appendix of `docs/archive/public-access.md`.
  *
  * Deliberately not `#[serde(default)]`: a save without it is a save from
  * before [`TOURNAMENT_FORMAT_VERSION`](crate::TOURNAMENT_FORMAT_VERSION) 10

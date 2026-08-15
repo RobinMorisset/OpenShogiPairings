@@ -6,7 +6,7 @@ Known limitations and future work, roughly ordered by area.
 
 - **ILP/CP-SAT backend.** Pairing is now a real **minimum-weight perfect
   matching** (integer blossom in the standalone [`integer-blossom`](crates/matching/src/lib.rs)
-  crate) over a rule-weighted graph ([`crates/core/src/pairing.rs`](crates/core/src/pairing.rs)):
+  crate) over a rule-weighted graph ([`crates/core/src/pairing`](crates/core/src/pairing)):
   rematch/repeat-bye ≫ bye-group² ≫ score gap² ≫ float-repeat ≫ floater-selection ≫
   same-club ≫ within-group fold, ordered by a scalar multiplier ladder whose tiers are derived
   from each rule's worst-case contribution (so the lexicographic separation is
@@ -24,7 +24,7 @@ Known limitations and future work, roughly ordered by area.
 - **Log of which user took which action**
 
 - **Push the public projection to a URL the club configures** — phase 3 of
-  [docs/public-access.md](docs/public-access.md). Phases 1 (the live
+  [docs/archive/public-access.md](docs/archive/public-access.md). Phases 1 (the live
   capability-keyed page) and 2 (the static HTML export) have landed, and
   between them cover both deployments. What is left is for a club that wants
   the standings *inside* their own pages rather than on a separate one: POST
@@ -38,6 +38,27 @@ Known limitations and future work, roughly ordered by area.
 
 - **Add logistic prior**, should be quite similar to Laplace one, but not exactly
 
+## Documentation
+
+- **Fold the archived design docs into `docs/reference/`.** Each was written
+  before its feature shipped and has drifted since; see
+  [docs/README.md](docs/README.md) for what the four directories mean. The work,
+  per document: mine the parts still true and the rationale worth keeping into a
+  maintained reference doc — its own file under `docs/reference/`, split off
+  from [architecture.md](docs/reference/architecture.md) where that section has
+  outgrown it — then delete the archived one. Remaining:
+  [elo-pairing-mode.md](docs/archive/elo-pairing-mode.md),
+  [multi-referee-internet.md](docs/archive/multi-referee-internet.md),
+  [multi-tournament.md](docs/archive/multi-tournament.md),
+  [pairing-explanations.md](docs/archive/pairing-explanations.md),
+  [public-access.md](docs/archive/public-access.md),
+  [team-tournaments.md](docs/archive/team-tournaments.md),
+  [two-round-boards.md](docs/archive/two-round-boards.md).
+  `public-access.md` is the one exception to "then delete": the phase-3 entry
+  under Multi-referee server still cites it as that phase's specification, and
+  the HelloAsso entry cites its non-goals — so it has to outlive the others, or
+  hand that design over first.
+
 ## Other
 
 - **Pull the players list from a HelloAsso billetterie** Start from the back-office
@@ -48,7 +69,7 @@ Known limitations and future work, roughly ordered by area.
   rating list rather than a silent bulk insert; a re-import (registrations trickle
   in) needs the HelloAsso participant id kept as an external key to dedup against.
   Do not import email addresses (see the non-goals in
-  [docs/public-access.md](docs/public-access.md)).
+  [docs/archive/public-access.md](docs/archive/public-access.md)).
 
 - Show **predicted elo change** as the rightmost column of the Standings tab.
 

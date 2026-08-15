@@ -344,7 +344,7 @@ impl Rule {
             // fold. Squaring (rather than |·|) spreads an unavoidable deviation across
             // boards instead of dumping it all on one, so no single player faces an
             // opponent far from the fold's intent — and it matches the squared
-            // ScoreGap / EloGap rules. See `docs/swiss-fold.md`.
+            // ScoreGap / EloGap rules. See `docs/reference/swiss-fold.md`.
             Rule::Fold => {
                 if sa.points != sb.points {
                     return 0;

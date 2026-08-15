@@ -5,7 +5,7 @@
 //! complete the round automatically) so a simulated tournament is paired exactly
 //! as a live one would be. The CLI ([`crates/sim`](../../sim)) links these directly and runs
 //! the loop thousands of times in parallel; the design is written up in
-//! `docs/simulation-cli.md`.
+//! `docs/guides/simulation-cli.md`.
 //!
 //! Three layers:
 //! - a **result model** — sample a board's winner from the logistic law
@@ -85,7 +85,7 @@ pub enum SimError {
     /// Team tournaments aren't simulated (yet). The pairing would run, but every
     /// metric here is defined over individual standings — fidelity, welfare, the
     /// ELO estimate's error — so the numbers would be meaningless rather than
-    /// wrong-looking. Refused instead. See `docs/team-tournaments.md`.
+    /// wrong-looking. Refused instead. See `docs/archive/team-tournaments.md`.
     #[error("simulating a team tournament is not supported")]
     TeamTournament,
 }

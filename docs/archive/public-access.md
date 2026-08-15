@@ -1,5 +1,10 @@
 # Public read-only access to standings and pairings — design
 
+> **Archived design doc — do not trust the details.** Written before the feature
+> was implemented and not maintained since, so it has drifted from the code. It
+> is kept for the rationale it records; for how the software actually behaves,
+> see [`docs/reference/`](../reference) and the code.
+
 Status: **phases 1 and 2 implemented** (the projection, the capability-keyed
 public endpoint and its payload-carrying stream, the publication flag, the
 picker audit, the read-only frontend mode, and the static HTML export — see §6).
@@ -42,7 +47,7 @@ that decides the phasing: **who has to be reachable from the internet.**
 | LAN (`0.0.0.0` + QR of the venue IP) | inbound | n/a | unreliable — client isolation on guest wifi blocks it silently |
 
 The desktop app *is* the server (`osp-server` embedded in-process on a random
-loopback port, see [`crates/server/src/lib.rs`](../crates/server/src/lib.rs)),
+loopback port, see [`crates/server/src/lib.rs`](../../crates/server/src/lib.rs)),
 so the public-endpoint option does not exist for it at all. Since most
 tournaments will run the laptop and not the hosted instance, an
 outbound transport is eventually mandatory — but it is not what to build
@@ -57,10 +62,10 @@ first, because it needs somewhere to push *to*.
 Standings, the cup bracket, the podium and the effective winner of each board
 are **already computed server-side** and already shipped on every response —
 `TournamentView` in
-[`crates/server/src/tournament.rs`](../crates/server/src/tournament.rs), built
-from [`crates/core/src/standings.rs`](../crates/core/src/standings.rs), which
+[`crates/server/src/tournament.rs`](../../crates/server/src/tournament.rs), built
+from [`crates/core/src/standings.rs`](../../crates/core/src/standings.rs), which
 exists precisely so "every client shares one ranking". The frontend only
-formats them ([`frontend/src/lib/tiebreak.ts`](../frontend/src/lib/tiebreak.ts)
+formats them ([`frontend/src/lib/tiebreak.ts`](../../frontend/src/lib/tiebreak.ts)
 computes tooltip breakdowns, not the values).
 
 So the public payload is not a new computation and carries no risk of the
@@ -103,7 +108,7 @@ unexplainable.
 One consequence worth handling in the UI rather than in the projection:
 `PointAdjustment::reason` is *mandatory, free text, and written
 referee-to-referee* today
-([`player.rs:164`](../crates/core/src/player.rs)). "−2,
+([`player.rs:164`](../../crates/core/src/player.rs)). "−2,
 turned up drunk" is a reasonable thing to type into a private tool and a
 libel risk on a public page. The fix is not redaction (the reason is exactly
 what makes the adjustment legitimate) but a hint next to the field when the
@@ -134,7 +139,7 @@ Decided:
 The current data model makes this rule **structural rather than a filter**:
 `Tournament::draft: Option<RoundDraft>` is a separate field from
 `Tournament::rounds: Vec<Round>`, and a round only enters `rounds` when it is
-confirmed ([`crates/core/src/tournament.rs`](../crates/core/src/tournament.rs)).
+confirmed ([`crates/core/src/tournament.rs`](../../crates/core/src/tournament.rs)).
 Dropping one field is the entire policy. Nothing needs filtering inside
 `rounds`, and the in-progress round shows up naturally with its undecided
 boards — which is precisely the "who is still playing" view.
@@ -162,7 +167,7 @@ hides the mutating buttons is not access control.
 Concretely: the public projection is served by its **own router tree with no
 mutating handler in it**, mounted outside `require_tournament_auth`, rather
 than by relaxing the existing routes. In
-[`crates/server/src/tournament.rs`](../crates/server/src/tournament.rs) the
+[`crates/server/src/tournament.rs`](../../crates/server/src/tournament.rs) the
 `scope()` function already splits `public` from `protected`; this is a third
 group, and the property to preserve is that no handler is reachable from more
 than one of them. No bug in token handling can then escalate a reader into a
@@ -171,7 +176,7 @@ writer, because there is no writer to reach.
 Explicitly **not** public, now or later: `/rounds/{n}/counterfactual`. It runs
 the blossom solver twice per request — a baseline matching plus a re-solve
 with the edge forced or forbidden (`solve_stable` in
-[`crates/core/src/pairing.rs`](../crates/core/src/pairing.rs)). An
+[`crates/core/src/pairing`](../../crates/core/src/pairing)). An
 unauthenticated endpoint that runs two O(N³) solves is a one-line denial of
 service against a laptop in the middle of a tournament. The standing rule is
 that the public surface is **precomputed or cheap-derived data only**, and
@@ -226,7 +231,7 @@ authenticated laptops versus 200 phones on venue wifi, hammering a laptop
 that is also running the solver.
 
 The cost is **not** the notification channel. An idle SSE connection
-([`crates/server/src/live.rs`](../crates/server/src/live.rs)) is a tokio task
+([`crates/server/src/live.rs`](../../crates/server/src/live.rs)) is a tokio task
 future, a `broadcast::Receiver` over a shared ring, an fd, and kernel socket
 buffers — comfortably under 100 KB all-in, so single-digit MB for a room of
 100 — and `KeepAlive::default()` costs a comment ping per client per 15s.
@@ -265,7 +270,7 @@ same cost, so it is not the answer.
 
 `version` is monotonic within a **server run** — but it starts at `0` on
 every boot (`TournamentStore` in
-[`crates/server/src/state.rs`](../crates/server/src/state.rs)); it is session
+[`crates/server/src/state.rs`](../../crates/server/src/state.rs)); it is session
 state and is not persisted with the tournament. A receiver that keeps "the
 highest version I have seen" and drops anything lower will therefore **go
 deaf after a server restart**, having latched onto version 57 and being fed
@@ -315,9 +320,9 @@ serialize-once cache with `ETag` on the `GET` and the payload-carrying SSE
 stream on top of it, the picker audit, and the read-only frontend mode.
 End-to-end useful on its own: QR code on the wall, done.
 
-Landed in [`crates/server/src/public.rs`](../crates/server/src/public.rs) (the
+Landed in [`crates/server/src/public.rs`](../../crates/server/src/public.rs) (the
 projection, the reader routes, the publication endpoints),
-[`crates/server/src/state.rs`](../crates/server/src/state.rs) (the key in the
+[`crates/server/src/state.rs`](../../crates/server/src/state.rs) (the key in the
 auth sidecar, the payload cache, the stream cap, the per-boot id the `ETag`
 needs), and `frontend/src/lib/components/PublicView.svelte` +
 `frontend/src/lib/publicAccess.ts` on the client.
@@ -374,7 +379,7 @@ that serves the laptop deployment without new infrastructure.
 Landed in `frontend/src/lib/publicExport.ts` (the renderer and the document
 assembly), `frontend/src/lib/components/PublicSnapshot.svelte` (one page of it),
 and one referee-side route, `GET /public-snapshot`, in
-[`crates/server/src/public.rs`](../crates/server/src/public.rs).
+[`crates/server/src/public.rs`](../../crates/server/src/public.rs).
 
 Two pieces are shared with the live reader page rather than written twice, and
 between them they are the whole of what a "section" is:
@@ -510,7 +515,7 @@ decide against real use, not blockers.
 design as decided, with the two deviations recorded at the end.
 
 Noticed while deciding what the public surface may call. `explain_round`
-([`crates/core/src/tournament.rs`](../crates/core/src/tournament.rs)) rebuilds
+([`crates/core/src/tournament.rs`](../../crates/core/src/tournament.rs)) rebuilds
 the `PairingModel` from `self.rounds[..idx]` — the rounds *before* the one
 being explained — and re-scores the boards that were chosen. Cost is not the
 issue: there is no matching solve, just `edge_units` over the N/2 confirmed
@@ -537,7 +542,7 @@ state, and this is not.
 Costs, all accepted: a `TOURNAMENT_FORMAT_VERSION` bump (5 → 6), with old
 saves rejected loudly rather than migrated; and some save-file growth, which
 is modest because `ledger()` keeps only the rules that actually fired
-([`crates/core/src/pairing.rs`](../crates/core/src/pairing.rs)), so a cleanly
+([`crates/core/src/pairing`](../../crates/core/src/pairing)), so a cleanly
 paired board stores an empty contribution list.
 
 ### The staleness watermark

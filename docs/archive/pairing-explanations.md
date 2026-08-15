@@ -1,5 +1,10 @@
 # Pairing explanations — design doc
 
+> **Archived design doc — do not trust the details.** Written before the feature
+> was implemented and not maintained since, so it has drifted from the code. It
+> is kept for the rationale it records; for how the software actually behaves,
+> see [`docs/reference/`](../reference) and the code.
+
 ## Goal
 
 Give referees a way to understand *why* the engine produced a particular set of
@@ -8,7 +13,7 @@ of edge weights.
 
 The engine solves a **minimum-weight perfect matching** where the scalar edge
 weight is a lexicographic scalarization of the rule ladder (see the module docs
-in [`pairing.rs`](../crates/core/src/pairing.rs)). A global optimum has no local
+in [`pairing`](../../crates/core/src/pairing)). A global optimum has no local
 "reason" for any single board; the honest answer to *"why is A paired with B?"*
 is *"because that lets everyone else pair better than any alternative."* So the
 design is built on three ideas:
@@ -304,7 +309,7 @@ POST /api/tournament/rounds/{number}/counterfactual
 ```
 
 Handlers follow the existing pattern in
-[`crates/server/src/tournament.rs`](../crates/server/src/tournament.rs): take a
+[`crates/server/src/tournament.rs`](../../crates/server/src/tournament.rs): take a
 read lock (`state.store.read()`), call the core method, `Json`-serialize. No
 `backup_after` — these don't mutate. Wire both routes in `routes()` next to the
 existing `/rounds` routes.
@@ -318,7 +323,7 @@ JSON stays simple).
 ## Frontend
 
 All three surfaces live on the **current (uncompleted) round's**
-[`RoundView.svelte`](../frontend/src/lib/components/RoundView.svelte), which is
+[`RoundView.svelte`](../../frontend/src/lib/components/RoundView.svelte), which is
 where a referee reviews fresh pairings and decides whether to override. (The
 mechanism generalizes to any past round, but V1 scopes the UI to the live one.)
 
@@ -395,8 +400,8 @@ tangible.
 ### i18n
 
 New keys under `roundView.explanation.*` in
-[`en.json`](../frontend/src/lib/i18n/locales/en.json) /
-[`fr.json`](../frontend/src/lib/i18n/locales/fr.json): one label per `RuleId`,
+[`en.json`](../../frontend/src/lib/i18n/locales/en.json) /
+[`fr.json`](../../frontend/src/lib/i18n/locales/fr.json): one label per `RuleId`,
 the report template, the glyph tooltip template, and the counterfactual panel
 copy. Rule labels are the referee-facing vocabulary ("downfloat", "repeat
 float", "club clash", "fold"), not the internal enum names.

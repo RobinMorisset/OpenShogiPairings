@@ -1,5 +1,10 @@
 # Two-round boards ("long games")
 
+> **Archived design doc — do not trust the details.** Written before the feature
+> was implemented and not maintained since, so it has drifted from the code. It
+> is kept for the rationale it records; for how the software actually behaves,
+> see [`docs/reference/`](../reference) and the code.
+
 ## The rule
 
 Some tournaments give the top boards **double the time control**, so those games
@@ -74,7 +79,7 @@ Add an additive, defaulted `bool`:
 /// Whether the referee may flag individual boards as "long games" that last
 /// two rounds and score two points for the winner (double time control on the
 /// top boards). Off by default. When on, the round view shows a per-board
-/// checkbox. See `docs/two-round-boards.md`.
+/// checkbox. See `docs/archive/two-round-boards.md`.
 #[serde(default)]
 pub long_boards_enabled: bool,
 ```
@@ -96,7 +101,7 @@ or Cup), so it is a separate boolean, not a new `PairingSource` variant:
 ```rust
 /// This board is a "long game": double time control, lasts two rounds, and its
 /// winner scores two points instead of one. Off by default and omitted from
-/// JSON when false. See `docs/two-round-boards.md`.
+/// JSON when false. See `docs/archive/two-round-boards.md`.
 #[serde(default, skip_serializing_if = "is_false")]
 pub long: bool,
 ```

@@ -1,4 +1,4 @@
-// The static HTML export of the public page — docs/public-access.md phase 2.
+// The static HTML export of the public page — docs/archive/public-access.md phase 2.
 //
 // Phase 1 serves the public projection from the server, which is everything the
 // hosted deployment needs and nothing at all for the desktop app: there,
@@ -14,7 +14,7 @@
 //     builds, so the exported standings cannot disagree with the referee's
 //     screen. The alternative — a second, string-building renderer — would be a
 //     second thing to keep in sync, and the first time the two drifted the
-//     club's website would be quietly wrong (docs/public-access.md §5).
+//     club's website would be quietly wrong (docs/archive/public-access.md §5).
 //   - **They are rendered from the server's projection, not from the referee's
 //     own view.** `GET /public-snapshot` runs the same exhaustive-destructuring
 //     filter the reader endpoint runs, so a field added to `Tournament` cannot
@@ -176,7 +176,7 @@ function anchorTooltips(root: HTMLElement): void {
  * dropped from print, where a tooltip cannot be hovered.
  */
 const TOOLTIP_CSS = `
-/* --- Static-export tooltips (docs/public-access.md phase 2) --- */
+/* --- Static-export tooltips (docs/archive/public-access.md phase 2) --- */
 .osp-tip { position: relative; }
 .osp-tip::after {
   content: attr(data-tip);
@@ -227,7 +227,7 @@ interface DocumentOptions {
  *   web server, and it carries forty people's names, clubs and ratings. Putting
  *   it on the club's site is the referee's decision; leaving it in a search
  *   index for good is a different one, and this is the conservative default
- *   (the same reasoning as the capability URL in docs/public-access.md §3.2).
+ *   (the same reasoning as the capability URL in docs/archive/public-access.md §3.2).
  * - **No `data-theme`.** The app's dark theme is opt-in via that attribute, so
  *   its absence pins the export to light — like the QR code, and for the same
  *   sort of reason: a dark page dropped into a club's white website looks

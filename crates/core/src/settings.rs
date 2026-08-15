@@ -461,7 +461,7 @@ pub enum HandicapDisplay {
 /// per-category `elo_upward_looseness_*` knobs, which widen the upward arm so an
 /// *upward* revision clears on less evidence than a downward one (for the Gaussian
 /// this is a two-piece normal; for the Laplace, a wider upward scale); `Flat` has
-/// no arm to widen. See `docs/elo-pairing-mode.md`.
+/// no arm to widen. See `docs/archive/elo-pairing-mode.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
@@ -843,7 +843,7 @@ pub struct PlayerCategory {
 
 /// Team-tournament configuration. Present exactly when the tournament is a team
 /// tournament — teams become the unit of pairing and ranking, while the games
-/// stay ordinary individual boards (see `docs/team-tournaments.md`).
+/// stay ordinary individual boards (see `docs/archive/team-tournaments.md`).
 ///
 /// Orthogonal to [`PairingMode`], like the cup: a team tournament is still
 /// paired Swiss or MacMahon, over teams instead of players.
@@ -982,7 +982,7 @@ pub struct TournamentSettings {
     pub cup_format: CupFormat,
     /// Whether the referee may flag individual boards as "long games" that last
     /// two rounds and score two points for the winner. Off by default. See
-    /// `docs/two-round-boards.md`.
+    /// `docs/archive/two-round-boards.md`.
     #[serde(default)]
     pub long_boards_enabled: bool,
     /// How handicap games are treated (see [`HandicapPolicy`]).

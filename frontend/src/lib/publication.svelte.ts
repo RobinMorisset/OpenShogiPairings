@@ -1,5 +1,5 @@
 /**
- * The public read-only page (docs/public-access.md), and the two things the app
+ * The public read-only page (docs/archive/public-access.md), and the two things the app
  * prints for the wall.
  *
  * Publication is per tournament and off by default. Turning it on mints a

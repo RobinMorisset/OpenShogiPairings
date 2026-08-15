@@ -3,13 +3,13 @@
 Prebuilt Windows and macOS apps are published to the repo's
 [Releases](https://github.com/RobinMorisset/OpenShogiPairings/releases) page by a
 GitHub Actions workflow
-([`.github/workflows/release.yml`](../.github/workflows/release.yml)). You don't
+([`.github/workflows/release.yml`](../../.github/workflows/release.yml)). You don't
 build or upload anything by hand — you push a version tag and the workflow does
 the rest.
 
 ## Steps
 
-1. **Close the changelog section.** In [`CHANGELOG.md`](../CHANGELOG.md), rename
+1. **Close the changelog section.** In [`CHANGELOG.md`](../../CHANGELOG.md), rename
    the `## [Unreleased]` heading to `## [X.Y.Z] - YYYY-MM-DD` with the version
    you're about to tag and the release date, and reread the section: it is where
    the "NOT backwards compatible with any earlier version" banner lives, and that
@@ -27,21 +27,21 @@ the rest.
 
 2. **Bump the version** so the tag matches what the app reports. Update the
    `version` field in all four:
-   - [`Cargo.toml`](../Cargo.toml) (`[workspace.package]` — feeds
+   - [`Cargo.toml`](../../Cargo.toml) (`[workspace.package]` — feeds
      `osp_core::VERSION`, i.e. the `/api/health` payload and the client's
      "server upgraded" check)
-   - [`frontend/src-tauri/Cargo.toml`](../frontend/src-tauri/Cargo.toml) (the
+   - [`frontend/src-tauri/Cargo.toml`](../../frontend/src-tauri/Cargo.toml) (the
      desktop crate is excluded from the workspace, so it carries its own
      `[package]` version)
-   - [`frontend/src-tauri/tauri.conf.json`](../frontend/src-tauri/tauri.conf.json)
-   - [`frontend/package.json`](../frontend/package.json)
+   - [`frontend/src-tauri/tauri.conf.json`](../../frontend/src-tauri/tauri.conf.json)
+   - [`frontend/package.json`](../../frontend/package.json)
 
    Commit that on `main`, together with the changelog edit from step 1. All four
    must equal the tag you're about to push — CI's `check-version` job verifies
    this and fails the release before building if any is out of sync.
 
    > **Not** part of the app version bump:
-   > [`crates/matching`](../crates/matching/Cargo.toml) (`integer-blossom`) is
+   > [`crates/matching`](../../crates/matching/Cargo.toml) (`integer-blossom`) is
    > published to crates.io independently and carries its own `[package]`
    > version, deliberately decoupled from the workspace. Leave it alone when
    > cutting an app release — it is bumped only when the matching crate itself
@@ -52,7 +52,7 @@ the rest.
    > separately (see [below](#releasing-the-integer-blossom-crate)).
 
    Bump the root `version` in
-   [`frontend/package-lock.json`](../frontend/package-lock.json) to match too —
+   [`frontend/package-lock.json`](../../frontend/package-lock.json) to match too —
    both the top-level field and the one under `packages[""]`, so the lockfile
    mirrors `package.json`. Nothing re-syncs it automatically (unlike the two
    `Cargo.lock`s, which the pre-commit hook re-resolves), so it drifts otherwise;
@@ -100,15 +100,15 @@ them anywhere.
 
 ## Releasing the `integer-blossom` crate
 
-[`crates/matching`](../crates/matching/Cargo.toml) is published to crates.io on
+[`crates/matching`](../../crates/matching/Cargo.toml) is published to crates.io on
 its own schedule, independent of the desktop app above. Its version tracks *its*
 public API, not the app tag, so it moves only when the matching crate changes.
 
 To cut a crate release: bump `version` in
-[`crates/matching/Cargo.toml`](../crates/matching/Cargo.toml) (follow semver for
+[`crates/matching/Cargo.toml`](../../crates/matching/Cargo.toml) (follow semver for
 the crate's own API — patch for fixes, minor for additions, major for breaking
 changes), add a matching entry to
-[`crates/matching/CHANGELOG.md`](../crates/matching/CHANGELOG.md) (crates.io has
+[`crates/matching/CHANGELOG.md`](../../crates/matching/CHANGELOG.md) (crates.io has
 no changelog of its own; this file ships in the package and renders on docs.rs),
 commit on `main`, then from `crates/matching/` run `cargo publish`
 (`cargo publish --dry-run` first to sanity-check the package). Publish only after
@@ -121,7 +121,7 @@ the other.
 - **Unsigned builds.** The apps are not code-signed, so users get an "unknown
   publisher" (Windows) or "unidentified developer / damaged" (macOS) warning on
   first launch. This is documented for users in the README's
-  [Download](../README.md#download) section. Removing it means buying an Apple
+  [Download](../../README.md#download) section. Removing it means buying an Apple
   Developer ID (~$99/yr) and a Windows code-signing certificate, then adding the
   signing secrets to the workflow — see the
   [tauri-action docs](https://github.com/tauri-apps/tauri-action).
@@ -131,5 +131,5 @@ the other.
   automatically, notes and all; don't, while the release notes still have to be
   filled in by hand.
 - **Local one-off build.** To produce a single executable locally without the
-  release machinery, see [Packaging](../README.md#packaging-windows) in the
+  release machinery, see [Packaging](../../README.md#packaging-windows) in the
   README.

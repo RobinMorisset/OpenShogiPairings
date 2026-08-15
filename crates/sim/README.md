@@ -9,7 +9,7 @@ A command-line tool that Monte-Carlo–simulates a tournament many times to comp
    the final ranking tracks real strength?
 
 For the methodology (result model, strength model, metrics) see
-[`docs/simulation-cli.md`](../../docs/simulation-cli.md). This file is just how to
+[`docs/guides/simulation-cli.md`](../../docs/guides/simulation-cli.md). This file is just how to
 run it.
 
 ## Build & run

@@ -69,7 +69,7 @@ pub struct RuleTotal {
 /// record of a past event rather than a function of the present state: the model
 /// it scores against is the one that actually paired the round, and that model's
 /// inputs (results, ratings, settings) are all editable afterwards. See the
-/// appendix of `docs/public-access.md`.
+/// appendix of `docs/archive/public-access.md`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(deny_unknown_fields)]

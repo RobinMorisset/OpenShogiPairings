@@ -9,7 +9,7 @@
   // file is a disagreement nobody can resolve from either screen.
   //
   // The only difference between the two readers is `staticPage`, which drops the
-  // controls no script will ever answer in an exported file (docs/public-access.md
+  // controls no script will ever answer in an exported file (docs/archive/public-access.md
   // §5). Everything else — which components, which props, what happens before
   // round 1 — is the same by construction.
   import { _ } from "svelte-i18n";
@@ -38,7 +38,7 @@
 {#if section.kind === "standings" && tournament.rounds.length === 0}
   <!-- Before round 1 there is nothing to rank: everyone sits at their MacMahon
        start. The entrant list is what the page is for at that moment — players
-       check that they are registered (docs/public-access.md §2). -->
+       check that they are registered (docs/archive/public-access.md §2). -->
   <p class="muted">{$_("publicView.notStarted")}</p>
   <EntrantList players={tournament.players} />
 {:else if section.kind === "standings"}

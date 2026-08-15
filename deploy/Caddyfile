@@ -7,7 +7,7 @@
 #
 #   caddy run --config deploy/Caddyfile
 #
-# This is the whole "add TLS" step from docs/multi-referee-internet.md §1.3: the
+# This is the whole "add TLS" step from docs/archive/multi-referee-internet.md §1.3: the
 # server itself speaks plain HTTP on loopback and never needs a certificate.
 
 tournament.example.com {

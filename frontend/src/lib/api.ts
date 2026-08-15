@@ -330,7 +330,7 @@ export interface TournamentListing {
 /**
  * List the tournaments the picker may show. Sends the admin token if we have
  * one: on a hosted server that is what distinguishes a referee from a stranger
- * who found the URL (see `docs/public-access.md` §3.1).
+ * who found the URL (see `docs/archive/public-access.md` §3.1).
  */
 export function listTournaments(): Promise<TournamentListing> {
   return request<TournamentListing>("/api/tournaments", undefined, ADMIN_AUTH);
@@ -924,7 +924,7 @@ export function restoreBackup(id: string): Promise<TournamentResponse> {
   });
 }
 
-// --- Public read-only access (docs/public-access.md, phase 1) ---------------
+// --- Public read-only access (docs/archive/public-access.md, phase 1) ---------------
 //
 // Two audiences share this section. The referee half (`fetchPublication`,
 // `setPublication`) is ordinary authenticated API. The reader half takes a
@@ -951,7 +951,7 @@ export function setPublication(published: boolean): Promise<PublicationState> {
 
 /**
  * The public projection of the currently open tournament, for the static HTML
- * export (`docs/public-access.md` phase 2).
+ * export (`docs/archive/public-access.md` phase 2).
  *
  * The referee's own credentials, not a capability key: the export exists for
  * the desktop deployment, where the reader endpoint listens on a loopback port

@@ -1,5 +1,10 @@
 # Multiple referees on one tournament, over the internet — design
 
+> **Archived design doc — do not trust the details.** Written before the feature
+> was implemented and not maintained since, so it has drifted from the code. It
+> is kept for the rationale it records; for how the software actually behaves,
+> see [`docs/reference/`](../reference) and the code.
+
 Status: **Phases 1–3 landed.** Phase 1: shared-password auth (server middleware +
 `POST /api/login`, `OSP_PASSWORD`, client login overlay). Phase 2: the standalone
 server can serve the built SPA same-origin (`OSP_STATIC_DIR`), persist the
@@ -47,7 +52,7 @@ hotspots, and roaming, so the whole design is built around it.
 
 This is a genuine shift from today's model, where the app **is** the server
 (the Tauri desktop app embeds `osp-server` in-process on a random loopback port;
-see [`crates/server/src/lib.rs`](../crates/server/src/lib.rs)). We keep that
+see [`crates/server/src/lib.rs`](../../crates/server/src/lib.rs)). We keep that
 mode and add a second one:
 
 - **Local mode** (unchanged): Tauri desktop app, embedded server on loopback,
@@ -60,7 +65,7 @@ The same server code serves both; the difference is configuration, not a fork.
 ### Scope decision: one tournament per server instance
 
 The server already holds exactly one tournament as its single source of truth
-(`TournamentStore.current` in [`state.rs`](../crates/server/src/state.rs)). We
+(`TournamentStore.current` in [`state.rs`](../../crates/server/src/state.rs)). We
 keep that for V1: **one hosted instance = one live tournament**, and the
 instance password *is* the tournament password. Running two tournaments at once
 means running two instances (different subdomain/port). Multi-tournament routing
@@ -92,7 +97,7 @@ avoid OAuth.
   `/api/login`. Missing/bad token → `401`.
 - Make it optional so local mode is unaffected: thread an
   `Option<AuthConfig>` into `router()`
-  ([`lib.rs`](../crates/server/src/lib.rs)). Tauri passes `None` (loopback-only,
+  ([`lib.rs`](../../crates/server/src/lib.rs)). Tauri passes `None` (loopback-only,
   in-process — auth there is pure friction); the standalone binary passes
   `Some` when a password is configured. This is a small change to the one router
   builder.
@@ -105,7 +110,7 @@ avoid OAuth.
 - On `401` (or first launch in remote mode), show a password prompt; on success
   store the token in `localStorage` and send it on every request. A `401` from
   any later call bounces back to the prompt.
-- Centralize this in [`api.ts`](../frontend/src/lib/api.ts): the existing
+- Centralize this in [`api.ts`](../../frontend/src/lib/api.ts): the existing
   `fetchOk` helper is the one place to inject the `Authorization` header and to
   catch `401` → clear token → emit a "needs login" event.
 
@@ -136,7 +141,7 @@ and durable.
 Today the frontend is a separate Vite bundle — a **single-page app (SPA)**, i.e.
 the whole UI is one HTML/JS bundle that talks to the API over `fetch` — and its
 API address is the **build-time** `VITE_API_BASE`
-([`api.ts`](../frontend/src/lib/api.ts)), so a referee cannot just "open the
+([`api.ts`](../../frontend/src/lib/api.ts)), so a referee cannot just "open the
 app." Instead, have axum serve the built SPA as static files (`tower-http`
 `ServeDir` with a fallback to `index.html`), alongside `/api/*`.
 
@@ -145,7 +150,7 @@ Payoff — this is the ergonomic core of remote mode:
 - Referees open **one HTTPS URL** in **any browser**, laptop or phone. No
   install, no rebuild, no IP configuration.
 - Frontend and API share an origin, so the **permissive CORS** layer
-  ([`lib.rs:36`](../crates/server/src/lib.rs)) — flagged in-code as "lock down
+  ([`lib.rs:36`](../../crates/server/src/lib.rs)) — flagged in-code as "lock down
   before exposing this beyond the machine" — can be dropped for remote mode.
 - `VITE_API_BASE` becomes `""` (same-origin relative URLs) for the hosted
   build; the Tauri build keeps asking the embedded server for its port.
@@ -154,7 +159,7 @@ Payoff — this is the ergonomic core of remote mode:
 
 Right now the live tournament exists **only in memory**
 (`TournamentStore.current`); only coarse round-transition snapshots reach disk,
-rotating at 10 ([`backup.rs`](../crates/server/src/backup.rs)). A hosted server
+rotating at 10 ([`backup.rs`](../../crates/server/src/backup.rs)). A hosted server
 that restarts mid-round (deploy, crash, VPS reboot) would lose everything since
 the last transition. For an always-on server we need:
 
@@ -183,7 +188,7 @@ tournament survives a restart.
 ## 3. Phase 3 — Live sync & concurrency safety
 
 By here, multiple referees *can* work over the internet, but they still load the
-tournament once on mount ([`App.svelte`](../frontend/src/App.svelte)) and never
+tournament once on mount ([`App.svelte`](../../frontend/src/App.svelte)) and never
 refresh — B doesn't see A's result until a manual reload — and the shared undo
 stack is a footgun. This phase makes concurrent editing actually correct and
 live. Two independent pieces:
@@ -191,7 +196,7 @@ live. Two independent pieces:
 ### 3.1 Optimistic concurrency (prevent lost updates)
 
 Two referees editing off the same view can silently clobber each other, and the
-**global linear undo** ([`state.rs:16`](../crates/server/src/state.rs)) makes it
+**global linear undo** ([`state.rs:16`](../../crates/server/src/state.rs)) makes it
 worse: B's "undo" pops A's last edit.
 
 - Give the tournament a monotonically increasing **version** (bump it in
@@ -268,5 +273,5 @@ Recommended order: **1 → 2 → 3 → 4**.
 - **Multi-tournament is V2, not V1.** One hosted instance = one live tournament
   (§0); run a second instance for a second tournament.
 - **Backups stay on the host.** Server-side backups
-  ([`backup.rs`](../crates/server/src/backup.rs)) living on the VPS rather than a
+  ([`backup.rs`](../../crates/server/src/backup.rs)) living on the VPS rather than a
   referee's machine is fine as-is; no change planned.

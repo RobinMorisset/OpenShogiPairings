@@ -54,6 +54,6 @@ source?: PairingSource,
  * This board is a "long game": double time control, lasting two rounds, and
  * its winner scores two points instead of one. Off by default and omitted
  * from JSON when false. The two players sit out the next round's pairing
- * while an undecided long board is in flight. See `docs/two-round-boards.md`.
+ * while an undecided long board is in flight. See `docs/archive/two-round-boards.md`.
  */
 long?: boolean, };

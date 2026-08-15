@@ -1,5 +1,5 @@
 //! Public read-only access to the standings and pairings — see
-//! `docs/public-access.md` (phase 1).
+//! `docs/archive/public-access.md` (phase 1).
 //!
 //! Players in the room, and anyone following from home, get the standings and
 //! the pairings on their phones with no password and no ability to change
@@ -123,7 +123,7 @@ pub(crate) struct PublicTournament {
     /// Each round carries its frozen pairing `explanation`, so the ledger rides
     /// along with the projection — nothing in it goes beyond what is published
     /// here anyway (it names the same players and the same rules). No public UI
-    /// reads it yet; showing it is phase 4 in `docs/public-access.md`.
+    /// reads it yet; showing it is phase 4 in `docs/archive/public-access.md`.
     rounds: Vec<Round>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cup: Option<Cup>,
@@ -295,7 +295,7 @@ async fn get_public(
 
 /// `GET /api/tournaments/{id}/public-snapshot` — the same projection, for the
 /// **referee**, so the desktop app can write it out as plain web pages
-/// (`docs/public-access.md` phase 2).
+/// (`docs/archive/public-access.md` phase 2).
 ///
 /// It lives in the protected group rather than behind the capability key, for
 /// two reasons. The laptop deployment is the whole point of the static export —

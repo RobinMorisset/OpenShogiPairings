@@ -1,4 +1,4 @@
-// QR codes for the public reader page (see docs/public-access.md §3.2).
+// QR codes for the public reader page (see docs/archive/public-access.md §3.2).
 //
 // The capability URL is ~100 characters of hex and a UUID: nothing anyone is
 // going to type into a phone, so the QR code *is* the distribution mechanism,

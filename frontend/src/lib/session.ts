@@ -1,4 +1,4 @@
-// Session tokens + auth-gate state (see docs/multi-tournament.md).
+// Session tokens + auth-gate state (see docs/archive/multi-tournament.md).
 //
 // In local/embedded mode the server runs without authentication, so none of
 // this ever fires. Against a hosted server, two independent passwords may

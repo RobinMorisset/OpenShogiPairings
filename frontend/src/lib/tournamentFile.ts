@@ -207,7 +207,7 @@ export interface ExportedFile {
 }
 
 /**
- * Save the exported public pages (`docs/public-access.md` phase 2) side by side
+ * Save the exported public pages (`docs/archive/public-access.md` phase 2) side by side
  * in one directory. `name` is the tournament name, for the dialog's title.
  *
  * Returns how many files were written, `0` if the user cancelled.

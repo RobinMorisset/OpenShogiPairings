@@ -42,7 +42,7 @@
     teamMatches?: TeamMatchView[][];
     /** Referee-defined categories, for the highlight filter and leader marks. */
     categories?: PlayerCategory[];
-    /** Rendering into a static HTML file (docs/public-access.md phase 2), where
+    /** Rendering into a static HTML file (docs/archive/public-access.md phase 2), where
      *  no script will ever run: drop the controls that would be dead there —
      *  the same ones `print-hide` drops on paper, for the same reason. */
     staticPage?: boolean;

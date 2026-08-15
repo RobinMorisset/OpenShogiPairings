@@ -4,7 +4,7 @@
 //! Nothing here is stored. Every team-level fact is *derived* from the rosters
 //! and the ordinary boards, exactly as the cup derives its bracket — so editing
 //! a past board result re-derives the match it belongs to, the team's points,
-//! and every tie-break that reads them. See `docs/team-tournaments.md`.
+//! and every tie-break that reads them. See `docs/archive/team-tournaments.md`.
 
 use std::cmp::Ordering;
 use std::collections::HashMap;

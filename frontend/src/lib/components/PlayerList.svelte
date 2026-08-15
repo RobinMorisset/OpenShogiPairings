@@ -31,7 +31,7 @@
     /** Remove a previously applied point adjustment. */
     onRemoveAdjustment?: (id: string, adjustmentId: string) => void;
     /** Whether this tournament has a public reader page (see
-     *  `docs/public-access.md`). Only affects who an adjustment's mandatory
+     *  `docs/archive/public-access.md`). Only affects who an adjustment's mandatory
      *  free-text reason is written *for* — which is worth saying at the moment
      *  it is typed. */
     published?: boolean;

@@ -10,7 +10,7 @@ done — see [Windows results](#windows-results) at the end.
 
 - **Environment measured:** macOS 26.5.2 (build 25F84), Apple Silicon, Tauri
   2.11, `--no-bundle` release build, commit `e39ff12`.
-- **Harness:** [`scripts/startup-bench.py`](../scripts/startup-bench.py) — runs
+- **Harness:** [`scripts/startup-bench.py`](../../scripts/startup-bench.py) — runs
   as-is on macOS and Linux. On Windows the **warm** mode runs as-is, but **cold**
   mode needs two fixes first (see [Windows results](#windows-results)): the
   webview purge path is wrong, and the cold trick doesn't reproduce the Windows
@@ -44,7 +44,7 @@ lives, so effort isn't wasted optimising the ~20ms that is actually ours.
 Startup blocked mounting the UI on the locale catalogue, and only *then* did the
 first component resolve the API base (a dynamic import plus an IPC round-trip).
 Nothing about locating the server needs the locale, so commit `e39ff12` kicks
-that off in parallel from [`main.ts`](../frontend/src/main.ts) via
+that off in parallel from [`main.ts`](../../frontend/src/main.ts) via
 `prewarmApiBase`. Worth a measured **~17ms (~3.5%)**, `p ≈ 0.005`. Small, but it
 is the only part of the warm path that is ours to move, and it is the worked
 example for the methodology below.
@@ -100,7 +100,7 @@ The harness needs the frontend temporarily instrumented to fire the paint ping.
 
 ### Step 1 — add the paint marker (temporary)
 
-In [`frontend/src/lib/components/TournamentPicker.svelte`](../frontend/src/lib/components/TournamentPicker.svelte),
+In [`frontend/src/lib/components/TournamentPicker.svelte`](../../frontend/src/lib/components/TournamentPicker.svelte),
 right after the `void refresh();` line at the end of the `<script>` block:
 
 ```svelte
@@ -227,7 +227,7 @@ Recording these because each looked plausible and cost time to rule out:
 
 Repeated on **Windows 10 Home 22H2 (build 19045)**, x64, Tauri 2.11,
 `--no-bundle` release build, commit `fd6d7fb`, same
-[`scripts/startup-bench.py`](../scripts/startup-bench.py). Windows Defender
+[`scripts/startup-bench.py`](../../scripts/startup-bench.py). Windows Defender
 real-time protection **on**. The short version: **the shape matches macOS — a
 fast warm launch dominated by native window init, plus a large one-time
 first-launch penalty that lands entirely before `main()` — but every number is

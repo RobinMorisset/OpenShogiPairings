@@ -1,4 +1,4 @@
-//! Password authentication (see `docs/multi-tournament.md`).
+//! Password authentication (see `docs/archive/multi-tournament.md`).
 //!
 //! Two independent uses of the same [`AuthConfig`] shape:
 //!

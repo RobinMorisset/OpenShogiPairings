@@ -1,8 +1,8 @@
 //! Live sync: a change-notification stream (SSE) plus an optimistic-concurrency
-//! guard. Both are per-tournament now (see `docs/multi-tournament.md`).
+//! guard. Both are per-tournament now (see `docs/archive/multi-tournament.md`).
 //!
 //! Several referees share one tournament, so once they edit concurrently two
-//! problems appear (see `docs/multi-referee-internet.md` §3):
+//! problems appear (see `docs/archive/multi-referee-internet.md` §3):
 //!
 //! - they must see each other's changes without manually reloading, and
 //! - an edit made against a stale view must not silently clobber a newer one.

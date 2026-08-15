@@ -3,7 +3,7 @@
 //! A team tournament (the format that traditionally precedes the European
 //! championships) pairs *teams*, but the games themselves stay ordinary
 //! individual boards: a match between two teams of `size` players is `size`
-//! boards, board k against board k. See `docs/team-tournaments.md`.
+//! boards, board k against board k. See `docs/archive/team-tournaments.md`.
 //!
 //! Only the roster is stored. Everything team-level that could be derived —
 //! match results, team scores, the board↔match grouping — is recomputed by

@@ -1,5 +1,10 @@
 # Multi-tournament server — design
 
+> **Archived design doc — do not trust the details.** Written before the feature
+> was implemented and not maintained since, so it has drifted from the code. It
+> is kept for the rationale it records; for how the software actually behaves,
+> see [`docs/reference/`](../reference) and the code.
+
 Status: **All three phases landed** (server registry, frontend picker, Tauri
 persistence — see §7). Supersedes the "Scope decision: one tournament per
 server instance" section of [`multi-referee-internet.md`](multi-referee-internet.md),
@@ -245,7 +250,7 @@ embedded server — nothing is gated, exactly as before.
 
 This does not touch the reader path. The public routes are merged *outside* the
 auth layer, so the public page still opens on its capability key alone, with no
-password and no token anywhere (see `docs/public-access.md`).
+password and no token anywhere (see `docs/archive/public-access.md`).
 
 Axum-wise: nest the protected routes under `/api/tournaments/{id}` so a
 `Path<Uuid>` extractor is available to a middleware chain applied via
