@@ -10,12 +10,10 @@ will be explicitly mentioned in the changelog for that version though.
 ## [Unreleased]
 
 The save format changed again, but a **tournament that has not started yet can
-still be opened from v1.1.0, v1.2.0 or v1.3.0** — those three share one save
-format, and its players and all of its settings are carried over, the file being
-saved in the new format from then on. A save from any of them whose tournament
-had rounds played, or a round in preparation, says so plainly when you try to
-open it: finish that event with the version that has it. Saves from v1.0.0
-cannot be opened at all.
+still be opened from a v1.1.0, v1.2.0 or v1.3.0 save**, with its players and all
+of its settings carried over. A save whose tournament had rounds played, or a
+round in preparation, says so plainly when you try to open it: finish that event
+with the version that has it. Saves from v1.0.0 cannot be opened at all.
 
 ### Added
 
@@ -35,33 +33,37 @@ cannot be opened at all.
 - **Printable per-player result sheets**, accessible from a button in each
   round tab.
 - Optional **nationality protection**, a weaker variant of club protection.
-- **An application icon of its own** — a shogi piece bearing a pairing list —
-  in place of the generic Tauri placeholder, and a matching favicon for the
-  browser client, which had none at all.
 - A **licence check** in the Players tab: give it a CSV list of the players
-  whose federation licence is up to date and a nationality, and it names the
-  registered players of that nationality who are not on the list — the ones who
-  forgot to pay their yearly fee. Each of them also carries any name on the list
-  that is one character from theirs, since these files are typed by hand and a
-  misspelling looks exactly like an unpaid licence. It only reports; nothing is
-  registered, edited or removed, and a near miss never counts as a licence.
+  whose federation licence is up to date, and it names the registered players of
+  a chosen nationality who are missing from it — the ones who forgot to pay
+  their yearly fee — flagging near-miss spellings, since these files are typed
+  by hand. It only reports; nothing is registered, edited or removed.
+- **An application icon of its own** — a shogi piece bearing a pairing list —
+  in place of the generic Tauri placeholder, and a favicon for the browser
+  client, which had none at all.
 
 ### Fixed
 
-- **Discarding the draft of round 1 left registration closed for good.**
-  Preparing round 1 is one click that closes registration *and* opens the
-  draft; cancelling put only the draft back, leaving a tournament with
-  registration closed, no draft and no round — a state nothing but undo could
-  get out of, and one that refuses late registration outright in team mode.
+- **A tournament created without a password of its own was writable by anyone**
+  on a server with `OSP_ADMIN_PASSWORD` set: no password meant no gate, so a
+  stranger could add players to it or delete it outright. Such a tournament now
+  falls back to the admin token. Local and embedded servers, which have no admin
+  password, are unchanged.
+- **The API answered cross-origin requests from any website.** It now names the
+  origins the app is actually served from, so a page on an unrelated site can no
+  longer read the API's replies.
+- **Discarding the draft of round 1 left registration closed for good**, with no
+  draft and no round either — a state nothing but undo could get out of.
   Cancelling that first draft now reopens registration, exactly as cancelling
   round 1 itself already did.
-- **An internal server error used to hang up instead of answering**, which a
-  client cannot tell from the network failing — and if it happened after an
-  edit had been applied, the acknowledgement was lost with it, so every later
-  edit came back as "another referee changed the tournament first" until the
-  page was reloaded. Such a request now answers with the error, naming what
-  broke so it can be reported, and the app reloads the tournament rather than
-  assuming the edit was rejected.
+- **Removing a player who never played could break the tournament**: their
+  sit-outs stayed behind, pointing at a number nobody held any more, which could
+  make the standings fail outright and an open round draft refuse to be
+  confirmed. They are now removed from the rounds and the draft along with
+  everything else.
+- **A round with no game to play could not be finished**, and so blocked every
+  later round: a round where every player is byed, absent or still on a long
+  board has no board whose result could complete it.
 - Half points from a `0=` influenced Points and tie-breaks like SOS, SODOS, but
   they were not included in Wins, SOSW, SODOSW, etc.
 - "Why these pairings?" now warns if unreliable; this can occur if a referee
@@ -73,82 +75,21 @@ cannot be opened at all.
   of a no-show.
 - The float markers in the standings table were doubled: a player who
   played one point up showed `^^`, two points up `^^^^`.
-- **A tournament created without a password of its own was writable by
-  anyone** on a server with `OSP_ADMIN_PASSWORD` set, once it was published:
-  publishing lists its id to unauthenticated callers, and having no password
-  meant having no gate, so a stranger could add players to it, unpublish it or
-  delete it outright. Such a tournament now falls back to the admin token.
-  Local and embedded servers, which have no admin password, are unchanged, and
-  the public reader page still needs only its capability key.
-- **The API answered cross-origin requests from any website.** It now names the
-  origins the app is actually served from — the desktop webview and the dev
-  server — so a page on an unrelated site can no longer read the API's replies.
-  This matters most on a server with no admin password, where every route is
-  open by design and `osp-server` listens on the well-known `127.0.0.1:3000`.
-- **Removing a player who never played could break the tournament.** Someone
-  who says they will miss the first round and then never comes should be
-  removable, and mostly was — but their sit-outs stayed behind, pointing at a
-  number nobody held any more. If they were the last player registered, the
-  standings then failed outright; and an open round draft kept them too, so
-  confirming it failed the same way. They are now removed from the rounds and
-  the draft along with everything else, leaving no row in the standings and no
-  line in the american grid.
-- **A round with no game to play could not be finished.** A round where every
-  player is byed, absent, or still on a long board carried over from the
-  previous round has no board at all, and was nonetheless stamped as being in
-  progress. Since a round only finishes when a board result is recorded, and
-  there was no board to record, it stayed unfinished and no later round could
-  be started.
-- **A damaged save of a cup tournament brought the server down instead of being
-  refused.** The bracket is rebuilt from the frozen seeding on every read, and
-  that rebuild trusted the bracket size and the seed list it was given — so a
-  file whose two no longer agreed (a truncated write, a hand edit) crashed the
-  moment anything looked at that tournament, taking the others with it. Such a
-  file is now checked when it is loaded, exactly as an imported one is, and
-  appears in the picker with the reason it could not be opened; the file itself
-  is left untouched.
-- **The rest of a damaged save could still bring the server down, or quietly
-  report the wrong tournament.** The same check now also refuses a file whose
-  players share a registration id or a tournament number, whose players have no
-  tournament number although registration is finalized, whose rounds are not
-  numbered in order, or whose boards and sit-outs name somebody the file does
-  not contain — the first three of which crashed the server on the first look at
-  that tournament, and the rest of which produced standings for a tournament
-  nobody played. A key this version does not recognise anywhere in a save is now
-  an error too, rather than being skipped over: a renamed `outcome` used to load
-  as a board with no result, silently erasing it.
-- A file with no format version at all was assumed to be in the current format
-  and read anyway. It is now refused, since that field is the only thing that
-  says what shape the rest of the file is in.
-- A backup directory that could not be read was reported as "no backups yet",
-  and a data directory that could not be read (an unmounted volume, say) as a
-  server with no tournaments on it. Both now say what actually happened.
-- **The public page and its exported copy showed different things once a cup was
-  drawn but round 1 had not started.** The bracket is frozen when registration is
-  finalized, and in the gap before the first round the live page showed the
-  bracket and no entrant list, while the exported pages showed the entrant list
-  and no bracket — so a player looking at their phone in the room and one
-  looking at the club's website saw two different tournaments, neither of them
-  complete. Both now show both, and which sections a public page has is decided
-  in one place for the two of them.
-- The simulator's `--cup-final` reconstructed twice the bracket it should from a
-  hybrid cup of the German type. Walking backward from the final, the round the
-  pre-qualified players spend in the open looked exactly like a bracket round, so
-  their opponents were taken for cup players. A game a player *lost* is no longer
-  read as one they won their way through, which gives that round away — unless
-  every pre-qualified player happens to have won it, which no reading of the
-  results alone can tell from a bracket of twice the size.
-- **A team could end up playing a match one board short.** Removing a player
-  who had not played took them out of their team as well, and a roster one
-  member short simply played that many fewer boards — so a three-board match
-  could be decided 2–0 over two boards and reported as an ordinary result. In a
-  team tournament the team is what gets paired, so removals now work at that
-  level: after registration a player can no longer be removed on their own, and
-  a team that has never played a match can be removed instead — before
-  registration closes its players go back to the unassigned pool, after it they
-  leave with the team, which is how a no-show team is dropped.
-- Some filesystem failures were silently swallowed; they are now surfaced
-  as errors in the log.
+- **An internal server error used to hang up instead of answering**, which a
+  client cannot tell from the network failing — and every later edit then came
+  back as "another referee changed the tournament first" until the page was
+  reloaded. The error is now answered and named, and the app reloads the
+  tournament rather than assuming the edit was rejected.
+- **A damaged save file could bring the server down**, taking every other
+  tournament with it, or quietly produce standings for a tournament nobody
+  played. Saves are now checked when they are loaded, exactly as imported ones
+  are, and a file that fails appears in the picker with the reason it could not
+  be opened, untouched. A file with no format version at all, or carrying a key
+  this version does not recognise, is now refused rather than read anyway.
+- Some filesystem failures were silently swallowed; they are now surfaced as
+  errors in the log. In particular, an unreadable backup directory was reported
+  as "no backups yet", and an unreadable data directory (an unmounted volume,
+  say) as a server with no tournaments on it.
 - The desktop app now respects `OSP_DATA_DIR` instead of putting its data in a
   hardcoded location.
 
@@ -164,10 +105,8 @@ cannot be opened at all.
   a game still being played shows `5?` rather than a win or a loss. The wins,
   points and tie-break columns — and the ranking itself — still count
   completed rounds only, so the table re-sorts in one step at the end of the
-  round rather than shuffling under the referee mid-round. A note above the
-  table names every round that isn't in the ranking yet: normally just the one
-  being played, but also an earlier one whose result a referee cleared to
-  correct it.
+  round rather than shuffling under the referee mid-round, with a note above it
+  naming the rounds not counted yet.
 - **A reorganized Settings tab**, with useless sections hidden, settings grouped
   logically, and better handling of very wide windows.
 - **Much better handling of narrow windows (e.g. phones)**, especially in the
