@@ -173,7 +173,9 @@ self-contained executable. The Svelte frontend is the same code either way.
 
 ## Prerequisites
 
-- **Rust** (stable, ≥ 1.77) via [rustup](https://rustup.rs)
+- **Rust** (stable, ≥ 1.90) via [rustup](https://rustup.rs) — the highest
+  `rust-version` in the dependency graph (`typed-index-collections`); the
+  workspace's own floor is `crates/matching`'s 1.87
 - **Node.js** ≥ 22.22.2 (or ≥ 24.15.0, or ≥ 26) with npm — the range in
   `frontend/package.json`'s `engines`, enforced at install time by
   `frontend/.npmrc`
