@@ -279,15 +279,21 @@ impl Forfeit {
 }
 
 /// What happened on a board — the single field replacing the former
-/// `result` × `no_show` × `drawn` product.
+/// `result` × `no_show` × `drawn` product, and since format 11 the board's
+/// handicap too.
 ///
-/// As three sibling fields, states that cannot occur were representable and only
+/// As sibling fields, states that cannot occur were representable and only
 /// excluded by convention (a result recorded on a forfeited board, a draw on a
-/// board nobody turned up for), which the ELO reader in particular got wrong.
-/// The sum type makes them unrepresentable instead.
+/// board nobody turned up for, odds conceded in a game nobody played), which the
+/// ELO reader in particular got wrong. The sum type makes them unrepresentable
+/// instead.
 ///
-/// `drawn` lives only in the variants where play happened: the American grid
-/// cannot express "forfeit after draws", so neither does the type.
+/// `drawn` and `handicap` live only in the variants where play happened or still
+/// might: the American grid cannot express "forfeit after draws", and nobody
+/// concedes odds in a game nobody played, so neither does the type. Both are
+/// carried across a [`Pending`](Self::Pending) ↔ [`Won`](Self::Won) toggle,
+/// because whether a draw occurred and who conceded what are facts about the
+/// game, not about who eventually won it.
 ///
 /// Serialized internally-tagged, like [`PairingSource`], e.g. `{"kind":"won",
 /// "winner":"player1"}`; the whole field is omitted from JSON while the board is
@@ -297,16 +303,21 @@ impl Forfeit {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Outcome {
     /// No decision yet. `drawn` records at least one draw (sennichite) before
-    /// the decisive replay still in progress — it matters for ELO.
+    /// the decisive replay still in progress — it matters for ELO. A handicap is
+    /// agreed before the game, so a pending board can already carry one.
     Pending {
         #[serde(default, skip_serializing_if = "is_false")]
         drawn: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        handicap: Option<HandicapGame>,
     },
     /// Played to a decision, possibly after one or more draws.
     Won {
         winner: Winner,
         #[serde(default, skip_serializing_if = "is_false")]
         drawn: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        handicap: Option<HandicapGame>,
     },
     /// Side(s) failed to appear, so no game was played. The present side (if
     /// exactly one) is credited the point exactly like a bye; never feeds ELO.
@@ -315,7 +326,7 @@ pub enum Outcome {
 }
 
 impl Default for Outcome {
-    /// A fresh board: nothing played, no draw.
+    /// A fresh board: nothing played, no draw, no handicap.
     fn default() -> Self {
         Outcome::PENDING
     }
@@ -323,13 +334,18 @@ impl Default for Outcome {
 
 impl Outcome {
     /// An untouched board — what [`Board::pending`] starts from.
-    pub const PENDING: Outcome = Outcome::Pending { drawn: false };
+    pub const PENDING: Outcome = Outcome::Pending {
+        drawn: false,
+        handicap: None,
+    };
 
-    /// A board played straight to a decision, with no draw along the way.
+    /// A board played straight to a decision, with no draw along the way and no
+    /// handicap.
     pub const fn won(winner: Winner) -> Outcome {
         Outcome::Won {
             winner,
             drawn: false,
+            handicap: None,
         }
     }
 
@@ -348,8 +364,35 @@ impl Outcome {
     /// false on a forfeit, where no game was played at all.
     pub fn drawn(self) -> bool {
         match self {
-            Outcome::Pending { drawn } | Outcome::Won { drawn, .. } => drawn,
+            Outcome::Pending { drawn, .. } | Outcome::Won { drawn, .. } => drawn,
             Outcome::Forfeit { .. } => false,
+        }
+    }
+
+    /// The handicap conceded on this board, if any. Always `None` on a forfeit,
+    /// where no game was played, so nobody conceded anything.
+    pub fn handicap(self) -> Option<HandicapGame> {
+        match self {
+            Outcome::Pending { handicap, .. } | Outcome::Won { handicap, .. } => handicap,
+            Outcome::Forfeit { .. } => None,
+        }
+    }
+
+    /// The same outcome with its handicap replaced, or `None` if the board is
+    /// forfeited — there is no variant to write it into, which is the whole
+    /// point of holding it here rather than beside the outcome.
+    pub fn with_handicap(self, game: Option<HandicapGame>) -> Option<Outcome> {
+        match self {
+            Outcome::Pending { drawn, .. } => Some(Outcome::Pending {
+                drawn,
+                handicap: game,
+            }),
+            Outcome::Won { winner, drawn, .. } => Some(Outcome::Won {
+                winner,
+                drawn,
+                handicap: game,
+            }),
+            Outcome::Forfeit { .. } => None,
         }
     }
 
@@ -366,9 +409,9 @@ impl Outcome {
         !matches!(self, Outcome::Pending { .. })
     }
 
-    /// `skip_serializing_if` helper — an untouched board is the default and
-    /// omitted from JSON.
-    fn is_pending_undrawn(&self) -> bool {
+    /// `skip_serializing_if` helper — an untouched board (pending, undrawn, no
+    /// handicap) is the default and omitted from JSON.
+    fn is_untouched(&self) -> bool {
         *self == Outcome::PENDING
     }
 }
@@ -386,20 +429,11 @@ pub struct Board {
     pub player1: TournamentId,
     pub player2: TournamentId,
     /// What kind of game this board records, and — for the kinds that can hold
-    /// one — what happened on it. See [`GameRecord`]. Omitted from JSON for an
-    /// ordinary board with nothing recorded on it yet, which is most of them
-    /// while a round is being played.
+    /// one — what happened on it, the draw flag and the handicap included. See
+    /// [`GameRecord`]. Omitted from JSON for an ordinary board with nothing
+    /// recorded on it yet, which is most of them while a round is being played.
     #[serde(default, skip_serializing_if = "GameRecord::is_pending_short")]
     pub record: GameRecord,
-    /// The handicap conceded on this board, if any (see [`HandicapGame`]).
-    ///
-    /// Never set together with a forfeited [`outcome`](Self::outcome): nobody
-    /// played, so nobody conceded odds. Unlike the draw flag this is a field of
-    /// its own rather than part of the outcome, so the pairing of the two is an
-    /// invariant `Tournament::set_board_no_show` and
-    /// `Tournament::set_board_handicap` maintain, not one the types enforce.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub handicap: Option<HandicapGame>,
     /// The float for this board: `points(player1) − points(player2)` at the time
     /// the round was paired, **in half-points** — the unit [`HalfPoints`] keeps
     /// scores in, so an ordinary one-point float is `±2` here. Only the sign
@@ -429,7 +463,9 @@ pub struct Board {
 /// starting one becomes [`LongCarried`](Self::LongCarried), which holds no
 /// outcome at all — so exactly one record is authoritative at every instant and
 /// the two cannot disagree about who won. Cancelling the later round moves the
-/// outcome back, the exact inverse.
+/// outcome back, the exact inverse. Everything about the game travels in that
+/// move, the draw flag and the handicap included, because all of it lives
+/// *inside* the [`Outcome`] rather than beside it.
 ///
 /// That the carried record has nowhere to *put* an outcome is the point: it is
 /// why this is an enum around [`Outcome`] rather than a flag beside one. See
@@ -467,7 +503,7 @@ impl GameRecord {
     /// `skip_serializing_if` helper — an ordinary board with nothing recorded on
     /// it is the default and omitted.
     fn is_pending_short(&self) -> bool {
-        matches!(self, GameRecord::Short(o) if o.is_pending_undrawn())
+        matches!(self, GameRecord::Short(o) if o.is_untouched())
     }
 
     /// The outcome this record holds; pending for [`LongCarried`](Self::LongCarried),
@@ -509,7 +545,6 @@ impl Board {
             player1,
             player2,
             record: GameRecord::Short(Outcome::PENDING),
-            handicap: None,
             points_diff,
             source,
         }
@@ -673,6 +708,20 @@ impl Board {
         })
     }
 
+    /// The handicap conceded on this board, if any (see [`HandicapGame`]).
+    ///
+    /// Lives inside the [`Outcome`] rather than beside it, so a forfeited board
+    /// simply has nowhere to hold one: nobody played, so nobody conceded odds,
+    /// and the type says so instead of a rule somewhere saying it. The same
+    /// falls out for a carried long game, whose
+    /// [`LongCarried`](GameRecord::LongCarried) record holds no outcome — so the
+    /// handicap travels with the game onto its
+    /// [`LongEnd`](GameRecord::LongEnd) board, and cannot be left behind to
+    /// disagree with it.
+    pub fn handicap(&self) -> Option<HandicapGame> {
+        self.outcome().handicap()
+    }
+
     /// The winner that counts for standings and pairing. For a handicap game,
     /// when the "Wiel" rule ([`TournamentSettings::handicap_wiel_rule`]) is on,
     /// that is always the giver (once the game is decided), regardless of who
@@ -681,7 +730,7 @@ impl Board {
     ///
     /// [`TournamentSettings::handicap_wiel_rule`]: crate::settings::TournamentSettings::handicap_wiel_rule
     pub fn effective_winner(&self, wiel_rule: bool) -> Option<Winner> {
-        match &self.handicap {
+        match self.handicap() {
             Some(h) if wiel_rule => self.outcome().winner().map(|_| h.giver),
             _ => self.outcome().winner(),
         }
@@ -955,8 +1004,23 @@ mod tests {
         let cases = [
             (Outcome::PENDING, r#"{"kind":"pending"}"#),
             (
-                Outcome::Pending { drawn: true },
+                Outcome::Pending {
+                    drawn: true,
+                    handicap: None,
+                },
                 r#"{"kind":"pending","drawn":true}"#,
+            ),
+            // A handicap is agreed before the game, so it rides on the pending
+            // board — the state the picker leaves behind on an unplayed board.
+            (
+                Outcome::Pending {
+                    drawn: false,
+                    handicap: Some(HandicapGame {
+                        handicap: Handicap::TwoPiece,
+                        giver: Winner::Player1,
+                    }),
+                },
+                r#"{"kind":"pending","handicap":{"handicap":"2p","giver":"player1"}}"#,
             ),
             (
                 Outcome::won(Winner::Player2),
@@ -966,8 +1030,20 @@ mod tests {
                 Outcome::Won {
                     winner: Winner::Player1,
                     drawn: true,
+                    handicap: None,
                 },
                 r#"{"kind":"won","winner":"player1","drawn":true}"#,
+            ),
+            (
+                Outcome::Won {
+                    winner: Winner::Player1,
+                    drawn: false,
+                    handicap: Some(HandicapGame {
+                        handicap: Handicap::Rook,
+                        giver: Winner::Player2,
+                    }),
+                },
+                r#"{"kind":"won","winner":"player1","handicap":{"handicap":"r","giver":"player2"}}"#,
             ),
             (
                 Outcome::Forfeit {

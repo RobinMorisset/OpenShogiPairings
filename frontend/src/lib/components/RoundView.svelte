@@ -19,7 +19,7 @@
     type Winner,
   } from "../types";
   import { sourceBadge } from "../pairingSource";
-  import { drawnOf, forfeitOf, handicapGiverId, winnerOf } from "../boardOutcome";
+  import { drawnOf, forfeitOf, handicapGiverId, handicapOf, winnerOf } from "../boardOutcome";
   import { absenceKind, absent, cycledForfeit, isDecided } from "../noShow";
   import { inLongFlagUnit, isLong } from "../longGames";
   import { printPage } from "../platform";
@@ -203,7 +203,7 @@
   const showLongColumn = $derived(longEnabled && !readOnly);
   const showHandicapColumn = $derived(
     handicapPolicy !== "none" &&
-      (!readOnly || round.boards.some((b) => b.handicap != null)),
+      (!readOnly || round.boards.some((b) => handicapOf(b) != null)),
   );
   const showSuggestedColumn = $derived(handicapPolicy === "suggested");
 
@@ -1069,8 +1069,8 @@
             {#if showHandicapColumn}
               <td class="handicap-col">
                 {#if readOnly}
-                  {#if board.handicap}
-                    <span class="mark">{board.handicap.handicap}</span>
+                  {#if handicapOf(board)}
+                    <span class="mark">{handicapOf(board)?.handicap}</span>
                     <span class="giver"
                       >{$_("roundView.giverGives", { values: { name: giverName(board) } })}</span
                     >
@@ -1087,7 +1087,7 @@
                       title={forfeitOf(board) != null
                         ? $_("roundView.handicapForfeitedTitle")
                         : undefined}
-                      value={board.handicap?.handicap ?? ""}
+                      value={handicapOf(board)?.handicap ?? ""}
                       onchange={(e) => onHandicapChange(index, e.currentTarget.value)}
                     >
                       <option value=""></option>
@@ -1101,7 +1101,7 @@
                         </option>
                       {/each}
                     </select>
-                    {#if board.handicap}
+                    {#if handicapOf(board)}
                       <span class="giver" title={$_("roundView.giverTitle")}
                         >{$_("roundView.giverGives", { values: { name: giverName(board) } })}</span
                       >

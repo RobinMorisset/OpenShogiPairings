@@ -6,7 +6,7 @@
 // facts about a board: what happened on it, who actually won, and who conceded
 // the odds.
 
-import type { Board, Forfeit, Outcome, Winner } from "./types";
+import type { Board, Forfeit, HandicapGame, Outcome, Winner } from "./types";
 
 /**
  * A board's outcome. The server omits the `record` entirely while the board is
@@ -42,6 +42,16 @@ export function drawnOf(board: Board): boolean {
   return outcome.kind === "forfeit" ? false : (outcome.drawn ?? false);
 }
 
+/**
+ * The handicap conceded on this board, if any. Never set on a forfeit: the
+ * handicap lives inside the outcome, whose `forfeit` arm has no field for one,
+ * because nobody concedes odds in a game nobody played.
+ */
+export function handicapOf(board: Board): HandicapGame | null {
+  const outcome = outcomeOf(board);
+  return outcome.kind === "forfeit" ? null : (outcome.handicap ?? null);
+}
+
 /** Which side(s) missed this board, and why, if it was forfeited. */
 export function forfeitOf(board: Board): Forfeit | null {
   const outcome = outcomeOf(board);
@@ -58,13 +68,14 @@ interface BoardOutcome {
 /** The plain (non-effective) outcome of a board from one side's perspective. */
 export function boardOutcome(board: Board, side: Winner): BoardOutcome {
   const actualWon = winnerOf(board) === side;
-  const gave = board.handicap?.giver === side;
+  const gave = handicapOf(board)?.giver === side;
   return { actualWon, gave };
 }
 
 /** The tournament number of the player who conceded the odds, or `null` if the
  *  board has no handicap. */
 export function handicapGiverId(board: Board): number | null {
-  if (!board.handicap) return null;
-  return board.handicap.giver === "player1" ? board.player1 : board.player2;
+  const handicap = handicapOf(board);
+  if (!handicap) return null;
+  return handicap.giver === "player1" ? board.player1 : board.player2;
 }

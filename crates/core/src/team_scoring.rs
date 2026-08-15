@@ -1140,7 +1140,7 @@ mod tests {
         // giver, so the board win follows the giver's team.
         t.set_board_handicap(number, 0, Some(crate::round::Handicap::Rook))
             .unwrap();
-        let giver = t.rounds[0].boards[0].handicap.unwrap().giver;
+        let giver = t.rounds[0].boards[0].handicap().unwrap().giver;
         let loser = match giver {
             Winner::Player1 => Winner::Player2,
             Winner::Player2 => Winner::Player1,

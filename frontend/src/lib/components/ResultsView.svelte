@@ -18,7 +18,7 @@
   } from "../types";
   import { teamAverageRating } from "../teams";
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
-  import { boardOutcome, drawnOf, forfeitOf, winnerOf } from "../boardOutcome";
+  import { boardOutcome, drawnOf, forfeitOf, handicapOf, winnerOf } from "../boardOutcome";
   import { absenceKind } from "../noShow";
   import { crossTableColumns, type CrossTableColumn } from "../crossTable";
   import { partitionDropped } from "../tiebreak";
@@ -594,9 +594,8 @@
     const roundIdx = roundIndexByNumber.get(round.number);
     const effectiveWon =
       roundIdx != null ? effectiveWinners[roundIdx]?.[boardIdx] === side : actualWon;
-    const handicap: PlayedCell["handicap"] = board.handicap
-      ? { code: board.handicap.handicap, gave }
-      : undefined;
+    const game = handicapOf(board);
+    const handicap: PlayedCell["handicap"] = game ? { code: game.handicap, gave } : undefined;
     // points_diff = points(player1) − points(player2) in half-points, frozen at
     // pairing time. From this player's own perspective: a positive diff means
     // player1 outranked player2, i.e. player1 played down (▼); the sign flips

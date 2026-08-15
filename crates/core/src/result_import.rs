@@ -824,7 +824,7 @@ mod tests {
         ];
         let (t, _) = build_tournament(None, rows).unwrap();
         let board = &t.rounds[0].boards[0];
-        let game = board.handicap.expect("handicap set");
+        let game = board.handicap().expect("handicap set");
         assert_eq!(game.handicap, Handicap::Rook);
         let beta_side = if board.player1 == tid(&t, "Beta") {
             Winner::Player1

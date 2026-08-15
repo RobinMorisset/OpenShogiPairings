@@ -510,7 +510,7 @@ pub fn estimate_elos(
             // A draw counts whether or not the decisive replay has finished; a
             // forfeit is not a game and never counts.
             let score_a = match board.outcome() {
-                Outcome::Pending { drawn: true } | Outcome::Won { drawn: true, .. } => 0.5,
+                Outcome::Pending { drawn: true, .. } | Outcome::Won { drawn: true, .. } => 0.5,
                 Outcome::Won {
                     winner: Winner::Player1,
                     ..
@@ -523,7 +523,7 @@ pub fn estimate_elos(
             };
             // player1's handicap offset: −h if player1 conceded the odds, +h if it
             // received them, 0 for an even game. Needs the giver's fixed rating.
-            let offset_a = match &board.handicap {
+            let offset_a = match board.handicap() {
                 Some(hg) => {
                     let giver = if hg.giver == Winner::Player1 {
                         &players[a]
@@ -712,8 +712,11 @@ mod tests {
         giver: Winner,
     ) -> Board {
         Board {
-            record: GameRecord::Short(Outcome::won(result)),
-            handicap: Some(HandicapGame { handicap, giver }),
+            record: GameRecord::Short(Outcome::Won {
+                winner: result,
+                drawn: false,
+                handicap: Some(HandicapGame { handicap, giver }),
+            }),
             ..Board::pending(a, b, 0, PairingSource::Swiss)
         }
     }
@@ -947,6 +950,7 @@ mod tests {
             record: GameRecord::Short(Outcome::Won {
                 winner: Winner::Player1,
                 drawn: true,
+                handicap: None,
             }),
             ..Board::pending(
                 a.tournament_id.unwrap(),

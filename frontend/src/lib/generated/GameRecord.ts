@@ -12,7 +12,9 @@ import type { Outcome } from "./Outcome";
  * starting one becomes [`LongCarried`](Self::LongCarried), which holds no
  * outcome at all — so exactly one record is authoritative at every instant and
  * the two cannot disagree about who won. Cancelling the later round moves the
- * outcome back, the exact inverse.
+ * outcome back, the exact inverse. Everything about the game travels in that
+ * move, the draw flag and the handicap included, because all of it lives
+ * *inside* the [`Outcome`] rather than beside it.
  *
  * That the carried record has nowhere to *put* an outcome is the point: it is
  * why this is an enum around [`Outcome`] rather than a flag beside one. See

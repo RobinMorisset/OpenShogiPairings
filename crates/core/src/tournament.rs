@@ -55,14 +55,17 @@ use typed_index_collections::TiVec;
 /// v11: boards carry one `record` sum (`short` / `long_start` / `long_carried` /
 /// `long_end`, each but the third holding the outcome) in place of the separate
 /// `outcome` field and `long` flag.
+/// v12: a board's `handicap` moves inside its `outcome`, so neither a forfeited
+/// board nor a carried long game can hold one.
 ///
 /// A save is normally only readable at the exact version this build writes. The
 /// one exception is v5 — what v1.1.0, v1.2.0 and v1.3.0 all wrote — whose
 /// **not-yet-started** tournaments the server upgrades on load; see
 /// `UPGRADABLE_FROM` in `crates/server/src/save.rs` for the window and why it
 /// stops at the first round. A tournament that has not started has no board, so
-/// the v11 board shape is not part of what that upgrade has to translate.
-pub const TOURNAMENT_FORMAT_VERSION: u32 = 11;
+/// neither the v11 board shape nor the v12 handicap move is part of what that
+/// upgrade has to translate.
+pub const TOURNAMENT_FORMAT_VERSION: u32 = 12;
 
 /// Minimum number of players required to start a round.
 pub(crate) const MIN_PLAYERS_PER_ROUND: usize = 2;
@@ -1335,10 +1338,9 @@ impl Tournament {
                             && b.player2 == board.player2
                     })
                 })
-                .map(|b| {
-                    b.record = GameRecord::LongStart(outcome);
-                    b.handicap = board.handicap;
-                });
+                // The handicap rides inside the outcome, so restoring the one
+                // restores the other — there is nothing to copy alongside.
+                .map(|b| b.record = GameRecord::LongStart(outcome));
             debug_assert!(
                 restored.is_some(),
                 "a carried long game has its starting record in the previous round"
@@ -1931,17 +1933,17 @@ impl Tournament {
                     continue;
                 }
                 // Everything about the *game* moves onto the live record: the
-                // outcome, and the handicap conceded in it. What stays behind is
-                // only what the round decided — who was paired, and their float.
-                // Leaving the handicap here would duplicate it, and a duplicate
-                // is a thing that can disagree.
+                // outcome, and — since it lives inside that outcome — the
+                // handicap conceded in it. What stays behind is only what the
+                // round decided: who was paired, and their float. Nothing has to
+                // be blanked here, because `LongCarried` has nowhere to keep a
+                // duplicate that could disagree.
                 let carried = Board {
                     record: GameRecord::LongEnd(board.outcome()),
                     source: PairingSource::Carried,
                     ..*board
                 };
                 board.record = GameRecord::LongCarried;
-                board.handicap = None;
                 boards.push(carried);
             }
         }
@@ -2435,16 +2437,18 @@ impl Tournament {
                 board: board_index,
             })?;
         // Recording an actual result supersedes a no-show — the game was played
-        // after all. A forfeited board carries no draw, so the replayed-draw flag
-        // starts fresh there; on a played board it survives the toggle, since
-        // whether a draw occurred is independent of who eventually won.
-        let drawn = board.outcome().drawn();
+        // after all. A forfeited board carries neither draw nor handicap, so both
+        // start fresh there; on a played board they survive the toggle, since
+        // whether a draw occurred and who conceded odds are independent of who
+        // eventually won.
+        let (drawn, handicap) = (board.outcome().drawn(), board.outcome().handicap());
         board.set_outcome(if board.outcome().winner() == Some(clicked) {
-            Outcome::Pending { drawn }
+            Outcome::Pending { drawn, handicap }
         } else {
             Outcome::Won {
                 winner: clicked,
                 drawn,
+                handicap,
             }
         });
         round.completed = round.is_complete();
@@ -2582,23 +2586,15 @@ impl Tournament {
                 board: board_index,
             })?;
         board.set_outcome(match absent {
-            // A forfeit isn't a played game, so it drops any recorded result and
-            // draw — states the outcome type can't even express together.
+            // A forfeit isn't a played game, so it drops any recorded result,
+            // draw and handicap — states the outcome type can't even express
+            // together.
             Some(absent) => Outcome::Forfeit { absent },
             // Clearing only ever un-forfeits: on a board that carries a real
             // result there is no forfeit to clear, and the result must survive.
             None if board.outcome().forfeit().is_some() => Outcome::PENDING,
             None => board.outcome(),
         });
-        // Nobody played, so nobody conceded odds: a forfeit drops the handicap
-        // too, the same way it drops the result and the draw flag. The handicap
-        // is a separate field rather than part of the outcome, so it has to be
-        // cleared explicitly — leaving it would keep a "X gives 2-piece" hint on
-        // a board that was never played, publish it in the cross-table, and
-        // resurrect it if the forfeit is later cleared.
-        if absent.is_some() {
-            board.handicap = None;
-        }
         round.completed = round.is_complete();
         self.explanations_stale_after(round_number);
         Ok(&self.rounds[idx].boards[board_index])
@@ -2728,8 +2724,14 @@ impl Tournament {
         self.refuse_if_carried(round_number, board_index)?;
         let board = self.board_mut(round_number, board_index)?;
         board.set_outcome(match board.outcome() {
-            Outcome::Pending { .. } => Outcome::Pending { drawn },
-            Outcome::Won { winner, .. } => Outcome::Won { winner, drawn },
+            Outcome::Pending { handicap, .. } => Outcome::Pending { drawn, handicap },
+            Outcome::Won {
+                winner, handicap, ..
+            } => Outcome::Won {
+                winner,
+                drawn,
+                handicap,
+            },
             Outcome::Forfeit { .. } => {
                 return Err(TournamentError::DrawnOnForfeitedBoard {
                     round: round_number,
@@ -2762,21 +2764,10 @@ impl Tournament {
         board_index: usize,
         handicap: Option<Handicap>,
     ) -> Result<&Board, TournamentError> {
+        // A carried record holds no outcome, so it could not take a handicap
+        // either; this names that specifically rather than letting it fall
+        // through to the forfeit error below, which would be the wrong reason.
         self.refuse_if_carried(round_number, board_index)?;
-        // Rejected in both directions, like the draw flag: the picker is disabled
-        // on a forfeited board, and the forfeit already dropped whatever handicap
-        // the board carried, so even a clear means the client is out of sync.
-        if self
-            .board(round_number, board_index)?
-            .outcome()
-            .forfeit()
-            .is_some()
-        {
-            return Err(TournamentError::HandicapOnForfeitedBoard {
-                round: round_number,
-                board: board_index,
-            });
-        }
         // Resolve the giver up front (immutable borrow of `players`) so the board
         // can then be borrowed mutably without conflict.
         let game = match handicap {
@@ -2792,7 +2783,17 @@ impl Tournament {
                 Some(HandicapGame { handicap, giver })
             }
         };
-        self.board_mut(round_number, board_index)?.handicap = game;
+        let board = self.board_mut(round_number, board_index)?;
+        // A forfeited outcome has no variant to hold a handicap, so the write is
+        // itself the check — in both directions, since the picker is disabled on
+        // a forfeited board and even a clear means the client is out of sync.
+        let outcome = board.outcome().with_handicap(game).ok_or(
+            TournamentError::HandicapOnForfeitedBoard {
+                round: round_number,
+                board: board_index,
+            },
+        )?;
+        board.set_outcome(outcome);
         // Under the Wiel rule the handicap decides who the board scores for, and
         // that score is what later rounds were paired on.
         self.explanations_stale_after(round_number);
@@ -2810,20 +2811,26 @@ impl Tournament {
         handicap: Handicap,
         giver: Winner,
     ) -> Result<(), TournamentError> {
-        let board = self.board(round_number, board_index)?;
-        if matches!(board.source, PairingSource::Cup { .. }) {
+        if matches!(
+            self.board(round_number, board_index)?.source,
+            PairingSource::Cup { .. }
+        ) {
             return Err(TournamentError::HandicapNotAllowedForCup);
         }
-        // The importer forces every board and resolves it straight away, so it
-        // never meets a forfeited one — a cross-table's forfeit wins come in as
-        // byes. Stated so a future importer that *does* record forfeits can't
-        // quietly build the state `set_board_handicap` refuses.
-        debug_assert!(
-            board.outcome().forfeit().is_none(),
-            "round {round_number} board {board_index} is forfeited, so it cannot take a handicap"
-        );
-        self.board_mut(round_number, board_index)?.handicap =
-            Some(HandicapGame { handicap, giver });
+        self.refuse_if_carried(round_number, board_index)?;
+        let board = self.board_mut(round_number, board_index)?;
+        // Unreachable today — the importer forces every board and resolves it
+        // straight away, and a cross-table's forfeit wins come in as byes — but
+        // it costs nothing to say so through the same total function the public
+        // setter uses, rather than a rule a future importer could quietly break.
+        let outcome = board
+            .outcome()
+            .with_handicap(Some(HandicapGame { handicap, giver }))
+            .ok_or(TournamentError::HandicapOnForfeitedBoard {
+                round: round_number,
+                board: board_index,
+            })?;
+        board.set_outcome(outcome);
         self.explanations_stale_after(round_number);
         Ok(())
     }
@@ -2963,22 +2970,11 @@ impl Tournament {
         {
             return Err(TournamentError::JustifiedAbsenceOutsideTeamMode);
         }
-        // Nobody played, so nobody conceded odds: a forfeited board carrying a
-        // handicap is a state no setter here can produce (`set_board_no_show`
-        // drops the handicap, `set_board_handicap` refuses a forfeited board).
-        // Rejected rather than tolerated because the two disagree about whether
-        // the game happened, and every reader — the cross-table, the FESA export,
-        // the "X gives" hint — believes a different one. Nothing older loads into
-        // this state either: the only backwards compatibility this build offers is
-        // for a tournament that has not started, which has no boards at all.
-        if let Some((round, board)) = self.rounds.iter().find_map(|r| {
-            r.boards
-                .iter()
-                .position(|b| b.handicap.is_some() && b.outcome().forfeit().is_some())
-                .map(|i| (r.number, i))
-        }) {
-            return Err(TournamentError::HandicapOnForfeitedBoard { round, board });
-        }
+        // No check for a handicap on a forfeited board, nor on a carried one:
+        // since format 12 the handicap lives inside `Outcome`, which
+        // `Outcome::Forfeit` and `GameRecord::LongCarried` both have nowhere to
+        // put, so a file cannot express either pair at all — the same reason
+        // there is no check for a draw on one.
         // A frozen explanation names the round it explains. A file where the two
         // disagree, or whose watermark points past the last round, would put a
         // rationale under the wrong pairings (or vouch for rounds that aren't
@@ -4087,9 +4083,12 @@ mod tests {
             .expect("the carried game is still in round 2");
         assert_eq!((carried.player1, carried.player2), long_pair);
         assert_eq!(carried.source, PairingSource::Carried);
-        assert_eq!(carried.outcome(), Outcome::won(Winner::Player1));
+        // The winner alone, not the whole outcome: the handicap lives in there
+        // too now, so comparing against `Outcome::won` would assert there is
+        // none — the opposite of what the next line checks.
+        assert_eq!(carried.outcome().winner(), Some(Winner::Player1));
         assert_eq!(
-            carried.handicap.map(|h| h.handicap),
+            carried.handicap().map(|h| h.handicap),
             Some(Handicap::Lance),
             "the handicap travels with the game, both ways"
         );
@@ -4997,14 +4996,18 @@ mod tests {
                 .outcome(),
             Outcome::Won {
                 winner: Winner::Player1,
-                drawn: true
+                drawn: true,
+                handicap: None,
             }
         );
         assert_eq!(
             t.toggle_board_winner(1, 0, Winner::Player1)
                 .unwrap()
                 .outcome(),
-            Outcome::Pending { drawn: true }
+            Outcome::Pending {
+                drawn: true,
+                handicap: None,
+            }
         );
     }
 
@@ -5587,6 +5590,11 @@ mod tests {
     /// picker is disabled there — and declaring a no-show drops a handicap the
     /// board already carried rather than leaving it to be published (or to come
     /// back if the forfeit is cleared).
+    ///
+    /// There is no load-time half to this test, unlike
+    /// [`a_justified_absence_is_refused_outside_team_mode`]: the handicap lives
+    /// inside `Outcome`, so `Outcome::Forfeit` has nowhere to hold one and the
+    /// state cannot be built to check — which is the point of it living there.
     #[test]
     fn a_forfeit_refuses_a_handicap_and_drops_the_one_already_set() {
         let mut t = Tournament::new("Cup").unwrap();
@@ -5597,12 +5605,12 @@ mod tests {
 
         t.set_board_handicap(1, 0, Some(Handicap::TwoPiece))
             .unwrap();
-        assert!(t.rounds[0].boards[0].handicap.is_some());
+        assert!(t.rounds[0].boards[0].handicap().is_some());
 
         // Declaring the no-show removes it, exactly as it removes the draw flag.
         t.set_board_no_show(1, 0, Some(Forfeit::Player2(AbsenceKind::NoShow)))
             .unwrap();
-        assert_eq!(t.rounds[0].boards[0].handicap, None);
+        assert_eq!(t.rounds[0].boards[0].handicap(), None);
 
         // And it cannot be set again while the forfeit stands. Nor cleared: the
         // UI offers neither, so either request is a client out of sync.
@@ -5618,23 +5626,16 @@ mod tests {
         // Clearing the forfeit reopens the picker, but does not resurrect the
         // handicap — the referee re-enters it.
         t.set_board_no_show(1, 0, None).unwrap();
-        assert_eq!(t.rounds[0].boards[0].handicap, None);
+        assert_eq!(t.rounds[0].boards[0].handicap(), None);
         t.set_board_handicap(1, 0, Some(Handicap::TwoPiece))
             .unwrap();
-        assert!(t.rounds[0].boards[0].handicap.is_some());
+        assert!(t.rounds[0].boards[0].handicap().is_some());
         assert!(t.validate_loaded().is_ok());
 
-        // ...and a save that pairs the two anyway is rejected on load. No file
-        // this build can otherwise read reaches that state: the handicap and the
-        // forfeit are exclusive through every setter, and the only older saves
-        // accepted are of tournaments that have not started, which have no boards.
-        t.rounds[0].boards[0].set_outcome(Outcome::Forfeit {
-            absent: Forfeit::Player2(AbsenceKind::NoShow),
-        });
-        assert_eq!(
-            t.validate_loaded(),
-            Err(TournamentError::HandicapOnForfeitedBoard { round: 1, board: 0 })
-        );
+        // Recording a result keeps the handicap: who conceded the odds is a fact
+        // about the game, not about who eventually won it.
+        t.toggle_board_winner(1, 0, Winner::Player2).unwrap();
+        assert!(t.rounds[0].boards[0].handicap().is_some());
     }
 
     #[test]
@@ -5674,7 +5675,7 @@ mod tests {
         } else {
             Winner::Player2
         };
-        assert_eq!(board.handicap.unwrap().giver, giver_side);
+        assert_eq!(board.handicap().unwrap().giver, giver_side);
         // ...but with the Wiel rule on, the giver still counts as the effective winner.
         assert_eq!(board.effective_winner(true), Some(giver_side));
         // With the Wiel rule off (the default), the actual result counts instead.
@@ -5683,7 +5684,7 @@ mod tests {
         // The frozen giver survives a later rating swap (Low now outrates High).
         let low_id = t.players.iter().find(|p| p.id != high).unwrap().id;
         t.edit_player(low_id, rated("Low", 9999)).unwrap();
-        assert_eq!(t.rounds[0].boards[0].handicap.unwrap().giver, giver_side);
+        assert_eq!(t.rounds[0].boards[0].handicap().unwrap().giver, giver_side);
     }
 
     #[test]
@@ -5698,7 +5699,11 @@ mod tests {
             Err(TournamentError::HandicapNeedsRatingDifference)
         );
         // Clearing a handicap is always allowed, even with equal ratings.
-        assert!(t.set_board_handicap(1, 0, None).unwrap().handicap.is_none());
+        assert!(t
+            .set_board_handicap(1, 0, None)
+            .unwrap()
+            .handicap()
+            .is_none());
     }
 
     #[test]
@@ -5716,7 +5721,11 @@ mod tests {
             Err(TournamentError::HandicapNotAllowedForCup)
         );
         // Clearing a handicap is still allowed.
-        assert!(t.set_board_handicap(1, 0, None).unwrap().handicap.is_none());
+        assert!(t
+            .set_board_handicap(1, 0, None)
+            .unwrap()
+            .handicap()
+            .is_none());
         // No suggestion either, despite the large rating gap.
         let board = t.rounds[0].boards[0].clone();
         assert_eq!(t.suggested_handicap_for_board(&board), None);
@@ -5757,7 +5766,7 @@ mod tests {
         } else {
             Winner::Player2
         };
-        assert_eq!(board.handicap.unwrap().giver, giver_side); // rated player gives
+        assert_eq!(board.handicap().unwrap().giver, giver_side); // rated player gives
     }
 
     #[test]
@@ -6101,22 +6110,24 @@ mod tests {
         start_next_round(&mut t);
         t.set_board_long(1, 0, true).unwrap();
         t.set_board_handicap(1, 0, Some(Handicap::Rook)).unwrap();
-        let conceded = t.rounds[0].boards[0].handicap;
+        let conceded = t.rounds[0].boards[0].handicap();
         assert!(conceded.is_some());
 
         start_next_round(&mut t);
         assert_eq!(
-            t.rounds[1].boards[0].handicap, conceded,
+            t.rounds[1].boards[0].handicap(),
+            conceded,
             "the handicap moved onto the live record"
         );
         assert_eq!(
-            t.rounds[0].boards[0].handicap, None,
+            t.rounds[0].boards[0].handicap(),
+            None,
             "and did not stay behind to be a second copy of itself"
         );
 
         // Back again with the game, so a cancel loses nothing.
         t.cancel_last_round().unwrap();
-        assert_eq!(t.rounds[0].boards[0].handicap, conceded);
+        assert_eq!(t.rounds[0].boards[0].handicap(), conceded);
         t.validate_loaded().expect("still a whole record");
     }
 

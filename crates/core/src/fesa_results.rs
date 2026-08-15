@@ -590,14 +590,14 @@ mod tests {
         };
 
         let ad = board("Alpha", "Delta");
-        let game = ad.handicap.expect("handicap set");
+        let game = ad.handicap().expect("handicap set");
         assert_eq!(game.handicap, Handicap::FivePiece);
         assert_eq!(game.giver, giver_side(ad, "Alpha"));
 
         // `m` is the older spelling of the sente handicap, and the conceding side
         // is the one the cell marks `-` — here the *weaker*, pre-unrated player.
         let bg = board("Beta", "Gamma");
-        let game = bg.handicap.expect("handicap set");
+        let game = bg.handicap().expect("handicap set");
         assert_eq!(game.handicap, Handicap::Sente);
         assert_eq!(game.giver, giver_side(bg, "Gamma"));
         assert_eq!(find(&t, "Gamma", "Cid").rating, None); // unrated, yet the giver

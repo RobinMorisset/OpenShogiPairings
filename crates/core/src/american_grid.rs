@@ -325,7 +325,7 @@ fn game_cell(
         .map_or_else(|| "?".into(), |r| r.to_string());
 
     let mut cell = format!("{opponent}{}", result_marker(board, is_player1));
-    if let Some(game) = &board.handicap {
+    if let Some(game) = board.handicap() {
         // `-` when this player conceded the odds (the frozen giver), `+` when
         // they received them.
         let gave = matches!(
@@ -550,6 +550,7 @@ mod tests {
             b.set_outcome(Outcome::Won {
                 winner: Winner::Player1,
                 drawn: true,
+                handicap: None,
             })
         });
         let rows = data_rows(&to_grid(&t, &t.standings()).unwrap());
@@ -563,10 +564,14 @@ mod tests {
         // Higher-rated P1 gives a two-piece handicap: `-2p` on the giver's cell,
         // `+2p` on the receiver's. The +/- game result is unaffected.
         let (t, p1, _) = one_board(|b| {
-            b.handicap = Some(HandicapGame {
-                handicap: Handicap::TwoPiece,
-                giver: Winner::Player1,
-            });
+            b.set_outcome(
+                b.outcome()
+                    .with_handicap(Some(HandicapGame {
+                        handicap: Handicap::TwoPiece,
+                        giver: Winner::Player1,
+                    }))
+                    .expect("the board is not forfeited"),
+            );
         });
         let grid = to_grid(&t, &t.standings()).unwrap();
         let _ = p1;

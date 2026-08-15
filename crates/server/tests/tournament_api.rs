@@ -30,7 +30,12 @@ async fn create_then_add_and_remove_player() {
     let (status, body) = send(router(state.clone()), get(&t(id, ""))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["tournament"]["name"], "Paris Open");
-    assert_eq!(body["tournament"]["format_version"], 11);
+    // Named rather than spelled out: what this asserts is whatever this build
+    // writes, so a format bump is not a reason for it to fail.
+    assert_eq!(
+        body["tournament"]["format_version"],
+        osp_core::TOURNAMENT_FORMAT_VERSION
+    );
     assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
     assert_eq!(body["can_undo"], false); // nothing to undo on a fresh tournament
 

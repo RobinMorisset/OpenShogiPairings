@@ -54,6 +54,10 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
 - **The API answered cross-origin requests from any website.** It now names the
   origins the app is actually served from, so a page on an unrelated site can no
   longer read the API's replies.
+- **A handicap could be set on a board nobody turned up for**, and the odds then
+  showed up in the cross-table and the exported results. Declaring a no-show now
+  clears the board's handicap and greys the picker out, as it already did for
+  the draw button.
 - **Discarding the draft of round 1 left registration closed for good**, with no
   draft and no round either — a state nothing but undo could get out of.
   Cancelling that first draft now reopens registration, exactly as cancelling

@@ -35,12 +35,14 @@ use serde_json::{Map, Value};
 /// What is deliberately narrow is *which tournaments* are upgraded: only the
 /// **not-yet-started** ones, a list of players and settings whose fields turn out
 /// to be a pure subset of today's (see [`upgrade_from_v5`]). Rounds are where the
-/// five intervening bumps actually bite (boards gained an outcome sum in v6,
-/// forfeit reasons in v8, frozen pairing explanations in v10), and a referee does
-/// not upgrade the binary mid-event — so a started v5 save is refused with
-/// [`TournamentError::OldSaveAlreadyStarted`] rather than half-converted.
+/// seven intervening bumps actually bite (boards gained an outcome sum in v6,
+/// forfeit reasons in v8, frozen pairing explanations in v10, one record per
+/// round of a long game in v11, and the handicap moved inside the outcome in
+/// v12), and a referee does not upgrade the binary mid-event — so a started v5
+/// save is refused with [`TournamentError::OldSaveAlreadyStarted`] rather than
+/// half-converted.
 ///
-/// Versions 6..9 were never released and are rejected like any other unknown
+/// Versions 6..11 were never released and are rejected like any other unknown
 /// version.
 pub(crate) const UPGRADABLE_FROM: u32 = 5;
 

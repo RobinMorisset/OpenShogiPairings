@@ -44,23 +44,22 @@ export function withRecord(fields: BoardFields): Partial<Board> {
  * omit it for a game still being played in its second round.
  *
  * Mirrors `confirm_round_inner`'s carry (`crates/core/src/tournament.rs`), down
- * to the handicap moving onto the live record and the source becoming
- * `Carried`.
+ * to the source becoming `Carried`. The handicap needs no handling of its own:
+ * it lives inside the outcome, so placing that on the live half places it too.
  */
 export function carriedLongGame(
   fields: BoardFields,
 ): { started: Partial<Board>; ended: Partial<Board> } {
   // `long` is dropped: a carried game is long by construction, so a fixture
   // passing `long: false` here would be describing something that cannot exist.
-  const { outcome, long, handicap, ...rest } = fields;
+  const { outcome, long, ...rest } = fields;
   void long;
   return {
     started: { ...rest, record: { kind: "long_carried" } },
     ended: {
       ...rest,
-      handicap,
       source: { kind: "carried" },
       record: { kind: "long_end", outcome: outcome ?? { kind: "pending" } },
-    } as Partial<Board>,
+    },
   };
 }
