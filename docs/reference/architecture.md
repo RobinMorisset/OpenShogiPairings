@@ -124,7 +124,11 @@ Full design, including the webhook phase still to come, in
 ## Where the files live
 
 Two directories, configured independently by environment variable — the desktop
-app reads the same two, so one name means one thing everywhere:
+app reads the same two, so one name means one thing everywhere. These are the
+two that matter to how the software behaves; for the full set the server reads
+(`OSP_BIND`, `OSP_STATIC_DIR`, `OSP_ADMIN_PASSWORD`, the backup retention),
+with defaults, see [`deploy/README.md`](../../deploy/README.md) — which is the
+one table, not a copy of one.
 
 | Variable | Holds | Default (desktop app) | Default (`osp-server`) |
 | --- | --- | --- | --- |

@@ -20,6 +20,9 @@ document is a bug.
 Procedures, for whoever is doing them.
 
 - [`cutting-a-release.md`](guides/cutting-a-release.md)
+- [`../deploy/README.md`](../deploy/README.md) — running the server yourself
+  (Docker, systemd, Caddy), and the full environment-variable table. It lives
+  next to the recipes it describes rather than in here.
 - [`simulation-cli.md`](guides/simulation-cli.md) — `osp-sim`, the pairing-settings simulator.
 - [`solver-scaling-benchmark.md`](guides/solver-scaling-benchmark.md) — how pairing cost scales with field size.
 - [`desktop-startup-profiling.md`](guides/desktop-startup-profiling.md) — where desktop startup time goes.
