@@ -150,6 +150,10 @@ tournament. For how it's built, see [Architecture](#architecture) below.
 
 ## Architecture
 
+![The crate stack: integer-blossom at the bottom, osp-core on it, osp-server and
+osp-sim side by side above, the frontend on osp-server. Everything but osp-sim is
+packaged into the Tauri executable.](docs/reference/architecture.svg)
+
 Rust does the correctness-critical work, TypeScript the interface. The domain
 and the pairing engine live in `osp-core`, on top of a standalone blossom
 (min-weight perfect matching) solver, `integer-blossom`; `osp-server` wraps them

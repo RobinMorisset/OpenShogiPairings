@@ -3,6 +3,10 @@
 How OpenShogiPairings is put together, as it currently is. The HTTP surface has
 its own document, [`api.md`](api.md).
 
+![The crate stack: integer-blossom at the bottom, osp-core on it, osp-server and
+osp-sim side by side above, the frontend on osp-server. Everything but osp-sim is
+packaged into the Tauri executable.](architecture.svg)
+
 | Piece | Location | Tech | Role |
 |-------|----------|------|------|
 | Domain / pairing engine | [`crates/core`](../../crates/core) (`osp-core`) | Rust | Correctness-critical logic + shared DTOs. Reused by every client. |
