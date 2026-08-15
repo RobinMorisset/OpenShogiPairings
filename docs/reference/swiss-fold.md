@@ -6,9 +6,11 @@ half, and pair the Nth player of the top half against the Nth of the bottom half
 for a group of eight, `1-5, 2-6, 3-7, 4-8`. This is the standard Swiss "slip", and
 it is the analog of FIDE's S1-vs-S2 bracket pairing.
 
-The fold is the **lowest-priority tier** of the pairing ladder
-([`crates/core/src/pairing`](../../crates/core/src/pairing)), below rematch,
-score-gap, float, and club. It only decides *which* alternative to use when the
+The fold is the **lowest-priority tier** of the Swiss pairing ladder
+([`crates/core/src/pairing/rules.rs`](../../crates/core/src/pairing/rules.rs)),
+below — in this order — rematch, cup pre-qualification, bye group, airtight
+groups, score gap, float repeat, floater selection, club, and nationality, which
+is the tier immediately above it. It only decides *which* alternative to use when the
 ideal fold is blocked by a higher rule (a rematch, a needed float, …); when the
 ideal fold is achievable it costs nothing.
 

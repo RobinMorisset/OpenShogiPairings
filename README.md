@@ -53,6 +53,10 @@ tournament. For how it's built, see [Architecture](#architecture) below.
   **qualification round** (the German Championship format): half the bracket is
   pre-qualified and plays the open in round 1 while the next players play off
   for the remaining slots.
+- **Team tournaments**, the format that precedes every WOSC: teams of a fixed
+  size (2 to 9 players; 3 is the European convention) become the unit of pairing
+  and of the ranking, while the games themselves stay ordinary individual
+  boards.
 - **Handicap games**, with a recommended handicap (FFS Annexe 7, from the
   rating gap) suggested automatically, and draws-before-the-decisive-game
   recorded for ELO purposes.
@@ -110,7 +114,23 @@ tournament. For how it's built, see [Architecture](#architecture) below.
   rewrite it; when the data it cites has since been edited, it says so.
 - **Click-to-edit** any player cell in place; forced pairings and a forced
   bye when hand-tuning a round draft.
+- **A public page for the players and the spectators**, off until the referee
+  turns it on. On a hosted server, *Public page…* mints a link carrying a random
+  key and shows it as a QR code, with a one-sheet printout for the playing room;
+  anyone with it reads the standings and the pairings on their phone and can
+  change nothing. Publishing again rotates the key, so every link already handed
+  out stops working. A round still being hand-tuned is never public — but each
+  result becomes public the moment it is recorded, board by board.
+- **Or export those pages to a folder**: *Export web pages…* writes the
+  standings and each round as plain HTML — no server, no scripts, no external
+  request — to upload wherever the club already has a website. This is the route
+  that works from the desktop app, whose server nothing else on the network can
+  reach.
 - **Print** pairings, **save/load** a tournament as a portable JSON file.
+- **Printable result sheets**: one slip per player — their tournament number,
+  and a row per round for the board, the opponent and the running score — laid
+  out several to an A4 page to cut apart and hand out, with spare blank slips
+  for whoever registers once the tournament has started.
 - **UI in nine languages** (English, French, German, Japanese, Russian,
   Belarusian, Ukrainian, Slovak, Polish), light/dark theme.
 - Runs as a **single portable desktop executable** (no install, no command
