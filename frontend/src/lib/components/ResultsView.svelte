@@ -474,6 +474,10 @@
     }
   });
 
+  /** Clicking the highlighted chip again is also how the highlight is dropped:
+   *  with one category at a time, a separate "clear" chip was a second way of
+   *  doing exactly this, taking room on a line the note and the print button
+   *  already share. */
   function toggleHighlight(id: string) {
     highlightedCategory = highlightedCategory === id ? null : id;
   }
@@ -893,13 +897,6 @@
             onclick={() => toggleHighlight(cat.id)}
           >{cat.name}</button>
         {/each}
-        {#if filtering}
-          <button
-            type="button"
-            class="cat-chip clear"
-            onclick={() => (highlightedCategory = null)}
-          >{$_("resultsView.clearHighlight")}</button>
-        {/if}
       </div>
     {/if}
     {#if liveRounds.length === 1}
@@ -1552,9 +1549,6 @@
     background: var(--bg-accent);
     border-color: var(--border-accent-strong);
     color: var(--text-on-accent);
-  }
-  .cat-chip.clear {
-    border-style: dashed;
   }
   tr.cat-dim {
     opacity: 0.35;
