@@ -155,6 +155,7 @@ impl From<TournamentView> for PublicTournamentView {
             cup_bracket,
             // Derived from the draft, which is not published.
             draft_cup_players: _,
+            draft_long_players: _,
             suggested_handicaps,
             effective_winners,
         } = view;

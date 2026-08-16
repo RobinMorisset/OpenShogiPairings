@@ -647,11 +647,7 @@ impl Tournament {
                     }),
             );
         }
-        let absent_value = if self.settings.half_point_absences {
-            SitoutValue::Half
-        } else {
-            SitoutValue::Zero
-        };
+        let absent_value = self.absent_sitout_value();
         let playing: HashSet<TournamentId> =
             boards.iter().flat_map(|b| [b.player1, b.player2]).collect();
         let already: HashSet<TournamentId> = sitouts.iter().map(|s| s.player).collect();
@@ -676,6 +672,20 @@ impl Tournament {
         });
         self.draft = None;
         self.explanations_extend_through(draft.number);
+        // Same invariant as the individual path, checked for the same reason —
+        // here the partition is "every member of a paired team is on a board,
+        // every member of a byed team has a sit-out", and an absent player of a
+        // playing team must get the forfeited board rather than a sit-out on top
+        // of it. Team mode refuses late registration outright, so here the full
+        // rule is not merely assertable but permanently true.
+        // See `Tournament::validate_round_membership`.
+        #[cfg(debug_assertions)]
+        if let Err(e) = self.validate_round_membership() {
+            panic!(
+                "confirming round {} broke the round records: {e}",
+                draft.number
+            );
+        }
         Ok(self.rounds.last().expect("just pushed a round"))
     }
 

@@ -173,10 +173,26 @@ All three surfaces become single-round lookups.
   such record can reach the renderer. That is asserted rather than handled: a
   `0-` fallback would paper over a regression in the guard by quietly reporting a
   played game as no game at all.
-- **Standings cross-table.** Same rule. A `LongStart` in the last, ongoing round
-  shows as an ordinary game. A `LongCarried` in column N followed by a `LongEnd`
-  in column N+1 is what the UI keys on to draw one cell straddling both columns;
-  absent the `LongEnd`, the `LongStart` stands alone.
+- **Standings cross-table.** A `LongCarried` in column N followed by a `LongEnd`
+  in column N+1 is drawn as **one cell straddling both columns**, showing the
+  result once — because it is one game. A `LongStart` in the last, ongoing round
+  stands alone in its own column: only one of its two rounds exists so far.
+
+  **Implemented** as `crossTableColumns` (`frontend/src/lib/crossTable.ts`),
+  which is the layout decision — which columns a cell covers and which round
+  supplies its content — separated from the rendering so that it can be tested.
+  That separation is the point: this rule has now been got wrong twice, both
+  times by deciding a column's content from a *neighbouring* round, and both
+  times invisibly, because no fixture could build a carried game. The fixture can
+  now (`carriedLongGame` in `boardFixture.ts`, which yields both halves at once
+  since half a carried game is a save the server refuses).
+
+  This is the one place the app and the American Grid deliberately **differ**,
+  and neither should be "fixed" to match the other. The grid is a fixed-format
+  document for a rating body: one column per round, always, so `LongCarried`
+  renders `0-` and the result lands in the round it was finished in. The
+  cross-table is read by people, where two columns of a single game showing `0-`
+  and then a result is exactly the thing that reads as two games.
 - **Round view.** The "carried games" section that records into the *previous*
   round goes away: the game is a board of the round being displayed.
 
@@ -210,6 +226,19 @@ previous** round, decided or not" — a single-round check with no outcome
 inspection, replacing both the all-rounds `long_pending()` scan at
 `tournament.rs:1222` and the two matching validations in the
 forced-board/forced-bye loops.
+
+Implemented as `Tournament::long_players_busy_in`, and note the emphasis on
+`LongStart`: the first implementation of this reused `Board::is_long`, which is
+also true of the `LongCarried` and `LongEnd` records the carry writes. That
+excluded the players from the round *after* the game as well, where — with no
+`LongStart` left to carry — nothing then gave them a board or a sit-out either,
+reintroducing defect (5) above one round later. `LongStart` is the only record
+that means "this game still reaches into the next round".
+
+The frontend does not restate the rule. It arrives on the response as
+`draft_long_players`, beside the `draft_cup_players` it already had, because the
+frontend's own copy of this predicate had the identical bug — not independently,
+but because it was a copy.
 
 ## Issues this design must handle
 
@@ -383,6 +412,41 @@ panic or a silent mis-score:
   that round (this is the points-per-round invariant, made checkable);
 - `LongEnd` never appears in round 1.
 
+That fourth bullet turned out to be a special case of something worth stating in
+general, and `validate_round_membership` now states it: **every player is
+accounted for exactly once in every round they are part of** — one board or one
+sit-out, never both and never neither. It subsumes the `LongEnd`-vs-sit-out check
+and closes the board-vs-board half that was never written, but its real value is
+the *other* direction, a player with no record at all: that is what defect (5)
+was, and what the `is_long` bug above reintroduced, and nothing else in the file
+would have noticed either.
+
+`validate_round_membership` states it without exception, which it can because a
+player registered after the rounds started is now marked absent for each one
+already played (`add_player`). That was worth doing on its own account — it is
+the same situation as a player who was registered from the start and marked
+absent, and `half_point_absences` is meant to keep both of them near the field
+they belong to rather than dropping them among the beginners for the rest of the
+event. Only one of the two was getting it. Removing the last exception to this
+invariant came free with the fix.
+
+Two consequences worth knowing, neither of which forced a new `SitoutKind`:
+
+- **The next draft offers a late joiner pre-marked absent**, since
+  `Round::absentees` selects on kind and `prepare_round` defaults from it. One
+  untick, and accepted deliberately: dodging it means a sit-out kind of its own
+  and every exhaustive match over `SitoutKind` — scoring, the grid,
+  `scope_reason`, the UI label and its nine translations — to save a click.
+- **The exported grid is unchanged.** `SitoutValue::Zero.cell()` and the
+  no-record path both render `0-`, so with `half_point_absences` off the document
+  is byte-identical to before. With it on, the late joiner's missed rounds now
+  read `0=` instead of `0-`, which is the fix.
+
+The check is also asserted at the end of both confirm paths in debug builds,
+which makes every test that confirms a round a test of it — and is how a cup test
+that had been walking straight through the `is_long` bug above started failing on
+it.
+
 ### 9. Save format
 
 `TOURNAMENT_FORMAT_VERSION` bumps. No migration is written, per the project's
@@ -392,14 +456,54 @@ rather than being read as current.
 
 ## What this does not fix
 
-- The referee can still leave a long game unresolved when the tournament simply
-  ends at round N+1: nothing forces a result if N+2 is never prepared. Under this
-  design the export is at least honest (`0-` twice, no fabricated loss), but if a
-  stronger guarantee is wanted, it belongs in a "finish the tournament" check, not
-  here.
 - The `american_grid` design choice — that the game is reported in the column
   where it *became known* (N+1), with N showing a non-game — is unchanged. This
-  design only makes the code match it.
+  design only makes the code match it. (The app's own cross-table deliberately
+  diverged later; see Rendering above.)
+
+*Resolved since:* an earlier draft of this section said the referee could leave a
+long game unresolved at the end of the tournament and that the export would then
+be "at least honest (`0-` twice)". Both halves were wrong. The export refuses
+outright while a long game has no result, and it now also refuses one that was
+never carried — see "Scoring" below.
+
+## Scoring
+
+**Exactly one record of a long game ever scores it**, and it is the `LongEnd`,
+at the full two-point weight. `LongCarried` scores nothing — it has no outcome to
+score from. `LongStart` scores nothing *either*, and that is the part worth
+writing down, because it is not obvious and it is not merely tidiness.
+
+The model that pairs round N+1 is replayed from the rounds below it, and
+confirming N+1 rewrites round N's record from `LongStart` to `LongCarried`. If
+the two scored differently, the model that paired the gap round could never be
+recomputed once it had been paired: `explain_counterfactual` would answer
+questions about that round from a model that never paired it, silently. Since
+`LongCarried` *cannot* score, `LongStart` must not. Implemented as
+`Board::scoring_weight`, which every pass of `compute_scores` goes through.
+
+Two things fall out of it:
+
+- **A long game's points arrive once, when the round it finishes in completes** —
+  which is exactly when every other result of that round arrives. Previously a
+  game decided inside round N scored there and then vanished for the whole of the
+  gap round, because its outcome had moved to a round that was not complete yet.
+  There is no longer a moment at which a score goes backwards.
+- **A forfeited long game is a forfeit in both of its rounds.** The forfeit rule
+  says the pair never faced each other and neither floated; the inert record used
+  to escape it, since `LongCarried` reads as `Pending` whatever the game really
+  was, and so recorded the opponent once — neither the forfeit rule's nought nor
+  the long rule's two — plus a float marker from a game nobody played.
+
+The case this rule cannot answer is a `LongStart` that is **never carried**: the
+tournament ends on the round it began in. It has consumed one round, so two
+points would let its players outscore a field that played the same single round,
+and zero silently drops a game the grid still renders. Neither is defensible, so
+the state is refused rather than scored: `grid_export_blocker` returns
+`UncarriedLongGame`, naming the round and the two ways out — play the next round,
+which carries it, or untick the box, which demotes it to an ordinary one-point
+game. The mid-tournament state stays perfectly legal; only the export refuses,
+because that is the point at which "the tournament is over" is being asserted.
 
 ## Suggested sequencing
 

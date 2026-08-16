@@ -11,7 +11,7 @@ use typed_index_collections::TiVec;
 use uuid::Uuid;
 
 use crate::player::{Grade, Player, PointAdjustment};
-use crate::round::{GameRecord, Round, Winner};
+use crate::round::{Round, Winner};
 use crate::settings::TournamentSettings;
 use crate::units::{HalfPoints, TournamentId, Wins};
 
@@ -294,6 +294,16 @@ pub(crate) fn compute_scores(
         // A float is judged on the points going *into* the round, so record
         // opponents and floats before applying this round's results.
         for board in &round.boards {
+            // A record that does not score is not a game that happened *here*:
+            // a long game is accounted for once, by the record holding its
+            // outcome. Skipped before the forfeit test below, because the inert
+            // record of a carried game reads as `Pending` whatever the game
+            // really was — a forfeited long game looked like an ordinary
+            // unfinished one here, and so recorded an opponent and a float that
+            // a forfeit forbids.
+            let Some(reps) = board.scoring_weight() else {
+                continue;
+            };
             // A no-show is not a real game: the player who showed up is scored
             // exactly like a bye and the absentee like an absence (both handled
             // below), so neither records the other as an opponent, and there is
@@ -309,17 +319,6 @@ pub(crate) fn compute_scores(
             // the same opponent for the opponent-based tie-breaks (SOS, SODOS,
             // SOSOS, Buchholz). It still feeds ELO as a single game (that reads
             // the boards directly, not these lists).
-            //
-            // Once carried, the game holds one record per round it occupies and
-            // both rounds are completed, so each record contributes *one* game and
-            // the two add up to the same two. Doubling per record would count it
-            // four times over. A long board that was never carried — the last
-            // round of the tournament — is the whole game in one record, so it
-            // still counts two on its own.
-            let reps = match board.record {
-                GameRecord::LongStart(_) => 2,
-                GameRecord::Short(_) | GameRecord::LongCarried | GameRecord::LongEnd(_) => 1,
-            };
             for _ in 0..reps {
                 by_tid[ta].opponents.push(tb);
                 by_tid[tb].opponents.push(ta);
@@ -329,14 +328,14 @@ pub(crate) fn compute_scores(
             // board is already recorded as a game faced above, so a later Swiss
             // round won't re-pair them.)
             //
-            // A carried long game holds a record in both of its rounds, and both
-            // are read here, so the marker ends up on the round the game *ended*
-            // in — the later write wins. That is the intended reading: the float
-            // rules decay by distance from this marker, and a player who has only
-            // just finished a game they floated into is exactly as fresh a floater
-            // as one who finished an ordinary game that round. Recording it from
-            // the round the game *started* would discount the repeat penalty by
-            // one round, for no reason the player would recognise.
+            // A carried long game is read only through its live record, so the
+            // marker lands on the round the game *ended* in. That is the intended
+            // reading: the float rules decay by distance from this marker, and a
+            // player who has only just finished a game they floated into is
+            // exactly as fresh a floater as one who finished an ordinary game
+            // that round. Recording it from the round the game *started* would
+            // discount the repeat penalty by one round, for no reason the player
+            // would recognise.
             if let Some((down, up)) = float_direction(board.points_diff, ta, tb) {
                 by_tid[down].last_descended = Some(round.number);
                 by_tid[up].last_ascended = Some(round.number);
@@ -355,6 +354,9 @@ pub(crate) fn compute_scores(
         // A no-show has the same effect on the player who showed up as a bye: a
         // downfloat they can't be given twice.
         for board in &round.boards {
+            if board.scoring_weight().is_none() {
+                continue;
+            }
             if let Some(present) = board.no_show_opponent() {
                 let s = &mut by_tid[present];
                 s.had_bye = true;
@@ -364,15 +366,14 @@ pub(crate) fn compute_scores(
 
         // Apply this round's results (effective winner scores).
         for board in &round.boards {
+            let Some(reps) = board.scoring_weight() else {
+                continue;
+            };
             let (winner, loser) = match board.effective_winner(settings.handicap_wiel_rule()) {
                 Some(Winner::Player1) => (board.player1, board.player2),
                 Some(Winner::Player2) => (board.player2, board.player1),
                 None => continue,
             };
-            // A long board (double time control) is worth two points and counts
-            // as two games against the same opponent for the point/victory totals
-            // and the opponent-based tie-breaks; it stays a single game for ELO.
-            let reps = if board.is_long() { 2 } else { 1 };
             let s = &mut by_tid[winner];
             s.victories += Wins::from_whole(reps); // one win per game (two for a long board)
             for _ in 0..reps {
@@ -389,10 +390,13 @@ pub(crate) fn compute_scores(
         // The player who showed up on a no-show board scores the free point, as
         // for a bye. The absentee scores nothing (like an absence).
         for board in &round.boards {
+            // A long board resolved by forfeit still scores its long weight (two
+            // points), unless the referee demoted it — but, as everywhere else
+            // here, only from the record that holds the game.
+            let Some(reps) = board.scoring_weight() else {
+                continue;
+            };
             if let Some(present) = board.no_show_opponent() {
-                // A long board resolved by forfeit still scores its long weight
-                // (two points), unless the referee demoted it.
-                let reps = if board.is_long() { 2 } else { 1 };
                 let s = &mut by_tid[present];
                 s.victories += Wins::from_whole(reps); // one win (two for a long board)
             }
@@ -416,8 +420,8 @@ mod tests {
     use super::*;
     use crate::pairing::RoundExplanation;
     use crate::round::{
-        AbsenceKind, Board, CupStage, Forfeit, Outcome, PairingSource, Sitout, SitoutKind,
-        SitoutValue,
+        AbsenceKind, Board, CupStage, Forfeit, GameRecord, Outcome, PairingSource, Sitout,
+        SitoutKind, SitoutValue,
     };
     use crate::settings::MacMahonThreshold;
 
@@ -643,6 +647,44 @@ mod tests {
         assert_eq!(scores.get(&a.id).last_descended, Some(1));
     }
 
+    /// The two rounds a carried long game occupies: the inert record in the
+    /// round it began, and the live one in the round it finished in.
+    ///
+    /// Tests say "a long game that scored" with this rather than with a bare
+    /// `LongStart`, because a `LongStart` is a game whose second round has not
+    /// been confirmed yet and it deliberately scores nothing until it is.
+    fn carried_long_rounds(
+        a: TournamentId,
+        b: TournamentId,
+        points_diff: i32,
+        outcome: Outcome,
+    ) -> [Round; 2] {
+        let paired = Board {
+            record: GameRecord::LongCarried,
+            ..Board::pending(a, b, points_diff, PairingSource::Swiss)
+        };
+        [
+            Round {
+                number: 1,
+                explanation: RoundExplanation::empty(1),
+                boards: vec![paired.clone()],
+                sitouts: Vec::new(),
+                completed: true,
+            },
+            Round {
+                number: 2,
+                explanation: RoundExplanation::empty(2),
+                boards: vec![Board {
+                    record: GameRecord::LongEnd(outcome),
+                    source: PairingSource::Carried,
+                    ..paired
+                }],
+                sitouts: Vec::new(),
+                completed: true,
+            },
+        ]
+    }
+
     #[test]
     fn long_board_scores_two_points_two_victories_and_counts_twice_for_tiebreaks() {
         // A beats B on a long (two-round) board: A scores 2 points (4 halves) and
@@ -650,25 +692,16 @@ mod tests {
         // opponent/defeated lists (so SOS/SODOS weight B double).
         let a = player(1, None);
         let b = player(2, None);
-        let round = Round {
-            number: 1,
-            explanation: RoundExplanation::empty(1),
-            boards: vec![Board {
-                record: GameRecord::LongStart(Outcome::won(Winner::Player1)),
-                ..Board::pending(
-                    a.tournament_id.unwrap(),
-                    b.tournament_id.unwrap(),
-                    0,
-                    PairingSource::Swiss,
-                )
-            }],
-            sitouts: Vec::new(),
-            completed: true,
-        };
+        let rounds = carried_long_rounds(
+            a.tournament_id.unwrap(),
+            b.tournament_id.unwrap(),
+            0,
+            Outcome::won(Winner::Player1),
+        );
         let scores = compute_scores(
             &[a.clone(), b.clone()],
             &TournamentSettings::default(),
-            &[round],
+            &rounds,
         );
         assert_eq!(scores.get(&a.id).points(), 4); // 2 points = 4 half-points
         assert_eq!(scores.get(&a.id).victories, 4); // 2 wins = 4 half-wins
@@ -734,39 +767,67 @@ mod tests {
         assert_eq!(scores.get(&b.id).opponents, vec![atid, atid]);
     }
 
+    /// A long game whose second round has not been confirmed scores nothing at
+    /// all — not even the opponent — **whether or not it has been decided**.
+    ///
+    /// This is the rule that keeps the gap round's pairing model reproducible.
+    /// Confirming round 2 rewrites this record from `LongStart` to `LongCarried`,
+    /// and `LongCarried` has no outcome to score from, so the two must agree at
+    /// zero or the model that paired round 2 could never be recomputed once it
+    /// had been paired. The test asserts the decided case as well as the pending
+    /// one, because it is the decided case that would otherwise differ.
     #[test]
-    fn pending_long_board_records_the_opponent_but_awards_no_points() {
-        // A long board with no result yet: the opponent is already recorded
-        // (twice), but nobody has scored — the "padded" standings state.
+    fn a_long_board_not_yet_carried_scores_nothing_decided_or_not() {
         let a = player(1, None);
         let b = player(2, None);
-        let round = Round {
-            number: 1,
-            explanation: RoundExplanation::empty(1),
-            boards: vec![Board {
-                record: GameRecord::LongStart(Outcome::PENDING),
-                ..Board::pending(
-                    a.tournament_id.unwrap(),
-                    b.tournament_id.unwrap(),
-                    0,
-                    PairingSource::Swiss,
-                )
-            }],
-            sitouts: Vec::new(),
-            completed: true, // completed even with the long board pending
-        };
+        let (atid, btid) = (a.tournament_id.unwrap(), b.tournament_id.unwrap());
+        for outcome in [Outcome::PENDING, Outcome::won(Winner::Player1)] {
+            let round = Round {
+                number: 1,
+                explanation: RoundExplanation::empty(1),
+                boards: vec![Board {
+                    record: GameRecord::LongStart(outcome),
+                    ..Board::pending(atid, btid, 2, PairingSource::Swiss)
+                }],
+                sitouts: Vec::new(),
+                completed: true, // completed even with the long board running
+            };
+            let scores = compute_scores(
+                &[a.clone(), b.clone()],
+                &TournamentSettings::default(),
+                &[round],
+            );
+            assert_eq!(scores.get(&a.id).points(), 0, "{outcome:?}");
+            assert_eq!(scores.get(&a.id).victories, 0, "{outcome:?}");
+            assert!(scores.get(&a.id).opponents.is_empty(), "{outcome:?}");
+            assert!(scores.get(&a.id).defeated.is_empty(), "{outcome:?}");
+            // No float either: the players have not finished floating anywhere.
+            assert_eq!(scores.get(&a.id).last_descended, None, "{outcome:?}");
+            assert_eq!(scores.get(&b.id).last_ascended, None, "{outcome:?}");
+        }
+    }
+
+    /// The same game once carried and decided: every figure appears at once, and
+    /// at the long weight. Together with the test above this pins the whole
+    /// visible behaviour — a long game's points arrive when the round it
+    /// *finishes* in completes, which is when every other result of that round
+    /// arrives too.
+    #[test]
+    fn a_carried_long_board_scores_everything_in_the_round_it_ended_in() {
+        let a = player(1, None);
+        let b = player(2, None);
+        let (atid, btid) = (a.tournament_id.unwrap(), b.tournament_id.unwrap());
+        let rounds = carried_long_rounds(atid, btid, 0, Outcome::won(Winner::Player1));
         let scores = compute_scores(
             &[a.clone(), b.clone()],
             &TournamentSettings::default(),
-            &[round],
+            &rounds,
         );
-        assert_eq!(scores.get(&a.id).points(), 0);
-        assert_eq!(scores.get(&a.id).victories, 0);
-        assert_eq!(
-            scores.get(&a.id).opponents,
-            vec![b.tournament_id.unwrap(), b.tournament_id.unwrap()]
-        );
-        assert!(scores.get(&a.id).defeated.is_empty());
+        assert_eq!(scores.get(&a.id).points(), 4);
+        assert_eq!(scores.get(&a.id).victories, 4);
+        assert_eq!(scores.get(&a.id).opponents, vec![btid, btid]);
+        assert_eq!(scores.get(&a.id).defeated, vec![btid, btid]);
+        assert_eq!(scores.get(&b.id).opponents, vec![atid, atid]);
     }
 
     #[test]
@@ -775,31 +836,44 @@ mod tests {
         // weight (2 points / 2 victories), like a doubled bye.
         let a = player(1, None);
         let b = player(2, None);
-        let round = Round {
-            number: 1,
-            explanation: RoundExplanation::empty(1),
-            boards: vec![Board {
-                record: GameRecord::LongStart(Outcome::Forfeit {
-                    absent: Forfeit::Player2(AbsenceKind::NoShow),
-                }),
-                ..Board::pending(
-                    a.tournament_id.unwrap(),
-                    b.tournament_id.unwrap(),
-                    0,
-                    PairingSource::Swiss,
-                )
-            }],
-            sitouts: Vec::new(),
-            completed: true,
-        };
+        let (atid, btid) = (a.tournament_id.unwrap(), b.tournament_id.unwrap());
+        let rounds = carried_long_rounds(
+            atid,
+            btid,
+            2,
+            Outcome::Forfeit {
+                absent: Forfeit::Player2(AbsenceKind::NoShow),
+            },
+        );
         let scores = compute_scores(
             &[a.clone(), b.clone()],
             &TournamentSettings::default(),
-            &[round],
+            &rounds,
         );
         assert_eq!(scores.get(&a.id).points(), 4); // 2 points
         assert_eq!(scores.get(&a.id).victories, 4); // 2 wins
         assert_eq!(scores.get(&b.id).points(), 0);
+
+        // And it is a forfeit throughout, in both of its rounds: neither player
+        // faced the other, and no float was read off it. The inert record used to
+        // escape this because it reads as `Pending` whatever the game was, so a
+        // forfeited long game recorded the opponent once — neither the forfeit
+        // rule's nought nor the long rule's two.
+        assert!(
+            scores.get(&a.id).opponents.is_empty(),
+            "a forfeit is not a game faced, in either of its rounds"
+        );
+        assert!(scores.get(&b.id).opponents.is_empty());
+        assert_eq!(
+            scores.get(&b.id).last_ascended,
+            None,
+            "the absentee did not upfloat into a game nobody played"
+        );
+        // The player who turned up is scored like a bye, which *is* a downfloat —
+        // but from the bye rule in the round the game ended in, not from the
+        // board's frozen `points_diff` one round earlier.
+        assert!(scores.get(&a.id).had_bye);
+        assert_eq!(scores.get(&a.id).last_descended, Some(2));
     }
 
     #[test]

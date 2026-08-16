@@ -20,7 +20,7 @@
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
   import { boardOutcome, drawnOf, forfeitOf, winnerOf } from "../boardOutcome";
   import { absenceKind } from "../noShow";
-  import { isLong } from "../longGames";
+  import { crossTableColumns, type CrossTableColumn } from "../crossTable";
   import { partitionDropped } from "../tiebreak";
   import { formatScore, HALF_POINT_TIEBREAKS } from "../score";
   import { printPage } from "../platform";
@@ -521,33 +521,34 @@
     | { kind: "no-show"; opponentName: string; justified: boolean }
     | { kind: "no-show-win"; opponentName: string }
     | { kind: "pending"; opponent: string; opponentName: string }
-    // A long (two-round) game started this round: its result belongs to the next
-    // round's column, so this column shows a `0−` placeholder.
+    // The inert half of a carried long game, drawn on its own — which only
+    // happens if the other half is missing, a save the server will not load.
+    // Shows `0−`: this round holds no result, and the cell must not imply one.
     | { kind: "long-pending"; opponentName: string }
-    // The player wasn't in this round at all (e.g. registered later).
+    // The player wasn't in this round at all. Reachable only from a file that
+    // predates late joiners being marked absent for the rounds they missed.
     | { kind: "not-in-round" }
     | PlayedCell;
 
-  // A long (two-round) game lives in its starting round but its result is only
-  // known in the next round, so it shows a `0−` placeholder in the starting
-  // column and its result in the following column — matching the American Grid.
-  function longAwareCell(player: Player, i: number): Cell {
-    const pid = tid(player);
-    const onLong = (round: Round) =>
-      round.boards.find((b) => isLong(b) && (b.player1 === pid || b.player2 === pid));
-    const here = onLong(shownRounds[i]);
-    if (here) {
-      const opp = here.player1 === pid ? here.player2 : here.player1;
-      return { kind: "long-pending", opponentName: opponentLabel(opp) };
-    }
-    if (i > 0) {
-      const prev = shownRounds[i - 1];
-      const idx = prev.boards.findIndex(
-        (b) => isLong(b) && (b.player1 === pid || b.player2 === pid),
-      );
-      if (idx >= 0) return cellForBoard(player, prev, prev.boards[idx], idx);
-    }
-    return cellFor(player, shownRounds[i]);
+  // How this player's row is laid out across the round columns: one cell per
+  // round, except for a long game, which is drawn once in a cell straddling the
+  // two rounds it was played over. The layout rule is `lib/crossTable.ts` — it
+  // is the part that has been wrong twice, and there it can be tested.
+  function columnsFor(player: Player): CrossTableColumn[] {
+    return crossTableColumns(shownRounds, tid(player));
+  }
+
+  // The extra tooltip line on a cell that covers two round columns. The cell
+  // shows one result where the row otherwise shows one per round, so it has to
+  // say which rounds it accounts for — the reader is counting columns.
+  function longSpanNote(column: CrossTableColumn): string {
+    if (column.span !== 2) return "";
+    return `\n${$_("resultsView.longGameSpanTitle", {
+      values: {
+        from: shownRounds[column.startRound].number,
+        to: shownRounds[column.readRound].number,
+      },
+    })}`;
   }
 
   function cellFor(player: Player, round: Round): Cell {
@@ -568,6 +569,14 @@
     const opponentTid = isP1 ? board.player2 : board.player1;
     const opponent = String(opponentTid);
     const opponentName = opponentLabel(opponentTid);
+    // The inert half of a carried long game, reached on its own. Normally it is
+    // never drawn: the straddling cell reads the round holding the live record
+    // instead. Getting here means a save with one half of a carried game, which
+    // the server refuses to load — so say "no result here" rather than let
+    // `outcomeOf` report the record's absent outcome as a game still in play.
+    if (board.record?.kind === "long_carried") {
+      return { kind: "long-pending", opponentName };
+    }
     const forfeit = forfeitOf(board);
     if (forfeit) {
       // This side missed the board for a single absence on their side, or when
@@ -1051,9 +1060,11 @@
           {/if}
           <td>{player.nationality ?? "—"}</td>
           <td>{player.club ?? "—"}</td>
-          {#each shownRounds as round, i (round.number)}
-            {@const cell = longAwareCell(player, i)}
-            <td class="num result">
+          {#each columnsFor(player) as column, i (shownRounds[i].number)}
+            {#if column.span !== 0}
+              {@const cell = cellFor(player, shownRounds[column.readRound])}
+              {@const straddles = column.span === 2}
+              <td class="num result" class:long-span={straddles} colspan={column.span}>
               {#if cell.kind === "sitout"}
                 {@const tone = isBye(cell.sitout) && cell.sitout.value === "full" ? "win" : "absent"}
                 {#if editablePlayerSitouts}
@@ -1102,32 +1113,36 @@
                   data-tip={$_(
                     cell.justified ? "resultsView.justifiedTitle" : "resultsView.noShowTitle",
                     { values: { name: cell.opponentName } },
-                  )}>{cell.justified ? "0−" : "0#"}</span
+                  ) + longSpanNote(column)}>{cell.justified ? "0−" : "0#"}</span
                 >
               {:else if cell.kind === "no-show-win"}
                 <span
                   class="win"
-                  data-tip={$_("resultsView.noShowWinTitle", { values: { name: cell.opponentName } })}
-                  >0+</span
+                  data-tip={$_("resultsView.noShowWinTitle", {
+                    values: { name: cell.opponentName },
+                  }) + longSpanNote(column)}>0+</span
                 >
               {:else if cell.kind === "pending"}
                 <!-- The opponent alone, unprefixed: the cell already says this
                      is a game against them, so a "vs" in front of the name is
                      a word the referee reads past on every single hover. -->
-                <span class="pending" data-tip={cell.opponentName}>{cell.opponent}?</span>
+                <span class="pending" data-tip={cell.opponentName + longSpanNote(column)}
+                  >{cell.opponent}?</span
+                >
               {:else}
                 <span
                   class={cell.actualWon ? "win" : "loss"}
-                  data-tip={cell.handicap && cell.effectiveWon !== cell.actualWon
+                  data-tip={(cell.handicap && cell.effectiveWon !== cell.actualWon
                     ? `${cell.opponentName}\n${$_(
                         cell.effectiveWon
                           ? "resultsView.handicapGameWin"
                           : "resultsView.handicapGameLoss",
                       )}`
-                    : cell.opponentName}>{playedLabel(cell)}</span
+                    : cell.opponentName) + longSpanNote(column)}>{playedLabel(cell)}</span
                 >
-              {/if}
-            </td>
+                {/if}
+              </td>
+            {/if}
           {/each}
           {#if teamMode}
             <!-- Wins counts *matches*, and the ranking criteria rank teams: a
@@ -1347,6 +1362,18 @@
   .tiebreak,
   th.mid {
     text-align: center;
+  }
+  /* A long game is one game played over two rounds, so it gets one cell over
+     two columns. Without a mark it just looks like a result that has drifted
+     off the column grid, which is exactly the misreading the old layout caused
+     for real — so the cell is bracketed by its own side rules, saying "these
+     two rounds, one game". Kept to borders and a faint tint rather than a
+     background block: this table is read as a grid, and a filled cell in the
+     middle of it pulls the eye away from the rankings it exists to show. */
+  .long-span {
+    border-left: 1px solid var(--color-border);
+    border-right: 1px solid var(--color-border);
+    background: color-mix(in srgb, var(--color-text) 4%, transparent);
   }
   .win {
     color: var(--color-success);

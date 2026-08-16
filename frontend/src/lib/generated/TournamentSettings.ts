@@ -94,6 +94,13 @@ handicap_policy: HandicapPolicy,
  * round. So turning this on affects rounds confirmed from then on, not ones
  * already played.
  *
+ * The point of it is that missing a round — commonly a whole day of a
+ * weekend event — should not drop a player so far down the standings that
+ * the rest of their tournament is spent against the bottom of the field. It
+ * therefore applies to a player registered *late* just as much as to one
+ * registered from the start and marked absent: both were simply not at the
+ * board. See [`Tournament::add_player`](crate::Tournament::add_player).
+ *
  * [`Sitout::value`]: crate::round::Sitout::value
  */
 half_point_absences: boolean, 

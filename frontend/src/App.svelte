@@ -37,7 +37,6 @@
     type DraftUpdate,
   } from "./lib/api";
   import { describeApiError, describeCoded } from "./lib/errorCodes";
-  import { busyOnLongGame } from "./lib/longGames";
   import { isDecided } from "./lib/noShow";
   import { pairingRating } from "./lib/teams";
   import type {
@@ -94,6 +93,7 @@
   const cupPodium = $derived(store.cupPodium);
   const cupBracket = $derived(store.cupBracket);
   const draftCupPlayers = $derived(store.draftCupPlayers);
+  const draftLongPlayers = $derived(store.draftLongPlayers);
   const suggestedHandicaps = $derived(store.suggestedHandicaps);
   const effectiveWinners = $derived(store.effectiveWinners);
   const canUndo = $derived(store.canUndo);
@@ -183,21 +183,6 @@
     if (!tournament || !activeRound) return [];
     const idx = tournament.rounds.findIndex((r) => r.number === activeRound.number);
     return idx >= 0 ? (teamMatches[idx] ?? []) : [];
-  });
-
-  // Players a long game from the previous round keeps out of this draft. They
-  // can't be paired or customized — the server excludes them from pairing — so
-  // keep them out of the draft UI too (alongside cup players), which also stops a
-  // gap round accidentally carrying them into the next round as absentees.
-  //
-  // The rule lives in `lib/longGames.ts` so this mirrors `busy_long` in
-  // `confirm_round_inner` rather than restating it; note it keys on `long`, not
-  // `longPending` — a long game takes both its rounds even when it finished in
-  // the first.
-  const busyLongPlayers = $derived.by(() => {
-    if (!tournament) return [];
-    const number = tournament.draft?.number ?? tournament.rounds.length + 1;
-    return busyOnLongGame(tournament.rounds, number);
   });
 
   // Why the engine chose the active round's pairings. Frozen onto the round when
@@ -1334,7 +1319,7 @@
             draft={tournament.draft}
             players={tournament.players}
             cupPlayers={draftCupPlayers}
-            longGamePlayers={busyLongPlayers}
+            longGamePlayers={draftLongPlayers}
             teams={teamMode ? (tournament.teams ?? []) : []}
             onUpdate={handleUpdateDraft}
             onConfirm={handleConfirmRound}

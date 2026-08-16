@@ -578,6 +578,41 @@ impl Board {
         !matches!(self.record, GameRecord::Short(_))
     }
 
+    /// What this board contributes to the score tables: how many games it is
+    /// worth, or `None` for a record that scores nothing at all.
+    ///
+    /// **Exactly one record of a long game ever scores it.** A carried long game
+    /// holds two — the inert [`LongCarried`](GameRecord::LongCarried) in the
+    /// round it began and the live [`LongEnd`](GameRecord::LongEnd) in the round
+    /// it finished in — and the live one carries the whole two-point weight. The
+    /// inert one cannot score, having no outcome to score from.
+    ///
+    /// [`LongStart`](GameRecord::LongStart) — a long game whose second round has
+    /// not been confirmed yet — scores nothing *either*, and that is the subtle
+    /// part. It is not merely tidy: the model that pairs round N+1 is replayed
+    /// from the rounds before it, and confirming N+1 rewrites the round-N record
+    /// from `LongStart` to `LongCarried`. If those two scored differently, the
+    /// pairing model of the gap round could never be recomputed once it had been
+    /// paired, and every counterfactual probe of that round would run against a
+    /// model that never paired it. Since `LongCarried` cannot score, `LongStart`
+    /// must not.
+    ///
+    /// The consequence a referee sees is that a long game's points appear when
+    /// the round it *finishes* in completes — which is exactly when every other
+    /// result of that round appears. The exception that would be wrong is a
+    /// `LongStart` that is never carried at all, because there is no later round
+    /// to reveal it; the American Grid export refuses that state rather than let
+    /// it settle at zero (see `Tournament::grid_export_blocker`).
+    pub fn scoring_weight(&self) -> Option<u32> {
+        match self.record {
+            GameRecord::Short(_) => Some(1),
+            // One game played over two rounds, so two of everything: two points,
+            // two wins, and the opponent faced twice for SOS and its family.
+            GameRecord::LongEnd(_) => Some(2),
+            GameRecord::LongStart(_) | GameRecord::LongCarried => None,
+        }
+    }
+
     /// A long board whose game hasn't finished yet — the state that shows the
     /// `0-` placeholder in the cross-table, that blocks advancing past the round
     /// after the one it started in, and that refuses the American Grid export.

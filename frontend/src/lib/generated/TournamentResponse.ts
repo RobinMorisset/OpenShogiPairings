@@ -64,6 +64,13 @@ cup_bracket: CupBracketView | null,
  */
 draft_cup_players: Array<TournamentId>, 
 /**
+ * Players a long game started in the previous round keeps out of the round
+ * being drafted, for the same reason as `draft_cup_players` — and shipped
+ * rather than mirrored because the frontend's own copy of the rule carried
+ * the same bug the Rust one did. Empty otherwise.
+ */
+draft_long_players: Array<TournamentId>, 
+/**
  * Suggested handicap per board, indexed like `tournament.rounds[i].boards[j]`.
  * Computed from current ratings regardless of `handicap_policy` — the
  * frontend decides how to surface it. `None` = no suggestion (near-equal

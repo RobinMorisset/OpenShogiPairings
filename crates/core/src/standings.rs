@@ -602,7 +602,8 @@ mod tests {
 
     #[test]
     fn long_board_opponent_counts_twice_in_sos_and_sodos() {
-        // R1: A beats B on a long board; C beats D (normal). R2: B beats C.
+        // A beats B on a long board spanning R1-R2; C beats D in R1; B beats C in
+        // R3 (B is on the long board through R2, so R3 is their next game).
         // B ends on 1 point (2 halves). A faced B on a long board, so B is
         // counted *twice* for A's opponent-sums: SOSM(A) = SODOSM(A) = 2·2 = 4,
         // not 2 as it would be for a single game.
@@ -610,20 +611,24 @@ mod tests {
         let b = player(2, None);
         let c = player(3, None);
         let d = player(4, None);
-        let long_ab = Board {
-            record: GameRecord::LongStart(Outcome::won(Winner::Player1)),
-            ..Board::pending(
-                a.tournament_id.unwrap(),
-                b.tournament_id.unwrap(),
-                0,
-                PairingSource::Swiss,
-            )
-        };
+        // The pair of records a carried long game is: the inert one in the round
+        // it began, and the live one holding the result in the round it ended in.
+        // A bare `LongStart` would score nothing at all — it is a game whose
+        // second round has not been confirmed yet.
+        let paired_ab = Board::pending(
+            a.tournament_id.unwrap(),
+            b.tournament_id.unwrap(),
+            0,
+            PairingSource::Swiss,
+        );
         let rounds = vec![
             round(
                 1,
                 vec![
-                    long_ab,
+                    Board {
+                        record: GameRecord::LongCarried,
+                        ..paired_ab.clone()
+                    },
                     board(
                         c.tournament_id.unwrap(),
                         d.tournament_id.unwrap(),
@@ -633,6 +638,14 @@ mod tests {
             ),
             round(
                 2,
+                vec![Board {
+                    record: GameRecord::LongEnd(Outcome::won(Winner::Player1)),
+                    source: PairingSource::Carried,
+                    ..paired_ab
+                }],
+            ),
+            round(
+                3,
                 vec![board(
                     b.tournament_id.unwrap(),
                     c.tournament_id.unwrap(),

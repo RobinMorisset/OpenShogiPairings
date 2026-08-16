@@ -85,7 +85,10 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   played. Saves are now checked when they are loaded, exactly as imported ones
   are, and a file that fails appears in the picker with the reason it could not
   be opened, untouched. A file with no format version at all, or carrying a key
-  this version does not recognise, is now refused rather than read anyway.
+  this version does not recognise, is now refused rather than read anyway. So is
+  one whose rounds leave a player out altogether: a player needs exactly one
+  board or one sit-out in every round they are in, and none at all quietly drops
+  a round out of their record.
 - Some filesystem failures were silently swallowed; they are now surfaced as
   errors in the log. In particular, an unreadable backup directory was reported
   as "no backups yet", and an unreadable data directory (an unmounted volume,
@@ -122,6 +125,38 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   name.
 - If `OSP_ADMIN_PASSWORD` is set, only published tournaments are visible to
   anyone without that password.
+- **A long game's points disappeared from the standings for a whole round.** A
+  long board decided early — most often because one player never turned up —
+  scored its two points as soon as its first round finished, then lost them again
+  the moment the next round was started, getting them back only once that round
+  was complete. In the meantime the standings, and the public page, showed the
+  wrong ranking. A long game's points now simply arrive once, when the round it
+  finishes in is completed, like every other result of that round.
+- **A long game nobody turned up for was still counted as a game played.** For
+  tie-breaks a no-show is not a game: neither player is recorded as having faced
+  the other. That held in the round the game finished in but not in the round it
+  started, so the pair were counted as having met once — where the rule says
+  either nought or, for a long game played out, twice. Every published tie-break
+  that sums opponents (SOS, SODOS, Buchholz) was affected, as was the pairing of
+  later rounds.
+- **A long game that never got its second round is now refused by the grid
+  export.** Flagging a board in the final round as a long game leaves it having
+  taken one round rather than two, so what it is worth is genuinely undecided —
+  and it was quietly being scored as nothing while still appearing in the exported
+  grid. The export now says so and names the two ways out: start the next round,
+  which the game carries into, or untick the box to score it as one ordinary game.
+- **A player registered mid-tournament was scored as if they had not missed
+  anything, which cost them points where half-point absences are on.** Someone
+  added after a round has been played has now simply missed it, exactly like a
+  player who was registered from the start and marked absent — the rounds before
+  they arrived appear as absences and are worth what the tournament's
+  "half point for an absence" setting says. They used to have no record of those
+  rounds at all, so they scored nothing for them while an absentee scored half a
+  point each, which pushed them below players they were level with and paired
+  them against the bottom of the field for the rest of the event — the opposite of
+  what that setting is for. With the setting off, nothing changes. One
+  consequence to know about: the next round's draft now offers them ticked as
+  absent, like anyone else who missed the previous round, so untick them.
 - **The buttons that start a round and export the cross-table now ask the
   server whether they should be available, instead of working it out
   themselves.** Both had re-implemented the rule in the browser, and both had
@@ -152,8 +187,10 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   keeps one record per round — a placeholder in the round it began, and the live
   game in the round it is finished in, where the result is entered. The round it
   is played in stays open until that result is in, exactly like any other
-  unfinished game, and the cross-table shows `0-` then the result without
-  looking anywhere but the column it is drawing.
+  unfinished game. In the results cross-table it is drawn the way it was played:
+  **one cell spanning the two rounds**, showing the result once, instead of a
+  blank followed by a result that read like two separate games. The grid exported
+  for the rating body keeps one column per round, as that format requires.
 - **The American Grid export invented a result for an unfinished long game.** A
   long board carries its result into the *next* round's column, so one that had
   not been entered yet was written as a loss for **both** players — a double

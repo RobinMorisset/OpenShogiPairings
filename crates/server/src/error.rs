@@ -182,6 +182,11 @@ pub(crate) fn domain_payload(
         TournamentError::UnresolvedLongGame { round } => {
             with("unresolved_long_game", [("round", round.to_string())])
         }
+        // Referee-reachable and referee-fixable: they either start the next round
+        // or untick the long box, and the message has to say both.
+        TournamentError::UncarriedLongGame { round } => {
+            with("uncarried_long_game", [("round", round.to_string())])
+        }
         // Referee-reachable: the round a long game *started* still shows its
         // board, so clicking it is an ordinary mistake, not a broken client.
         TournamentError::CarriedLongGame { round } => {
@@ -339,6 +344,11 @@ pub(crate) fn domain_payload(
         // A carried long game is written as a pair of records, in one operation,
         // so a file holding only one of them was hand-edited too.
         | TournamentError::OrphanedLongGame { .. }
+        // Likewise a round that accounts for a player twice or not at all:
+        // confirming a round asserts the opposite, so these reach a referee only
+        // from a file this build did not write.
+        | TournamentError::PlayerTwiceInRound { .. }
+        | TournamentError::PlayerMissingFromRound { .. }
         // Deliberately English: unfinished scaffolding (the UI offers no team
         // probe yet), not a state the product is meant to have.
         // TODO: `InvalidDraft` carries a free-form English string built at ~8
@@ -516,6 +526,7 @@ mod tests {
             TournamentError::LongFlagAfterCoupledResult,
             TournamentError::NotCurrentRound,
             TournamentError::UnresolvedLongGame { round: 3 },
+            TournamentError::UncarriedLongGame { round: 3 },
             TournamentError::CarriedLongGame { round: 3 },
             TournamentError::LongGameStartedEarlier { round: 2 },
             TournamentError::RoundNotFound(7),

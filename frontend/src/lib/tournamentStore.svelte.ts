@@ -33,7 +33,11 @@ export class TournamentStore {
   teamMatches = $state<TeamMatchView[][]>([]);
   cupPodium = $state<CupPodium | null>(null);
   cupBracket = $state<CupBracketView | null>(null);
+  /** Players the cup pairs in the round being drafted, and the players a long
+   *  game from the previous round keeps out of it — both server-computed, so
+   *  the draft UI hides exactly who the pairing will refuse to place. */
   draftCupPlayers = $state<number[]>([]);
+  draftLongPlayers = $state<number[]>([]);
   suggestedHandicaps = $state<(Handicap | null)[][]>([]);
   /** Winner that counts for standings/pairing per board, server-computed (see
    *  `TournamentResponse.effective_winners`), indexed like `tournament.rounds`. */
@@ -79,6 +83,7 @@ export class TournamentStore {
     this.cupPodium = res.cup_podium ?? null;
     this.cupBracket = res.cup_bracket ?? null;
     this.draftCupPlayers = res.draft_cup_players ?? [];
+    this.draftLongPlayers = res.draft_long_players ?? [];
     this.suggestedHandicaps = res.suggested_handicaps ?? [];
     this.effectiveWinners = res.effective_winners ?? [];
     this.canUndo = res.can_undo;
@@ -117,6 +122,7 @@ export class TournamentStore {
     this.cupPodium = null;
     this.cupBracket = null;
     this.draftCupPlayers = [];
+    this.draftLongPlayers = [];
     this.suggestedHandicaps = [];
     this.effectiveWinners = [];
     this.canUndo = false;

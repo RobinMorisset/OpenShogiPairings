@@ -222,6 +222,15 @@ pub enum TournamentError {
     /// `docs/long-boards-v2.md`.
     #[error("round {round} holds half of a carried long game")]
     OrphanedLongGame { round: u32 },
+    /// The American Grid export was asked for while a long game in the last
+    /// round has never been carried into a second one. It has taken a single
+    /// round, so it is not yet worth two points and the scoring gives it none:
+    /// the referee must play the next round or demote the board.
+    #[error(
+        "the long game in round {round} has not been played over a second round: \
+         start the next round, or untick the long box to score it as one game"
+    )]
+    UncarriedLongGame { round: u32 },
     /// No round with the given number exists.
     #[error("no round number {0}")]
     RoundNotFound(u32),
@@ -296,6 +305,13 @@ pub enum TournamentError {
     /// cross-table grows a second cell for a round that has one.
     #[error("round {round} has player {player} taking part more than once")]
     PlayerTwiceInRound { round: u32, player: TournamentId },
+    /// The other direction of the same rule: a player with no record at all in a
+    /// round — no board, no sit-out, not even an absence. They simply vanish
+    /// from it, scoring nothing and appearing nowhere, which is what a long
+    /// game's pairing exclusion once did to both its players. See
+    /// [`validate_round_membership`](Tournament::validate_round_membership).
+    #[error("round {round} has no board and no sit-out for player {player}")]
+    PlayerMissingFromRound { round: u32, player: TournamentId },
     /// The ELO estimate is enabled but nothing anchors its scale: every player is
     /// on a flat prior and none is pinned, so the estimate has no absolute
     /// reference (see [`crate::elo::has_scale_anchor`]).
@@ -491,6 +507,22 @@ impl Tournament {
     ///
     /// Returns [`TournamentError::EmptyPlayerName`] if the last name is blank
     /// (the last name is the required identifier; the first name is optional).
+    ///
+    /// A player registered **after** the rounds have started is marked absent
+    /// for each one already played, at the tournament's
+    /// [`half_point_absences`](crate::settings::TournamentSettings::half_point_absences)
+    /// default — the same record, and the same score, as a player who was
+    /// registered from the start and marked absent for those rounds. The two are
+    /// the same situation: someone who was not at the board. They used to differ,
+    /// the late joiner getting no record at all and so scoring zero where the
+    /// absentee scored a half point each round, which in a half-point tournament
+    /// dropped them below players they should have been level with and paired
+    /// them against the bottom of the field — precisely the outcome that setting
+    /// exists to avoid.
+    ///
+    /// It also means every round accounts for every player, with no exception to
+    /// carve out; see
+    /// [`validate_round_membership`](Self::validate_round_membership).
     pub fn add_player(&mut self, new: NewPlayer) -> Result<&Player, TournamentError> {
         if new.last_name.trim().is_empty() {
             return Err(TournamentError::EmptyPlayerName);
@@ -507,11 +539,39 @@ impl Tournament {
         // immediately (independent of rating); before finalization, numbers are
         // assigned in bulk by `finalize_registration`.
         if self.registration_finalized {
-            player.tournament_id = Some(TournamentId(self.next_tournament_id()));
+            let number = TournamentId(self.next_tournament_id());
+            player.tournament_id = Some(number);
+            // Absent for everything already played. Written now rather than
+            // derived later because nothing in the file records *when* someone
+            // joined: with the record, "missed round 2" and "was not registered
+            // for round 2" are the same fact, which is what they are.
+            let value = self.absent_sitout_value();
+            for round in &mut self.rounds {
+                round.sitouts.push(Sitout {
+                    player: number,
+                    kind: SitoutKind::Absent,
+                    value,
+                });
+            }
         }
         self.players.push(player);
         // `push` never reallocates away the just-added last element.
         Ok(self.players.last().expect("just pushed a player"))
+    }
+
+    /// What an absence scores by default, per
+    /// [`half_point_absences`](crate::settings::TournamentSettings::half_point_absences).
+    ///
+    /// Only ever a default: it is read when a sit-out is *written*, and
+    /// [`set_sitout_value`](Self::set_sitout_value) can override any of them
+    /// afterwards. So changing the setting mid-tournament does not rewrite what
+    /// earlier rounds already scored.
+    pub(crate) fn absent_sitout_value(&self) -> SitoutValue {
+        if self.settings.half_point_absences {
+            SitoutValue::Half
+        } else {
+            SitoutValue::Zero
+        }
     }
 
     /// The next unused tournament number (max assigned + 1). Numbers are never
@@ -1048,6 +1108,61 @@ impl Tournament {
             .unwrap_or_default()
     }
 
+    /// The players a long game keeps out of round `number`'s Swiss pairing:
+    /// those on a board *started* long in the immediately previous round.
+    ///
+    /// A long game is one game played across two rounds — which is exactly why
+    /// its winner scores two points — so it occupies both rounds whichever round
+    /// it actually finishes in. That is why this is keyed on the record rather
+    /// than on whether the game is still pending: one that finished early (or
+    /// resolved by a no-show) still took both rounds, and freeing its players the
+    /// moment it was decided let them take three wins out of two. The referee who
+    /// wants them paired here unticks the box before the round advances, demoting
+    /// the board to an ordinary one-point game; that is the only escape hatch.
+    ///
+    /// Keyed on `LongStart` specifically, **not** on [`Board::is_long`]. The
+    /// carry rewrites the starting record to `LongCarried` and puts a `LongEnd`
+    /// in the round it lands in, and both of those are `is_long()`. Matching them
+    /// excluded the players from the round *after* the game as well — and since
+    /// there was no `LongStart` to carry, they got no board there either, and no
+    /// sit-out: they simply vanished from a round. `LongStart` is the one record
+    /// that means "this game is still reaching into the next round".
+    ///
+    /// Only the immediately previous round is scanned, since that is the whole
+    /// reach of a long game: a round holding a `LongEnd` is not complete until
+    /// that result is in, so no round can be prepared while one is outstanding.
+    fn long_players_busy_in(&self, number: u32) -> HashSet<TournamentId> {
+        self.rounds
+            .iter()
+            .filter(|r| r.number + 1 == number)
+            .flat_map(|r| &r.boards)
+            .filter(|b| matches!(b.record, GameRecord::LongStart(_)))
+            .flat_map(|b| [b.player1, b.player2])
+            .collect()
+    }
+
+    /// The players a long game keeps out of the round currently being drafted
+    /// (empty when there is no draft). The long-game counterpart of
+    /// [`draft_cup_players`](Self::draft_cup_players), and shipped beside it for
+    /// the same reason: so a client can keep those players out of the Swiss
+    /// customization UI without re-deriving the rule.
+    ///
+    /// Shipped rather than mirrored deliberately. The frontend had its own copy
+    /// of this predicate, and it carried the same `is_long()` bug — the copy was
+    /// not wrong *independently*, it was wrong because it was a copy. Sorted so
+    /// the response is stable between requests.
+    pub fn draft_long_players(&self) -> Vec<TournamentId> {
+        let Some(draft) = &self.draft else {
+            return Vec::new();
+        };
+        let mut players: Vec<TournamentId> = self
+            .long_players_busy_in(draft.number)
+            .into_iter()
+            .collect();
+        players.sort_unstable();
+        players
+    }
+
     /// Cancel the most recent round, stepping the tournament back one stage.
     ///
     /// Peels off exactly one step *as the referee took it*: if a round is
@@ -1153,23 +1268,46 @@ impl Tournament {
         Some(cancelled)
     }
 
-    /// Begin preparing the next round (the `RoundDraft` state).
-    ///
-    /// Requires registration finalized and the previous round (if any)
-    /// completed. The draft's absent set defaults to the previous round's
-    /// absentees (restricted to players who still exist), so recurring absences
-    /// carry over while late joiners are not pre-marked absent.
     /// Why the American Grid export would refuse right now, or `None` if it
     /// would produce a document.
     ///
     /// Same contract as [`next_round_blocker`](Self::next_round_blocker):
     /// `american_grid::to_grid` is defined in terms of this, so the button's
     /// reason and the export's refusal are the same sentence, computed once.
+    ///
+    /// Two states are refused, both of them a long game the referee has not
+    /// finished with:
+    ///
+    /// - one with **no result**, which would otherwise be submitted to a rating
+    ///   body as a loss for both players;
+    /// - one that was **never carried** — a `LongStart` still sitting in the last
+    ///   round, decided or not. That game has consumed one round, not two, so
+    ///   what it is worth is genuinely undecided: two points would let its
+    ///   players outscore a field that played the same single round, and the
+    ///   scoring rule therefore gives it nothing (see
+    ///   [`Board::scoring_weight`](crate::Board::scoring_weight)). Rather than
+    ///   export a document whose grid shows a game the standings scored at zero,
+    ///   this says so and leaves the referee the two real choices: play the next
+    ///   round, which carries it, or untick the box, which demotes it to an
+    ///   ordinary one-point game.
     pub fn grid_export_blocker(&self) -> Option<TournamentError> {
-        self.rounds
+        if let Some(round) = self
+            .rounds
             .iter()
             .find(|r| r.boards.iter().any(|b| b.long_pending()))
-            .map(|round| TournamentError::UnresolvedLongGame {
+        {
+            return Some(TournamentError::UnresolvedLongGame {
+                round: round.number,
+            });
+        }
+        self.rounds
+            .iter()
+            .find(|r| {
+                r.boards
+                    .iter()
+                    .any(|b| matches!(b.record, GameRecord::LongStart(_)))
+            })
+            .map(|round| TournamentError::UncarriedLongGame {
                 round: round.number,
             })
     }
@@ -1195,6 +1333,12 @@ impl Tournament {
         None
     }
 
+    /// Begin preparing the next round (the `RoundDraft` state).
+    ///
+    /// Requires registration finalized and the previous round (if any)
+    /// completed. The draft's absent set defaults to the previous round's
+    /// absentees (restricted to players who still exist), so recurring absences
+    /// carry over while late joiners are not pre-marked absent.
     pub fn prepare_round(&mut self) -> Result<&RoundDraft, TournamentError> {
         if let Some(blocked) = self.next_round_blocker() {
             return Err(blocked);
@@ -1451,32 +1595,11 @@ impl Tournament {
             .collect();
 
         // Players on a long game started in the previous round. They sit out this
-        // round's pairing entirely — like cup players — because a long game *is*
-        // one game played across two rounds, which is exactly why its winner
-        // scores two points.
-        //
-        // Deliberately keyed on `long`, not `long_pending`: a long game that
-        // finished early (or resolved by a no-show) still took both rounds. It
-        // used to free its players the moment it was decided, which let them take
-        // three wins out of two rounds — two from the long board, one from the
-        // round they should not have been in. The referee who wants them paired
-        // here unticks the box before the round advances, demoting the board to an
-        // ordinary one-point game; that is the only escape hatch.
-        //
-        // Only the immediately previous round is scanned, since that is the whole
-        // reach of a long game: `prepare_round` refuses to advance past R+1 while
-        // one is still pending, so a long board can never be two rounds behind and
-        // unresolved. Scanning every round (as this once did) would be wrong now
-        // that the predicate no longer clears itself when the game is decided —
-        // the players would be excluded from every subsequent round forever.
-        let busy_long: HashSet<TournamentId> = self
-            .rounds
-            .iter()
-            .filter(|r| r.number + 1 == draft.number)
-            .flat_map(|r| &r.boards)
-            .filter(|b| b.is_long())
-            .flat_map(|b| [b.player1, b.player2])
-            .collect();
+        // round's pairing entirely — like cup players — because the carry below
+        // is about to hand them the board that finishes that game. See
+        // `long_players_busy_in` for why it is keyed on `LongStart` alone; the
+        // carry reads the same records, so the two agree by construction.
+        let busy_long = self.long_players_busy_in(draft.number);
 
         // The Swiss pool: present players not taken by the cup and not mid-long-game.
         let swiss_present: Vec<TournamentId> = present
@@ -1676,11 +1799,7 @@ impl Tournament {
             kind: SitoutKind::CupBye { stage },
             value: SitoutValue::Full,
         }));
-        let absent_value = if self.settings.half_point_absences {
-            SitoutValue::Half
-        } else {
-            SitoutValue::Zero
-        };
+        let absent_value = self.absent_sitout_value();
         // An absent player the cup paired anyway (the bracket ignores the absent
         // set, so the referee can record the forfeit) has a board: it is the
         // board that scores them, so they get no sit-out.
@@ -1754,6 +1873,20 @@ impl Tournament {
         self.rounds.push(round);
         self.draft = None;
         self.explanations_extend_through(draft.number);
+        // Building a round is where the "exactly one record each" invariant is
+        // won or lost — the pairing pool, the cup boards, the carried boards and
+        // the sit-outs are four sources that have to partition the field between
+        // them, and the bug this guards against was one of them quietly claiming
+        // a player none of the others then covered. Debug-only, so every test
+        // that confirms a round is a test of it, at no cost in release: this can
+        // only break through a bug in the code just above.
+        #[cfg(debug_assertions)]
+        if let Err(e) = self.validate_round_membership() {
+            panic!(
+                "confirming round {} broke the round records: {e}",
+                draft.number
+            );
+        }
         Ok(self.rounds.last().expect("just pushed a round"))
     }
 
@@ -2772,6 +2905,69 @@ impl Tournament {
             }
         }
         self.validate_long_games()?;
+        self.validate_round_membership()?;
+        Ok(())
+    }
+
+    /// Every player is accounted for exactly once in every round they are part
+    /// of: one board, or one sit-out, never both and never neither.
+    ///
+    /// This is the invariant that makes a round's records *mean* something. Each
+    /// score in the tournament — points, SOS, the float history, the American
+    /// Grid row — is a sum over a player's records, so a duplicate silently
+    /// doubles them and a missing one silently drops a round out of their
+    /// history. Neither shows up as an error anywhere downstream; they show up
+    /// as a wrong number in a published table, which is the failure mode worth
+    /// the most to catch early.
+    ///
+    /// Stated without exception, which it can be because a player registered
+    /// after the rounds started is marked absent for the ones already played
+    /// (see [`add_player`](Self::add_player)). Before that, a late joiner was the
+    /// one legitimate gap, and this had to be weakened to "a player's records
+    /// form a suffix of the rounds" — enough to catch a player who evaporates
+    /// from a round, but blind to one who is in the field and in no round at all,
+    /// since nothing distinguished them from somebody who had just arrived.
+    /// Giving late joiners the record they were missing was worth doing for its
+    /// own sake, and removed the exception as a side effect.
+    ///
+    /// Worth stating separately from the more specific checks because it is the
+    /// one rule that would have caught the long-game pairing bug this file's
+    /// `long_players_busy_in` describes — the two players had a board in rounds 1
+    /// and 2 and then simply were not in round 3, and every other validator was
+    /// content. It is also asserted at the end of both confirm paths in debug
+    /// builds, which makes every test that confirms a round a test of it.
+    ///
+    /// The one thing it does not check is the *reverse* membership of an
+    /// unfinalized tournament: before finalization nobody has a number and there
+    /// are no rounds, so it has nothing to say and says nothing.
+    pub(crate) fn validate_round_membership(&self) -> Result<(), TournamentError> {
+        let field: HashSet<TournamentId> = self
+            .players
+            .iter()
+            .filter_map(|p| p.tournament_id)
+            .collect();
+        for round in &self.rounds {
+            // One game, or one reason there was no game — never two of either,
+            // and never one of each. See [`TournamentError::PlayerTwiceInRound`]
+            // for what a second entry costs.
+            if let Some(player) = first_repeat(round_participants(round)) {
+                return Err(TournamentError::PlayerTwiceInRound {
+                    round: round.number,
+                    player,
+                });
+            }
+            // `min` rather than `find` because a set's order is not stable, and
+            // an error that names a different player each run is one nobody can
+            // write a test against. (Players the round names but the field does
+            // not are `validate_rounds_name_the_field`'s business.)
+            let seen: HashSet<TournamentId> = round_participants(round).collect();
+            if let Some(&player) = field.difference(&seen).min() {
+                return Err(TournamentError::PlayerMissingFromRound {
+                    round: round.number,
+                    player,
+                });
+            }
+        }
         Ok(())
     }
 
@@ -2932,15 +3128,6 @@ impl Tournament {
                 return Err(TournamentError::UnknownRoundPlayer {
                     round: round.number,
                     player: sitout.player,
-                });
-            }
-            // One game, or one reason there was no game — never two of either,
-            // and never one of each. See [`TournamentError::PlayerTwiceInRound`]
-            // for what a second entry costs.
-            if let Some(player) = first_repeat(round_participants(round)) {
-                return Err(TournamentError::PlayerTwiceInRound {
-                    round: round.number,
-                    player,
                 });
             }
         }
@@ -3259,6 +3446,444 @@ mod tests {
             "two completed rounds cannot yield more than two wins, got {:?}",
             standing.victories
         );
+    }
+
+    /// A long game reaches exactly one round forward, and lets go after it.
+    ///
+    /// `busy_long` used to key on [`Board::is_long`], which is true of the inert
+    /// `LongCarried` record the carry leaves behind and of the `LongEnd` it
+    /// creates. So the round *after* the one the game ended in excluded the two
+    /// players a second time — and with no `LongStart` left to carry, nothing gave
+    /// them a board there either, and nothing gave them a sit-out. They dropped
+    /// out of a whole round: no result, no absence, no error, no trace.
+    ///
+    /// Every long-game test before this one stopped at the carry, which is why a
+    /// green suite said nothing about the round after it. This one runs a single
+    /// long game from round 1 through to round 3.
+    #[test]
+    fn a_long_game_frees_its_players_in_the_round_after_it_ends() {
+        let mut t = four_players_round1_with_long_enabled();
+        t.set_board_long(1, 0, true).unwrap();
+        let long_players = [t.rounds[0].boards[0].player1, t.rounds[0].boards[0].player2];
+
+        // Round 1: decide both boards, the long one included. Deciding it here is
+        // the interesting case — a game that finishes early still occupies its
+        // second round, so nothing about the carry changes.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+        assert!(t.rounds[0].completed);
+
+        // Round 2 carries it: the two players are out of the Swiss pairing here,
+        // and receive the game's live record instead.
+        start_next_round(&mut t);
+        assert!(matches!(
+            t.rounds[0].boards[0].record,
+            GameRecord::LongCarried
+        ));
+        let round2 = &t.rounds[1];
+        for player in long_players {
+            let boards: Vec<&Board> = round2
+                .boards
+                .iter()
+                .filter(|b| b.player1 == player || b.player2 == player)
+                .collect();
+            assert_eq!(
+                boards.len(),
+                1,
+                "player {player} should be on exactly the carried board in round 2"
+            );
+            assert!(matches!(boards[0].record, GameRecord::LongEnd(_)));
+            assert_eq!(boards[0].source, PairingSource::Carried);
+        }
+
+        // Finish round 2's one fresh board (the carried one arrived decided).
+        let fresh = round2
+            .boards
+            .iter()
+            .position(|b| matches!(b.record, GameRecord::Short(_)))
+            .expect("the other two players have an ordinary board in round 2");
+        t.toggle_board_winner(2, fresh, Winner::Player1).unwrap();
+        assert!(t.rounds[1].completed);
+
+        // Round 3: the long game is over and reaches no further. All four play.
+        start_next_round(&mut t);
+        let round3 = t.rounds.last().unwrap();
+        assert_eq!(round3.number, 3);
+        assert_eq!(
+            round3.boards.len(),
+            2,
+            "all four players should be paired in round 3, got {:?}",
+            round3.boards
+        );
+        assert!(round3.sitouts.is_empty(), "nobody sits out a full field");
+        for player in long_players {
+            assert!(
+                round3
+                    .boards
+                    .iter()
+                    .any(|b| b.player1 == player || b.player2 == player),
+                "player {player} vanished from round 3"
+            );
+            // And no long record follows them into it.
+            assert!(round3
+                .boards
+                .iter()
+                .all(|b| matches!(b.record, GameRecord::Short(_))));
+        }
+
+        // The invariant the bug broke, stated directly rather than through the
+        // symptom: it also holds in a release build, where the assertion inside
+        // `confirm_round_inner` is compiled out.
+        assert_eq!(t.validate_round_membership(), Ok(()));
+    }
+
+    /// The membership invariant is a rule about *files*, not just about rounds
+    /// this build produced, so check it rejects the shapes a hand-edited or
+    /// corrupted save can have — and tolerates the one legitimate gap.
+    #[test]
+    fn validate_loaded_rejects_a_round_that_loses_or_doubles_a_player() {
+        let mut t = four_players_round1_with_long_enabled();
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+        start_next_round(&mut t);
+        assert_eq!(t.validate_loaded(), Ok(()));
+
+        // A player who evaporates from a round — the shape the long-game pairing
+        // bug wrote, and the one nothing else here would have caught.
+        let mut lost = t.clone();
+        let dropped = lost.rounds[1].boards.pop().expect("round 2 has two boards");
+        assert_eq!(
+            lost.validate_loaded(),
+            Err(TournamentError::PlayerMissingFromRound {
+                round: 2,
+                player: dropped.player1.min(dropped.player2),
+            })
+        );
+
+        // Counted twice: a board and a sit-out for the same player in one round.
+        // Every score is a sum over these, so this one publishes wrong numbers
+        // rather than missing ones.
+        let mut doubled = t.clone();
+        let player = doubled.rounds[1].boards[0].player1;
+        doubled.rounds[1].sitouts.push(Sitout {
+            player,
+            kind: SitoutKind::Absent,
+            value: SitoutValue::Zero,
+        });
+        assert_eq!(
+            doubled.validate_loaded(),
+            Err(TournamentError::PlayerTwiceInRound { round: 2, player })
+        );
+
+        // A late registration is no exception to the rule, because it is not a
+        // gap: `add_player` marks them absent for the rounds already played, so
+        // the file it produces satisfies the same "everyone, every round" check
+        // as any other. This is what lets the rule be stated without a special
+        // case for them.
+        let mut late = t.clone();
+        let e = late.add_player(named("E")).unwrap().tournament_id.unwrap();
+        assert!(late.rounds.iter().all(|r| r.sitout(e).is_some()));
+        assert_eq!(late.validate_loaded(), Ok(()));
+
+        // And dropping that record back out is caught like any other hole — the
+        // shape a file written before this change would have.
+        let mut hole = late.clone();
+        hole.rounds[0].sitouts.retain(|s| s.player != e);
+        assert_eq!(
+            hole.validate_loaded(),
+            Err(TournamentError::PlayerMissingFromRound {
+                round: 1,
+                player: e
+            })
+        );
+    }
+
+    /// A player registered mid-tournament is absent for what they missed, and
+    /// scores it exactly like a player who was registered from the start and
+    /// marked absent for the same rounds.
+    ///
+    /// These are the same situation — someone who was not at the board — and
+    /// `half_point_absences` exists so that being in it does not wreck the rest
+    /// of a player's tournament: half a point keeps them near the field they
+    /// belong to, instead of dropping them among the beginners for the remaining
+    /// days. It used to apply to only one of the two. The late joiner had no
+    /// record at all, so they scored zero where the absentee scored a half point
+    /// per round, and were paired accordingly.
+    #[test]
+    fn a_late_registration_is_absent_for_what_it_missed_like_any_absence() {
+        let mut t = Tournament::new("Half").unwrap();
+        for n in ["A", "B", "C", "D"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.settings.half_point_absences = true;
+        t.finalize_registration().unwrap();
+
+        // D is registered from the start and marked absent for round 1.
+        let d = t.players[3].tournament_id.unwrap();
+        t.prepare_round().unwrap();
+        t.update_draft(vec![d], vec![], vec![]).unwrap();
+        t.confirm_round().unwrap();
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        assert!(t.rounds[0].completed);
+
+        // E is registered only now, after round 1 has been played.
+        let e_uuid = t.add_player(named("E")).unwrap().id;
+        let e = t
+            .players
+            .iter()
+            .find(|p| p.id == e_uuid)
+            .and_then(|p| p.tournament_id)
+            .expect("a player registered after finalization is numbered at once");
+
+        // The same record, down to what it scored.
+        let sitout_of = |t: &Tournament, who: TournamentId| *t.rounds[0].sitout(who).unwrap();
+        assert_eq!(sitout_of(&t, e).kind, SitoutKind::Absent);
+        assert_eq!(sitout_of(&t, e).value, SitoutValue::Half);
+        assert_eq!(sitout_of(&t, e).value, sitout_of(&t, d).value);
+
+        // And therefore the same score, which is the point of the setting.
+        let points_of = |t: &Tournament, who: TournamentId| {
+            let id = t
+                .players
+                .iter()
+                .find(|p| p.tournament_id == Some(who))
+                .unwrap()
+                .id;
+            t.standings()
+                .into_iter()
+                .find(|s| s.player_id == id)
+                .unwrap()
+                .points
+        };
+        assert_eq!(points_of(&t, e), points_of(&t, d));
+        assert_eq!(points_of(&t, e), crate::HalfPoints::from_halves(1));
+
+        // The accepted cost: an absence is an absence, so the next draft offers
+        // them pre-marked absent and the referee unticks the box. Avoiding that
+        // would need a sit-out kind of its own, for a one-click difference.
+        let draft = t.prepare_round().unwrap();
+        assert!(draft.absent.contains(&e));
+        assert!(draft.absent.contains(&d));
+
+        assert_eq!(t.validate_loaded(), Ok(()));
+    }
+
+    /// The zero-default case, so the parity above is not an artefact of the
+    /// setting being on: with `half_point_absences` off a late joiner scores
+    /// nothing for the rounds they missed, exactly as before this change.
+    #[test]
+    fn a_late_registration_scores_nothing_for_missed_rounds_by_default() {
+        let mut t = Tournament::new("Zero").unwrap();
+        for n in ["A", "B"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        assert!(!t.settings.half_point_absences);
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+
+        let c_uuid = t.add_player(named("C")).unwrap().id;
+        let c = t
+            .players
+            .iter()
+            .find(|p| p.id == c_uuid)
+            .and_then(|p| p.tournament_id)
+            .unwrap();
+        assert_eq!(t.rounds[0].sitout(c).unwrap().value, SitoutValue::Zero);
+        assert_eq!(t.validate_loaded(), Ok(()));
+    }
+
+    /// M1: a long game's score never *falls* as the tournament advances.
+    ///
+    /// It used to. A game decided inside its starting round scored two points
+    /// there (from `LongStart`), and confirming the next round moved the outcome
+    /// onto a `LongEnd` in a round that was not complete yet — so the two points
+    /// vanished from the standings, and from the public page, for the whole
+    /// duration of the gap round before reappearing.
+    ///
+    /// Now they simply arrive once, when the round the game *finishes* in
+    /// completes, which is when every other result of that round arrives.
+    #[test]
+    fn a_long_games_points_never_go_backwards() {
+        let mut t = four_players_round1_with_long_enabled();
+        t.set_board_long(1, 0, true).unwrap();
+        let winner = t.rounds[0].boards[0].player1;
+        let points = |t: &Tournament| {
+            let id = t
+                .players
+                .iter()
+                .find(|p| p.tournament_id == Some(winner))
+                .unwrap()
+                .id;
+            t.standings()
+                .into_iter()
+                .find(|s| s.player_id == id)
+                .unwrap()
+                .points
+        };
+
+        // Decided inside its own round, which does not carry it.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+        let after_round1 = points(&t);
+
+        // Confirming round 2 carries it: the outcome moves into a round that is
+        // not complete yet. This is the moment the points used to disappear.
+        start_next_round(&mut t);
+        let during_gap = points(&t);
+        assert!(
+            during_gap >= after_round1,
+            "carrying the game dropped its player from {after_round1:?} to {during_gap:?}"
+        );
+
+        // Completing round 2 is when the game is finally scored, at its full
+        // two-point weight.
+        let fresh = t.rounds[1]
+            .boards
+            .iter()
+            .position(|b| matches!(b.record, GameRecord::Short(_)))
+            .expect("the other two players have an ordinary board");
+        t.toggle_board_winner(2, fresh, Winner::Player1).unwrap();
+        assert!(t.rounds[1].completed);
+        let after_round2 = points(&t);
+        assert!(after_round2 >= during_gap);
+        assert_eq!(
+            after_round2,
+            crate::HalfPoints::from_whole(2),
+            "a long game is worth two points once it is finished"
+        );
+    }
+
+    /// The reason `LongStart` scores nothing, stated directly: the carry must not
+    /// change what the rounds below it say.
+    ///
+    /// Round N+1 is paired from a model replayed over the rounds before it, and
+    /// confirming it rewrites round N's record from `LongStart` to `LongCarried`.
+    /// If those scored differently, that model could never be recomputed once the
+    /// round had been paired — so `explain_counterfactual` would answer questions
+    /// about the gap round using a model that never paired it. `LongCarried` has
+    /// no outcome and cannot score; this pins `LongStart` to the same answer.
+    #[test]
+    fn carrying_a_long_game_leaves_the_earlier_rounds_scoring_untouched() {
+        let mut t = four_players_round1_with_long_enabled();
+        t.set_board_long(1, 0, true).unwrap();
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+
+        let model_of = |t: &Tournament| {
+            let scores = crate::scoring::compute_scores(&t.players, &t.settings, &t.rounds[..1]);
+            t.players
+                .iter()
+                .map(|p| {
+                    let s = scores.get(&p.id);
+                    (
+                        s.points(),
+                        s.victories,
+                        s.opponents.clone(),
+                        s.last_descended,
+                        s.last_ascended,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let before = model_of(&t);
+        start_next_round(&mut t);
+        assert_eq!(
+            model_of(&t),
+            before,
+            "round 1 scored differently after the carry, so round 2's pairing \
+             model can no longer be reproduced"
+        );
+    }
+
+    /// M2: a long game resolved by a no-show is a forfeit in *both* of its
+    /// rounds.
+    ///
+    /// The forfeit rule says the two never faced each other and neither floated.
+    /// The inert record escaped it, because a `LongCarried` reads as `Pending`
+    /// whatever the game really was — so the pair were recorded as having met
+    /// once, which is neither the forfeit rule's nought nor the long rule's two,
+    /// and a float marker was written from a game nobody played. Both are inputs
+    /// to the published tie-breaks and to every later pairing.
+    #[test]
+    fn a_forfeited_long_game_is_a_forfeit_in_both_of_its_rounds() {
+        let mut t = four_players_round1_with_long_enabled();
+        t.set_board_long(1, 0, true).unwrap();
+        let (present, absent) = (t.rounds[0].boards[0].player1, t.rounds[0].boards[0].player2);
+        t.set_board_no_show(1, 0, Some(Forfeit::Player2(AbsenceKind::NoShow)))
+            .unwrap();
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+        start_next_round(&mut t);
+        let fresh = t.rounds[1]
+            .boards
+            .iter()
+            .position(|b| matches!(b.record, GameRecord::Short(_)))
+            .expect("the other two players have an ordinary board");
+        t.toggle_board_winner(2, fresh, Winner::Player1).unwrap();
+
+        let scores = crate::scoring::compute_scores(&t.players, &t.settings, &t.rounds);
+        let of = |who: TournamentId| {
+            let id = t
+                .players
+                .iter()
+                .find(|p| p.tournament_id == Some(who))
+                .unwrap()
+                .id;
+            scores.get(&id)
+        };
+        let (p, a) = (of(present), of(absent));
+        assert!(
+            !p.opponents.contains(&absent),
+            "a game nobody played is not a game faced, in either round"
+        );
+        assert!(!a.opponents.contains(&present));
+        assert!(
+            !a.defeated.contains(&present) && !p.defeated.contains(&absent),
+            "nobody was beaten over the board"
+        );
+        // The one who turned up is scored like a bye — at the long weight, since
+        // the board still took both rounds.
+        assert_eq!(p.victories, crate::Wins::from_whole(2));
+        assert!(p.had_bye);
+        assert_eq!(a.victories, crate::Wins::ZERO);
+    }
+
+    /// A long game that never gets its second round is refused by the export
+    /// rather than silently scored at nothing.
+    ///
+    /// It has taken one round, so two points would let its players outscore a
+    /// field that played the same single round, and the scoring rule gives it
+    /// none. Rather than hand a rating body a grid showing a game the standings
+    /// ignored, the export says so and names the two ways out.
+    #[test]
+    fn an_uncarried_long_game_refuses_the_grid_rather_than_scoring_nothing() {
+        let mut t = four_players_round1_with_long_enabled();
+        t.set_board_long(1, 0, true).unwrap();
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+        assert!(t.rounds[0].completed);
+
+        assert_eq!(
+            t.grid_export_blocker(),
+            Some(TournamentError::UncarriedLongGame { round: 1 }),
+            "a decided long game that spans only one round is not exportable"
+        );
+
+        // The first way out: untick the box, and it is an ordinary one-point game.
+        let mut demoted = t.clone();
+        demoted.set_board_long(1, 0, false).unwrap();
+        assert_eq!(demoted.grid_export_blocker(), None);
+
+        // The second: play the round it spans into, which carries it.
+        start_next_round(&mut t);
+        let fresh = t.rounds[1]
+            .boards
+            .iter()
+            .position(|b| matches!(b.record, GameRecord::Short(_)))
+            .unwrap();
+        t.toggle_board_winner(2, fresh, Winner::Player1).unwrap();
+        assert_eq!(t.grid_export_blocker(), None);
     }
 
     #[test]

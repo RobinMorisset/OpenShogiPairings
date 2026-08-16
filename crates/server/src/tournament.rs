@@ -283,6 +283,12 @@ pub(crate) struct TournamentView {
     /// keep them out of the Swiss customization. Empty otherwise.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) draft_cup_players: Vec<TournamentId>,
+    /// Players a long game started in the previous round keeps out of the round
+    /// being drafted, for the same reason as `draft_cup_players` — and shipped
+    /// rather than mirrored because the frontend's own copy of the rule carried
+    /// the same bug the Rust one did. Empty otherwise.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) draft_long_players: Vec<TournamentId>,
     /// Suggested handicap per board, indexed like `tournament.rounds[i].boards[j]`.
     /// Computed from current ratings regardless of `handicap_policy` — the
     /// frontend decides how to surface it. `None` = no suggestion (near-equal
@@ -309,6 +315,7 @@ pub(crate) fn build_view(store: &TournamentStore) -> Result<TournamentView, ApiE
     let cup_podium = tournament.cup_podium();
     let cup_bracket = tournament.cup_bracket();
     let draft_cup_players = tournament.draft_cup_players();
+    let draft_long_players = tournament.draft_long_players();
     let suggested_handicaps = tournament
         .rounds
         .iter()
@@ -346,6 +353,7 @@ pub(crate) fn build_view(store: &TournamentStore) -> Result<TournamentView, ApiE
         cup_podium,
         cup_bracket,
         draft_cup_players,
+        draft_long_players,
         suggested_handicaps,
         effective_winners,
     })
