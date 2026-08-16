@@ -524,6 +524,7 @@
     "longFlagAfterCoupledResult": "Iná partia tohto pohárového kola už má výsledok. Pohárové kolo je dlhé alebo krátke ako celok, takže sa už nedá zmeniť.",
     "unresolvedLongGame": "Najprv treba dokončiť dlhú partiu z {round}. kola.",
     "uncarriedLongGame": "Dlhá partia v kole {round} sa odohrala len počas jedného kola. Spustite ďalšie kolo alebo odznačte políčko „dlhá partia“, aby sa počítala ako jedna partia.",
+    "unfinishedRound": "Kolo {round} nie je dokončené. Tabuľka je záverečným záznamom turnaja, takže každé kolo v nej musí byť ukončené.",
     "carriedLongGame": "Táto dlhá partia sa končí v {round}. kole — jej výsledok zapíšte tam.",
     "longGameStartedEarlier": "Táto dlhá partia sa začala v {round}. kole, jej dĺžku už nemožno zmeniť.",
     "handicapNeedsRatingDifference": "Partia s hendikepom vyžaduje dvoch hráčov s rozdielnym ratingom.",

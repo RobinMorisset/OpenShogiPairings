@@ -524,6 +524,7 @@
     "longFlagAfterCoupledResult": "この決勝トーナメントの回戦では、別の対局にすでに結果が入力されています。回戦全体で長短が決まるため、もう変更できません。",
     "unresolvedLongGame": "先に第{round}回戦の長時間対局を終える必要があります。",
     "uncarriedLongGame": "第{round}回戦の長時間対局は1回戦分しか行われていません。次の回戦を開始するか、「長時間対局」のチェックを外して1局として計算してください。",
+    "unfinishedRound": "第{round}回戦が終了していません。グリッドは大会の最終記録なので、すべての回戦が完了している必要があります。",
     "carriedLongGame": "この長時間対局が終わるのは第{round}回戦です。結果はそちらに入力してください。",
     "longGameStartedEarlier": "この長時間対局は第{round}回戦に始まったため、持ち時間の区分はもう変更できません。",
     "handicapNeedsRatingDifference": "駒落ち対局にはレーティングの異なる2名が必要です。",

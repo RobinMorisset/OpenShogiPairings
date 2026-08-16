@@ -44,6 +44,7 @@ export const ERROR_CODE_KEYS: Record<string, string> = {
   long_flag_after_coupled_result: "serverError.longFlagAfterCoupledResult",
   unresolved_long_game: "serverError.unresolvedLongGame",
   uncarried_long_game: "serverError.uncarriedLongGame",
+  unfinished_round: "serverError.unfinishedRound",
   carried_long_game: "serverError.carriedLongGame",
   long_game_started_earlier: "serverError.longGameStartedEarlier",
 

@@ -187,6 +187,10 @@ pub(crate) fn domain_payload(
         TournamentError::UncarriedLongGame { round } => {
             with("uncarried_long_game", [("round", round.to_string())])
         }
+        // Referee-reachable: they asked for the grid before finishing a round.
+        TournamentError::UnfinishedRound { round } => {
+            with("unfinished_round", [("round", round.to_string())])
+        }
         // Referee-reachable: the round a long game *started* still shows its
         // board, so clicking it is an ordinary mistake, not a broken client.
         TournamentError::CarriedLongGame { round } => {
@@ -526,6 +530,7 @@ mod tests {
             TournamentError::NotCurrentRound,
             TournamentError::UnresolvedLongGame { round: 3 },
             TournamentError::UncarriedLongGame { round: 3 },
+            TournamentError::UnfinishedRound { round: 3 },
             TournamentError::CarriedLongGame { round: 3 },
             TournamentError::LongGameStartedEarlier { round: 2 },
             TournamentError::RoundNotFound(7),

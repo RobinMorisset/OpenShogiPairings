@@ -524,6 +524,7 @@
     "longFlagAfterCoupledResult": "Inna partia tej rundy pucharowej ma już wynik. Runda pucharowa jest długa albo krótka w całości, więc nie można jej już zmienić.",
     "unresolvedLongGame": "Najpierw trzeba zakończyć długą partię z rundy {round}.",
     "uncarriedLongGame": "Długa partia w rundzie {round} została rozegrana tylko w ciągu jednej rundy. Rozpocznij następną rundę lub odznacz pole „długa partia”, aby liczyć ją jako pojedynczą partię.",
+    "unfinishedRound": "Runda {round} nie została zakończona. Tabela jest końcowym zapisem turnieju, więc każda runda w niej musi być ukończona.",
     "carriedLongGame": "Ta długa partia kończy się w rundzie {round} — tam zapisz jej wynik.",
     "longGameStartedEarlier": "Ta długa partia zaczęła się w rundzie {round}, więc jej długości nie można już zmienić.",
     "handicapNeedsRatingDifference": "Partia z forą wymaga dwóch graczy o różnym rankingu.",

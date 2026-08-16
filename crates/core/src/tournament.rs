@@ -222,6 +222,13 @@ pub enum TournamentError {
     /// `docs/reference/two-round-boards.md`.
     #[error("round {round} holds half of a carried long game")]
     OrphanedLongGame { round: u32 },
+    /// The American Grid export was asked for while a round still has a game to
+    /// play. The grid is the tournament's final record, so every round in it
+    /// must be finished — and the export used to *omit* an unfinished round
+    /// rather than refuse, quietly shipping a document that was missing a round
+    /// nobody had been told about.
+    #[error("round {round} is not finished")]
+    UnfinishedRound { round: u32 },
     /// The American Grid export was asked for while a long game in the last
     /// round has never been carried into a second one. It has taken a single
     /// round, so it is not yet worth two points and the scoring gives it none:
@@ -1320,14 +1327,25 @@ impl Tournament {
                 round: round.number,
             });
         }
+        if let Some(round) = self.rounds.iter().find(|r| {
+            r.boards
+                .iter()
+                .any(|b| matches!(b.record, GameRecord::LongStart(_)))
+        }) {
+            return Some(TournamentError::UncarriedLongGame {
+                round: round.number,
+            });
+        }
+        // And the general rule the two above are special cases of: the grid is
+        // the tournament's final record, so nothing in it may still be being
+        // played. Checked last so that a long game gets the message that names
+        // it, rather than "round N is not finished" for a round whose only
+        // unfinished thing is a game the referee has to be told about
+        // specifically.
         self.rounds
             .iter()
-            .find(|r| {
-                r.boards
-                    .iter()
-                    .any(|b| matches!(b.record, GameRecord::LongStart(_)))
-            })
-            .map(|round| TournamentError::UncarriedLongGame {
+            .find(|r| !r.completed)
+            .map(|round| TournamentError::UnfinishedRound {
                 round: round.number,
             })
     }

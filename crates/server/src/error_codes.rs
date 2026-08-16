@@ -44,6 +44,7 @@ pub(crate) const LOCALIZED_ERROR_CODES: &[&str] = &[
     "long_flag_after_coupled_result",
     "unresolved_long_game",
     "uncarried_long_game",
+    "unfinished_round",
     "carried_long_game",
     "long_game_started_earlier",
     // Handicaps

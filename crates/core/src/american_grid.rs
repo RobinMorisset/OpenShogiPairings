@@ -88,7 +88,15 @@ pub fn to_grid(tournament: &Tournament, standings: &[Standing]) -> Result<String
         .enumerate()
         .filter_map(|(i, s)| tid_of.get(&s.player_id).map(|&t| (t, i as u32 + 1)))
         .collect();
-    let completed: Vec<&Round> = tournament.rounds.iter().filter(|r| r.completed).collect();
+    // Every round, not just the finished ones. `grid_export_blocker` above has
+    // already refused the document if any round is unfinished, so there is
+    // nothing to filter — and filtering was how an unfinished round used to
+    // vanish from the export instead of stopping it.
+    debug_assert!(
+        tournament.rounds.iter().all(|r| r.completed),
+        "the blocker admits only a tournament whose rounds are all finished"
+    );
+    let rounds: Vec<&Round> = tournament.rounds.iter().collect();
 
     // Header row, then one row per player in final-rank order.
     let mut rows: Vec<Vec<String>> = Vec::with_capacity(standings.len() + 1);
@@ -99,13 +107,13 @@ pub fn to_grid(tournament: &Tournament, standings: &[Standing]) -> Result<String
         "Nat".into(),
         "Elo".into(),
     ];
-    header.extend(completed.iter().map(|r| r.number.to_string()));
+    header.extend(rounds.iter().map(|r| r.number.to_string()));
     header.push("Pts".into());
     rows.push(header);
 
     for standing in standings {
         if let Some(player) = players_by_id.get(&standing.player_id) {
-            rows.push(row_for(player, standing, &completed, &rank_of));
+            rows.push(row_for(player, standing, &rounds, &rank_of));
         }
     }
 
@@ -649,6 +657,76 @@ mod tests {
         t.rounds[1].completed = true;
         let rows = data_rows(&to_grid(&t, &t.standings()).unwrap());
         assert!(rows[0].contains("[0- 2+]"), "A row: {rows:?}");
+    }
+
+    /// The grid is the tournament's final record, so a round that is still being
+    /// played refuses the whole document.
+    ///
+    /// It used to be *filtered out* instead: an unfinished round simply did not
+    /// appear, so the export succeeded and produced a document missing a round,
+    /// with nothing to say so. That is the quiet failure this guards — quieter
+    /// than the unfinished-long-game case it sits beside, because there the
+    /// starting round still rendered `0-` for both players while the round the
+    /// result belonged to was the one dropped.
+    #[test]
+    fn an_unfinished_round_refuses_the_whole_export() {
+        let (mut t, _, _) = one_board(|_| {});
+        assert!(to_grid(&t, &t.standings()).is_ok(), "the baseline exports");
+
+        // A second round, paired but not played.
+        let (a, b) = (t.rounds[0].boards[0].player1, t.rounds[0].boards[0].player2);
+        t.rounds.push(Round {
+            number: 2,
+            explanation: RoundExplanation::empty(2),
+            boards: vec![Board::pending(a, b, 0, PairingSource::Swiss)],
+            sitouts: Vec::new(),
+            completed: false,
+        });
+        assert_eq!(
+            to_grid(&t, &t.standings()),
+            Err(TournamentError::UnfinishedRound { round: 2 }),
+            "an unfinished round must stop the export, not vanish from it"
+        );
+        // The blocker and the export agree, since one is defined in terms of the
+        // other — the button says exactly what the export would do.
+        assert_eq!(
+            t.grid_export_blocker(),
+            Some(TournamentError::UnfinishedRound { round: 2 })
+        );
+
+        // Recording the result unblocks it, and round 2 is in the document.
+        t.rounds[1].boards[0].set_outcome(Outcome::won(Winner::Player1));
+        t.rounds[1].completed = true;
+        let grid = to_grid(&t, &t.standings()).unwrap();
+        assert!(
+            data_rows(&grid)[0].contains("[2+ 2+]"),
+            "both rounds present: {grid}"
+        );
+    }
+
+    /// A long game gets the message that names it, rather than the general one
+    /// about the round it happens to sit in.
+    #[test]
+    fn a_long_game_is_diagnosed_before_the_round_it_holds_up() {
+        let (mut t, _, _) = one_board(|b| b.record = GameRecord::LongCarried);
+        let (a, b) = (t.rounds[0].boards[0].player1, t.rounds[0].boards[0].player2);
+        t.rounds.push(Round {
+            number: 2,
+            explanation: RoundExplanation::empty(2),
+            boards: vec![Board {
+                record: GameRecord::LongEnd(Outcome::PENDING),
+                ..Board::pending(a, b, 0, PairingSource::Carried)
+            }],
+            sitouts: Vec::new(),
+            completed: false,
+        });
+        // Round 2 is unfinished *and* holds an unresolved long game. Both rules
+        // apply; the specific one wins, because "finish the long game" is what
+        // the referee can act on.
+        assert_eq!(
+            to_grid(&t, &t.standings()),
+            Err(TournamentError::UnresolvedLongGame { round: 2 })
+        );
     }
 
     #[test]

@@ -127,33 +127,35 @@ so no never-completing deadlock.
 
 ## What blocks the American Grid export
 
-Exporting the grid asserts the tournament is over, so `grid_export_blocker`
-refuses two states that are perfectly legal while it is still running:
+The grid is the tournament's final record, so `grid_export_blocker` refuses two
+states that are perfectly legal while it is still running:
 
-- **A long game still being played** — its live record has no result. Worth
-  refusing rather than leaving to the round's own completeness, because the grid
-  *omits* rounds that are not complete instead of refusing them: the round
-  holding the unfinished game would simply be dropped, leaving `0-` in the column
-  of the round it started and no column at all for the round it should have
-  finished in. The game would disappear from a document sent to a rating body.
+- **A round that is not finished.** This is the general rule, and it is not
+  specific to long games at all. It is stated here because the export used to
+  *filter* unfinished rounds out rather than refuse them, so it succeeded and
+  produced a document with a round silently missing.
 - **A long game that was never carried** — a `LongStart` still sitting in the
-  last round, decided or not. It has taken one round rather than two, so two
-  points would let its players outscore a field that played the same single
-  round, and the scoring rule gives it none. The referee plays the next round,
-  which carries it, or unticks the box, which demotes it to an ordinary
-  one-point game.
+  last round, decided or not. Not covered by the rule above: `LongStart` does not
+  hold its round open, so that round is complete and the export would otherwise
+  go ahead. The game has taken one round rather than two, so two points would let
+  its players outscore a field that played the same single round, and the scoring
+  rule gives it none. The referee plays the next round, which carries it, or
+  unticks the box, which demotes it to an ordinary one-point game.
 
-An undecided `LongStart` is caught by both; the first fires, which is the more
-useful message of the two.
+A third check, for a long game with **no result**, adds no rule to those two —
+an unresolved `LongEnd` leaves its round unfinished, and an unresolved
+`LongStart` is uncarried by definition. It runs first purely so the referee is
+told to finish the game rather than that a round is unfinished or that a board
+needs demoting, which are true but not what to do about it.
 
 ## Rendering
 
 The two surfaces differ deliberately, and neither should be "fixed" into the
 other.
 
-The **American Grid** keeps one column per completed round, as that fixed format
-requires: `LongCarried` renders `0-`, and the result appears in the round the
-game was finished in.
+The **American Grid** keeps one column per round, as that fixed format requires:
+`LongCarried` renders `0-`, and the result appears in the round the game was
+finished in.
 
 The **results cross-table** in the app draws the game the way it was played: one
 cell straddling both round columns, showing the result once (`crossTableColumns`

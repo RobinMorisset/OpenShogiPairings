@@ -147,6 +147,11 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   either nought or, for a long game played out, twice. Every published tie-break
   that sums opponents (SOS, SODOS, Buchholz) was affected, as was the pairing of
   later rounds.
+- **The American Grid export dropped a round that was still being played,
+  instead of refusing.** Asking for the grid mid-round produced a document that
+  was simply missing that round, with nothing to say so — and it is the record
+  sent to a rating body. Every round in the grid must now be finished, and the
+  export says which one is not.
 - **A long game that never got its second round is now refused by the grid
   export.** Flagging a board in the final round as a long game leaves it having
   taken one round rather than two, so what it is worth is genuinely undecided —
