@@ -144,11 +144,19 @@ impl<'u> PairingModel<'u> {
                 for (rank, &key) in order.iter().enumerate() {
                     elo_rank[key] = rank as i128;
                 }
-                let (elo_lo, elo_hi) = free
+                // Folded through an `Option` rather than from `(i64::MAX,
+                // i64::MIN)`: with nothing left for the engine to pair — every
+                // unit fixed by a forced board — that seed survives untouched
+                // and `i64::MIN - i64::MAX` overflows rather than describing a
+                // spread. An empty set has no spread, so the bound is zero.
+                let max_elo_gap = free
                     .iter()
                     .map(|&key| units[key].elo)
-                    .fold((i64::MAX, i64::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
-                (elo_rank, (elo_hi - elo_lo).max(0) as i128)
+                    .fold(None::<(i64, i64)>, |seen, v| {
+                        Some(seen.map_or((v, v), |(lo, hi)| (lo.min(v), hi.max(v))))
+                    })
+                    .map_or(0, |(lo, hi)| (hi - lo).max(0) as i128);
+                (elo_rank, max_elo_gap)
             } else {
                 (vec![0i128; units.len()].into(), 0)
             };
@@ -376,5 +384,32 @@ mod tests {
             "an even field must not reserve a bye-rule tier"
         );
         assert!(has_bye_rule(true, 3), "an odd field keeps the bye rules");
+    }
+
+    /// The referee can fix every board by hand, which leaves the engine nothing
+    /// to pair. In ELO mode the model still asks the free set how wide its rating
+    /// spread is, and an empty set has no answer: the fold used to seed itself
+    /// with `(i64::MAX, i64::MIN)` and subtract them, which panics on an overflow
+    /// check and wraps to a nonsense ladder bound without one.
+    ///
+    /// Found by the fuzzer, from two players and one forced board.
+    #[test]
+    fn an_elo_model_with_nothing_left_to_pair_has_no_rating_spread() {
+        let settings = TournamentSettings {
+            pairing: crate::settings::PairingMode::Elo {
+                estimator: crate::settings::EloEstimator::default(),
+            },
+            ..TournamentSettings::default()
+        };
+        let players: Vec<Player> = (1..=2)
+            .map(|i| player(i, Some(1500 + i * 100), None))
+            .collect();
+        let units = player_units(&players, &settings, &[], &[]);
+
+        let model = PairingModel::build(1, &settings, &units, &[], false);
+        assert_eq!(
+            model.max_elo_gap, 0,
+            "an empty free set has no rating spread"
+        );
     }
 }
