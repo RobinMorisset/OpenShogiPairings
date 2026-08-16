@@ -20,8 +20,9 @@ service: string,
  */
 version: string, 
 /**
- * How git describes the build the server came from, e.g.
+ * How git describes the build the *server* came from, e.g.
  * `v1.3.0-14-ga031b12-dirty`, or `None` when `version` pins it down on its
- * own — see [`GIT_DESCRIPTION`].
+ * own — see [`GIT_DESCRIPTION`]. It says nothing about the client that
+ * displays it, which in development can be a different commit entirely.
  */
 build: string | null, };

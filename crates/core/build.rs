@@ -4,13 +4,37 @@
 //! running: every commit between two releases reports the same number. So the
 //! health payload also carries what `git describe` makes of the build —
 //! `v1.3.0-14-ga031b12`, i.e. fourteen commits past that release, suffixed
-//! `-dirty` when the tree had uncommitted changes and no commit describes it at
-//! all. The one case with nothing to add is a clean tree whose HEAD carries a
-//! tag naming this very version: that build *is* the release, and the version
-//! already identifies it.
+//! `-dirty` when the sources it was built from had uncommitted changes and no
+//! commit describes it at all. The one case with nothing to add is a clean tree
+//! whose HEAD carries a tag naming this very version: that build *is* the
+//! release, and the version already identifies it.
+//!
+//! "The sources it was built from" is meant narrowly, and [`RUST_SOURCES`] is
+//! the list. This string is only ever reported by a Rust binary, about itself —
+//! the health endpoint answers for the server, and nothing here claims to
+//! describe the web client it is serving. Editing a `.svelte` file or a doc
+//! leaves the server byte-identical to the one HEAD would produce, so calling it
+//! dirty would be noise; it would also cost a recompile of this crate and
+//! everything downstream on the next `cargo` command, for a string that could
+//! not have changed.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// Everything a Rust build of this repository reads. Dirtiness is measured over
+/// these paths, and they are the ones cargo is asked to watch.
+///
+/// `frontend/src-tauri` earns its place: it is the desktop app's own crate, and
+/// it links the server in. The rest of `frontend/` does not — those files ship
+/// inside the desktop bundle, but they cannot change a byte of the binary that
+/// answers `/api/health`.
+const RUST_SOURCES: &[&str] = &[
+    "crates",
+    "frontend/src-tauri",
+    "Cargo.toml",
+    "Cargo.lock",
+    "rust-toolchain.toml",
+];
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
@@ -49,16 +73,26 @@ fn git_description(version: &str) -> String {
         // a manually dispatched (untagged) build. Fall back to the bare hash
         // instead of failing outright, as plain `describe` would.
         "--always",
-        // Uncommitted changes mean no commit describes this build. Staged and
-        // unstaged both count (both differ from HEAD); untracked files don't, or
-        // every stray scratch file in the tree would brand the build dirty.
-        "--dirty",
+        // Deliberately not `--dirty`: that asks about the whole tree, and the
+        // answer here is about [`RUST_SOURCES`] alone. Appended below instead.
     ]);
 
-    // Exactly the release tag with nothing appended — no distance, no `-dirty`:
-    // the version *is* the identity of this build, so it has nothing to add.
-    // Both spellings, since the repo tags `v1.3.0` while the crate says `1.3.0`.
-    if described == version || described.strip_prefix('v') == Some(version) {
+    // Exactly the release tag with nothing appended — no distance: the version
+    // *is* the identity of this build, so a clean one has nothing to add. Both
+    // spellings, since the repo tags `v1.3.0` while the crate says `1.3.0`.
+    let is_this_release = described == version || described.strip_prefix('v') == Some(version);
+
+    // Uncommitted Rust sources mean no commit describes this build, so say so
+    // even when HEAD is tagged — a modified release is not that release. Staged
+    // and unstaged both count (both differ from HEAD); untracked files don't, or
+    // every stray scratch file in the tree would brand the build dirty.
+    let mut status = vec!["status", "--porcelain", "--untracked-files=no", "--"];
+    status.extend_from_slice(RUST_SOURCES);
+    if !git.run(&status).is_empty() {
+        return format!("{described}-dirty");
+    }
+
+    if is_this_release {
         return String::new();
     }
 
@@ -112,13 +146,18 @@ impl GitDirs {
     /// script result can't outlive the state it recorded.
     ///
     /// The commit and the tag it is measured from move with `HEAD` and the ref
-    /// files. Dirtiness moves with the tracked files themselves — which is why
-    /// they are all named here, some 300 of them: naming instead the directories
-    /// they live in would mean scanning `target/` and `node_modules/`, and
-    /// naming nothing at all would let a build script that ran while the tree
-    /// was clean keep claiming so long after it stopped being true. `index`
-    /// covers `git add` of a file that wasn't tracked when this list was drawn
-    /// up.
+    /// files. Dirtiness moves with the tracked files under [`RUST_SOURCES`] —
+    /// which is why they are named one by one: naming instead the directories
+    /// they live in would mean scanning `target/`, and naming nothing at all
+    /// would let a build script that ran while they were clean keep claiming so
+    /// long after it stopped being true. `index` covers `git add` of a file that
+    /// wasn't tracked when this list was drawn up.
+    ///
+    /// This list and the dirtiness check must span the same paths. Watch less
+    /// and the answer goes stale; watch more — every tracked file in the repo,
+    /// as this once did — and editing a `.svelte` file or a doc rebuilds this
+    /// crate and everything downstream to recompute a string that cannot have
+    /// changed.
     ///
     /// Cargo re-runs the script when a listed path is *missing* too, so deleting
     /// a tracked file is caught by the same list.
@@ -131,9 +170,22 @@ impl GitDirs {
         // `-z` because git otherwise quotes paths that aren't plain ASCII, and a
         // quoted path names no file on disk — cargo would then re-run the script
         // on every single build.
-        let files = self.run_in_top_level(&["ls-files", "-z"]);
-        for file in files.split('\0').filter(|f| !f.is_empty()) {
-            watch(&self.top_level.join(file));
+        for source in RUST_SOURCES {
+            let files = self.run_raw(&["ls-files", "-z", "--", source]);
+            let mut watched = 0;
+            for file in files.split('\0').filter(|f| !f.is_empty()) {
+                watch(&self.top_level.join(file));
+                watched += 1;
+            }
+            // One entry at a time, so that a path which has been renamed or
+            // deleted since this list was written says so, instead of silently
+            // contributing nothing — leaving its files unwatched and its changes
+            // invisible to the dirtiness check that spans the very same list.
+            assert!(
+                watched > 0,
+                "osp-core build script: RUST_SOURCES names {source:?}, which matches no tracked \
+                 file. It has moved or gone; update the list."
+            );
         }
     }
 
@@ -141,34 +193,37 @@ impl GitDirs {
     /// proved git is present and this is a checkout. A failure here is a broken
     /// repository or a broken git, and guessing past it would bake in a wrong
     /// commit.
+    ///
+    /// The output is trimmed; use [`GitDirs::run_raw`] where trailing bytes
+    /// carry meaning.
     fn run(&self, args: &[&str]) -> String {
-        self.output(args).trim().to_string()
+        self.run_raw(args).trim().to_string()
     }
 
-    /// As [`GitDirs::run`], but rooted at the repository top level and returning
-    /// the output untrimmed — `ls-files` lists only what sits under the cwd, and
-    /// its `-z` records are separated, not terminated the way lines are.
-    fn run_in_top_level(&self, args: &[&str]) -> String {
+    /// As [`GitDirs::run`], but returning the output untrimmed — `-z` records are
+    /// separated, not terminated the way lines are.
+    ///
+    /// Every command runs at the repository top level. That is not tidiness: git
+    /// resolves a pathspec relative to the *current directory*, and this script
+    /// runs in `crates/core`, so `-- crates` asked from here would quietly mean
+    /// `crates/core/crates`, match nothing, and report a modified tree as clean.
+    fn run_raw(&self, args: &[&str]) -> String {
         let top_level = self.top_level.to_str().expect("cargo paths are UTF-8");
         let mut full = vec!["-C", top_level];
         full.extend_from_slice(args);
-        self.output(&full)
-    }
-
-    fn output(&self, args: &[&str]) -> String {
         let output = Command::new("git")
-            .args(args)
+            .args(&full)
             .output()
             .unwrap_or_else(|err| {
                 panic!(
                     "osp-core build script: `git {}` failed: {err}",
-                    args.join(" ")
+                    full.join(" ")
                 )
             });
         assert!(
             output.status.success(),
             "osp-core build script: `git {}` exited with {}: {}",
-            args.join(" "),
+            full.join(" "),
             output.status,
             String::from_utf8_lossy(&output.stderr).trim()
         );

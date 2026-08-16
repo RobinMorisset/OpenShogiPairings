@@ -90,7 +90,10 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// How `git describe` names this build: `v1.3.0-14-ga031b12` for the fourteenth
 /// commit past that release, a bare hash where no release tag is reachable, and
-/// a `-dirty` suffix when the tree had uncommitted changes.
+/// a `-dirty` suffix when the Rust sources it was built from had uncommitted
+/// changes. Only those count: an edited `.svelte` file or doc leaves this binary
+/// identical to the one HEAD would produce, and nothing here claims to describe
+/// the web client the server happens to be serving.
 ///
 /// `None` when [`VERSION`] already identifies the build: a clean tree whose HEAD
 /// carried a tag naming this very version, i.e. the build *is* that release. See
@@ -118,9 +121,10 @@ pub struct HealthStatus {
     pub service: String,
     /// Semantic version of the running server.
     pub version: String,
-    /// How git describes the build the server came from, e.g.
+    /// How git describes the build the *server* came from, e.g.
     /// `v1.3.0-14-ga031b12-dirty`, or `None` when `version` pins it down on its
-    /// own — see [`GIT_DESCRIPTION`].
+    /// own — see [`GIT_DESCRIPTION`]. It says nothing about the client that
+    /// displays it, which in development can be a different commit entirely.
     pub build: Option<String>,
 }
 
