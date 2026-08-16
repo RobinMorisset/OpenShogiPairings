@@ -15,8 +15,6 @@ Known limitations and future work, roughly ordered by area.
   plain matching can't express, and by very large fields. Plan: `good_lp` + HiGHS
   first, then CP-SAT.
 
-- "force_pairing on a past round reads the current player list, so re-pairing a round that a late joiner missed would now pair them into it.", found by the long-boards redesign session.
-
 ## Multi-referee server
 
 - **OAuth authentication**
@@ -75,8 +73,6 @@ Known limitations and future work, roughly ordered by area.
 - **Pre-fill the earlier rounds on the result sheets**: printing them mid-tournament
   (for a late arrival, or to replace a lost slip) currently leaves rounds already
   played blank, so they have to be copied over by hand.
-
-- More cost details in Question this pairing
 
 - Finer invalidation for the Why these pairings at the top of each round's pairings: it is now a flag per round, so a new round is always valid, but a settings change still invalidates every round wholesale. A bunch of changes should not affect it at all, e.g. altering the tiebreak criteria.
 
