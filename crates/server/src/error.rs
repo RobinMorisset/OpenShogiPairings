@@ -344,10 +344,9 @@ pub(crate) fn domain_payload(
         // A carried long game is written as a pair of records, in one operation,
         // so a file holding only one of them was hand-edited too.
         | TournamentError::OrphanedLongGame { .. }
-        // Likewise a round that accounts for a player twice or not at all:
-        // confirming a round asserts the opposite, so these reach a referee only
-        // from a file this build did not write.
-        | TournamentError::PlayerTwiceInRound { .. }
+        // And the other direction of the same rule: a round that accounts for a
+        // player not at all. Confirming a round asserts against it, so this
+        // reaches a referee only from a file this build did not write.
         | TournamentError::PlayerMissingFromRound { .. }
         // Deliberately English: unfinished scaffolding (the UI offers no team
         // probe yet), not a state the product is meant to have.

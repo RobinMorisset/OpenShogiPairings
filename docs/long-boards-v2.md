@@ -1,8 +1,8 @@
 # Long boards, second design
 
 Status: **implemented**. Supersedes the model described in
-[`two-round-boards.md`](two-round-boards.md), which stays accurate as a record of
-what shipped in 1.3/1.4.
+[`archive/two-round-boards.md`](archive/two-round-boards.md), which is kept for
+the rationale it records rather than for its details.
 
 ## Why change
 
@@ -101,7 +101,7 @@ Two reasons it has to work this way:
   slip a Swiss game into the gap round desynchronises the bracket from the field.
 
 The shipped behaviour is the opposite, and is documented as a deliberate decision
-in `two-round-boards.md:513-518` ("it is no longer `long_pending` and its players
+in `archive/two-round-boards.md:513-518` ("it is no longer `long_pending` and its players
 are *not* excluded from round N+1; it scores its `long` weight"). The most likely
 way to hit it in practice is a **no-show on a long board**: the present player
 takes two free points *and* a normal game the following round.
