@@ -852,11 +852,6 @@
   <p class="muted">{$_("resultsView.noPlayers")}</p>
 {:else}
   <div class="results">
-  {#if !staticPage}
-    <div class="results-toolbar print-hide">
-      <button type="button" class="ghost" onclick={() => printPage(true)}>🖨 {$_("roundView.print")}</button>
-    </div>
-  {/if}
   {#if cupPodium && (cupPodium.champion || cupPodium.runner_up || cupPodium.third)}
     <div class="podium">
       <span class="cup-title">{$_("resultsView.cup")}</span>
@@ -871,48 +866,63 @@
       {/if}
     </div>
   {/if}
-  {#if categories.length > 0 && !staticPage}
-    <div class="category-filter print-hide">
-      <span class="filter-label">{$_("resultsView.highlightCategory")}</span>
-      {#each categories as cat (cat.id)}
-        <button
-          type="button"
-          class="cat-chip"
-          class:active={highlightedCategory === cat.id}
-          onclick={() => toggleHighlight(cat.id)}
-        >{cat.name}</button>
-      {/each}
-      {#if filtering}
-        <button
-          type="button"
-          class="cat-chip clear"
-          onclick={() => (highlightedCategory = null)}
-        >{$_("resultsView.clearHighlight")}</button>
-      {/if}
-    </div>
-  {/if}
-  <!-- The live columns show results the ranking hasn't taken in yet, so say so
+  <!-- Everything that stands between the podium and the table shares this line:
+       the category chips on the left, the note in the middle, the button that
+       prints the table on the right. The table is tall enough without three
+       half-empty rows over it, and none of them needs a line of its own. Any of
+       them can be missing — no chips without categories, no note once every
+       round is in, neither chips nor button on the static page — and what is
+       left keeps its place.
+
+       The live columns show results the ranking hasn't taken in yet, so say so
        rather than leaving the referee to wonder why a recorded win moved
        nothing — above the table, where it is read before the numbers it
        qualifies rather than after. It supersedes the "nothing completed yet"
        note, which says less and would only ever appear alongside it (a round is
        in progress in both cases); that note survives for the completed-but-empty
        table. -->
-  {#if liveRounds.length === 1}
-    <p class="muted note">
-      {$_("resultsView.roundInProgressNote", { values: { number: liveRounds[0].number } })}
-    </p>
-  {:else if liveRounds.length > 1}
-    <p class="muted note">
-      {$_("resultsView.roundsInProgressNote", {
-        values: { numbers: liveRounds.map((r) => r.number).join(", ") },
-      })}
-    </p>
-  {:else if completedCount === 0}
-    <p class="muted note">
-      {$_("resultsView.noRoundsCompleted")}
-    </p>
-  {/if}
+  <div class="results-head">
+    {#if categories.length > 0 && !staticPage}
+      <div class="category-filter print-hide">
+        <span class="filter-label">{$_("resultsView.highlightCategory")}</span>
+        {#each categories as cat (cat.id)}
+          <button
+            type="button"
+            class="cat-chip"
+            class:active={highlightedCategory === cat.id}
+            onclick={() => toggleHighlight(cat.id)}
+          >{cat.name}</button>
+        {/each}
+        {#if filtering}
+          <button
+            type="button"
+            class="cat-chip clear"
+            onclick={() => (highlightedCategory = null)}
+          >{$_("resultsView.clearHighlight")}</button>
+        {/if}
+      </div>
+    {/if}
+    {#if liveRounds.length === 1}
+      <p class="muted note">
+        {$_("resultsView.roundInProgressNote", { values: { number: liveRounds[0].number } })}
+      </p>
+    {:else if liveRounds.length > 1}
+      <p class="muted note">
+        {$_("resultsView.roundsInProgressNote", {
+          values: { numbers: liveRounds.map((r) => r.number).join(", ") },
+        })}
+      </p>
+    {:else if completedCount === 0}
+      <p class="muted note">
+        {$_("resultsView.noRoundsCompleted")}
+      </p>
+    {/if}
+    {#if !staticPage}
+      <button type="button" class="ghost print-hide" onclick={() => printPage(true)}
+        >🖨 {$_("roundView.print")}</button
+      >
+    {/if}
+  </div>
 
   <table class:teamed={teamMode} onmousemove={trackTip} onmouseleave={clearTip}>
     <thead>
@@ -1199,9 +1209,33 @@
 {/if}
 
 <style>
-  .results-toolbar {
-    display: flex;
-    justify-content: flex-end;
+  /* Three columns so the note keeps the centring it had when it was a line of
+     its own: chips left, button right, and the two side columns are `1fr` each
+     so they settle to the same width — which leaves the middle one, and the
+     note in it, centred on the table. The chips wrap inside their column rather
+     than push the note off centre; only a card too narrow for all three at once
+     (a short tournament, a small window) squeezes them enough to lose the exact
+     centring. Vertical spacing is left to the three of them, so a line that ends
+     up with none of them takes no room at all. */
+  .results-head {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: baseline;
+    gap: 0.75rem;
+  }
+  .results-head .category-filter {
+    grid-column: 1;
+    justify-self: start;
+  }
+  .results-head .note {
+    grid-column: 2;
+  }
+  /* The direct child only: the chips beside it are buttons too. */
+  .results-head > button {
+    grid-column: 3;
+    justify-self: end;
+    /* The gap the note carries below itself, for the rounds where there is no
+       note and the button is alone on the line. */
     margin-bottom: 0.5rem;
   }
   .results {
