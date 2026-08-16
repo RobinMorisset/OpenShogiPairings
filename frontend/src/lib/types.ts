@@ -11,6 +11,7 @@
 export type { AffectedCycle } from "./generated/AffectedCycle";
 export type { BackupInfo } from "./generated/BackupInfo";
 export type { BackupList } from "./generated/BackupList";
+export type { BlockedReason } from "./generated/BlockedReason";
 export type { Board } from "./generated/Board";
 export type { BracketMatch } from "./generated/BracketMatch";
 export type { CupBracketView } from "./generated/CupBracketView";
@@ -39,6 +40,7 @@ export type { MacMahonThreshold } from "./generated/MacMahonThreshold";
 export type { NewPlayer } from "./generated/NewPlayer";
 export type { AbsenceKind } from "./generated/AbsenceKind";
 export type { Forfeit } from "./generated/Forfeit";
+export type { GameRecord } from "./generated/GameRecord";
 export type { Outcome } from "./generated/Outcome";
 export type { PairingSource } from "./generated/PairingSource";
 export type { PairingMode } from "./generated/PairingMode";

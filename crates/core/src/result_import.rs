@@ -655,9 +655,9 @@ mod tests {
         let drawn = t.rounds[1]
             .boards
             .iter()
-            .find(|b| b.outcome.drawn())
+            .find(|b| b.outcome().drawn())
             .expect("the Beta–Delta draw");
-        assert!(drawn.outcome.winner().is_some()); // a decisive winner is still recorded
+        assert!(drawn.outcome().winner().is_some()); // a decisive winner is still recorded
     }
 
     #[test]

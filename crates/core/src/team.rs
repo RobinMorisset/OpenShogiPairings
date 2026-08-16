@@ -619,7 +619,7 @@ impl Tournament {
                 absent.contains(&player).then_some(AbsenceKind::Justified)
             };
             if let Some(forfeit) = Forfeit::of(missing(Winner::Player1), missing(Winner::Player2)) {
-                board.outcome = Outcome::Forfeit { absent: forfeit };
+                board.set_outcome(Outcome::Forfeit { absent: forfeit });
             }
         }
         // Display order: by team match (best-ranked team first), then board

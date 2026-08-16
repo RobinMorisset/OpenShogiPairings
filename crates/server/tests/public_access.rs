@@ -124,8 +124,8 @@ async fn the_public_projection_drops_the_draft_and_the_referee_only_fields() {
         referee["tournament"]["rounds"]
     );
     assert_eq!(
-        body["tournament"]["rounds"][0]["boards"][0]["outcome"],
-        json!({ "kind": "won", "winner": "player1" })
+        body["tournament"]["rounds"][0]["boards"][0]["record"],
+        json!({ "kind": "short", "outcome": { "kind": "won", "winner": "player1" } })
     );
 }
 

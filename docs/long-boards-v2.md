@@ -1,6 +1,6 @@
 # Long boards, second design
 
-Status: **proposed**. Supersedes the model described in
+Status: **implemented**. Supersedes the model described in
 [`two-round-boards.md`](two-round-boards.md), which stays accurate as a record of
 what shipped in 1.3/1.4.
 
@@ -62,12 +62,22 @@ enum GameRecord {
 }
 ```
 
-If putting `Outcome` inside the enum is too invasive for one change, the fallback
-is a `kind: GameKind` field beside the existing `outcome`, with
-`LongCarried ⇒ outcome == Pending` enforced in `validate_loaded` and a
-`debug_assert!` at every mutation site. The sum type is preferred: it is the same
-move `round.rs` already made with `Outcome`/`Forfeit` to make the old illegal
+**Implemented** in `crates/core/src/round.rs` as the sum type above — the fallback
+of a `kind` flag beside the existing `outcome` was not needed. It is the same move
+`round.rs` already made with `Outcome`/`Forfeit` to make the old illegal
 combinations unrepresentable.
+
+Two details settled during implementation:
+
+- **Adjacently tagged on the wire** (`#[serde(tag = "kind", content = "outcome")]`),
+  giving `{"kind":"short","outcome":{…}}` and a bare `{"kind":"long_carried"}`.
+  Internal tagging cannot work here: `Outcome` is *itself* tagged `kind`, so
+  flattening it in would emit that key twice.
+- **`Board::outcome()` is an accessor**, returning `Pending` for `LongCarried`,
+  and `set_outcome` panics on it — reaching that is a bug in core, since every
+  API-facing caller must refuse the board first. The frontend's `outcomeOf` in
+  `boardOutcome.ts` mirrors the same rule, so the ~50 call sites that only ever
+  *read* an outcome were unaffected by the change.
 
 ### A long game always consumes two rounds
 
@@ -151,11 +161,18 @@ Consequences:
 All three surfaces become single-round lookups.
 
 - **American grid.** `long_aware_cell` is deleted. `LongCarried` renders `0-`
-  through the existing sit-out/no-game path; `LongStart` renders `0-` while
-  pending and its real result once decided (which is the case where the
-  tournament ends at round N — the game shows as decided, correctly);
-  `LongEnd` and `Short` render normally. Defects (1), (2) and (3) all disappear:
-  there is no cross-round read and no branch ordering.
+  through the existing sit-out/no-game path; `LongStart`, `LongEnd` and `Short`
+  all render their result in the column being drawn — for `LongStart` that is the
+  tournament-ends-at-round-N case, where the game correctly shows as decided.
+  Defects (1), (2) and (3) all disappear: there is no cross-round read and no
+  branch ordering.
+
+  Note there is deliberately **no** "unfinished long game" rendering. An earlier
+  draft of this document had `LongStart` render `0-` while pending, but the
+  export now refuses the whole document while any long game is unresolved, so no
+  such record can reach the renderer. That is asserted rather than handled: a
+  `0-` fallback would paper over a regression in the guard by quietly reporting a
+  played game as no game at all.
 - **Standings cross-table.** Same rule. A `LongStart` in the last, ongoing round
   shows as an ordinary game. A `LongCarried` in column N followed by a `LongEnd`
   in column N+1 is what the UI keys on to draw one cell straddling both columns;
@@ -199,21 +216,21 @@ forced-board/forced-bye loops.
 These are the places where the change is not free. Each is a real interaction,
 found by walking the call sites rather than by inspection of the model.
 
-### 1. `force_pairing` would destroy a carried game — must be handled
+### 1. Every path that drops a round must un-carry — handled
 
-`force_pairing` (`tournament.rs:1740-1798`) pops the current round and
-re-confirms it from a *reconstructed* draft consisting of `absent`,
-`forced_boards` and `forced_byes`. A `Carried` board is none of those, so
-re-confirming round N+1 would drop it — losing the result and stranding round N's
-record in `LongCarried` with nothing pointing at it.
+`force_pairing` pops the current round and re-confirms it from a *reconstructed*
+draft of `absent` / `forced_boards` / `forced_byes`. A carried board is none of
+those, so a naive pop strands the previous round holding an inert `LongCarried`
+with nothing to make it live again: re-confirming finds no `LongStart` to carry,
+and the game — result and all — disappears.
 
-The fix belongs in the same place that already loses information here: this path
-also silently discards `long` flags today. `confirm_round_inner` should re-derive
-carried boards from the previous round's `LongStart(Pending)` records rather than
-from the draft, so that any re-confirmation of round N+1 re-injects them
-identically. That also keeps the draft free of derived state.
+Resolved by making the carry derived from the previous round rather than from the
+draft (so re-confirmation rebuilds it identically), and by routing **every** drop
+through `pop_round_uncarrying`, which moves the outcome back before removing the
+round. `cancel_last_round` and both `force_pairing` variants use it; a bare
+`self.rounds.pop()` is now the bug.
 
-### 2. `cancel_last_round` must move the outcome back
+### 2. `cancel_last_round` must move the outcome back — handled
 
 Cancelling round N+1 flips round N's record from `LongCarried` back to
 `LongStart` and **copies the `LongEnd` board's outcome onto it** before deleting
@@ -236,39 +253,104 @@ incapable of disagreeing. With the outcome inside the enum, `LongCarried` has no
 field to write and the error is a `match` arm; with the fallback flag layout, it
 is an explicit guard plus a `validate_loaded` invariant.
 
-### 4. Handicaps travel with the game
+### 4. Handicaps travel with the game — handled
 
-`Board::handicap` is part of the game, not of the round. A handicap set on the
-round-N board before the carry must move to the `LongEnd` record in step 3,
-otherwise the grid's `(-2p)` suffix renders on a `0-` placeholder and vanishes
-from the column that shows the result. `set_board_handicap` must also refuse a
-`LongCarried` record, as in (3).
+`Board::handicap` is part of the game, not of the round, so it moves onto the
+`LongEnd` record with the outcome and comes back with it on a cancel. What stays
+on the inert record is only what the *round* decided: who was paired, and their
+float. Leaving a copy of the handicap behind would duplicate it, and a duplicate
+is a thing that can disagree — it would also put the grid's `(-r)` suffix on the
+`0-` placeholder cell, which renders no game at all.
 
-### 5. `opponents` multiplicity — verify, do not assume
+### 4b. Every write to the inert record is refused — handled
 
-Scoring records a long-board opponent **twice** in `opponents`
-(`scoring.rs:245-249`), which is how the 2× weighting reaches SOS-family
-tie-breaks. With one record per round, the accounting has to be restated
-explicitly: `LongCarried` has no outcome and must contribute nothing, and
-`LongEnd` must contribute whatever multiplicity the rule intends. This is the
-one place where a quiet off-by-one would change published tie-breaks, so it wants
-a test that pins the SOS of a long game's opponent against the same game played
-short.
+Issue (3) above was under-specified, and the gap was live: nothing stopped a
+client addressing the board in the round its game *started*, which the round tab
+still shows. `toggle_board_winner` would have **panicked** there (a carried record
+has nowhere to put an outcome, so `set_outcome`'s `expect` fires) and
+`set_board_handicap` would have silently written a handicap that scores nothing.
+Both reachable from ordinary UI, so neither is the "bug in this crate" case a
+panic is for.
 
-The same care applies to `elo.rs`, where a long win must keep moving the estimate
-exactly like a single normal win (`two-round-boards.md:557`), i.e. `LongCarried`
-contributes no game and `LongEnd` contributes one.
+`refuse_if_carried` now guards the result, draw, no-show and handicap paths with
+`CarriedLongGame { round }`, naming the round the game is finished in.
 
-### 6. Cup: the schedule keeps working, but only because the record stays
+`set_board_long` is deliberately **not** guarded that way. Its own
+`NotCurrentRound` check already covers the inert record — which is always in a
+past round — and says the truer thing, since the length cannot be changed in the
+next round either. What it did need was the opposite guard: the *live* record is
+in the current round, and demoting it there would have turned it into an ordinary
+board and orphaned its partner, producing a file `validate_loaded` refuses. That
+is `LongGameStartedEarlier { round }`, mirrored by the frontend disabling the
+checkbox.
+
+### 4c. A player mid-long-game is not absent — handled
+
+The draft offered them an absence checkbox, and marking it produced a round where
+they held a sit-out *and* the carried board. That double-scored them, and the
+cross-table takes the sit-out in preference to the board
+(`american_grid.rs`'s `round_cell` looks up the sit-out first), so the long game
+vanished from the export it was about to be submitted in.
+
+Three layers, because each catches a different caller: `confirm_round` refuses a
+draft whose absent list names a player busy on a long game; `prepare_round` no
+longer *defaults* them into it (a no-show on the long board resolves the game but
+does not release its players, so they were being proposed automatically); and
+`validate_loaded` rejects a file where a `LongEnd` board's player also has a
+sit-out that round. The draft UI drops them from the absence list altogether —
+cup players stay, since marking one absent is how a bracket forfeit is recorded.
+
+### 5. `opponents` multiplicity — handled, and it was wrong
+
+Scoring records a long-board opponent **twice** in `opponents`, which is how the
+2x weighting reaches the SOS-family tie-breaks. The multiplier was per *board*,
+and the opponents loop filters only forfeits — not undecided boards — so once the
+game held one record per round, and both rounds were completed, the opponent was
+counted **four** times. A wrong published tie-break, not an internal detail.
+
+The multiplier is now per record: `LongCarried` and `LongEnd` contribute one game
+each, adding to the same two, which also says the truer thing — one game faced per
+round played. An uncarried `LongStart` (the tournament ended on it) is the whole
+game in one record and still counts two on its own. Pinned by
+`a_long_game_is_two_opponents_faced_not_four`.
+
+The same loop reads each board's frozen float, and a carried game holds a record
+in both of its rounds, so the float marker lands on the round the game **ended**
+in — the later write wins. That is the intended reading, and it is worth stating
+because the opposite is tempting: the float rules decay by distance from this
+marker, and a player who has only just finished a game they floated into is
+exactly as fresh a floater as one who finished an ordinary game that round. The
+game being long does not make the float older. Recording it from the round the
+game was *paired* in would discount the repeat penalty by one round, for no reason
+the player would recognise. Pinned by
+`a_carried_long_games_float_counts_from_the_round_it_ended_in`.
+
+Points and victories needed nothing: they come from `effective_winner`, which is
+`None` on the inert record, and the `LongEnd` keeps the 2x weight. Nor does
+`elo.rs`, which reads the boards directly rather than these lists and sees one
+decided record per game.
+
+### 6. Cup: the schedule keeps working, but the result lookup had to follow
 
 `cup_schedule` (`cup.rs:210-225`) derives the bracket→tournament-round mapping by
-asking, for each tournament round t, whether any Cup board there is flagged long,
+asking, for each tournament round t, whether any Cup board there is a long game,
 and advancing by 2 if so. This survives **only** because the round-N record
 remains in round N as `LongCarried`. Had the board been physically moved out of
 round t, the mapping would collapse back to the identity and the whole bracket
-would shift, and `replay_to`/`play_round` would look for the quarterfinal results
-in the round they are no longer in. The predicate must therefore be "is this a
-long-start-or-carried cup board", not "does it have an outcome".
+would shift.
+
+What the original analysis missed: the schedule survives, but the *result* lookup
+does not. `decide` (`cup.rs`) reads the outcome off the board in round t, and
+after the carry that record is the inert one. A long quarterfinal therefore
+replayed as undecided and the bracket answered `CupBracketInconsistent`. Fixed by
+having `decide` follow a `LongCarried` record forward to its `LongEnd` in round
+t+1 — the schedule still keys off round t, only the outcome is looked up one
+round later. Caught by
+`long_cup_round_couples_all_cup_boards_gaps_the_next_round_and_resumes`.
+
+Two existing cup facts preserved: a bracket round is long as a unit (all cup
+boards of the round flip together), and that coupling's decided-board guard bug
+is unchanged by this work.
 
 Note also that `cup.rs` reads `completed` nowhere (the only two occurrences are a
 test helper), and every caller passes `&self.rounds` unfiltered, so the

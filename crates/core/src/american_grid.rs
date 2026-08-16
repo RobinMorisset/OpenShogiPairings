@@ -43,7 +43,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::player::Player;
-use crate::round::{Board, Round, Winner};
+use crate::round::{Board, GameRecord, Round, Winner};
 use crate::standings::Standing;
 use crate::tournament::{Tournament, TournamentError};
 use crate::units::{HalfPoints, TournamentId};
@@ -70,14 +70,8 @@ const COLUMN_SEP: &str = " ";
 /// is wrong, and every route to it — the API, the desktop app, a future export —
 /// must be refused alike.
 pub fn to_grid(tournament: &Tournament, standings: &[Standing]) -> Result<String, TournamentError> {
-    if let Some(round) = tournament
-        .rounds
-        .iter()
-        .find(|r| r.boards.iter().any(|b| b.long_pending()))
-    {
-        return Err(TournamentError::UnresolvedLongGame {
-            round: round.number,
-        });
+    if let Some(blocked) = tournament.grid_export_blocker() {
+        return Err(blocked);
     }
     let players_by_id: HashMap<Uuid, &Player> =
         tournament.players.iter().map(|p| (p.id, p)).collect();
@@ -191,8 +185,9 @@ fn row_for(
         rank_of.contains_key(&tid),
         "exported player {tid} is missing from the standings"
     );
-    let mut round_cells: Vec<String> = (0..rounds.len())
-        .map(|i| long_aware_cell(tid, i, rounds, rank_of))
+    let mut round_cells: Vec<String> = rounds
+        .iter()
+        .map(|round| round_cell(tid, round, rank_of))
         .collect();
     // Wrap the whole block in a single literal bracket pair. Done in place so a
     // one-round tournament yields `[cell]` (both edits land on the same cell).
@@ -232,38 +227,6 @@ fn format_half_points(points: HalfPoints) -> String {
     }
 }
 
-/// The round cell for a player, aware of long (two-round) games. A long board
-/// lives in its *starting* round but its result is only known in the *next*
-/// round, so it renders as `0-` in the starting column (a game in progress) and
-/// its decisive result in the following column. Everything else defers to
-/// [`round_cell`].
-fn long_aware_cell(
-    player_id: TournamentId,
-    i: usize,
-    rounds: &[&Round],
-    rank_of: &HashMap<TournamentId, u32>,
-) -> String {
-    fn on_long(round: &Round, player_id: TournamentId) -> Option<&Board> {
-        round
-            .boards
-            .iter()
-            .find(|b| b.long && (b.player1 == player_id || b.player2 == player_id))
-    }
-    // On a long board this round → placeholder; the result belongs to the next
-    // column (it is not settled as of this round).
-    if on_long(rounds[i], player_id).is_some() {
-        return "0-".into();
-    }
-    // Carrying a long game from the previous round → show its result here, the
-    // round in which it becomes known.
-    if i > 0 {
-        if let Some(board) = on_long(rounds[i - 1], player_id) {
-            return game_cell(board, player_id, rank_of);
-        }
-    }
-    round_cell(player_id, rounds[i], rank_of)
-}
-
 /// The single round cell for a player: whatever their sit-out scored (`0+` for
 /// the usual bye, `0-`/`0=` for an absence) when they played no board, `0#` /
 /// `0+` for a no-show, or `<opponent><marker><handicap?>` for a game. The
@@ -285,7 +248,31 @@ fn round_cell(
         // Not in this round at all (e.g. registered later): nothing scored.
         return "0-".into();
     };
-    game_cell(board, player_id, rank_of)
+    match board.record {
+        // The inert record a carried long game leaves behind: no game was settled
+        // in this round and the result belongs to the `LongEnd` column, so this
+        // one reads as a non-game, which is what `0-` says.
+        GameRecord::LongCarried => "0-".into(),
+        // Everything else is a board whose result belongs to *this* column: an
+        // ordinary game, a long game finished in the round it was carried into,
+        // and a long game the tournament ended on before it could be carried.
+        _ => {
+            // Every one of them holds a settled result, because `to_grid` refuses
+            // the whole document while any long game is unresolved. Asserted
+            // rather than handled: rendering an unfinished game here is precisely
+            // the bug that guard exists to prevent — `Outcome::Pending` is neither
+            // a draw nor a win, so `result_marker` would write `-` for *both*
+            // players. A `0-` fallback would paper over a regression in the guard
+            // by quietly reporting a played game as no game at all.
+            debug_assert!(
+                !board.long_pending(),
+                "to_grid refuses while a long game is unresolved, so round \
+                 {} must not still hold one",
+                round.number
+            );
+            game_cell(board, player_id, rank_of)
+        }
+    }
 }
 
 /// The cell for a player's actual board: `0#`/`0+` for a no-show, otherwise
@@ -307,7 +294,7 @@ fn game_cell(
     // it missed — `0#` for an unjustified no-show, `0-` for an absence with a
     // reason — and the side that turned up gets `0+`, the bye-equivalent free
     // point. Under a double forfeit both cells are the absentees'.
-    if let Some(forfeit) = board.outcome.forfeit() {
+    if let Some(forfeit) = board.outcome().forfeit() {
         return match forfeit.kind(side) {
             Some(kind) => kind.cell().into(),
             None => "0+".into(),
@@ -347,11 +334,11 @@ fn game_cell(
 /// draw occurred (the ELO computation only needs that fact), otherwise `+` for a
 /// win and `-` for a loss, following the *actual* game result.
 fn result_marker(board: &Board, is_player1: bool) -> &'static str {
-    if board.outcome.drawn() {
+    if board.outcome().drawn() {
         return "=";
     }
     let won = matches!(
-        (board.outcome.winner(), is_player1),
+        (board.outcome().winner(), is_player1),
         (Some(Winner::Player1), true) | (Some(Winner::Player2), false)
     );
     if won {
@@ -376,6 +363,7 @@ fn pad(s: &str, width: usize) -> String {
 mod tests {
     use super::*;
     use crate::pairing::RoundExplanation;
+    use crate::round::GameRecord;
     use crate::round::{
         AbsenceKind, CupStage, Forfeit, Handicap, HandicapGame, Outcome, PairingSource, Sitout,
         SitoutKind, SitoutValue,
@@ -421,7 +409,7 @@ mod tests {
         let p2 = tid(&t, p2);
 
         let mut board = Board {
-            outcome: Outcome::won(Winner::Player1),
+            record: GameRecord::Short(Outcome::won(Winner::Player1)),
             ..Board::pending(p1, p2, 0, PairingSource::Swiss)
         };
         configure(&mut board);
@@ -551,10 +539,10 @@ mod tests {
         // A draw occurred but the game was replayed to a P1 win. Both cells show
         // `=`, dropping the +/- entirely.
         let (t, ..) = one_board(|b| {
-            b.outcome = Outcome::Won {
+            b.set_outcome(Outcome::Won {
                 winner: Winner::Player1,
                 drawn: true,
-            }
+            })
         });
         let rows = data_rows(&to_grid(&t, &t.standings()).unwrap());
         assert!(rows.iter().any(|r| r.contains("[2=]")));
@@ -593,18 +581,21 @@ mod tests {
             number: 1,
             explanation: RoundExplanation::empty(1),
             boards: vec![Board {
-                outcome: Outcome::won(Winner::Player1),
-                long: true,
+                record: GameRecord::LongCarried,
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
             sitouts: Vec::new(),
             completed: true,
         });
-        // Round 2: A and B are on the long game, so they have no board here.
+        // Round 2 holds the live record: the game is finished here, so this is
+        // the column its result belongs to.
         t.rounds.push(Round {
             number: 2,
             explanation: RoundExplanation::empty(2),
-            boards: Vec::new(),
+            boards: vec![Board {
+                record: GameRecord::LongEnd(Outcome::won(Winner::Player1)),
+                ..Board::pending(a, b, 0, PairingSource::Carried)
+            }],
             sitouts: Vec::new(),
             completed: true,
         });
@@ -630,7 +621,7 @@ mod tests {
             number: 1,
             explanation: RoundExplanation::empty(1),
             boards: vec![Board {
-                long: true,
+                record: GameRecord::LongCarried,
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
             sitouts: Vec::new(),
@@ -639,18 +630,23 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             explanation: RoundExplanation::empty(2),
-            boards: Vec::new(),
+            boards: vec![Board {
+                record: GameRecord::LongEnd(Outcome::PENDING),
+                ..Board::pending(a, b, 0, PairingSource::Carried)
+            }],
             sitouts: Vec::new(),
-            completed: true,
+            completed: false,
         });
 
         assert_eq!(
             to_grid(&t, &t.standings()),
-            Err(TournamentError::UnresolvedLongGame { round: 1 })
+            Err(TournamentError::UnresolvedLongGame { round: 2 })
         );
 
-        // Entering the result unblocks it, and the round-2 column carries it.
-        t.rounds[0].boards[0].outcome = Outcome::won(Winner::Player1);
+        // Entering the result on the live record unblocks it, and round 2 — the
+        // column the game was finished in — carries it.
+        t.rounds[1].boards[0].set_outcome(Outcome::won(Winner::Player1));
+        t.rounds[1].completed = true;
         let rows = data_rows(&to_grid(&t, &t.standings()).unwrap());
         assert!(rows[0].contains("[0- 2+]"), "A row: {rows:?}");
     }
@@ -670,7 +666,7 @@ mod tests {
             number: 1,
             explanation: RoundExplanation::empty(1),
             boards: vec![Board {
-                outcome: Outcome::won(Winner::Player1),
+                record: GameRecord::Short(Outcome::won(Winner::Player1)),
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
             sitouts: vec![Sitout {
@@ -689,7 +685,7 @@ mod tests {
             number: 2,
             explanation: RoundExplanation::empty(2),
             boards: vec![Board {
-                outcome: Outcome::won(Winner::Player2),
+                record: GameRecord::Short(Outcome::won(Winner::Player2)),
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
             }],
             sitouts: vec![Sitout {
@@ -714,9 +710,9 @@ mod tests {
             number: 2,
             explanation: RoundExplanation::empty(2),
             boards: vec![Board {
-                outcome: Outcome::Forfeit {
+                record: GameRecord::Short(Outcome::Forfeit {
                     absent: Forfeit::Player2(AbsenceKind::NoShow),
-                }, // P2 absent
+                }), // P2 absent
                 ..Board::pending(p1, p2, 0, PairingSource::Swiss)
             }],
             sitouts: Vec::new(),
@@ -741,9 +737,9 @@ mod tests {
             number: 2,
             explanation: RoundExplanation::empty(2),
             boards: vec![Board {
-                outcome: Outcome::Forfeit {
+                record: GameRecord::Short(Outcome::Forfeit {
                     absent: Forfeit::Player2(AbsenceKind::Justified),
-                },
+                }),
                 ..Board::pending(p1, p2, 0, PairingSource::Swiss)
             }],
             sitouts: Vec::new(),
@@ -772,9 +768,9 @@ mod tests {
             number: 2,
             explanation: RoundExplanation::empty(2),
             boards: vec![Board {
-                outcome: Outcome::Forfeit {
+                record: GameRecord::Short(Outcome::Forfeit {
                     absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
-                },
+                }),
                 ..Board::pending(p1, p2, 0, PairingSource::Swiss)
             }],
             sitouts: Vec::new(),

@@ -10,7 +10,9 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::player::Player;
-use crate::round::{Board, Outcome, PairingSource, Round, Sitout, SitoutKind, SitoutValue, Winner};
+use crate::round::{
+    Board, GameRecord, Outcome, PairingSource, Round, Sitout, SitoutKind, SitoutValue, Winner,
+};
 use crate::settings::TournamentSettings;
 use crate::units::{TournamentId, UnitKey};
 
@@ -193,7 +195,7 @@ pub(super) fn completed_round(
         boards: boards
             .iter()
             .map(|&(a, b, w)| Board {
-                outcome: Outcome::won(w),
+                record: GameRecord::Short(Outcome::won(w)),
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
             })
             .collect(),

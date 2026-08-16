@@ -31,10 +31,14 @@ export function sourceBadge(
   source?: PairingSource,
 ): {
   text: string;
-  kind: "swiss" | "forced" | "cup";
+  kind: "swiss" | "forced" | "cup" | "carried";
 } {
   if (!source || source.kind === "swiss")
     return { text: t("pairingSource.swiss"), kind: "swiss" };
   if (source.kind === "forced") return { text: t("pairingSource.forced"), kind: "forced" };
+  // A long game being finished in this round. It was paired in the previous one,
+  // so it is no more a decision of this round's engine than a forced board is.
+  if (source.kind === "carried")
+    return { text: t("pairingSource.carried"), kind: "carried" };
   return { text: cupStageLabel(source.stage, t), kind: "cup" };
 }

@@ -1,82 +1,24 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  busyOnLongGame,
-  longPending,
-  overrunLongRound,
-  pendingLongRound,
-} from "./longGames";
-import type { Board, Round } from "./types";
+import { busyOnLongGame, inLongFlagUnit } from "./longGames";
+import type { Board, Cup, Round } from "./types";
+import { withRecord, type BoardFields } from "./boardFixture";
 
-/** Only the fields these predicates read; the rest of `Board` is irrelevant. */
-const board = (fields: Partial<Board>): Board =>
-  ({ player1: 1, player2: 2, ...fields }) as Board;
+/**
+ * Boards as the tests describe them — `{ outcome, long }` — folded into the
+ * `record` sum the wire actually carries (see `GameRecord` in
+ * `crates/core/src/round.rs`). Keeps the fixtures readable while the shape
+ * under them is a tagged union.
+ */
+const board = (fields: BoardFields): Board =>
+  ({ player1: 1, player2: 2, ...withRecord(fields) }) as Board;
 
 const round = (number: number, boards: Board[]): Round =>
   ({ number, boards, completed: true }) as Round;
 
 const pendingLong = () => board({ long: true });
 
-describe("longPending", () => {
-  it("is true for a long board with no outcome yet", () => {
-    expect(longPending(pendingLong())).toBe(true);
-  });
 
-  it("is false for an ordinary unplayed board", () => {
-    expect(longPending(board({}))).toBe(false);
-    expect(longPending(board({ long: false }))).toBe(false);
-  });
-
-  it("is false once the long game is decided", () => {
-    expect(longPending(board({ long: true, outcome: { kind: "won", winner: "player1" } }))).toBe(false);
-  });
-
-  // A forfeited long board is decided, so there is no result left to record —
-  // the winnerless-but-decided case that the force-pairing guard got wrong. It
-  // does *not* free its players for the next round: see `busyOnLongGame`.
-  it("is false for a long board resolved by forfeit", () => {
-    const forfeited = board({ long: true, outcome: { kind: "forfeit", absent: { player2: "no_show" } } });
-    expect(longPending(forfeited)).toBe(false);
-  });
-});
-
-describe("overrunLongRound", () => {
-  it("is null when there are no long games at all", () => {
-    const rounds = [round(1, [board({})]), round(2, [board({})])];
-    expect(overrunLongRound(rounds, 3)).toBeNull();
-  });
-
-  // The boundary the rule is built around: a long game started in round 2 is
-  // *meant* to still be open while round 3 is prepared — it spans 2 and 3.
-  it("does not block the round a long game legitimately spans", () => {
-    const rounds = [round(1, [board({})]), round(2, [pendingLong()])];
-    expect(overrunLongRound(rounds, 3)).toBeNull();
-  });
-
-  // One round later, the same board has overrun and must be resolved.
-  it("blocks once that long game would straddle a third round", () => {
-    const rounds = [round(1, [board({})]), round(2, [pendingLong()]), round(3, [board({})])];
-    expect(overrunLongRound(rounds, 4)).toBe(2);
-  });
-
-  it("names the earliest offending round when several have overrun", () => {
-    const rounds = [round(1, [pendingLong()]), round(2, [pendingLong()]), round(3, [board({})])];
-    expect(overrunLongRound(rounds, 4)).toBe(1);
-  });
-
-  it("ignores a long game that was finished in time", () => {
-    const rounds = [
-      round(1, [board({ long: true, outcome: { kind: "won", winner: "player1" } })]),
-      round(2, [board({})]),
-      round(3, [board({})]),
-    ];
-    expect(overrunLongRound(rounds, 4)).toBeNull();
-  });
-
-  it("is null before any round exists", () => {
-    expect(overrunLongRound([], 1)).toBeNull();
-  });
-});
 
 describe("busyOnLongGame", () => {
   it("keeps the previous round's long players out of this one", () => {
@@ -113,29 +55,41 @@ describe("busyOnLongGame", () => {
   });
 });
 
-describe("pendingLongRound", () => {
-  it("names the round of an unresolved long game", () => {
-    expect(pendingLongRound([round(1, [pendingLong()])])).toBe(1);
+
+describe("inLongFlagUnit", () => {
+  const cupBoard = (player1: number, player2: number, stage: string): Board =>
+    ({ player1, player2, source: { kind: "cup", stage } }) as unknown as Board;
+  const qualifierCup = {
+    size: 8,
+    format: "qualifier",
+    seed_order: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+  } as unknown as Cup;
+
+  it("takes in every cup board of the round, and nothing else", () => {
+    const r = round(1, [cupBoard(1, 2, "quarterfinal"), board({ player1: 5, player2: 6 })]);
+    expect(r.boards.map(inLongFlagUnit(r, null))).toEqual([true, false]);
   });
 
-  // Wider than overrunLongRound on purpose. A long game started in round 2 is
-  // *meant* to still be open while round 3 is prepared — it spans 2 and 3, so
-  // the round guard passes. The export must refuse anyway: the game has no
-  // result to put in round 3's column, and rendering it would write a loss for
-  // both players into a document bound for a rating body.
-  it("blocks a long game that is still legitimately in flight", () => {
-    const rounds = [round(1, [board({ player1: 3, player2: 4 })]), round(2, [pendingLong()])];
-    expect(overrunLongRound(rounds, 3)).toBeNull();
-    expect(pendingLongRound(rounds)).toBe(2);
+  // A qualifier cup's first round is one session: the play-off boards and the
+  // pre-qualified players' games in the open go long together, or not at all.
+  it("takes in the pre-qualified players' games in the qualification round", () => {
+    const r = round(1, [
+      cupBoard(5, 12, "qualification"),
+      board({ player1: 1, player2: 20 }), // pre-qualified seed 1, facing an outsider
+      board({ player1: 21, player2: 22 }), // an ordinary Swiss game
+    ]);
+    expect(r.boards.map(inLongFlagUnit(r, qualifierCup))).toEqual([true, true, false]);
   });
 
-  it("is null once the long game is decided", () => {
-    const decided = board({ long: true, outcome: { kind: "won", winner: "player1" } });
-    expect(pendingLongRound([round(1, [decided])])).toBeNull();
+  it("leaves the pre-qualified alone once the bracket proper starts", () => {
+    // No qualification board here, so this is a later round.
+    const r = round(2, [cupBoard(1, 5, "quarterfinal"), board({ player1: 1, player2: 20 })]);
+    expect(r.boards.map(inLongFlagUnit(r, qualifierCup))).toEqual([true, false]);
   });
 
-  it("is null with no long boards at all", () => {
-    expect(pendingLongRound([round(1, [board({})])])).toBeNull();
-    expect(pendingLongRound([])).toBeNull();
+  it("ignores the seeding of a direct cup", () => {
+    const direct = { size: 8, format: "direct", seed_order: [1, 2, 3, 4, 5, 6, 7, 8] } as unknown as Cup;
+    const r = round(1, [cupBoard(1, 8, "quarterfinal"), board({ player1: 2, player2: 20 })]);
+    expect(r.boards.map(inLongFlagUnit(r, direct))).toEqual([true, false]);
   });
 });

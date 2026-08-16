@@ -897,7 +897,7 @@ fn observed_report(
         .rounds
         .iter()
         .flat_map(|r| &r.boards)
-        .any(|b| b.outcome.winner().is_some());
+        .any(|b| b.outcome().winner().is_some());
     if !played {
         return None;
     }

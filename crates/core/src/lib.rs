@@ -64,8 +64,8 @@ pub use pairing::{
 pub use player::{Grade, GradeKind, NewPlayer, Player, PointAdjustment};
 pub use result_import::ResultImportError;
 pub use round::{
-    AbsenceKind, Board, CupStage, ForcedMatch, Forfeit, Handicap, HandicapGame, Outcome,
-    PairingSource, Round, RoundDraft, Sitout, SitoutKind, SitoutValue, Winner,
+    AbsenceKind, Board, CupStage, ForcedMatch, Forfeit, GameRecord, Handicap, HandicapGame,
+    Outcome, PairingSource, Round, RoundDraft, Sitout, SitoutKind, SitoutValue, Winner,
 };
 pub use settings::{
     ClubProtection, DateError, EloEstimator, EloPriorShape, FloaterStyle, HandicapDisplay,

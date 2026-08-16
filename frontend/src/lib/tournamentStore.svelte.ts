@@ -10,6 +10,7 @@
  */
 import { fetchTournament } from "./api";
 import type {
+  BlockedReason,
   CupBracketView,
   CupPodium,
   Handicap,
@@ -38,6 +39,11 @@ export class TournamentStore {
    *  `TournamentResponse.effective_winners`), indexed like `tournament.rounds`. */
   effectiveWinners = $state<(Winner | null)[][]>([]);
   canUndo = $state(false);
+  /** Why the server would refuse to start the next round / export the grid, or
+   *  `null` if it would go ahead. Server-computed, so the buttons that read them
+   *  cannot disagree with the guards that enforce them. */
+  nextRoundBlocked = $state<BlockedReason | null>(null);
+  gridExportBlocked = $state<BlockedReason | null>(null);
 
   /**
    * Whether the in-memory tournament has changes not yet written to a file —
@@ -76,6 +82,8 @@ export class TournamentStore {
     this.suggestedHandicaps = res.suggested_handicaps ?? [];
     this.effectiveWinners = res.effective_winners ?? [];
     this.canUndo = res.can_undo;
+    this.nextRoundBlocked = res.next_round_blocked ?? null;
+    this.gridExportBlocked = res.grid_export_blocked ?? null;
     this.#appliedVersion = res.version;
   }
 
@@ -112,6 +120,8 @@ export class TournamentStore {
     this.suggestedHandicaps = [];
     this.effectiveWinners = [];
     this.canUndo = false;
+    this.nextRoundBlocked = null;
+    this.gridExportBlocked = null;
     this.#appliedVersion = null;
     this.hasUnsavedChanges = false;
   }

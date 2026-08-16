@@ -155,6 +155,13 @@ pub enum PairingSource {
     Forced,
     /// Dictated by the direct-elimination cup bracket (bypasses the engine).
     Cup { stage: CupStage },
+    /// A long game carried forward from the previous round, where the engine (or
+    /// the referee, or the bracket) actually chose it. Its
+    /// [`LongEnd`](GameRecord::LongEnd) record sits in this round because that is
+    /// where the game is finished, but nothing decided it *here* — so it carries
+    /// no pairing explanation and cannot be probed by a counterfactual, exactly
+    /// like a forced or cup board.
+    Carried,
 }
 
 impl PairingSource {
@@ -378,10 +385,12 @@ pub struct Board {
     /// pairing index players directly without a `Uuid → number` lookup.
     pub player1: TournamentId,
     pub player2: TournamentId,
-    /// What happened on this board: still to play, played to a decision, or
-    /// forfeited by one or both sides. Omitted from JSON while pending.
-    #[serde(default, skip_serializing_if = "Outcome::is_pending_undrawn")]
-    pub outcome: Outcome,
+    /// What kind of game this board records, and — for the kinds that can hold
+    /// one — what happened on it. See [`GameRecord`]. Omitted from JSON for an
+    /// ordinary board with nothing recorded on it yet, which is most of them
+    /// while a round is being played.
+    #[serde(default, skip_serializing_if = "GameRecord::is_pending_short")]
+    pub record: GameRecord,
     /// The handicap conceded on this board, if any (see [`HandicapGame`]).
     ///
     /// Never set together with a forfeited [`outcome`](Self::outcome): nobody
@@ -408,12 +417,83 @@ pub struct Board {
     /// Swiss for saves predating this field.
     #[serde(default, skip_serializing_if = "PairingSource::is_swiss")]
     pub source: PairingSource,
-    /// This board is a "long game": double time control, lasting two rounds, and
-    /// its winner scores two points instead of one. Off by default and omitted
-    /// from JSON when false. The two players sit out the next round's pairing
-    /// while an undecided long board is in flight. See `docs/archive/two-round-boards.md`.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub long: bool,
+}
+
+/// What a board records: an ordinary game, or one of the three states of a
+/// "long game" (double time control, spanning two rounds, worth two points).
+///
+/// A long game is *one* game played across two rounds, so it gets one record per
+/// round it occupies: [`LongStart`](Self::LongStart) in the round it began, and
+/// [`LongEnd`](Self::LongEnd) in the round it is finished in. When the game is
+/// carried forward its outcome **moves** to the `LongEnd` record and the
+/// starting one becomes [`LongCarried`](Self::LongCarried), which holds no
+/// outcome at all — so exactly one record is authoritative at every instant and
+/// the two cannot disagree about who won. Cancelling the later round moves the
+/// outcome back, the exact inverse.
+///
+/// That the carried record has nowhere to *put* an outcome is the point: it is
+/// why this is an enum around [`Outcome`] rather than a flag beside one. See
+/// `docs/long-boards-v2.md`.
+// Adjacently tagged, not internally: [`Outcome`] is itself tagged `kind`, so
+// flattening it in here would emit that key twice and lose one of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", content = "outcome", rename_all = "snake_case")]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub enum GameRecord {
+    /// An ordinary one-round game.
+    Short(Outcome),
+    /// A long game in the round it started, before being carried forward. It may
+    /// already be decided — finishing early does not cancel the carry, since the
+    /// game still took both of its rounds.
+    LongStart(Outcome),
+    /// The inert record a carried long game leaves in its starting round. Holds
+    /// no outcome: the live record is the `LongEnd` board in the next round.
+    /// Renders as `0-` and scores nothing.
+    LongCarried,
+    /// The live record of a carried long game, in the round it is finished in.
+    /// An ordinary board for the purpose of closing that round.
+    LongEnd(Outcome),
+}
+
+impl Default for GameRecord {
+    /// An ordinary board with nothing recorded on it yet — what a freshly paired
+    /// board is, and what a save omitting the field means.
+    fn default() -> Self {
+        GameRecord::Short(Outcome::PENDING)
+    }
+}
+
+impl GameRecord {
+    /// `skip_serializing_if` helper — an ordinary board with nothing recorded on
+    /// it is the default and omitted.
+    fn is_pending_short(&self) -> bool {
+        matches!(self, GameRecord::Short(o) if o.is_pending_undrawn())
+    }
+
+    /// The outcome this record holds; pending for [`LongCarried`](Self::LongCarried),
+    /// which holds none.
+    pub fn outcome(self) -> Outcome {
+        match self {
+            GameRecord::Short(o) | GameRecord::LongStart(o) | GameRecord::LongEnd(o) => o,
+            GameRecord::LongCarried => Outcome::PENDING,
+        }
+    }
+
+    /// The same record with a different outcome.
+    ///
+    /// `None` for [`LongCarried`](Self::LongCarried), which has nowhere to put
+    /// one — callers must write to the `LongEnd` record in the following round
+    /// instead. That refusal is the invariant this type exists to enforce, so it
+    /// is returned rather than silently dropped.
+    #[must_use]
+    pub fn with_outcome(self, outcome: Outcome) -> Option<Self> {
+        Some(match self {
+            GameRecord::Short(_) => GameRecord::Short(outcome),
+            GameRecord::LongStart(_) => GameRecord::LongStart(outcome),
+            GameRecord::LongEnd(_) => GameRecord::LongEnd(outcome),
+            GameRecord::LongCarried => return None,
+        })
+    }
 }
 
 impl Board {
@@ -428,12 +508,18 @@ impl Board {
         Board {
             player1,
             player2,
-            outcome: Outcome::PENDING,
+            record: GameRecord::Short(Outcome::PENDING),
             handicap: None,
             points_diff,
             source,
-            long: false,
         }
+    }
+
+    /// What happened on this board. [`GameRecord::LongCarried`] holds none — the
+    /// live record of that game is the [`LongEnd`](GameRecord::LongEnd) board in
+    /// the following round — so it reads as pending.
+    pub fn outcome(&self) -> Outcome {
+        self.record.outcome()
     }
 
     /// Whether this board's outcome is settled: either a game was played (a
@@ -441,48 +527,112 @@ impl Board {
     /// round's `completed` flag, so a no-show counts toward closing the round
     /// even though no game was played.
     pub fn is_decided(&self) -> bool {
-        self.outcome.is_decided()
+        self.outcome().is_decided()
+    }
+
+    /// Record `outcome` on this board.
+    ///
+    /// # Panics
+    ///
+    /// If this is a [`LongCarried`](GameRecord::LongCarried) record, which holds
+    /// no outcome — the game's live record is the `LongEnd` board in the next
+    /// round, and writing here would be the one way the two could come to
+    /// disagree. Callers reachable from the API must reject that board first and
+    /// return an error naming the round the result belongs to; reaching this is a
+    /// bug in *this* crate.
+    pub fn set_outcome(&mut self, outcome: Outcome) {
+        self.record = self
+            .record
+            .with_outcome(outcome)
+            .expect("a carried long game's result belongs to its LongEnd board");
+    }
+
+    /// Flag or unflag this board as a long game, keeping whatever is recorded on
+    /// it — unticking after a result is the deliberate demote path.
+    ///
+    /// Only meaningful before the game is carried forward; the caller
+    /// ([`Tournament::set_board_long`](crate::Tournament::set_board_long))
+    /// already refuses any round but the current one, which is what keeps a
+    /// carried or finishing record out of here.
+    pub fn set_long(&mut self, long: bool) {
+        debug_assert!(
+            matches!(self.record, GameRecord::Short(_) | GameRecord::LongStart(_)),
+            "longness is fixed once a game has been carried forward"
+        );
+        let outcome = self.outcome();
+        self.record = if long {
+            GameRecord::LongStart(outcome)
+        } else {
+            GameRecord::Short(outcome)
+        };
+    }
+
+    /// Whether this board is a long (two-round) game, in any of its states.
+    ///
+    /// This is what decides who sits out the next round's pairing, because a
+    /// long game occupies two rounds whichever round it finishes in. Keying that
+    /// exclusion on [`long_pending`](Self::long_pending) instead is what once let
+    /// a player who finished early — or whose opponent never turned up — take
+    /// three wins out of two rounds.
+    pub fn is_long(&self) -> bool {
+        !matches!(self.record, GameRecord::Short(_))
     }
 
     /// A long board whose game hasn't finished yet — the state that shows the
-    /// `0-` placeholder in the cross-table, and that blocks advancing past the
-    /// round after the one it started in.
+    /// `0-` placeholder in the cross-table, that blocks advancing past the round
+    /// after the one it started in, and that refuses the American Grid export.
     ///
-    /// **Not** what decides who sits out the next round's pairing: that is
-    /// [`long`](Self::long) alone, because a long game occupies two rounds
-    /// whichever round it finishes in. Keying the exclusion on this predicate is
-    /// what once let a player who finished early — or whose opponent never turned
-    /// up — take three wins out of two rounds.
+    /// **Not** what decides who sits out the next round: see
+    /// [`is_long`](Self::is_long).
     pub fn long_pending(&self) -> bool {
-        self.long && !self.is_decided()
+        match self.record {
+            // The two records that can be waiting on a result: a game still in
+            // its starting round, and one being finished in the round it was
+            // carried into.
+            GameRecord::LongStart(o) | GameRecord::LongEnd(o) => !o.is_decided(),
+            // The carried record holds nothing and is waiting for nothing — its
+            // game's state is the `LongEnd`'s, one round later. Treating it as
+            // pending would block the export and the next round on a record that
+            // can never be filled in.
+            GameRecord::LongCarried | GameRecord::Short(_) => false,
+        }
     }
 
     /// Whether this board counts as settled for the purpose of closing its round.
-    /// A pending long board does **not** hold the round open — the rest of the
-    /// field plays on while the long game (which spans this round and the next)
-    /// finishes — so it counts as complete here even without a result.
+    ///
+    /// A long game's *starting* record does not hold its round open — the rest of
+    /// the field plays on while the game, which spans this round and the next,
+    /// finishes — and neither does the inert record it leaves behind once it has
+    /// been carried forward. Its [`LongEnd`](GameRecord::LongEnd) record, in the
+    /// round the game is actually finished in, is an ordinary board and does hold
+    /// that round open until a result is entered.
+    ///
+    /// Every arm is local to this board: nothing here consults another round.
     pub fn complete_for_round(&self) -> bool {
-        self.is_decided() || self.long
+        match self.record {
+            GameRecord::LongStart(_) | GameRecord::LongCarried => true,
+            GameRecord::Short(o) | GameRecord::LongEnd(o) => o.is_decided(),
+        }
     }
 
     /// Whether the given `side` failed to show up on this board (true for that
     /// side under a single forfeit, and for both sides under
     /// [`Forfeit::Both`]).
     pub fn no_show_absent(&self, side: Winner) -> bool {
-        self.outcome.forfeit().is_some_and(|f| f.absent(side))
+        self.outcome().forfeit().is_some_and(|f| f.absent(side))
     }
 
     /// Why `side` missed this board, if they did — what the exported cell reads
     /// (`0#` for an unjustified no-show, `0-` for a justified absence).
     pub fn absence_kind(&self, side: Winner) -> Option<AbsenceKind> {
-        self.outcome.forfeit().and_then(|f| f.kind(side))
+        self.outcome().forfeit().and_then(|f| f.kind(side))
     }
 
     /// The id of the player who *did* show up — the one credited the free point,
     /// exactly like a bye — when exactly one side was a no-show. `None` when both
     /// showed up or [`Forfeit::Both`] (neither did, so nobody is credited).
     pub fn no_show_opponent(&self) -> Option<TournamentId> {
-        self.outcome.forfeit()?.present().map(|side| match side {
+        self.outcome().forfeit()?.present().map(|side| match side {
             Winner::Player1 => self.player1,
             Winner::Player2 => self.player2,
         })
@@ -497,8 +647,8 @@ impl Board {
     /// [`TournamentSettings::handicap_wiel_rule`]: crate::settings::TournamentSettings::handicap_wiel_rule
     pub fn effective_winner(&self, wiel_rule: bool) -> Option<Winner> {
         match &self.handicap {
-            Some(h) if wiel_rule => self.outcome.winner().map(|_| h.giver),
-            _ => self.outcome.winner(),
+            Some(h) if wiel_rule => self.outcome().winner().map(|_| h.giver),
+            _ => self.outcome().winner(),
         }
     }
 
@@ -804,14 +954,51 @@ mod tests {
         }
     }
 
-    /// A pending board serializes without an `outcome` key at all, and reads back
+    /// A pending board serializes without a `record` key at all, and reads back
     /// as pending — the `skip_serializing_if` / `default` pair that keeps saves
     /// from growing an entry per unplayed board.
     #[test]
-    fn a_pending_board_omits_its_outcome() {
+    fn a_pending_board_omits_its_record() {
         let board = Board::pending(TournamentId(1), TournamentId(2), 0, PairingSource::Swiss);
         let json = serde_json::to_string(&board).unwrap();
         assert_eq!(json, r#"{"player1":1,"player2":2}"#);
         assert_eq!(serde_json::from_str::<Board>(&json).unwrap(), board);
+    }
+
+    /// The wire shape of a board's record. Adjacently tagged so the record's own
+    /// `kind` and the outcome's cannot collide, and so the carried record — which
+    /// holds no outcome — is simply a `kind` with no `outcome` beside it.
+    #[test]
+    fn game_record_round_trips_through_its_wire_shape() {
+        let cases = [
+            (
+                GameRecord::Short(Outcome::won(Winner::Player1)),
+                r#"{"kind":"short","outcome":{"kind":"won","winner":"player1"}}"#,
+            ),
+            (
+                GameRecord::LongStart(Outcome::PENDING),
+                r#"{"kind":"long_start","outcome":{"kind":"pending"}}"#,
+            ),
+            (GameRecord::LongCarried, r#"{"kind":"long_carried"}"#),
+            (
+                GameRecord::LongEnd(Outcome::won(Winner::Player2)),
+                r#"{"kind":"long_end","outcome":{"kind":"won","winner":"player2"}}"#,
+            ),
+        ];
+        for (record, json) in cases {
+            assert_eq!(serde_json::to_string(&record).unwrap(), json, "{record:?}");
+            assert_eq!(serde_json::from_str::<GameRecord>(json).unwrap(), record);
+        }
+    }
+
+    /// A carried record has nowhere to put an outcome — the invariant the whole
+    /// enum exists for, so it is a refusal rather than a silent drop.
+    #[test]
+    fn a_carried_record_refuses_an_outcome() {
+        assert_eq!(
+            GameRecord::LongCarried.with_outcome(Outcome::won(Winner::Player1)),
+            None
+        );
+        assert_eq!(GameRecord::LongCarried.outcome(), Outcome::PENDING);
     }
 }

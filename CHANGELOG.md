@@ -122,6 +122,38 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   name.
 - If `OSP_ADMIN_PASSWORD` is set, only published tournaments are visible to
   anyone without that password.
+- **The buttons that start a round and export the cross-table now ask the
+  server whether they should be available, instead of working it out
+  themselves.** Both had re-implemented the rule in the browser, and both had
+  drifted from it: after a long game they stayed disabled for good, with the
+  server willing all along. They now show the server's own reason, translated.
+- **Refusing to make a round long now says why, and the checkbox stops
+  pretending it worked.** The refusal borrowed the "can't re-pair a round with
+  results" message, which described something else entirely; and because the
+  refusal leaves nothing to redraw, the box kept the tick the referee had just
+  made — showing the change as applied, under a banner saying it wasn't.
+- **Making a cup round long is refused once any of its games has a result.** The
+  flag covers the whole cup round at once, but the check only looked at the board
+  clicked — so ticking an unplayed board retroactively doubled a result already
+  recorded on another.
+- **A qualifier cup's first round now goes long as one session.** The
+  pre-qualified players' games in the open take the same length as the
+  qualification boards, instead of staying short and freeing them a round ahead
+  of the bracket they are about to join.
+- **A player finishing a long game can no longer be marked absent.** They are
+  playing, so the draft no longer offers them: marking them anyway gave them an
+  absence *and* the game, which scored them twice and replaced the game with a
+  `0-` in the cross-table export.
+- **A long game is now a board of both rounds it is played over.** It used to
+  live only in the round it started, which meant the round it was actually being
+  played in did not know about it: that round could close with the game
+  unfinished, the cross-table had to reach back a round to find the result, and
+  the pairing had to scan every round to work out who was still busy. It now
+  keeps one record per round — a placeholder in the round it began, and the live
+  game in the round it is finished in, where the result is entered. The round it
+  is played in stays open until that result is in, exactly like any other
+  unfinished game, and the cross-table shows `0-` then the result without
+  looking anywhere but the column it is drawing.
 - **The American Grid export invented a result for an unfinished long game.** A
   long board carries its result into the *next* round's column, so one that had
   not been entered yet was written as a loss for **both** players — a double

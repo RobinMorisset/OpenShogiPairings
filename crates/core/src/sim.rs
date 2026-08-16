@@ -225,7 +225,7 @@ pub fn game_elo_diffs(tournament: &Tournament, strengths: &StrengthMap) -> Vec<f
     let mut diffs = Vec::new();
     for round in &tournament.rounds {
         for board in &round.boards {
-            if board.outcome.winner().is_none() {
+            if board.outcome().winner().is_none() {
                 continue; // unplayed (or forfeited) — not a game yet
             }
             if let (Some(&a), Some(&b)) =
@@ -330,7 +330,7 @@ pub fn player_game_interest(
     let mut count: HashMap<TournamentId, u32> = HashMap::new();
     for round in &tournament.rounds {
         for board in &round.boards {
-            if board.outcome.winner().is_none() {
+            if board.outcome().winner().is_none() {
                 continue;
             }
             if let (Some(&a), Some(&b)) =

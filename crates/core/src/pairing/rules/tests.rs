@@ -17,7 +17,9 @@ use crate::pairing::model::{player_units, PairingUnit};
 use crate::pairing::rules::{active_rules, fold_ranks, scale_ladder, Ctx, Rule};
 use crate::pairing::test_support::*;
 use crate::player::{Player, PointAdjustment};
-use crate::round::{Board, Outcome, PairingSource, Round, Sitout, SitoutKind, SitoutValue, Winner};
+use crate::round::{
+    Board, GameRecord, Outcome, PairingSource, Round, Sitout, SitoutKind, SitoutValue, Winner,
+};
 use crate::settings::{
     ClubProtection, FloaterStyle, MacMahonThreshold, NationalityProtection, RatioAtLeastOne,
     TournamentSettings,
@@ -232,7 +234,7 @@ fn a_half_point_reaches_pairing_at_half_point_granularity() {
         number: 1,
         explanation: RoundExplanation::empty(1),
         boards: vec![Board {
-            outcome: Outcome::won(Winner::Player1),
+            record: GameRecord::Short(Outcome::won(Winner::Player1)),
             ..Board::pending(
                 a.tournament_id.unwrap(),
                 b.tournament_id.unwrap(),

@@ -6,4 +6,4 @@ import type { CupStage } from "./CupStage";
  * flag each game. Serialized internally-tagged, e.g. `{"kind":"swiss"}` or
  * `{"kind":"cup","stage":{"round_of":32}}`.
  */
-export type PairingSource = { "kind": "swiss" } | { "kind": "forced" } | { "kind": "cup", stage: CupStage, };
+export type PairingSource = { "kind": "swiss" } | { "kind": "forced" } | { "kind": "cup", stage: CupStage, } | { "kind": "carried" };

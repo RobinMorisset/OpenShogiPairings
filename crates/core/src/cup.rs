@@ -33,7 +33,7 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::round::{CupStage, Forfeit, PairingSource, Round};
+use crate::round::{Board, CupStage, Forfeit, GameRecord, PairingSource, Round};
 use crate::tournament::TournamentError;
 use crate::units::TournamentId;
 
@@ -254,7 +254,7 @@ impl Cup {
             let long = rounds.iter().find(|r| r.number == t).is_some_and(|r| {
                 r.boards
                     .iter()
-                    .any(|b| matches!(b.source, PairingSource::Cup { .. }) && b.long)
+                    .any(|b| matches!(b.source, PairingSource::Cup { .. }) && b.is_long())
             });
             t += if long { 2 } else { 1 };
         }
@@ -649,12 +649,23 @@ fn resolve_slot(rounds: &[Round], k: u32, a: Slot, b: Slot) -> (Slot, Slot) {
 /// no-show). A single no-show is a forfeit — the player who showed up wins —
 /// while a double no-show advances nobody ([`CupResult::BothAbsent`]).
 fn decide(rounds: &[Round], k: u32, a: TournamentId, b: TournamentId) -> Option<CupResult> {
+    let pair =
+        |bd: &&Board| (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a);
     let round = rounds.iter().find(|r| r.number == k)?;
-    let board = round
-        .boards
-        .iter()
-        .find(|bd| (bd.player1 == a && bd.player2 == b) || (bd.player1 == b && bd.player2 == a))?;
-    if matches!(board.outcome.forfeit(), Some(Forfeit::Both(..))) {
+    let board = round.boards.iter().find(pair)?;
+    // A bracket round played as long games is finished in the round after the one
+    // it was drawn in, and that is where its result lives — the record here is the
+    // inert one the carry left behind. The *schedule* still keys off this round
+    // (see `cup_schedule`), so only the result lookup follows the game forward.
+    let board = if board.record == GameRecord::LongCarried {
+        rounds
+            .iter()
+            .find(|r| r.number == k + 1)
+            .and_then(|next| next.boards.iter().find(pair))?
+    } else {
+        board
+    };
+    if matches!(board.outcome().forfeit(), Some(Forfeit::Both(..))) {
         return Some(CupResult::BothAbsent);
     }
     // A single no-show: the player who showed up advances by forfeit.
@@ -865,6 +876,7 @@ fn frontier_round_winners(
 mod tests {
     use super::*;
     use crate::pairing::RoundExplanation;
+    use crate::round::GameRecord;
     use crate::round::{AbsenceKind, Board, Outcome, PairingSource, Winner};
 
     fn ids(n: usize) -> Vec<TournamentId> {
@@ -879,7 +891,7 @@ mod tests {
             boards: results
                 .iter()
                 .map(|&(w, l, stage)| Board {
-                    outcome: Outcome::won(Winner::Player1), // player1 = winner
+                    record: GameRecord::Short(Outcome::won(Winner::Player1)), // player1 = winner
                     source: PairingSource::Cup { stage },
                     ..Board::pending(w, l, 0, PairingSource::Swiss)
                 })
@@ -1027,9 +1039,9 @@ mod tests {
         );
         // The top quarterfinal (seeds 1 & 8) is a double no-show — it advances nobody.
         r1.boards.push(Board {
-            outcome: Outcome::Forfeit {
+            record: GameRecord::Short(Outcome::Forfeit {
                 absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
-            },
+            }),
             source: PairingSource::Cup {
                 stage: CupStage::Quarterfinal,
             },
@@ -1252,7 +1264,7 @@ mod tests {
             ],
         );
         for b in &mut r1.boards {
-            b.long = true;
+            b.set_long(true);
         }
 
         // Round 2 is the gap round: no cup pairings, and the semifinal is pushed to
@@ -1457,9 +1469,9 @@ mod tests {
             ],
         );
         let dead = &mut qualification.boards[3];
-        dead.outcome = Outcome::Forfeit {
+        dead.set_outcome(Outcome::Forfeit {
             absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
-        };
+        });
 
         let pairings = cup.matches_for_round(&[qualification], 2).unwrap();
         assert_eq!(pairings.byes, vec![(s[0], CupStage::Quarterfinal)]);

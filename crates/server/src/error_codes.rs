@@ -40,7 +40,11 @@ pub(crate) const LOCALIZED_ERROR_CODES: &[&str] = &[
     "not_enough_present_players",
     "no_round_to_cancel",
     "round_has_results",
+    "long_flag_after_result",
+    "long_flag_after_coupled_result",
     "unresolved_long_game",
+    "carried_long_game",
+    "long_game_started_earlier",
     // Handicaps
     "handicap_needs_rating_difference",
     "handicap_not_allowed_for_cup",

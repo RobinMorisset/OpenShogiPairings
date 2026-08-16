@@ -509,7 +509,7 @@ pub fn estimate_elos(
             // straight off the outcome (and a draw as ½), not the effective winner.
             // A draw counts whether or not the decisive replay has finished; a
             // forfeit is not a game and never counts.
-            let score_a = match board.outcome {
+            let score_a = match board.outcome() {
                 Outcome::Pending { drawn: true } | Outcome::Won { drawn: true, .. } => 0.5,
                 Outcome::Won {
                     winner: Winner::Player1,
@@ -661,6 +661,7 @@ pub(crate) fn estimate_or_prior(estimates: &HashMap<Uuid, f64>, id: Uuid) -> f64
 mod tests {
     use super::*;
     use crate::pairing::RoundExplanation;
+    use crate::round::GameRecord;
     use crate::round::{Board, HandicapGame, Outcome, PairingSource};
     use crate::settings::{Ratio, RatioAtLeastOne, UnratedK};
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -698,7 +699,7 @@ mod tests {
 
     fn win(a: TournamentId, b: TournamentId) -> Board {
         Board {
-            outcome: Outcome::won(Winner::Player1),
+            record: GameRecord::Short(Outcome::won(Winner::Player1)),
             ..Board::pending(a, b, 0, PairingSource::Swiss)
         }
     }
@@ -711,7 +712,7 @@ mod tests {
         giver: Winner,
     ) -> Board {
         Board {
-            outcome: Outcome::won(result),
+            record: GameRecord::Short(Outcome::won(result)),
             handicap: Some(HandicapGame { handicap, giver }),
             ..Board::pending(a, b, 0, PairingSource::Swiss)
         }
@@ -943,10 +944,10 @@ mod tests {
         let a = player(Some(1500));
         let b = player(Some(1500));
         let drawn = Board {
-            outcome: Outcome::Won {
+            record: GameRecord::Short(Outcome::Won {
                 winner: Winner::Player1,
                 drawn: true,
-            },
+            }),
             ..Board::pending(
                 a.tournament_id.unwrap(),
                 b.tournament_id.unwrap(),

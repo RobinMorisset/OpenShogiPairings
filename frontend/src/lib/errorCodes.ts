@@ -40,7 +40,11 @@ export const ERROR_CODE_KEYS: Record<string, string> = {
   not_enough_present_players: "serverError.notEnoughPresentPlayers",
   no_round_to_cancel: "serverError.noRoundToCancel",
   round_has_results: "serverError.roundHasResults",
+  long_flag_after_result: "serverError.longFlagAfterResult",
+  long_flag_after_coupled_result: "serverError.longFlagAfterCoupledResult",
   unresolved_long_game: "serverError.unresolvedLongGame",
+  carried_long_game: "serverError.carriedLongGame",
+  long_game_started_earlier: "serverError.longGameStartedEarlier",
 
   handicap_needs_rating_difference: "serverError.handicapNeedsRatingDifference",
   handicap_not_allowed_for_cup: "serverError.handicapNotAllowedForCup",

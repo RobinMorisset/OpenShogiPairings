@@ -5,20 +5,20 @@
 // That makes "pending" a state the UI has to reason about in several places, so
 // the predicate lives here once instead of being spelled out at each call site.
 
-import { isDecided } from "./noShow";
-import type { Board, Round } from "./types";
+import type { Board, Cup, Round } from "./types";
+
 
 /**
- * A long board whose game hasn't finished yet. Mirrors `Board::long_pending` in
- * `crates/core/src/round.rs`.
+ * Whether this board is a long (two-round) game, in any of its states. Mirrors
+ * `Board::is_long` in `crates/core/src/round.rs`.
  *
- * Use this for "is there still a result to record" — the carried-games widget,
- * the `0-` placeholder, the overrun guard below. It is *not* what decides who
- * sits out the next round: see {@link busyOnLongGame}.
+ * This — not {@link longPending} — is what decides who sits out the next round,
+ * because a long game occupies two rounds whichever round it finishes in.
  */
-export function longPending(board: Board): boolean {
-  return board.long === true && !isDecided(board);
+export function isLong(board: Board): boolean {
+  return board.record !== undefined && board.record.kind !== "short";
 }
+
 
 /**
  * The players a long game keeps out of round `roundNumber`'s pairing — those on
@@ -35,42 +35,47 @@ export function longPending(board: Board): boolean {
  * be two rounds behind and unresolved, because `prepare_round` refuses to advance
  * past R+1 while one is pending.
  */
-/**
- * The round holding *any* still-unresolved long game, or `null` if none is.
- * Mirrors the guard in `american_grid::to_grid` (`crates/core`).
- *
- * Wider than {@link overrunLongRound}, deliberately: a long game that has not
- * overrun still has no result, and a long board carries its result into the
- * *next* round's column — so exporting now would write a loss for both players
- * into a document bound for a rating body. Any pending long game blocks the
- * export, not just a late one.
- */
-export function pendingLongRound(rounds: Round[]): number | null {
-  const round = rounds.find((r) => r.boards.some(longPending));
-  return round?.number ?? null;
-}
-
 export function busyOnLongGame(rounds: Round[], roundNumber: number): number[] {
   const previous = rounds.find((r) => r.number + 1 === roundNumber);
   if (!previous) return [];
   return previous.boards
-    .filter((b) => b.long === true)
+    .filter(isLong)
     .flatMap((b) => [b.player1, b.player2]);
 }
 
 /**
- * The round holding a long game that has overrun, or `null` if none has.
+ * Which boards a long flag moves together with, in `round`. Mirrors
+ * `in_cup_unit` in `Tournament::set_board_long` (`crates/core`).
  *
- * Mirrors the guard in `prepare_round` (`crates/core/src/tournament.rs`): a long
- * game may straddle its own round and the next, so preparing round N is blocked
- * by a pending long board in round N-2 or earlier — never by one in N-1, which
- * is still legitimately in flight.
+ * A cup bracket round is long or short as a *whole*, and in a qualifier cup's
+ * qualification round that unit also takes in the pre-qualified players' games
+ * in the open — they are playing the same session of the same cup. Everything
+ * else toggles on its own.
  *
- * `nextRoundNumber` is the round about to be prepared, i.e. `rounds.length + 1`.
+ * The UI needs this to grey the checkbox rather than let the referee tick a box
+ * the server will refuse: a flip is refused once *any* game in the unit has a
+ * result, not just the board clicked.
  */
-export function overrunLongRound(rounds: Round[], nextRoundNumber: number): number | null {
-  const stale = rounds.find(
-    (r) => r.number + 1 < nextRoundNumber && r.boards.some(longPending),
-  );
-  return stale?.number ?? null;
+export function inLongFlagUnit(round: Round, cup?: Cup | null): (board: Board) => boolean {
+  const prequalified = prequalifiedInRound(round, cup);
+  return (board) =>
+    board.source?.kind === "cup" ||
+    prequalified.has(board.player1) ||
+    prequalified.has(board.player2);
 }
+
+/**
+ * The pre-qualified players, but only in the round their qualification play-off
+ * is being held — which is the one round their games are coupled to it. Empty
+ * for a direct cup, and for every other round.
+ */
+function prequalifiedInRound(round: Round, cup?: Cup | null): Set<number> {
+  if (!cup || cup.format !== "qualifier") return new Set();
+  const isQualificationRound = round.boards.some(
+    (b) => b.source?.kind === "cup" && b.source.stage === "qualification",
+  );
+  if (!isQualificationRound) return new Set();
+  // `seed_order` is pre-qualified first, then the qualification field.
+  return new Set(cup.seed_order.slice(0, Math.floor(cup.size / 2)));
+}
+

@@ -30,7 +30,7 @@ async fn create_then_add_and_remove_player() {
     let (status, body) = send(router(state.clone()), get(&t(id, ""))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["tournament"]["name"], "Paris Open");
-    assert_eq!(body["tournament"]["format_version"], 10);
+    assert_eq!(body["tournament"]["format_version"], 11);
     assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
     assert_eq!(body["can_undo"], false); // nothing to undo on a fresh tournament
 
@@ -700,8 +700,8 @@ async fn set_board_result_toggles_winner() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        body["tournament"]["rounds"][0]["boards"][0]["outcome"],
-        json!({ "kind": "won", "winner": "player1" })
+        body["tournament"]["rounds"][0]["boards"][0]["record"],
+        json!({ "kind": "short", "outcome": { "kind": "won", "winner": "player1" } })
     );
 
     // Bad board index → 404.

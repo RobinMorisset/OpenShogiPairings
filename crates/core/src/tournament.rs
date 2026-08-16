@@ -20,8 +20,8 @@ use crate::pairing::{
 };
 use crate::player::{NewPlayer, Player, PointAdjustment};
 use crate::round::{
-    Board, ForcedMatch, Forfeit, Handicap, HandicapGame, Outcome, PairingSource, Round, RoundDraft,
-    Sitout, SitoutKind, SitoutValue, Winner,
+    Board, ForcedMatch, Forfeit, GameRecord, Handicap, HandicapGame, Outcome, PairingSource, Round,
+    RoundDraft, Sitout, SitoutKind, SitoutValue, Winner,
 };
 use crate::scoring::compute_scores;
 use crate::settings::{TeamModeConflict, TournamentSettings, TEAM_SIZES};
@@ -51,13 +51,17 @@ use typed_index_collections::TiVec;
 /// v9: teams carry manual point `adjustments`.
 /// v10: rounds carry the `explanation` of their pairing, frozen at confirmation,
 /// and the tournament an `explanations_faithful_through` watermark.
+/// v11: boards carry one `record` sum (`short` / `long_start` / `long_carried` /
+/// `long_end`, each but the third holding the outcome) in place of the separate
+/// `outcome` field and `long` flag.
 ///
 /// A save is normally only readable at the exact version this build writes. The
 /// one exception is v5 — what v1.1.0, v1.2.0 and v1.3.0 all wrote — whose
 /// **not-yet-started** tournaments the server upgrades on load; see
 /// `UPGRADABLE_FROM` in `crates/server/src/save.rs` for the window and why it
-/// stops at the first round.
-pub const TOURNAMENT_FORMAT_VERSION: u32 = 10;
+/// stops at the first round. A tournament that has not started has no board, so
+/// the v11 board shape is not part of what that upgrade has to translate.
+pub const TOURNAMENT_FORMAT_VERSION: u32 = 11;
 
 /// Minimum number of players required to start a round.
 pub(crate) const MIN_PLAYERS_PER_ROUND: usize = 2;
@@ -184,13 +188,40 @@ pub enum TournamentError {
     /// A pairing can't be forced onto a round that already has recorded results.
     #[error("cannot re-pair a round that already has recorded results")]
     RoundHasResults,
+    /// The clicked board already has a result, so it cannot be made long: the
+    /// flag doubles what a game is worth, and that game has been played.
+    #[error("this game already has a result, so it can no longer be made long")]
+    LongFlagAfterResult,
+    /// One of the *other* boards the flag moves with already has a result. A cup
+    /// round is long or short as a whole — including, in a qualifier cup's first
+    /// round, the pre-qualified players' games — so the referee clicked an empty
+    /// board and was still refused, which needs saying rather than implying.
+    #[error("another game in this cup round already has a result")]
+    LongFlagAfterCoupledResult,
     /// A board's "long game" flag can only be changed on the current round.
     #[error("a long game can only be set on the current round")]
     NotCurrentRound,
-    /// The next round can't be prepared while a long game from two rounds ago is
-    /// still unresolved (a long game spans exactly two rounds).
+    /// A long game must be resolved before the record that depends on it can be
+    /// used: the American Grid renders its result in the column of the round it
+    /// was finished in, and there is nothing to put there yet.
     #[error("the long game from round {round} must be resolved first")]
     UnresolvedLongGame { round: u32 },
+    /// A board was addressed in the round its long game *started*, where the
+    /// record is inert. The game is finished in `round`, and everything about it
+    /// — result, handicap — belongs to the record there.
+    #[error("this long game is finished in round {round}; record it there")]
+    CarriedLongGame { round: u32 },
+    /// A long game's length was decided in the round it started, so it cannot be
+    /// changed in the round it is finished in. The two records only mean anything
+    /// as a pair, and demoting one of them would orphan the other.
+    #[error("this long game was started in round {round}; its length is fixed")]
+    LongGameStartedEarlier { round: u32 },
+    /// A loaded file has half of a carried long game: a starting record with no
+    /// live one after it, a live one with no starting record before it, or a
+    /// start that was never carried although a later round exists. See
+    /// `docs/long-boards-v2.md`.
+    #[error("round {round} holds half of a carried long game")]
+    OrphanedLongGame { round: u32 },
     /// No round with the given number exists.
     #[error("no round number {0}")]
     RoundNotFound(u32),
@@ -1052,7 +1083,7 @@ impl Tournament {
             }
             return Ok(());
         }
-        if self.rounds.pop().is_none() {
+        if self.pop_round_uncarrying().is_none() {
             return Err(TournamentError::NoRoundToCancel);
         }
         // The watermark counts rounds, so it must not survive past the end of the
@@ -1084,39 +1115,100 @@ impl Tournament {
         }
     }
 
+    /// Remove the last round, moving any long game it was finishing back onto
+    /// the record it came from — which reverts to [`GameRecord::LongStart`].
+    ///
+    /// The exact inverse of the carry in [`confirm_round_inner`], and the only
+    /// supported way to drop a round. Popping without this leaves the previous
+    /// round holding an inert `LongCarried` record with nothing to make it live
+    /// again: re-confirming finds no `LongStart` to carry, and the game — result
+    /// and all — silently disappears.
+    ///
+    /// [`confirm_round_inner`]: Self::confirm_round_inner
+    fn pop_round_uncarrying(&mut self) -> Option<Round> {
+        let cancelled = self.rounds.pop()?;
+        for board in &cancelled.boards {
+            let GameRecord::LongEnd(outcome) = board.record else {
+                continue;
+            };
+            let restored = self
+                .rounds
+                .last_mut()
+                .and_then(|previous| {
+                    previous.boards.iter_mut().find(|b| {
+                        b.record == GameRecord::LongCarried
+                            && b.player1 == board.player1
+                            && b.player2 == board.player2
+                    })
+                })
+                .map(|b| {
+                    b.record = GameRecord::LongStart(outcome);
+                    b.handicap = board.handicap;
+                });
+            debug_assert!(
+                restored.is_some(),
+                "a carried long game has its starting record in the previous round"
+            );
+        }
+        Some(cancelled)
+    }
+
     /// Begin preparing the next round (the `RoundDraft` state).
     ///
     /// Requires registration finalized and the previous round (if any)
     /// completed. The draft's absent set defaults to the previous round's
     /// absentees (restricted to players who still exist), so recurring absences
     /// carry over while late joiners are not pre-marked absent.
-    pub fn prepare_round(&mut self) -> Result<&RoundDraft, TournamentError> {
+    /// Why the American Grid export would refuse right now, or `None` if it
+    /// would produce a document.
+    ///
+    /// Same contract as [`next_round_blocker`](Self::next_round_blocker):
+    /// `american_grid::to_grid` is defined in terms of this, so the button's
+    /// reason and the export's refusal are the same sentence, computed once.
+    pub fn grid_export_blocker(&self) -> Option<TournamentError> {
+        self.rounds
+            .iter()
+            .find(|r| r.boards.iter().any(|b| b.long_pending()))
+            .map(|round| TournamentError::UnresolvedLongGame {
+                round: round.number,
+            })
+    }
+
+    /// Why [`prepare_round`](Self::prepare_round) would refuse right now, or
+    /// `None` if it would go ahead.
+    ///
+    /// Exists so a client can disable the button *and say why* without
+    /// re-deriving the rule: `prepare_round` is defined in terms of this, so the
+    /// two cannot answer differently. Every previous attempt to mirror a rule
+    /// like this in the frontend has drifted from the original — a predicate
+    /// copied into TypeScript is a predicate that will one day disagree.
+    pub fn next_round_blocker(&self) -> Option<TournamentError> {
         if !self.registration_finalized {
-            return Err(TournamentError::RegistrationNotFinalized);
+            return Some(TournamentError::RegistrationNotFinalized);
         }
         if self.draft.is_some() {
-            return Err(TournamentError::DraftAlreadyExists);
+            return Some(TournamentError::DraftAlreadyExists);
         }
-        if let Some(last) = self.rounds.last() {
-            if !last.completed {
-                return Err(TournamentError::PreviousRoundNotComplete);
-            }
+        if self.rounds.last().is_some_and(|last| !last.completed) {
+            return Some(TournamentError::PreviousRoundNotComplete);
+        }
+        None
+    }
+
+    pub fn prepare_round(&mut self) -> Result<&RoundDraft, TournamentError> {
+        if let Some(blocked) = self.next_round_blocker() {
+            return Err(blocked);
         }
 
         let number = self.rounds.len() as u32 + 1;
-        // A long game started in round R spans R and R+1 only; its players sit out
-        // R+1's pairing. Before R+2 can be prepared it must be resolved, so a long
-        // game never straddles three rounds. (Its players are excluded from R+1 in
-        // `confirm_round`; here we refuse to advance past R+1 while it is pending.)
-        if let Some(stale) = self
-            .rounds
-            .iter()
-            .find(|r| r.number + 1 < number && r.boards.iter().any(|b| b.long_pending()))
-        {
-            return Err(TournamentError::UnresolvedLongGame {
-                round: stale.number,
-            });
-        }
+        // No guard for an overrunning long game is needed here any more. A game
+        // carried into round R+1 has its live `LongEnd` record *in* R+1, where it
+        // is an ordinary board, so R+1 is not complete until the result is in —
+        // and the `PreviousRoundNotComplete` check above already refuses R+2 on
+        // exactly that basis. The old `UnresolvedLongGame` guard existed only
+        // because the game was invisible to R+1's completion; it would now be
+        // unreachable. (The error variant survives: the American Grid export
+        // still refuses while any long game is unresolved.)
         let existing: HashSet<TournamentId> = self
             .players
             .iter()
@@ -1142,6 +1234,17 @@ impl Tournament {
                     }
                 }
                 absent.retain(|id| existing.contains(id));
+                // Never propose a player who is finishing a long game. Their game
+                // is about to become a board of this round, so they are playing,
+                // not absent — and `confirm_round` refuses the combination. A
+                // no-show *on* the long board is the case that reaches here: it
+                // resolves the game, but the carry still happens (a long game
+                // takes both its rounds however it ends), so they are still busy.
+                absent.retain(|id| {
+                    !r.boards
+                        .iter()
+                        .any(|b| b.is_long() && (b.player1 == *id || b.player2 == *id))
+                });
                 absent
             })
             .unwrap_or_default();
@@ -1371,7 +1474,7 @@ impl Tournament {
             .iter()
             .filter(|r| r.number + 1 == draft.number)
             .flat_map(|r| &r.boards)
-            .filter(|b| b.long)
+            .filter(|b| b.is_long())
             .flat_map(|b| [b.player1, b.player2])
             .collect();
 
@@ -1393,6 +1496,18 @@ impl Tournament {
                 round: draft.number,
                 player,
             });
+        }
+
+        // A player finishing a long game is playing, not sitting out, and the
+        // round is about to receive their board. Marking them absent gave them a
+        // sit-out *and* that board: the sit-out then took precedence in the
+        // cross-table (hiding the game from the export) and added its own value
+        // on top of the game's score. They should not be offered in the draft at
+        // all — this is the backstop for a client that offers them anyway.
+        if draft.absent.iter().any(|id| busy_long.contains(id)) {
+            return Err(TournamentError::InvalidDraft(
+                "an absent player is still in a long game".into(),
+            ));
         }
 
         // Validate the referee's forced boards/bye against the Swiss pool.
@@ -1588,6 +1703,39 @@ impl Tournament {
                     value: absent_value,
                 }),
         );
+
+        // Carry forward every long game the previous round started: its outcome
+        // *moves* onto a `LongEnd` board here, and the record it came from
+        // becomes inert. Derived from the previous round rather than from the
+        // draft, so any re-confirmation of this round (`force_pairing` pops it
+        // and rebuilds) reproduces the same boards instead of dropping them.
+        //
+        // The two players were kept out of this round's pairing by `busy_long`
+        // above, so these boards cannot collide with one they were paired into.
+        if let Some(previous) = self
+            .rounds
+            .iter_mut()
+            .find(|r| r.number + 1 == draft.number)
+        {
+            for board in previous.boards.iter_mut() {
+                if !matches!(board.record, GameRecord::LongStart(_)) {
+                    continue;
+                }
+                // Everything about the *game* moves onto the live record: the
+                // outcome, and the handicap conceded in it. What stays behind is
+                // only what the round decided — who was paired, and their float.
+                // Leaving the handicap here would duplicate it, and a duplicate
+                // is a thing that can disagree.
+                let carried = Board {
+                    record: GameRecord::LongEnd(board.outcome()),
+                    source: PairingSource::Carried,
+                    ..*board
+                };
+                board.record = GameRecord::LongCarried;
+                board.handicap = None;
+                boards.push(carried);
+            }
+        }
 
         let mut round = Round {
             number: draft.number,
@@ -1906,7 +2054,10 @@ impl Tournament {
 
         // Drop the round and re-confirm from the reconstructed draft. Earlier
         // rounds stay completed, so the standings entering this round are intact.
-        self.rounds.pop();
+        // Un-carrying is what lets the re-confirmation rebuild any long game this
+        // round was finishing: it puts the outcome back on a `LongStart` for the
+        // carry to pick up again.
+        self.pop_round_uncarrying();
         self.draft = Some(draft);
         self.confirm_round()
     }
@@ -1968,7 +2119,10 @@ impl Tournament {
 
         // Drop the round and re-confirm from the reconstructed draft. Earlier
         // rounds stay completed, so the standings entering this round are intact.
-        self.rounds.pop();
+        // Un-carrying is what lets the re-confirmation rebuild any long game this
+        // round was finishing: it puts the outcome back on a `LongStart` for the
+        // carry to pick up again.
+        self.pop_round_uncarrying();
         self.draft = Some(draft);
         self.confirm_round()
     }
@@ -1993,6 +2147,7 @@ impl Tournament {
                 return Ok(match bd.source {
                     PairingSource::Forced => ScopeReason::Forced,
                     PairingSource::Cup { .. } => ScopeReason::Cup,
+                    PairingSource::Carried => ScopeReason::MidLongGame,
                     // A Swiss board would have passed the in_swiss check.
                     PairingSource::Swiss => ScopeReason::Absent,
                 });
@@ -2021,6 +2176,7 @@ impl Tournament {
         board_index: usize,
         clicked: Winner,
     ) -> Result<&Board, TournamentError> {
+        self.refuse_if_carried(round_number, board_index)?;
         let idx = self
             .rounds
             .iter()
@@ -2038,15 +2194,15 @@ impl Tournament {
         // after all. A forfeited board carries no draw, so the replayed-draw flag
         // starts fresh there; on a played board it survives the toggle, since
         // whether a draw occurred is independent of who eventually won.
-        let drawn = board.outcome.drawn();
-        board.outcome = if board.outcome.winner() == Some(clicked) {
+        let drawn = board.outcome().drawn();
+        board.set_outcome(if board.outcome().winner() == Some(clicked) {
             Outcome::Pending { drawn }
         } else {
             Outcome::Won {
                 winner: clicked,
                 drawn,
             }
-        };
+        });
         round.completed = round.is_complete();
         // Every later round was paired from a model that read this result.
         self.explanations_stale_after(round_number);
@@ -2164,6 +2320,7 @@ impl Tournament {
         board_index: usize,
         absent: Option<Forfeit>,
     ) -> Result<&Board, TournamentError> {
+        self.refuse_if_carried(round_number, board_index)?;
         if absent.is_some_and(Forfeit::has_justified) && !self.settings.team_mode() {
             return Err(TournamentError::JustifiedAbsenceOutsideTeamMode);
         }
@@ -2180,15 +2337,15 @@ impl Tournament {
                 round: round_number,
                 board: board_index,
             })?;
-        board.outcome = match absent {
+        board.set_outcome(match absent {
             // A forfeit isn't a played game, so it drops any recorded result and
             // draw — states the outcome type can't even express together.
             Some(absent) => Outcome::Forfeit { absent },
             // Clearing only ever un-forfeits: on a board that carries a real
             // result there is no forfeit to clear, and the result must survive.
-            None if board.outcome.forfeit().is_some() => Outcome::PENDING,
-            None => board.outcome,
-        };
+            None if board.outcome().forfeit().is_some() => Outcome::PENDING,
+            None => board.outcome(),
+        });
         // Nobody played, so nobody conceded odds: a forfeit drops the handicap
         // too, the same way it drops the result and the draw flag. The handicap
         // is a separate field rather than part of the outcome, so it has to be
@@ -2214,7 +2371,8 @@ impl Tournament {
     /// an ordinary one-point board. Keeps the round's `completed` flag in sync,
     /// since flagging the last-undecided board long can close the round.
     ///
-    /// Cup (direct-elimination) boards are not supported yet and are rejected.
+    /// A cup board's flag couples to the whole cup round — including, in a
+    /// qualifier cup's qualification round, the pre-qualified players' games.
     pub fn set_board_long(
         &mut self,
         round_number: u32,
@@ -2237,31 +2395,70 @@ impl Tournament {
         if Some(idx) != last_index {
             return Err(TournamentError::NotCurrentRound);
         }
-        let round = &mut self.rounds[idx];
-        let board = round
-            .boards
-            .get_mut(board_index)
-            .ok_or(TournamentError::BoardNotFound {
-                round: round_number,
-                board: board_index,
-            })?;
-        // Making a board long after it is decided is meaningless; turning it off
-        // after a result is the intended demote path.
-        if long && board.is_decided() {
-            return Err(TournamentError::RoundHasResults);
+        // Which boards this toggle moves — one definition, used both to refuse
+        // the flip and to apply it. A guard that checks a smaller set than the
+        // write is how a result already recorded gets doubled behind the
+        // referee's back.
+        //
+        // A cup bracket round is long or not as a *unit*: that is the invariant
+        // the cup<->tournament-round mapping relies on (see `Cup::cup_schedule`).
+        // In a qualifier cup's qualification round the unit also takes in the
+        // pre-qualified players' games. They are playing the same session of the
+        // same cup — merely seeded past the play-off — so running them at a
+        // different length would free them a round early and desynchronise them
+        // from the bracket the qualifiers resume in. Their opponents that round
+        // are ordinary Swiss players, and the game is long for them too.
+        //
+        // A board outside all of that toggles on its own.
+        let prequalified: Vec<TournamentId> = self.prequalified_in_round(round_number).to_vec();
+        let in_cup_unit = |b: &Board| {
+            matches!(b.source, PairingSource::Cup { .. })
+                || prequalified.contains(&b.player1)
+                || prequalified.contains(&b.player2)
+        };
+
+        let clicked = self.board(round_number, board_index)?;
+        let clicked_record = clicked.record;
+        let clicked_decided = clicked.is_decided();
+        let coupled = in_cup_unit(clicked);
+
+        // The live record of a game carried from the previous round: its length
+        // was decided there, together with the record it left behind, and the two
+        // only mean anything as a pair. Demoting it here would turn it into an
+        // ordinary board and orphan its partner — a file `validate_loaded` would
+        // then refuse to load.
+        if let GameRecord::LongEnd(_) = clicked_record {
+            return Err(TournamentError::LongGameStartedEarlier {
+                round: round_number - 1,
+            });
         }
-        // A cup board's flag couples to every cup board of the round: a whole cup
-        // bracket round is long or not as a unit, which is exactly the invariant
-        // the cup↔tournament-round mapping relies on (see `Cup::cup_schedule`). A
-        // Swiss/forced board toggles on its own.
-        if matches!(board.source, PairingSource::Cup { .. }) {
+        // Making a board long after it is decided is meaningless; turning it off
+        // after a result is the intended demote path. Where the flag couples, the
+        // question is asked of the whole unit: flipping one cup board on flips
+        // them all, so a result on *any* of them would be retroactively doubled.
+        if long {
+            if coupled {
+                if self.rounds[idx]
+                    .boards
+                    .iter()
+                    .any(|b| in_cup_unit(b) && b.is_decided())
+                {
+                    return Err(TournamentError::LongFlagAfterCoupledResult);
+                }
+            } else if clicked_decided {
+                return Err(TournamentError::LongFlagAfterResult);
+            }
+        }
+
+        let round = &mut self.rounds[idx];
+        if coupled {
             for b in round.boards.iter_mut() {
-                if matches!(b.source, PairingSource::Cup { .. }) {
-                    b.long = long;
+                if in_cup_unit(b) {
+                    b.set_long(long);
                 }
             }
         } else {
-            board.long = long;
+            round.boards[board_index].set_long(long);
         }
         round.completed = round.is_complete();
         // A no-op as long as only the last round can be toggled (there is no
@@ -2284,8 +2481,9 @@ impl Tournament {
         board_index: usize,
         drawn: bool,
     ) -> Result<&Board, TournamentError> {
+        self.refuse_if_carried(round_number, board_index)?;
         let board = self.board_mut(round_number, board_index)?;
-        board.outcome = match board.outcome {
+        board.set_outcome(match board.outcome() {
             Outcome::Pending { .. } => Outcome::Pending { drawn },
             Outcome::Won { winner, .. } => Outcome::Won { winner, drawn },
             Outcome::Forfeit { .. } => {
@@ -2294,7 +2492,7 @@ impl Tournament {
                     board: board_index,
                 })
             }
-        };
+        });
         // A draw feeds the live ELO estimate, which is what an ELO-mode
         // tournament pairs on, so later rounds' models read it.
         self.explanations_stale_after(round_number);
@@ -2320,12 +2518,13 @@ impl Tournament {
         board_index: usize,
         handicap: Option<Handicap>,
     ) -> Result<&Board, TournamentError> {
+        self.refuse_if_carried(round_number, board_index)?;
         // Rejected in both directions, like the draw flag: the picker is disabled
         // on a forfeited board, and the forfeit already dropped whatever handicap
         // the board carried, so even a clear means the client is out of sync.
         if self
             .board(round_number, board_index)?
-            .outcome
+            .outcome()
             .forfeit()
             .is_some()
         {
@@ -2376,7 +2575,7 @@ impl Tournament {
         // byes. Stated so a future importer that *does* record forfeits can't
         // quietly build the state `set_board_handicap` refuses.
         debug_assert!(
-            board.outcome.forfeit().is_none(),
+            board.outcome().forfeit().is_none(),
             "round {round_number} board {board_index} is forfeited, so it cannot take a handicap"
         );
         self.board_mut(round_number, board_index)?.handicap =
@@ -2446,6 +2645,28 @@ impl Tournament {
     }
 
     /// Mutable access to a board by round number and index.
+    /// Refuse a mutation aimed at the inert record of a carried long game,
+    /// naming the round its live record is in.
+    ///
+    /// That record holds nothing about the game — not the result, not the
+    /// handicap — because the game is finished one round later and everything
+    /// about it lives there. Writing here is how the two records of one game
+    /// would come to disagree, so it is refused rather than allowed to become a
+    /// silent no-op (a handicap that scores nothing) or a panic
+    /// ([`GameRecord::with_outcome`] has nowhere to put an outcome).
+    fn refuse_if_carried(
+        &self,
+        round_number: u32,
+        board_index: usize,
+    ) -> Result<(), TournamentError> {
+        if self.board(round_number, board_index)?.record == GameRecord::LongCarried {
+            return Err(TournamentError::CarriedLongGame {
+                round: round_number + 1,
+            });
+        }
+        Ok(())
+    }
+
     fn board_mut(
         &mut self,
         round_number: u32,
@@ -2493,7 +2714,7 @@ impl Tournament {
                 .rounds
                 .iter()
                 .flat_map(|r| &r.boards)
-                .filter_map(|b| b.outcome.forfeit())
+                .filter_map(|b| b.outcome().forfeit())
                 .any(Forfeit::has_justified)
         {
             return Err(TournamentError::JustifiedAbsenceOutsideTeamMode);
@@ -2509,7 +2730,7 @@ impl Tournament {
         if let Some((round, board)) = self.rounds.iter().find_map(|r| {
             r.boards
                 .iter()
-                .position(|b| b.handicap.is_some() && b.outcome.forfeit().is_some())
+                .position(|b| b.handicap.is_some() && b.outcome().forfeit().is_some())
                 .map(|i| (r.number, i))
         }) {
             return Err(TournamentError::HandicapOnForfeitedBoard { round, board });
@@ -2548,6 +2769,82 @@ impl Tournament {
                 .collect();
             if let Some(&seed) = cup.seed_order.iter().find(|s| !known.contains(s)) {
                 return Err(TournamentError::UnknownCupSeed { seed });
+            }
+        }
+        self.validate_long_games()?;
+        Ok(())
+    }
+
+    /// The pairing invariants of carried long games (`docs/long-boards-v2.md`).
+    ///
+    /// A long game holds one record per round it occupies, and the two are only
+    /// meaningful together: the inert `LongCarried` one in the round it started,
+    /// and the live `LongEnd` one in the round it is finished in. A file with one
+    /// and not the other has a game whose result is either unreachable or
+    /// unattributable, and nothing downstream would say so — the grid would render
+    /// a column from a record that isn't there, and the cup would replay a
+    /// bracket round whose result it cannot find.
+    fn validate_long_games(&self) -> Result<(), TournamentError> {
+        let paired_in = |number: u32, board: &Board, want: fn(&GameRecord) -> bool| {
+            self.rounds
+                .iter()
+                .find(|r| r.number == number)
+                .is_some_and(|r| {
+                    r.boards.iter().any(|b| {
+                        want(&b.record) && b.player1 == board.player1 && b.player2 == board.player2
+                    })
+                })
+        };
+        for round in &self.rounds {
+            for board in &round.boards {
+                match board.record {
+                    // Its live record must be in the next round.
+                    GameRecord::LongCarried
+                        if !paired_in(round.number + 1, board, |r| {
+                            matches!(r, GameRecord::LongEnd(_))
+                        }) =>
+                    {
+                        return Err(TournamentError::OrphanedLongGame {
+                            round: round.number,
+                        })
+                    }
+                    // And a live record must have the record it came from behind
+                    // it — which also rules it out of round 1, where there is no
+                    // previous round to have started it.
+                    GameRecord::LongEnd(_)
+                        if round.number == 1
+                            || !paired_in(round.number - 1, board, |r| {
+                                matches!(r, GameRecord::LongCarried)
+                            }) =>
+                    {
+                        return Err(TournamentError::OrphanedLongGame {
+                            round: round.number,
+                        })
+                    }
+                    // Its players are *playing* this round, so neither can also be
+                    // sitting it out. Both at once double-scores them, and the
+                    // sit-out takes precedence in the cross-table, hiding the game
+                    // from the export entirely.
+                    GameRecord::LongEnd(_)
+                        if round.sitout(board.player1).is_some()
+                            || round.sitout(board.player2).is_some() =>
+                    {
+                        return Err(TournamentError::OrphanedLongGame {
+                            round: round.number,
+                        })
+                    }
+                    // A game must have been carried once a later round exists: it
+                    // spans two rounds, so a start still sitting there un-carried
+                    // means the round after it was built without it.
+                    GameRecord::LongStart(_)
+                        if self.rounds.iter().any(|r| r.number > round.number) =>
+                    {
+                        return Err(TournamentError::OrphanedLongGame {
+                            round: round.number,
+                        })
+                    }
+                    _ => {}
+                }
             }
         }
         Ok(())
@@ -2719,28 +3016,27 @@ mod tests {
 
         // Flagging an undecided board on is fine.
         t.set_board_long(1, 0, true).unwrap();
-        assert!(t.rounds[0].boards[0].long);
+        assert!(t.rounds[0].boards[0].is_long());
 
         // Flagging a *decided* board on is refused...
         t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
         assert_eq!(
             t.set_board_long(1, 1, true),
-            Err(TournamentError::RoundHasResults)
+            Err(TournamentError::LongFlagAfterResult)
         );
         // ...but flagging a decided long board *off* (the demote path) is allowed.
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
         assert!(t.rounds[0].boards[0].is_decided());
         t.set_board_long(1, 0, false).unwrap();
-        assert!(!t.rounds[0].boards[0].long);
+        assert!(!t.rounds[0].boards[0].is_long());
     }
 
-    /// A round can be born complete. With the only two players on a long board
-    /// carried over from round 1, round 2 has no board to record at all — and
-    /// the flag is otherwise recomputed only when a board changes, so stamping
-    /// it incomplete here left the round permanently unfinishable and every
-    /// later round unpreparable.
+    /// The carry, end to end: a long game started in round 1 gets its live record
+    /// in round 2 — the round it is actually finished in — and the record it came
+    /// from goes inert. Round 2 is then an ordinary round with an ordinary
+    /// undecided board, which is what gates round 3.
     #[test]
-    fn a_round_with_no_boards_is_complete_the_moment_it_is_confirmed() {
+    fn a_long_game_is_carried_into_the_round_it_is_finished_in() {
         let mut t = Tournament::new("Long").unwrap();
         for n in ["Alpha", "Bravo"] {
             t.add_player(named(n)).unwrap();
@@ -2751,28 +3047,74 @@ mod tests {
         t.set_board_long(1, 0, true).unwrap();
         assert!(
             t.rounds[0].completed,
-            "a long board completes its own round"
+            "a long board does not hold its own round open"
         );
+        let players = (t.rounds[0].boards[0].player1, t.rounds[0].boards[0].player2);
 
         start_next_round(&mut t);
-        assert!(
-            t.rounds[1].boards.is_empty() && t.rounds[1].sitouts.is_empty(),
-            "both players are still busy on the long board"
+
+        // Round 1's record is now inert, and round 2 holds the live one.
+        assert_eq!(t.rounds[0].boards[0].record, GameRecord::LongCarried);
+        assert_eq!(
+            t.rounds[1].boards.len(),
+            1,
+            "the carried game, and nothing else"
         );
+        let carried = &t.rounds[1].boards[0];
+        assert_eq!(carried.record, GameRecord::LongEnd(Outcome::PENDING));
+        assert_eq!(carried.source, PairingSource::Carried);
+        assert_eq!((carried.player1, carried.player2), players);
         assert!(
-            t.rounds[1].completed,
-            "nothing to record, so nothing to wait for"
+            t.rounds[1].sitouts.is_empty(),
+            "they are playing, not sitting out"
         );
 
-        // Until the long game is resolved the tournament is gated on *that*,
-        // which is a separate and correct guard.
+        // Round 2 is held open by that board like any other, so round 3 is gated
+        // by the ordinary rule rather than by a special long-game guard.
+        assert!(!t.rounds[1].completed);
         assert_eq!(
             t.prepare_round(),
-            Err(TournamentError::UnresolvedLongGame { round: 1 })
+            Err(TournamentError::PreviousRoundNotComplete)
         );
-        // Once it is, round 3 must go ahead — round 2 has no board anyone could
-        // ever record, so if it were not already complete, nothing would make it.
+
+        // The result is entered on the live record, in round 2.
+        t.toggle_board_winner(2, 0, Winner::Player1).unwrap();
+        assert!(t.rounds[1].completed);
+        t.prepare_round().expect("round 3 prepares");
+    }
+
+    /// A round can be born complete, and the carry is what makes that reachable:
+    /// a long game finished inside round 1 is carried into round 2 *already
+    /// decided*, so round 2 has nothing left to record the moment it is
+    /// confirmed. `completed` is otherwise only recomputed when a board changes,
+    /// and there is no board change coming — stamping it `false` at construction
+    /// left such a round permanently unfinishable and every later round
+    /// unpreparable.
+    #[test]
+    fn a_round_born_with_nothing_left_to_record_is_complete_at_once() {
+        let mut t = Tournament::new("Long").unwrap();
+        for n in ["Alpha", "Bravo"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.settings.long_boards_enabled = true;
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+        t.set_board_long(1, 0, true).unwrap();
+        // The long game finishes inside its own round. It is carried anyway — it
+        // still took both rounds — so round 2 receives it already decided.
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+
+        start_next_round(&mut t);
+        assert_eq!(
+            t.rounds[1].boards[0].record,
+            GameRecord::LongEnd(Outcome::won(Winner::Player1)),
+            "the outcome moved onto the live record"
+        );
+        assert_eq!(t.rounds[0].boards[0].record, GameRecord::LongCarried);
+        assert!(
+            t.rounds[1].completed,
+            "nothing left to record, so nothing to wait for"
+        );
         t.prepare_round().expect("round 3 prepares");
     }
 
@@ -2790,13 +3132,14 @@ mod tests {
         assert!(t.rounds[0].completed);
         assert!(!t.rounds[0].boards[0].is_decided());
 
-        // Round 2 excludes the two long players.
+        // Round 2 does not *pair* the two long players: their only board there is
+        // the carried record of the game they are still playing.
         t.prepare_round().unwrap();
         t.confirm_round().unwrap();
         let r2 = t.rounds.last().unwrap();
         for b in &r2.boards {
-            assert!(!long_players.contains(&b.player1));
-            assert!(!long_players.contains(&b.player2));
+            let theirs = long_players.contains(&b.player1) || long_players.contains(&b.player2);
+            assert!(!theirs || b.source == PairingSource::Carried);
         }
         assert!(r2.byes().all(|x| !long_players.contains(&x)));
 
@@ -2806,19 +3149,26 @@ mod tests {
             Err(TournamentError::NotCurrentRound)
         );
 
-        // Complete round 2, then round 3 is gated on the still-pending long game.
-        let n = t.rounds.last().unwrap().boards.len();
-        for i in 0..n {
+        // Round 2 holds the carried game, so recording every *other* board leaves
+        // it open — and round 3 is gated by that, not by a special guard.
+        let carried = t.rounds[1]
+            .boards
+            .iter()
+            .position(|b| b.source == PairingSource::Carried)
+            .expect("the carried game is a board of round 2");
+        let n = t.rounds[1].boards.len();
+        for i in (0..n).filter(|i| *i != carried) {
             t.toggle_board_winner(2, i, Winner::Player1).unwrap();
         }
-        assert!(t.rounds[1].completed);
+        assert!(!t.rounds[1].completed);
         assert_eq!(
             t.prepare_round(),
-            Err(TournamentError::UnresolvedLongGame { round: 1 })
+            Err(TournamentError::PreviousRoundNotComplete)
         );
 
-        // Enter the long result; now the next round can be prepared.
-        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        // Enter the long result on its live record; now the next round prepares.
+        t.toggle_board_winner(2, carried, Winner::Player1).unwrap();
+        assert!(t.rounds[1].completed);
         assert!(t.prepare_round().is_ok());
     }
 
@@ -2844,9 +3194,11 @@ mod tests {
         start_next_round(&mut t);
         let r2 = t.rounds.last().unwrap();
         for b in &r2.boards {
+            let theirs = long_players.contains(&b.player1) || long_players.contains(&b.player2);
             assert!(
-                !long_players.contains(&b.player1) && !long_players.contains(&b.player2),
-                "a long game takes rounds N and N+1 even when it finishes in N"
+                !theirs || b.source == PairingSource::Carried,
+                "a long game takes rounds N and N+1 even when it finishes in N, so \
+                 their only board here is the carried one"
             );
         }
         assert!(r2.byes().all(|x| !long_players.contains(&x)));
@@ -3454,21 +3806,21 @@ mod tests {
         assert_eq!(
             t.toggle_board_winner(1, 0, Winner::Player1)
                 .unwrap()
-                .outcome,
+                .outcome(),
             Outcome::won(Winner::Player1)
         );
         // click player 2 -> switch winner
         assert_eq!(
             t.toggle_board_winner(1, 0, Winner::Player2)
                 .unwrap()
-                .outcome,
+                .outcome(),
             Outcome::won(Winner::Player2)
         );
         // click the current winner again -> back to not played
         assert_eq!(
             t.toggle_board_winner(1, 0, Winner::Player2)
                 .unwrap()
-                .outcome,
+                .outcome(),
             Outcome::PENDING
         );
     }
@@ -3490,7 +3842,7 @@ mod tests {
         assert_eq!(
             t.toggle_board_winner(1, 0, Winner::Player1)
                 .unwrap()
-                .outcome,
+                .outcome(),
             Outcome::Won {
                 winner: Winner::Player1,
                 drawn: true
@@ -3499,7 +3851,7 @@ mod tests {
         assert_eq!(
             t.toggle_board_winner(1, 0, Winner::Player1)
                 .unwrap()
-                .outcome,
+                .outcome(),
             Outcome::Pending { drawn: true }
         );
     }
@@ -3520,7 +3872,7 @@ mod tests {
             .set_board_no_show(1, 0, Some(Forfeit::Player2(AbsenceKind::NoShow)))
             .unwrap();
         assert_eq!(
-            board.outcome,
+            board.outcome(),
             Outcome::Forfeit {
                 absent: Forfeit::Player2(AbsenceKind::NoShow)
             }
@@ -3529,14 +3881,14 @@ mod tests {
 
         // Recording an actual winner supersedes the no-show (game was played).
         let board = t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
-        assert_eq!(board.outcome, Outcome::won(Winner::Player1));
+        assert_eq!(board.outcome(), Outcome::won(Winner::Player1));
 
         // And marking a no-show again clears the recorded result.
         let board = t
             .set_board_no_show(1, 0, Some(Forfeit::Player1(AbsenceKind::NoShow)))
             .unwrap();
         assert_eq!(
-            board.outcome,
+            board.outcome(),
             Outcome::Forfeit {
                 absent: Forfeit::Player1(AbsenceKind::NoShow)
             }
@@ -3551,7 +3903,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            board.outcome,
+            board.outcome(),
             Outcome::Forfeit {
                 absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow)
             }
@@ -4016,11 +4368,11 @@ mod tests {
 
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
         let board = t.set_board_drawn(1, 0, true).unwrap();
-        assert!(board.outcome.drawn());
+        assert!(board.outcome().drawn());
         // The winner is untouched, and unaffected by the draw flag.
-        assert_eq!(board.outcome.winner(), Some(Winner::Player1));
+        assert_eq!(board.outcome().winner(), Some(Winner::Player1));
         assert_eq!(board.effective_winner(false), Some(Winner::Player1));
-        assert!(!t.set_board_drawn(1, 0, false).unwrap().outcome.drawn());
+        assert!(!t.set_board_drawn(1, 0, false).unwrap().outcome().drawn());
     }
 
     /// Nobody played, so nobody drew: the draw flag is rejected on a forfeited
@@ -4049,9 +4401,9 @@ mod tests {
         assert!(t.validate_loaded().is_ok());
 
         // ...and a save that carries one anyway is rejected on load.
-        t.rounds[0].boards[0].outcome = Outcome::Forfeit {
+        t.rounds[0].boards[0].set_outcome(Outcome::Forfeit {
             absent: Forfeit::Player1(AbsenceKind::Justified),
-        };
+        });
         assert!(matches!(
             t.validate_loaded(),
             Err(TournamentError::JustifiedAbsenceOutsideTeamMode)
@@ -4075,7 +4427,7 @@ mod tests {
         ));
         // Clearing the forfeit makes the board an ordinary pending one again.
         t.set_board_no_show(1, 0, None).unwrap();
-        assert!(t.set_board_drawn(1, 0, true).unwrap().outcome.drawn());
+        assert!(t.set_board_drawn(1, 0, true).unwrap().outcome().drawn());
     }
 
     /// Nobody played, so nobody conceded odds: the handicap follows the draw
@@ -4124,9 +4476,9 @@ mod tests {
         // this build can otherwise read reaches that state: the handicap and the
         // forfeit are exclusive through every setter, and the only older saves
         // accepted are of tournaments that have not started, which have no boards.
-        t.rounds[0].boards[0].outcome = Outcome::Forfeit {
+        t.rounds[0].boards[0].set_outcome(Outcome::Forfeit {
             absent: Forfeit::Player2(AbsenceKind::NoShow),
-        };
+        });
         assert_eq!(
             t.validate_loaded(),
             Err(TournamentError::HandicapOnForfeitedBoard { round: 1, board: 0 })
@@ -4164,7 +4516,7 @@ mod tests {
         t.toggle_board_winner(1, 0, receiver_wins).unwrap();
 
         let board = &t.rounds[0].boards[0];
-        assert_eq!(board.outcome.winner(), Some(receiver_wins)); // actual result recorded
+        assert_eq!(board.outcome().winner(), Some(receiver_wins)); // actual result recorded
         let giver_side = if p1_is_high {
             Winner::Player1
         } else {
@@ -4265,6 +4617,499 @@ mod tests {
         let back: Tournament = serde_json::from_str(&json).unwrap();
         assert_eq!(t, back);
         back.validate_loaded().unwrap();
+    }
+
+    /// Confirming a round must leave its own explanation faithful: nothing has
+    /// been edited since it was frozen a moment earlier, so the "why these
+    /// pairings?" panel must not open under a warning that the data has moved.
+    #[test]
+    fn confirming_a_round_leaves_its_explanation_faithful() {
+        let mut t = Tournament::new("Long").unwrap();
+        for n in ["Alpha", "Bravo", "Carol", "Dave"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.settings.long_boards_enabled = true;
+        t.finalize_registration().unwrap();
+
+        start_next_round(&mut t);
+        assert_eq!(t.explanations_faithful_through, 1);
+
+        // Flagging a board long is an edit *inside* round 1, which cannot unsettle
+        // round 1's own explanation — it was frozen before the flag existed.
+        t.set_board_long(1, 0, true).unwrap();
+        assert_eq!(t.explanations_faithful_through, 1);
+
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+        start_next_round(&mut t);
+        assert_eq!(
+            t.explanations_faithful_through, 2,
+            "round 2 was just paired from the present, so it is faithful to it"
+        );
+    }
+
+    /// A player finishing a long game is not available to be marked absent: they
+    /// are playing. Allowing it gave them a sit-out *and* the carried board in the
+    /// same round — the sit-out then hid the game from the cross-table export and
+    /// added its value on top of the game's own score.
+    #[test]
+    fn a_player_mid_long_game_cannot_be_marked_absent() {
+        let mut t = Tournament::new("Long").unwrap();
+        for n in ["Alpha", "Bravo", "Carol", "Dave"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.settings.long_boards_enabled = true;
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+        t.set_board_long(1, 0, true).unwrap();
+        let busy = t.rounds[0].boards[0].player1;
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+
+        t.prepare_round().unwrap();
+        t.update_draft(vec![busy], Vec::new(), Vec::new()).unwrap();
+        let err = t.confirm_round().unwrap_err();
+        assert!(
+            matches!(err, TournamentError::InvalidDraft(ref m) if m.contains("long game")),
+            "expected a long-game refusal, got {err:?}"
+        );
+    }
+
+    /// Flagging a cup round long moves *every* cup board, so the "not after a
+    /// result" guard has to be asked of every one of them. Asking only the
+    /// clicked board let a decided game be flipped long by a click on its
+    /// neighbour — retroactively doubling a result already recorded, which is
+    /// exactly what the guard exists to prevent.
+    #[test]
+    fn a_cup_round_cannot_go_long_once_any_of_its_boards_is_decided() {
+        let mut t = Tournament::new("Champ").unwrap();
+        enable_cup(&mut t);
+        let s: Vec<Uuid> = (0..8)
+            .map(|i| add_rated(&mut t, &format!("E{i}"), 2000 - i * 100, true))
+            .collect();
+        t.settings.long_boards_enabled = true;
+        t.finalize_registration_with(Some(8)).unwrap();
+        start_next_round(&mut t);
+
+        // Record one quarterfinal, then try to make the round long from another.
+        decide(&mut t, 1, s[0], s[7]);
+        let undecided = t.rounds[0]
+            .boards
+            .iter()
+            .position(|b| !b.is_decided())
+            .expect("three quarterfinals are still open");
+        assert_eq!(
+            t.set_board_long(1, undecided, true),
+            Err(TournamentError::LongFlagAfterCoupledResult),
+            "one decided board in the coupled unit blocks the whole flip, and \
+             says so — the referee clicked an empty board"
+        );
+        assert!(
+            t.rounds[0].boards.iter().all(|b| !b.is_long()),
+            "and nothing moved"
+        );
+    }
+
+    /// A qualifier cup's first round is one session of one cup: the play-off
+    /// boards *and* the pre-qualified players' games. Flagging it long has to
+    /// take in both, or the pre-qualified finish a round early and are free to be
+    /// paired while the qualifiers are still playing — desynchronised from the
+    /// bracket they are about to meet.
+    #[test]
+    fn a_qualifier_cups_first_round_goes_long_with_its_prequalified_games() {
+        let mut t = Tournament::new("Champ").unwrap();
+        t.update_settings(TournamentSettings {
+            cup_enabled: true,
+            cup_format: CupFormat::Qualifier,
+            long_boards_enabled: true,
+            ..Default::default()
+        })
+        .unwrap();
+        // A size-8 qualifier cup takes 12 eligible: four pre-qualified and eight
+        // in the qualification round. Four outsiders give the pre-qualified
+        // somebody to face in the open.
+        for i in 0..12 {
+            add_rated(&mut t, &format!("E{i}"), 2400 - i * 50, true);
+        }
+        for i in 0..4 {
+            add_rated(&mut t, &format!("N{i}"), 1500 - i * 50, false);
+        }
+        t.finalize_registration_with(Some(8)).unwrap();
+        start_next_round(&mut t);
+
+        let prequalified: Vec<TournamentId> = t.prequalified_in_round(1).to_vec();
+        assert_eq!(prequalified.len(), 4, "size/2 pre-qualified in round 1");
+
+        // Flag from a qualification board; the pre-qualified games move with it.
+        let cup_board = t.rounds[0]
+            .boards
+            .iter()
+            .position(|b| matches!(b.source, PairingSource::Cup { .. }))
+            .expect("the qualification round has cup boards");
+        t.set_board_long(1, cup_board, true).unwrap();
+
+        for b in &t.rounds[0].boards {
+            let theirs = prequalified.contains(&b.player1) || prequalified.contains(&b.player2);
+            let cup = matches!(b.source, PairingSource::Cup { .. });
+            assert_eq!(
+                b.is_long(),
+                cup || theirs,
+                "one session, one length: cup={cup} prequalified={theirs}"
+            );
+        }
+
+        // And the coupling is symmetric — unflagging from a pre-qualified game
+        // takes the qualification boards back with it.
+        let pre_board = t.rounds[0]
+            .boards
+            .iter()
+            .position(|b| {
+                !matches!(b.source, PairingSource::Cup { .. })
+                    && (prequalified.contains(&b.player1) || prequalified.contains(&b.player2))
+            })
+            .expect("a pre-qualified player plays in the open");
+        t.set_board_long(1, pre_board, false).unwrap();
+        assert!(t.rounds[0].boards.iter().all(|b| !b.is_long()));
+    }
+
+    /// A no-show *on* the long board resolves the game but does not release its
+    /// players — it still took both of its rounds. So the next draft must not
+    /// carry them into its absent list, which is otherwise defaulted from the
+    /// previous round's no-shows: proposing them there would offer the referee a
+    /// draft that `confirm_round` then refuses.
+    #[test]
+    fn a_no_show_on_a_long_board_does_not_default_its_players_absent() {
+        let mut t = Tournament::new("Long").unwrap();
+        for n in ["Alpha", "Bravo", "Carol", "Dave"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.settings.long_boards_enabled = true;
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+        t.set_board_long(1, 0, true).unwrap();
+        let (a, b) = (t.rounds[0].boards[0].player1, t.rounds[0].boards[0].player2);
+        t.set_board_no_show(1, 0, Some(Forfeit::Player2(AbsenceKind::NoShow)))
+            .unwrap();
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+
+        let draft = t.prepare_round().unwrap();
+        assert!(
+            !draft.absent.contains(&a) && !draft.absent.contains(&b),
+            "the long game's players are playing it, not absent: {:?}",
+            draft.absent
+        );
+        t.confirm_round().expect("and the round confirms");
+    }
+
+    /// The blockers are what the buttons read, so they must answer exactly what
+    /// the guards do. Pinned here because the alternative — a client deriving the
+    /// same rule from the same data — is what this replaced, and what drifted.
+    #[test]
+    fn the_blockers_agree_with_the_guards_they_report_on() {
+        let mut t = Tournament::new("Long").unwrap();
+        for n in ["Alpha", "Bravo", "Carol", "Dave"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.settings.long_boards_enabled = true;
+
+        // Before finalization, and with a draft open, `prepare_round` refuses for
+        // reasons the blocker names identically.
+        assert_eq!(
+            t.next_round_blocker(),
+            Some(TournamentError::RegistrationNotFinalized)
+        );
+        t.finalize_registration().unwrap();
+        assert_eq!(t.next_round_blocker(), None);
+        t.prepare_round().unwrap();
+        assert_eq!(
+            t.next_round_blocker(),
+            Some(TournamentError::DraftAlreadyExists)
+        );
+        t.confirm_round().unwrap();
+
+        // A long game leaves round 2 open, and that is what stops round 3 — the
+        // blocker says so rather than the client working it out.
+        t.set_board_long(1, 0, true).unwrap();
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+        assert_eq!(t.next_round_blocker(), None, "round 1 is complete");
+        start_next_round(&mut t);
+        assert_eq!(
+            t.next_round_blocker(),
+            Some(TournamentError::PreviousRoundNotComplete),
+            "the carried game holds round 2 open"
+        );
+        assert_eq!(
+            t.prepare_round(),
+            Err(TournamentError::PreviousRoundNotComplete)
+        );
+
+        // And the export refuses for as long as the game is unresolved, with the
+        // blocker and `to_grid` naming the same round.
+        assert_eq!(
+            t.grid_export_blocker(),
+            Some(TournamentError::UnresolvedLongGame { round: 2 })
+        );
+        assert_eq!(
+            crate::american_grid::to_grid(&t, &t.standings()),
+            Err(TournamentError::UnresolvedLongGame { round: 2 })
+        );
+
+        // Entering the result clears both, together. The carried board is not
+        // index 0 — it is appended after the round's own pairings — so find it.
+        assert!(
+            t.rounds[1]
+                .boards
+                .iter()
+                .any(|b| b.source == PairingSource::Carried),
+            "round 2 holds the carried game"
+        );
+        for i in 0..t.rounds[1].boards.len() {
+            if !t.rounds[1].boards[i].is_decided() {
+                t.toggle_board_winner(2, i, Winner::Player1).unwrap();
+            }
+        }
+        assert_eq!(t.grid_export_blocker(), None);
+        assert_eq!(t.next_round_blocker(), None);
+        assert!(crate::american_grid::to_grid(&t, &t.standings()).is_ok());
+        t.prepare_round().expect("round 3 prepares");
+    }
+
+    /// A long game counts as **two** games against its opponent for the
+    /// opponent-based tie-breaks (SOS, SODOS, SOSOS, Buchholz) — it is worth two
+    /// rounds, so it weighs two. Not four.
+    ///
+    /// It now holds one record per round it occupies, and both are in completed
+    /// rounds, so a per-record multiplier of two would count the game twice over.
+    /// Each record contributes one game instead, which is the same total and says
+    /// the truer thing: one game faced per round played.
+    #[test]
+    fn a_long_game_is_two_opponents_faced_not_four() {
+        let mut t = Tournament::new("Long").unwrap();
+        for n in ["Alpha", "Bravo", "Carol", "Dave"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.settings.long_boards_enabled = true;
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+
+        // Board 0 goes long; the other board finishes, so round 1 completes.
+        t.set_board_long(1, 0, true).unwrap();
+        let (a, b) = (t.rounds[0].boards[0].player1, t.rounds[0].boards[0].player2);
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+        assert!(t.rounds[0].completed);
+
+        // Round 2 carries the long game; finish everything.
+        start_next_round(&mut t);
+        let n = t.rounds[1].boards.len();
+        for i in 0..n {
+            t.toggle_board_winner(2, i, Winner::Player1).unwrap();
+        }
+        assert!(t.rounds[1].completed);
+
+        let uuid_of = |tid: TournamentId| {
+            t.players
+                .iter()
+                .find(|p| p.tournament_id == Some(tid))
+                .expect("a current player")
+                .id
+        };
+        let (a_id, b_id) = (uuid_of(a), uuid_of(b));
+        let standings = t.standings();
+        let faced = |who: Uuid, whom: Uuid| {
+            standings
+                .iter()
+                .find(|s| s.player_id == who)
+                .expect("in the standings")
+                .opponents
+                .iter()
+                .filter(|&&o| o == whom)
+                .count()
+        };
+        assert_eq!(faced(a_id, b_id), 2, "two rounds of one game, so two games");
+        assert_eq!(faced(b_id, a_id), 2);
+    }
+
+    /// A handicap is part of the *game*, not of the round it was drawn in, so it
+    /// travels with the game onto the live record and comes back with it.
+    ///
+    /// Leaving a copy behind would duplicate it, and a duplicate can disagree; it
+    /// would also put the grid's `(-r)` suffix on the `0-` placeholder cell, which
+    /// renders no game at all.
+    #[test]
+    fn a_handicap_travels_with_the_game_it_was_conceded_in() {
+        let mut t = Tournament::new("Long").unwrap();
+        for (n, elo) in [("Alpha", 2000), ("Bravo", 1600)] {
+            t.add_player(NewPlayer {
+                last_name: n.to_string(),
+                rating: Some(elo),
+                ..Default::default()
+            })
+            .unwrap();
+        }
+        t.settings.long_boards_enabled = true;
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+        t.set_board_long(1, 0, true).unwrap();
+        t.set_board_handicap(1, 0, Some(Handicap::Rook)).unwrap();
+        let conceded = t.rounds[0].boards[0].handicap;
+        assert!(conceded.is_some());
+
+        start_next_round(&mut t);
+        assert_eq!(
+            t.rounds[1].boards[0].handicap, conceded,
+            "the handicap moved onto the live record"
+        );
+        assert_eq!(
+            t.rounds[0].boards[0].handicap, None,
+            "and did not stay behind to be a second copy of itself"
+        );
+
+        // Back again with the game, so a cancel loses nothing.
+        t.cancel_last_round().unwrap();
+        assert_eq!(t.rounds[0].boards[0].handicap, conceded);
+        t.validate_loaded().expect("still a whole record");
+    }
+
+    /// Everything about a carried long game lives on its live record, so every
+    /// way of writing to the inert one is refused, naming where the game is.
+    ///
+    /// Without these the result path would *panic* (a carried record has nowhere
+    /// to put an outcome) and the handicap path would silently write a handicap
+    /// that scores nothing — both reachable by addressing the board the round it
+    /// started in, which the round tab still shows.
+    #[test]
+    fn writing_to_a_carried_long_games_inert_record_is_refused() {
+        let mut t = Tournament::new("Long").unwrap();
+        // Rated, and unequally: a handicap needs a rating difference to size it.
+        for (n, elo) in [("Alpha", 2000), ("Bravo", 1600)] {
+            t.add_player(NewPlayer {
+                last_name: n.to_string(),
+                rating: Some(elo),
+                ..Default::default()
+            })
+            .unwrap();
+        }
+        t.settings.long_boards_enabled = true;
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+        t.set_board_long(1, 0, true).unwrap();
+        start_next_round(&mut t);
+
+        let carried = Err(TournamentError::CarriedLongGame { round: 2 });
+        assert_eq!(t.toggle_board_winner(1, 0, Winner::Player1), carried);
+        assert_eq!(t.set_board_drawn(1, 0, true), carried);
+        assert_eq!(
+            t.set_board_no_show(1, 0, Some(Forfeit::Player2(AbsenceKind::NoShow))),
+            carried
+        );
+        assert_eq!(
+            t.set_board_handicap(1, 0, Some(Handicap::Rook)),
+            Err(TournamentError::CarriedLongGame { round: 2 })
+        );
+        // Longness is refused there too, but for the older and truer reason: it
+        // was fixed when the round advanced, and round 2 cannot change it either.
+        assert_eq!(
+            t.set_board_long(1, 0, false),
+            Err(TournamentError::NotCurrentRound)
+        );
+        // And the live record's length is fixed by the round that started it —
+        // demoting it here would orphan the record left behind.
+        assert_eq!(
+            t.set_board_long(2, 0, false),
+            Err(TournamentError::LongGameStartedEarlier { round: 1 })
+        );
+
+        // The live record takes all of it.
+        t.toggle_board_winner(2, 0, Winner::Player1).unwrap();
+        t.set_board_handicap(2, 0, Some(Handicap::Rook)).unwrap();
+        t.validate_loaded().expect("still a whole record");
+    }
+
+    /// Cancelling the round a long game is finished in moves its outcome back
+    /// onto the record it came from — the exact inverse of the carry, so the fact
+    /// that the game was played survives the round-trip. Dropping the result (or
+    /// refusing the cancel) would both lose it.
+    #[test]
+    fn cancelling_the_round_a_long_game_ends_in_gives_its_result_back() {
+        let mut t = Tournament::new("Long").unwrap();
+        for n in ["Alpha", "Bravo"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.settings.long_boards_enabled = true;
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+        t.set_board_long(1, 0, true).unwrap();
+        start_next_round(&mut t);
+        // The game is played out in round 2, on its live record.
+        t.toggle_board_winner(2, 0, Winner::Player1).unwrap();
+
+        t.cancel_last_round().unwrap();
+        assert_eq!(t.rounds.len(), 1);
+        assert_eq!(
+            t.rounds[0].boards[0].record,
+            GameRecord::LongStart(Outcome::won(Winner::Player1)),
+            "the outcome came back to the record it started on"
+        );
+        t.validate_loaded().expect("and the record is whole again");
+
+        // Re-confirming carries it forward again, result and all.
+        start_next_round(&mut t);
+        assert_eq!(t.rounds[0].boards[0].record, GameRecord::LongCarried);
+        assert_eq!(
+            t.rounds[1].boards[0].record,
+            GameRecord::LongEnd(Outcome::won(Winner::Player1))
+        );
+    }
+
+    /// A carried long game is two records written as a pair. A file holding only
+    /// one of them has a game whose result is unreachable or unattributable, and
+    /// nothing downstream would say so — so loading it is refused.
+    #[test]
+    fn validate_loaded_rejects_half_of_a_carried_long_game() {
+        // A real carried game, produced the only way there is to produce one.
+        let mut t = Tournament::new("Long").unwrap();
+        for n in ["Alpha", "Bravo"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.settings.long_boards_enabled = true;
+        t.finalize_registration().unwrap();
+        start_next_round(&mut t);
+        t.set_board_long(1, 0, true).unwrap();
+        start_next_round(&mut t);
+        t.validate_loaded()
+            .expect("a carried game is a valid record");
+
+        // The live record without the one it came from.
+        let mut orphan = t.clone();
+        orphan.rounds[0].boards.clear();
+        assert_eq!(
+            orphan.validate_loaded(),
+            Err(TournamentError::OrphanedLongGame { round: 2 })
+        );
+
+        // The starting record without the live one.
+        let mut orphan = t.clone();
+        orphan.rounds[1].boards.clear();
+        assert_eq!(
+            orphan.validate_loaded(),
+            Err(TournamentError::OrphanedLongGame { round: 1 })
+        );
+
+        // A start that was never carried, although a later round exists.
+        let mut orphan = t.clone();
+        orphan.rounds[0].boards[0].record = GameRecord::LongStart(Outcome::PENDING);
+        orphan.rounds[1].boards.clear();
+        assert_eq!(
+            orphan.validate_loaded(),
+            Err(TournamentError::OrphanedLongGame { round: 1 })
+        );
+
+        // A long game in the last round has nothing after it to be carried into,
+        // which is the one time a bare `LongStart` is correct.
+        let mut last = t.clone();
+        last.rounds.pop();
+        last.rounds[0].boards[0].record = GameRecord::LongStart(Outcome::PENDING);
+        last.explanations_faithful_through = 1;
+        last.validate_loaded()
+            .expect("an uncarried long game in the last round is fine");
     }
 
     #[test]
@@ -5040,13 +5885,13 @@ mod tests {
             .boards
             .iter()
             .filter(|b| matches!(b.source, PairingSource::Cup { .. }))
-            .all(|b| b.long));
+            .all(|b| b.is_long()));
         assert_eq!(
             t.rounds[0]
                 .boards
                 .iter()
                 .find(|b| matches!(b.source, PairingSource::Swiss))
-                .map(|b| b.long),
+                .map(|b| b.is_long()),
             Some(false)
         );
 
@@ -5059,32 +5904,56 @@ mod tests {
             .filter(|b| matches!(b.source, PairingSource::Cup { .. }))
             .all(|b| !b.is_decided()));
 
-        // Round 2 is the gap round: the eight cup players are busy on their long
-        // QFs, so only the two non-eligibles are paired, with no cup boards.
+        // Round 2 is the gap round: the eight cup players are still playing their
+        // long QFs, which are carried into this round because that is where they
+        // are finished. Nothing new is *paired* for them — only the two
+        // non-eligibles are — and no fresh cup board is drawn.
         t.prepare_round().unwrap();
         t.confirm_round().unwrap();
         let r2 = t.rounds.last().unwrap();
         assert!(r2
             .boards
             .iter()
-            .all(|b| matches!(b.source, PairingSource::Swiss)));
+            .all(|b| matches!(b.source, PairingSource::Swiss | PairingSource::Carried)));
         assert!(find_board(&t, 2, n9, n10).is_some());
+        assert_eq!(
+            r2.boards
+                .iter()
+                .filter(|b| b.source == PairingSource::Carried)
+                .count(),
+            4,
+            "the four quarterfinals are being played in this round"
+        );
         assert!(r2
             .boards
             .iter()
+            .filter(|b| b.source != PairingSource::Carried)
             .all(|b| !s_tid.contains(&b.player1) && !s_tid.contains(&b.player2)));
 
-        // Complete round 2; round 3 can't be prepared until the long QFs resolve.
-        decide_rest(&mut t, 2);
+        // Deciding everything *but* the carried QFs leaves round 2 open, and
+        // round 3 is gated by that ordinary rule.
+        let swiss: Vec<usize> = r2
+            .boards
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.source != PairingSource::Carried)
+            .map(|(i, _)| i)
+            .collect();
+        for i in swiss {
+            t.toggle_board_winner(2, i, Winner::Player1).unwrap();
+        }
+        assert!(!t.rounds[1].completed);
         assert_eq!(
             t.prepare_round(),
-            Err(TournamentError::UnresolvedLongGame { round: 1 })
+            Err(TournamentError::PreviousRoundNotComplete)
         );
 
-        // Record the QF results; round 3 then hosts the semifinal.
+        // Record the QF results on their live records, in round 2; round 3 then
+        // hosts the semifinal.
         for i in 0..4 {
-            decide(&mut t, 1, s[i], s[7 - i]);
+            decide(&mut t, 2, s[i], s[7 - i]);
         }
+        assert!(t.rounds[1].completed);
         t.prepare_round().unwrap();
         t.confirm_round().unwrap();
         assert!(matches!(

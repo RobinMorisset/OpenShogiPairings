@@ -2,7 +2,7 @@
 //! transitions.
 
 use axum::http::StatusCode;
-use osp_core::Tournament;
+use osp_core::{Tournament, TOURNAMENT_FORMAT_VERSION};
 use osp_server::{router, AppState};
 use serde_json::json;
 
@@ -228,8 +228,10 @@ async fn import_opens_a_v1_3_0_save_of_a_tournament_that_has_not_started() {
     assert_eq!(status, StatusCode::OK);
     let t = &body["tournament"];
     assert_eq!(t["name"], "Maximal v1.3.0 Open");
-    // Stored at the current version, so the next save is an ordinary one.
-    assert_eq!(t["format_version"], 10);
+    // Stored at the current version, so the next save is an ordinary one. Named
+    // rather than spelled out: the upgrade targets whatever this build writes,
+    // so pinning a literal here only breaks on the next format bump.
+    assert_eq!(t["format_version"], TOURNAMENT_FORMAT_VERSION);
     // The referee's players and settings survive the upgrade — its whole point.
     assert_eq!(t["players"].as_array().unwrap().len(), 2);
     assert_eq!(t["players"][0]["club"], "Nancy");

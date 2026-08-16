@@ -20,6 +20,7 @@
   import { tiebreakLabel, tiebreakTitle } from "../tiebreaks";
   import { boardOutcome, drawnOf, forfeitOf, winnerOf } from "../boardOutcome";
   import { absenceKind } from "../noShow";
+  import { isLong } from "../longGames";
   import { partitionDropped } from "../tiebreak";
   import { formatScore, HALF_POINT_TIEBREAKS } from "../score";
   import { printPage } from "../platform";
@@ -533,7 +534,7 @@
   function longAwareCell(player: Player, i: number): Cell {
     const pid = tid(player);
     const onLong = (round: Round) =>
-      round.boards.find((b) => b.long && (b.player1 === pid || b.player2 === pid));
+      round.boards.find((b) => isLong(b) && (b.player1 === pid || b.player2 === pid));
     const here = onLong(shownRounds[i]);
     if (here) {
       const opp = here.player1 === pid ? here.player2 : here.player1;
@@ -542,7 +543,7 @@
     if (i > 0) {
       const prev = shownRounds[i - 1];
       const idx = prev.boards.findIndex(
-        (b) => b.long && (b.player1 === pid || b.player2 === pid),
+        (b) => isLong(b) && (b.player1 === pid || b.player2 === pid),
       );
       if (idx >= 0) return cellForBoard(player, prev, prev.boards[idx], idx);
     }

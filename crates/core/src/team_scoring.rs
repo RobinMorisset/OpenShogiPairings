@@ -286,7 +286,7 @@ pub(crate) fn match_result(round: &Round, m: &TeamMatch, wiel_rule: bool) -> Mat
         }
         // A forfeit credits the side that turned up; `no_show_opponent` is
         // already `None` when neither did, so `Both` scores nobody.
-        let winner_side = match board.outcome.forfeit() {
+        let winner_side = match board.outcome().forfeit() {
             Some(_) => board.no_show_opponent().map(|id| {
                 if id == board.player1 {
                     Winner::Player1
@@ -710,7 +710,7 @@ mod tests {
         let round = t.rounds.last_mut().unwrap();
         assert_eq!(round.boards.len(), outcomes.len());
         for (board, &outcome) in round.boards.iter_mut().zip(outcomes) {
-            board.outcome = outcome;
+            board.set_outcome(outcome);
         }
         round.completed = round.is_complete();
     }

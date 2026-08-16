@@ -196,6 +196,40 @@ pub(crate) fn scope(state: AppState) -> Router<AppState> {
     public.merge(public::scope()).merge(protected)
 }
 
+/// Why an action the UI offers would be refused right now, in the shape the
+/// client already renders: the stable machine `code` and its interpolation
+/// `values`, exactly as an error response carries them.
+///
+/// Shipped so a button can be disabled *and explain itself* without the frontend
+/// re-deriving the rule. Every rule this project has mirrored into TypeScript has
+/// eventually disagreed with the Rust it copied — the long-game predicates most
+/// recently — so the decision travels rather than its inputs.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+pub(crate) struct BlockedReason {
+    pub(crate) code: String,
+    pub(crate) values: std::collections::BTreeMap<String, String>,
+}
+
+impl BlockedReason {
+    /// `None` when the action would go ahead. An error with no localized code
+    /// still blocks, carrying its English message as the `code`: better a bare
+    /// string than a button that lies about being available.
+    fn of(blocker: Option<osp_core::TournamentError>) -> Option<Self> {
+        let err = blocker?;
+        Some(match crate::error::domain_payload(&err) {
+            Some((code, values)) => BlockedReason {
+                code: code.to_string(),
+                values,
+            },
+            None => BlockedReason {
+                code: err.to_string(),
+                values: Default::default(),
+            },
+        })
+    }
+}
+
 /// API response: the current tournament, undo availability, and the derived
 /// standings.
 ///
@@ -212,6 +246,16 @@ pub(crate) fn scope(state: AppState) -> Router<AppState> {
 pub(crate) struct TournamentView {
     pub(crate) tournament: Tournament,
     pub(crate) can_undo: bool,
+    /// Why starting the next round would be refused, or absent if it would go
+    /// ahead — [`Tournament::next_round_blocker`], rendered by the client.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub(crate) next_round_blocked: Option<BlockedReason>,
+    /// The same for the American Grid export
+    /// ([`Tournament::grid_export_blocker`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub(crate) grid_export_blocked: Option<BlockedReason>,
     /// Monotonic change version. Clients echo it in the `X-Tournament-Version`
     /// header so a stale edit is rejected (409), and use it to ignore the SSE
     /// echo of their own change (see [`crate::live`]).
@@ -287,9 +331,14 @@ pub(crate) fn build_view(store: &TournamentStore) -> Result<TournamentView, ApiE
                 .collect()
         })
         .collect();
+    // Read before `tournament` is moved into the response.
+    let next_round_blocked = BlockedReason::of(tournament.next_round_blocker());
+    let grid_export_blocked = BlockedReason::of(tournament.grid_export_blocker());
     Ok(TournamentView {
         tournament,
         can_undo: store.can_undo(),
+        next_round_blocked,
+        grid_export_blocked,
         version: store.version(),
         standings,
         team_standings,

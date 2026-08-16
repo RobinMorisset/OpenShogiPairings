@@ -9,15 +9,21 @@
 import type { Board, Forfeit, Outcome, Winner } from "./types";
 
 /**
- * A board's outcome. The server omits the field entirely while the board is an
- * ordinary pending one (`skip_serializing_if` on `Board::outcome`), so that is
+ * A board's outcome. The server omits the `record` entirely while the board is
+ * an ordinary pending one (`skip_serializing_if` on `Board::record`), so that is
  * what a missing value means.
  *
- * Mirrors `Outcome` in `crates/core/src/round.rs`; the accessors below are the
- * TS twins of its methods.
+ * A `long_carried` record holds no outcome at all — the live record of that game
+ * is the `long_end` board in the following round — so it reads as pending, which
+ * is also what it renders as (`0-`).
+ *
+ * Mirrors `Board::outcome` in `crates/core/src/round.rs`; the accessors below
+ * are the TS twins of `Outcome`'s methods.
  */
 export function outcomeOf(board: Board): Outcome {
-  return board.outcome ?? { kind: "pending" };
+  const record = board.record;
+  if (!record || record.kind === "long_carried") return { kind: "pending" };
+  return record.outcome;
 }
 
 /**

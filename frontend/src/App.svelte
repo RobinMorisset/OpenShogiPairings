@@ -36,17 +36,13 @@
     subscribeToChanges,
     type DraftUpdate,
   } from "./lib/api";
-  import { describeApiError } from "./lib/errorCodes";
-  import {
-    busyOnLongGame,
-    longPending,
-    overrunLongRound,
-    pendingLongRound,
-  } from "./lib/longGames";
+  import { describeApiError, describeCoded } from "./lib/errorCodes";
+  import { busyOnLongGame } from "./lib/longGames";
   import { isDecided } from "./lib/noShow";
   import { pairingRating } from "./lib/teams";
   import type {
     BackupList,
+    BlockedReason,
     Handicap,
     LicenceCheck,
     NewPlayer,
@@ -189,19 +185,6 @@
     return idx >= 0 ? (teamMatches[idx] ?? []) : [];
   });
 
-  // Long (two-round) games started in the previous round that are still unplayed,
-  // surfaced in the current round's view so the referee can record them here (the
-  // board itself lives in that previous round). Empty unless long boards are on.
-  const carriedRoundNumber = $derived(activeRound ? activeRound.number - 1 : 0);
-  const carriedLongBoards = $derived.by(() => {
-    if (!tournament || !activeRound) return [];
-    const prev = tournament.rounds.find((r) => r.number === carriedRoundNumber);
-    if (!prev) return [];
-    return prev.boards
-      .map((board, index) => ({ index, board }))
-      .filter(({ board }) => longPending(board));
-  });
-
   // Players a long game from the previous round keeps out of this draft. They
   // can't be paired or customized — the server excludes them from pairing — so
   // keep them out of the draft UI too (alongside cup players), which also stops a
@@ -242,6 +225,19 @@
           ? "ready"
           : "in_progress",
   );
+  // Why the server would refuse to start the next round / export the grid, or
+  // `null` if it would go ahead. Computed by the same code that enforces it
+  // (`Tournament::next_round_blocker`, `grid_export_blocker`), so the button and
+  // the refusal cannot disagree — which is exactly what went wrong when these
+  // rules were mirrored in TypeScript instead.
+  const nextRoundBlocked = $derived(store.nextRoundBlocked);
+  const gridExportBlocked = $derived(store.gridExportBlocked);
+  /** The translated sentence for a blocked reason, falling back to its code. */
+  function blockedText(reason: BlockedReason | null): string {
+    if (!reason) return "";
+    return describeCoded(reason.code, reason.values, $_) ?? reason.code;
+  }
+
   const enoughPlayers = $derived((tournament?.players.length ?? 0) >= 2);
 
   // The active round can be re-paired (via "force this pairing") only if it is
@@ -294,12 +290,6 @@
   // registration (a single undo step); from round 2 on, registration is already
   // finalized and it just prepares the next round.
   const nextRoundNumber = $derived((tournament?.rounds.length ?? 0) + 1);
-  // A long game may straddle its own round and the next, no further, so an
-  // unresolved one two rounds back blocks the next round — mirrors the guard in
-  // `prepare_round`. Without this the button stayed live and the server refused.
-  const overrunRound = $derived(
-    overrunLongRound(tournament?.rounds ?? [], nextRoundNumber),
-  );
   // Preparing round 1 of a team tournament also finalizes the rosters, so the
   // button carries `finalize_teams`'s guards — in the same order, and phrased as
   // the error it would otherwise have raised. Without this it looked live and
@@ -334,9 +324,12 @@
   const startEnabled = $derived(
     !busy &&
       enoughPlayers &&
-      overrunRound === null &&
       teamsNotReady === "" &&
-      ((phase === "registration" && cupReady) || phase === "ready"),
+      // In registration the button finalizes *then* prepares, so the server's
+      // "registration not finalized" is expected rather than blocking; from
+      // `ready` on, its verdict is the whole answer.
+      ((phase === "registration" && cupReady) ||
+        (phase === "ready" && nextRoundBlocked === null)),
   );
   const startTitle = $derived(
     phase === "draft" || phase === "in_progress"
@@ -345,8 +338,8 @@
         ? $_("app.startTitleNeedPlayers")
         : teamsNotReady !== ""
           ? teamsNotReady
-          : overrunRound !== null
-            ? $_("app.startTitleLongGamePending", { values: { round: overrunRound } })
+          : nextRoundBlocked !== null && phase !== "registration"
+            ? blockedText(nextRoundBlocked)
             : phase === "registration" && !cupReady
               ? $_("app.advanceTitleNeedCup", { values: { needed: cupFieldSize(8) } })
               : "",
@@ -357,28 +350,19 @@
   const completedRoundCount = $derived(
     tournament?.rounds.filter((r) => r.completed).length ?? 0,
   );
-  // An unresolved long game blocks the export outright — mirrors the guard in
-  // `american_grid::to_grid`. Without this the button stayed live and the server
-  // refused; before that guard existed, the grid was emitted with a loss for both
-  // players on a game nobody had finished.
-  const exportPendingLongRound = $derived(
-    pendingLongRound(tournament?.rounds ?? []),
-  );
   const exportEnabled = $derived(
     !busy &&
       phase === "ready" &&
       completedRoundCount > 0 &&
-      exportPendingLongRound === null,
+      gridExportBlocked === null,
   );
   const exportTitle = $derived(
     completedRoundCount === 0
       ? $_("app.exportTitleNoRounds")
       : phase !== "ready"
         ? $_("app.exportTitleNotReady")
-        : exportPendingLongRound !== null
-          ? $_("app.exportTitleLongGamePending", {
-              values: { round: exportPendingLongRound },
-            })
+        : gridExportBlocked !== null
+          ? blockedText(gridExportBlocked)
           : $_("app.exportTitleReady"),
   );
 
@@ -1378,12 +1362,10 @@
             onSetHandicap={(boardIndex, handicap) =>
               handleSetHandicap(activeRound.number, boardIndex, handicap)}
             longEnabled={tournament.settings.long_boards_enabled}
+            cup={tournament.cup}
             isCurrentRound={!!currentRound && activeRound.number === currentRound.number}
             onSetLong={(boardIndex, long) =>
               handleSetLong(activeRound.number, boardIndex, long)}
-            {carriedLongBoards}
-            onCarriedWinner={(boardIndex, clicked) =>
-              handleSetResult(carriedRoundNumber, boardIndex, clicked)}
             teams={teamMode ? (tournament.teams ?? []) : []}
             matches={activeRoundMatches}
             onPrintSheets={handlePrintSheets}

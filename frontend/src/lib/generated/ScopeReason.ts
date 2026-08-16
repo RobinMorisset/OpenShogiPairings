@@ -4,4 +4,4 @@
  * Why a probed player is out of the engine's hands — its board wasn't chosen by
  * the Swiss matching, so the counterfactual has nothing to reason about.
  */
-export type ScopeReason = "forced" | "cup" | "absent";
+export type ScopeReason = "forced" | "cup" | "mid_long_game" | "absent";

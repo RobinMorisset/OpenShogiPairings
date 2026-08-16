@@ -11,7 +11,7 @@ use typed_index_collections::TiVec;
 use uuid::Uuid;
 
 use crate::player::{Grade, Player, PointAdjustment};
-use crate::round::{Round, Winner};
+use crate::round::{GameRecord, Round, Winner};
 use crate::settings::TournamentSettings;
 use crate::units::{HalfPoints, TournamentId, Wins};
 
@@ -298,7 +298,7 @@ pub(crate) fn compute_scores(
             // exactly like a bye and the absentee like an absence (both handled
             // below), so neither records the other as an opponent, and there is
             // no float to read off this board.
-            if board.outcome.forfeit().is_some() {
+            if board.outcome().forfeit().is_some() {
                 continue;
             }
             // Boards carry tournament numbers, so the score table is indexed
@@ -307,9 +307,19 @@ pub(crate) fn compute_scores(
             let (ta, tb) = (board.player1, board.player2);
             // A long board (two rounds, two points) counts as *two* games against
             // the same opponent for the opponent-based tie-breaks (SOS, SODOS,
-            // SOSOS, Buchholz), so it is recorded twice. It still feeds ELO as a
-            // single game (that reads the boards directly, not these lists).
-            let reps = if board.long { 2 } else { 1 };
+            // SOSOS, Buchholz). It still feeds ELO as a single game (that reads
+            // the boards directly, not these lists).
+            //
+            // Once carried, the game holds one record per round it occupies and
+            // both rounds are completed, so each record contributes *one* game and
+            // the two add up to the same two. Doubling per record would count it
+            // four times over. A long board that was never carried — the last
+            // round of the tournament — is the whole game in one record, so it
+            // still counts two on its own.
+            let reps = match board.record {
+                GameRecord::LongStart(_) => 2,
+                GameRecord::Short(_) | GameRecord::LongCarried | GameRecord::LongEnd(_) => 1,
+            };
             for _ in 0..reps {
                 by_tid[ta].opponents.push(tb);
                 by_tid[tb].opponents.push(ta);
@@ -318,6 +328,15 @@ pub(crate) fn compute_scores(
             // Direction from the frozen float, recorded at pairing time. (The
             // board is already recorded as a game faced above, so a later Swiss
             // round won't re-pair them.)
+            //
+            // A carried long game holds a record in both of its rounds, and both
+            // are read here, so the marker ends up on the round the game *ended*
+            // in — the later write wins. That is the intended reading: the float
+            // rules decay by distance from this marker, and a player who has only
+            // just finished a game they floated into is exactly as fresh a floater
+            // as one who finished an ordinary game that round. Recording it from
+            // the round the game *started* would discount the repeat penalty by
+            // one round, for no reason the player would recognise.
             if let Some((down, up)) = float_direction(board.points_diff, ta, tb) {
                 by_tid[down].last_descended = Some(round.number);
                 by_tid[up].last_ascended = Some(round.number);
@@ -353,7 +372,7 @@ pub(crate) fn compute_scores(
             // A long board (double time control) is worth two points and counts
             // as two games against the same opponent for the point/victory totals
             // and the opponent-based tie-breaks; it stays a single game for ELO.
-            let reps = if board.long { 2 } else { 1 };
+            let reps = if board.is_long() { 2 } else { 1 };
             let s = &mut by_tid[winner];
             s.victories += Wins::from_whole(reps); // one win per game (two for a long board)
             for _ in 0..reps {
@@ -373,7 +392,7 @@ pub(crate) fn compute_scores(
             if let Some(present) = board.no_show_opponent() {
                 // A long board resolved by forfeit still scores its long weight
                 // (two points), unless the referee demoted it.
-                let reps = if board.long { 2 } else { 1 };
+                let reps = if board.is_long() { 2 } else { 1 };
                 let s = &mut by_tid[present];
                 s.victories += Wins::from_whole(reps); // one win (two for a long board)
             }
@@ -431,7 +450,7 @@ mod tests {
             number: 1,
             explanation: RoundExplanation::empty(1),
             boards: vec![Board {
-                outcome: Outcome::won(Winner::Player1),
+                record: GameRecord::Short(Outcome::won(Winner::Player1)),
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
@@ -464,9 +483,9 @@ mod tests {
             number: 1,
             explanation: RoundExplanation::empty(1),
             boards: vec![Board {
-                outcome: Outcome::Forfeit {
+                record: GameRecord::Short(Outcome::Forfeit {
                     absent: Forfeit::Player2(AbsenceKind::NoShow),
-                }, // player2 (B) is absent
+                }), // player2 (B) is absent
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
@@ -503,9 +522,9 @@ mod tests {
             number: 1,
             explanation: RoundExplanation::empty(1),
             boards: vec![Board {
-                outcome: Outcome::Forfeit {
+                record: GameRecord::Short(Outcome::Forfeit {
                     absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
-                },
+                }),
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
@@ -635,8 +654,7 @@ mod tests {
             number: 1,
             explanation: RoundExplanation::empty(1),
             boards: vec![Board {
-                outcome: Outcome::won(Winner::Player1),
-                long: true,
+                record: GameRecord::LongStart(Outcome::won(Winner::Player1)),
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
@@ -662,6 +680,60 @@ mod tests {
         assert_eq!(scores.get(&b.id).victories, 0);
     }
 
+    /// The float marker of a carried long game sits on the round the game
+    /// **ended** in, not the one it was paired in.
+    ///
+    /// The float rules decay by distance from this marker, and a player who has
+    /// only just finished a game they floated into is exactly as fresh a floater
+    /// as one who finished an ordinary game that round — the game being long does
+    /// not make the float older. Reading it from the starting round would discount
+    /// the repeat penalty by a round for no reason the player would recognise.
+    #[test]
+    fn a_carried_long_games_float_counts_from_the_round_it_ended_in() {
+        let a = player(1, None);
+        let b = player(2, None);
+        let (atid, btid) = (a.tournament_id.unwrap(), b.tournament_id.unwrap());
+        // `points_diff > 0`: A had more points, so A downfloated and B upfloated.
+        let paired = Board {
+            record: GameRecord::LongCarried,
+            ..Board::pending(atid, btid, 2, PairingSource::Swiss)
+        };
+        let rounds = [
+            Round {
+                number: 1,
+                explanation: RoundExplanation::empty(1),
+                boards: vec![paired.clone()],
+                sitouts: Vec::new(),
+                completed: true,
+            },
+            Round {
+                number: 2,
+                explanation: RoundExplanation::empty(2),
+                boards: vec![Board {
+                    record: GameRecord::LongEnd(Outcome::won(Winner::Player1)),
+                    source: PairingSource::Carried,
+                    ..paired
+                }],
+                sitouts: Vec::new(),
+                completed: true,
+            },
+        ];
+        let scores = compute_scores(
+            &[a.clone(), b.clone()],
+            &TournamentSettings::default(),
+            &rounds,
+        );
+        assert_eq!(
+            scores.get(&a.id).last_descended,
+            Some(2),
+            "the downfloater finished floating in round 2, not round 1"
+        );
+        assert_eq!(scores.get(&b.id).last_ascended, Some(2));
+        // And the game is still two games faced in total, not four.
+        assert_eq!(scores.get(&a.id).opponents, vec![btid, btid]);
+        assert_eq!(scores.get(&b.id).opponents, vec![atid, atid]);
+    }
+
     #[test]
     fn pending_long_board_records_the_opponent_but_awards_no_points() {
         // A long board with no result yet: the opponent is already recorded
@@ -672,7 +744,7 @@ mod tests {
             number: 1,
             explanation: RoundExplanation::empty(1),
             boards: vec![Board {
-                long: true,
+                record: GameRecord::LongStart(Outcome::PENDING),
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
@@ -707,10 +779,9 @@ mod tests {
             number: 1,
             explanation: RoundExplanation::empty(1),
             boards: vec![Board {
-                outcome: Outcome::Forfeit {
+                record: GameRecord::LongStart(Outcome::Forfeit {
                     absent: Forfeit::Player2(AbsenceKind::NoShow),
-                },
-                long: true,
+                }),
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
@@ -764,7 +835,7 @@ mod tests {
             number: 1,
             explanation: RoundExplanation::empty(1),
             boards: vec![Board {
-                outcome: Outcome::won(Winner::Player1),
+                record: GameRecord::Short(Outcome::won(Winner::Player1)),
                 ..Board::pending(
                     a.tournament_id.unwrap(),
                     b.tournament_id.unwrap(),
@@ -809,7 +880,7 @@ mod tests {
                 number: i as u32 + 1,
                 explanation: RoundExplanation::empty(i as u32 + 1),
                 boards: vec![Board {
-                    outcome: Outcome::won(Winner::Player1), // A wins every game
+                    record: GameRecord::Short(Outcome::won(Winner::Player1)), // A wins every game
                     ..Board::pending(
                         a.tournament_id.unwrap(),
                         o.tournament_id.unwrap(),

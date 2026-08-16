@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { winnerOf } from "./boardOutcome";
 import { absent, absenceKind, combineForfeit, cycledForfeit, isDecided } from "./noShow";
 import type { Board, Forfeit } from "./types";
+import { withRecord, type BoardFields } from "./boardFixture";
 
 describe("absent", () => {
   it("is true only for the named side", () => {
@@ -67,8 +68,8 @@ describe("cycledForfeit", () => {
 
 describe("isDecided", () => {
   // Only the fields the predicate reads; the rest of `Board` is irrelevant here.
-  const board = (fields: Partial<Board>): Board =>
-    ({ player1: 1, player2: 2, ...fields }) as Board;
+  const board = (fields: BoardFields): Board =>
+    ({ player1: 1, player2: 2, ...withRecord(fields) }) as Board;
 
   // The server omits `outcome` entirely while the board is an ordinary pending
   // one, so a missing field has to read as pending, not as an error.

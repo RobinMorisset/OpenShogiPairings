@@ -6,6 +6,7 @@
     type BoardLedger,
     type Counterfactual,
     type CounterfactualMode,
+    type Cup,
     type Handicap,
     type Forfeit,
     type Player,
@@ -20,6 +21,7 @@
   import { sourceBadge } from "../pairingSource";
   import { drawnOf, forfeitOf, handicapGiverId, winnerOf } from "../boardOutcome";
   import { absenceKind, absent, cycledForfeit, isDecided } from "../noShow";
+  import { inLongFlagUnit, isLong } from "../longGames";
   import { printPage } from "../platform";
   import { formatScore } from "../score";
   import type { HandicapChoice } from "../handicap";
@@ -70,6 +72,9 @@
     staticPage?: boolean;
     /** Whether long (two-round) games are enabled — shows the per-board checkbox. */
     longEnabled?: boolean;
+    /** The tournament's cup, if it has one. Only used to work out which boards
+     *  the long flag moves together with (see `inLongFlagUnit`). */
+    cup?: Cup | null;
     /** Whether the viewed round is the current round (the long flag is only
      *  editable on the current round). */
     isCurrentRound?: boolean;
@@ -77,9 +82,7 @@
     onSetLong?: (boardIndex: number, long: boolean) => void;
     /** Pending long boards carried in from the previous round, so the referee can
      *  record their result while running this round. */
-    carriedLongBoards?: { index: number; board: Board }[];
     /** Record the winner on a carried (previous-round) long board. */
-    onCarriedWinner?: (boardIndex: number, clicked: Winner) => void;
     /** The tournament's teams, in team mode — the boards are then grouped into
      *  the team matches they belong to. Empty for an individual tournament. */
     teams?: Team[];
@@ -110,10 +113,9 @@
     onSetNoShow,
     onSetHandicap,
     longEnabled = false,
+    cup = null,
     isCurrentRound = false,
     onSetLong,
-    carriedLongBoards = [],
-    onCarriedWinner,
     teams = [],
     matches = [],
     onPrintSheets,
@@ -170,7 +172,10 @@
    *  in team mode (the cup is rejected there), so only the two reachable
    *  reasons have a team wording. */
   function scopedOutText(reason: ScopeReason): string {
-    const group = teamMode && reason !== "cup" ? "scopedOutTeam" : "scopedOut";
+    // `cup` and `mid_long_game` have no team wording because team mode rejects
+    // both features outright, so they always read from the individual group.
+    const individualOnly = reason === "cup" || reason === "mid_long_game";
+    const group = teamMode && !individualOnly ? "scopedOutTeam" : "scopedOut";
     return $_(`roundView.probe.${group}.${reason}`);
   }
 
@@ -238,9 +243,25 @@
   // The long checkbox is editable only on the current round; turning it *on* also
   // needs the board still undecided (turning it off after a result is the demote
   // path). Mirrors the server's `set_board_long` guards.
+  //
+  // A game carried from the previous round is fixed: its length was decided
+  // there, together with the record it left behind, and the two only mean
+  // anything as a pair — demoting this one would orphan the other. The server
+  // refuses it; without this the checkbox would look live and fail on click.
+  const inFlagUnit = $derived(inLongFlagUnit(round, cup));
+
   function longToggleDisabled(board: Board): boolean {
     if (locked || !isCurrentRound) return true;
-    return isDecided(board) && !board.long;
+    if (board.record?.kind === "long_end") return true;
+    // Unticking after a result is the deliberate demote path, always allowed.
+    if (isLong(board)) return false;
+    // Ticking *on* is refused once a game has a result — and where the flag
+    // couples, that question is asked of every board it moves, not just this
+    // one. Greying them together is the point: otherwise the decided board is
+    // disabled while its neighbours look live and answer with an error.
+    return inFlagUnit(board)
+      ? round.boards.some((b) => inFlagUnit(b) && isDecided(b))
+      : isDecided(board);
   }
 
   // Cycle `side`'s absence independently, so the two buttons together cover
@@ -699,6 +720,8 @@
         return "\u{1F512}";
       case "cup":
         return "\u{1F3C6}";
+      case "carried":
+        return "\u{23F3}";
       default:
         return "";
     }
@@ -790,66 +813,6 @@
       {/if}
     </div>
   {/if}
-  {#if carriedLongBoards.length > 0}
-    <div class="carried">
-      <p class="carried-title">{$_("roundView.carriedTitle")}</p>
-      <table class="carried-table">
-        <tbody>
-          {#each carriedLongBoards as { index, board } (index)}
-            <tr>
-              <!-- Plain text for a reader, exactly as in the main table above:
-                   a disabled button is dimmed and carries a not-allowed
-                   cursor, which is a poor way to render a name nobody was
-                   invited to click. -->
-              <td class="p1-col">
-                {#if readOnly}
-                  <span
-                    class="player"
-                    class:winner={isWinner(board, "player1")}
-                    class:loser={isLoser(board, "player1")}>{name(board.player1)}</span
-                  >
-                {:else}
-                  <button
-                    type="button"
-                    class="player"
-                    class:winner={isWinner(board, "player1")}
-                    class:loser={isLoser(board, "player1")}
-                    disabled={locked || !onCarriedWinner}
-                    title={$_("roundView.clickToSetWinner")}
-                    onclick={() => onCarriedWinner?.(index, "player1")}
-                  >
-                    {name(board.player1)}
-                  </button>
-                {/if}
-              </td>
-              <td>
-                {#if readOnly}
-                  <span
-                    class="player"
-                    class:winner={isWinner(board, "player2")}
-                    class:loser={isLoser(board, "player2")}>{name(board.player2)}</span
-                  >
-                {:else}
-                  <button
-                    type="button"
-                    class="player"
-                    class:winner={isWinner(board, "player2")}
-                    class:loser={isLoser(board, "player2")}
-                    disabled={locked || !onCarriedWinner}
-                    title={$_("roundView.clickToSetWinner")}
-                    onclick={() => onCarriedWinner?.(index, "player2")}
-                  >
-                    {name(board.player2)}
-                  </button>
-                {/if}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-      <p class="hint print-hide">{$_("roundView.carriedHint")}</p>
-    </div>
-  {/if}
   {#if round.boards.length === 0 && byeSitouts.length === 0}
     <p class="empty">{$_("roundView.noBoards")}</p>
   {:else if alphabetical}
@@ -868,7 +831,7 @@
         {#each alphaRows as row (row.key)}
           <tr class:bye-row={!row.board}>
             <td class="num"
-              >{#if row.board}{row.number}{#if row.board.long}<span
+              >{#if row.board}{row.number}{#if isLong(row.board)}<span
                     class="long-badge"
                     title={$_("roundView.longTitle")}>★2R</span
                   >{/if}{/if}</td
@@ -959,7 +922,7 @@
                 )}<span class="compromise print-hide">⚠</span>{/if}</td
             >
             <td class="num"
-              >{index + 1}{#if board.long}<span class="long-badge" title={$_("roundView.longTitle")}
+              >{index + 1}{#if isLong(board)}<span class="long-badge" title={$_("roundView.longTitle")}
                   >★2R</span
                 >{/if}</td
             >
@@ -1086,10 +1049,20 @@
                 <input
                   type="checkbox"
                   class="long-check"
-                  checked={board.long ?? false}
+                  checked={isLong(board)}
                   disabled={longToggleDisabled(board)}
                   title={$_("roundView.longTitle")}
-                  onchange={(e) => onSetLong?.(index, e.currentTarget.checked)}
+                  onchange={(e) => {
+                    const wanted = e.currentTarget.checked;
+                    // Snap the box back to what the server holds, and let the
+                    // response move it. A refused change (a cup round that
+                    // already has a result) leaves the model untouched, so there
+                    // is nothing for Svelte to patch and the optimistic tick
+                    // would stay put — showing the change as applied underneath
+                    // the error banner saying it wasn't.
+                    e.currentTarget.checked = isLong(board);
+                    onSetLong?.(index, wanted);
+                  }}
                 />
               </td>
             {/if}
@@ -1781,25 +1754,6 @@
     font-size: 0.7rem;
     font-weight: 700;
     white-space: nowrap;
-  }
-
-  .carried {
-    margin-bottom: 0.9rem;
-    padding: 0.5rem 0.6rem;
-    border: 1px solid var(--border-divider);
-    border-radius: 0.4rem;
-    background: var(--bg-stripe);
-  }
-  .carried-title {
-    margin: 0 0 0.3rem;
-    font-weight: 600;
-    font-size: 0.85rem;
-  }
-  .carried-table {
-    width: auto;
-  }
-  .carried-table td {
-    border-bottom: none;
   }
 
   .handicap {

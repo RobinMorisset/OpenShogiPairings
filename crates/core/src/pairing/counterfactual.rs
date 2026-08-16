@@ -44,6 +44,10 @@ pub enum ScopeReason {
     Forced,
     /// The player's board comes from the cup bracket.
     Cup,
+    /// The player is finishing a long game carried from the previous round. The
+    /// engine did not pair them here — it paired them one round earlier — so
+    /// there is no decision in *this* round to ask about.
+    MidLongGame,
     /// The player sat this round out (absent or the bye is not being probed).
     Absent,
 }

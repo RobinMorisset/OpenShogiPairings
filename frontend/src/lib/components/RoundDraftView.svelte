@@ -125,6 +125,16 @@
   // Present players not already fixed into a forced pairing / bye.
   const forceable = $derived(present.filter((p) => !forcedIds.has(tid(p))));
 
+  // Who the absence list offers. A player finishing a long game is *playing*,
+  // not choosing to sit out: the round is about to receive their board, and the
+  // server refuses a draft that marks them absent (marking them anyway gave them
+  // a sit-out on top of that board, which hid the game from the cross-table
+  // export and scored them twice). So they are not offered at all.
+  //
+  // Cup players stay on the list: marking one absent is how the referee records
+  // a bracket forfeit, which is a real thing to want.
+  const absenceCandidates = $derived(allSorted.filter((p) => !longSet.has(tid(p))));
+
   // Cup players the referee has marked absent — their bracket game is still
   // created, so the referee is warned to record the forfeit.
   const absentCupPlayers = $derived(
@@ -351,7 +361,6 @@
       onchange={() => toggleAbsent(tid(p))}
     />
     {label(tid(p))}{#if cupSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.cupTag")}</span
-      >{:else if longSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.longTag")}</span
       >{/if}
   </label>
 {/snippet}
@@ -438,7 +447,7 @@
       {/if}
     {:else}
       <div class="players-grid">
-        {#each allSorted as p (p.id)}
+        {#each absenceCandidates as p (p.id)}
           {@render absentBox(p)}
         {/each}
       </div>

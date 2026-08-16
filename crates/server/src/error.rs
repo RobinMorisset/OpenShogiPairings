@@ -177,8 +177,18 @@ pub(crate) fn domain_payload(
         ),
         TournamentError::NoRoundToCancel => bare("no_round_to_cancel"),
         TournamentError::RoundHasResults => bare("round_has_results"),
+        TournamentError::LongFlagAfterResult => bare("long_flag_after_result"),
+        TournamentError::LongFlagAfterCoupledResult => bare("long_flag_after_coupled_result"),
         TournamentError::UnresolvedLongGame { round } => {
             with("unresolved_long_game", [("round", round.to_string())])
+        }
+        // Referee-reachable: the round a long game *started* still shows its
+        // board, so clicking it is an ordinary mistake, not a broken client.
+        TournamentError::CarriedLongGame { round } => {
+            with("carried_long_game", [("round", round.to_string())])
+        }
+        TournamentError::LongGameStartedEarlier { round } => {
+            with("long_game_started_earlier", [("round", round.to_string())])
         }
 
         // Handicaps.
@@ -326,6 +336,9 @@ pub(crate) fn domain_payload(
         // round and the player, which is what whoever is holding the broken
         // request or the broken file needs.
         | TournamentError::PlayerTwiceInRound { .. }
+        // A carried long game is written as a pair of records, in one operation,
+        // so a file holding only one of them was hand-edited too.
+        | TournamentError::OrphanedLongGame { .. }
         // Deliberately English: unfinished scaffolding (the UI offers no team
         // probe yet), not a state the product is meant to have.
         // TODO: `InvalidDraft` carries a free-form English string built at ~8
@@ -499,8 +512,12 @@ mod tests {
             TournamentError::NoRoundToCancel,
             TournamentError::NoCurrentRound,
             TournamentError::RoundHasResults,
+            TournamentError::LongFlagAfterResult,
+            TournamentError::LongFlagAfterCoupledResult,
             TournamentError::NotCurrentRound,
             TournamentError::UnresolvedLongGame { round: 3 },
+            TournamentError::CarriedLongGame { round: 3 },
+            TournamentError::LongGameStartedEarlier { round: 2 },
             TournamentError::RoundNotFound(7),
             TournamentError::BoardNotFound { round: 2, board: 5 },
             TournamentError::PlayerNotSittingOut {

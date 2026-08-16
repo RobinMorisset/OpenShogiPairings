@@ -81,11 +81,11 @@ const DYNAMIC_SITES: { site: string; keys: string[] }[] = [
     ),
   },
   {
-    // The cup is rejected in team mode, so that reason has no team wording and
-    // falls back to the shared one — see `scopedOutText`.
-    site: "RoundView.svelte probe, team mode — one per ScopeReason but `cup`",
+    // Cups and long games are both rejected in team mode, so those reasons have
+    // no team wording and fall back to the shared one — see `scopedOutText`.
+    site: "RoundView.svelte probe, team mode — one per ScopeReason but `cup` and `mid_long_game`",
     keys: unionMembers(SCOPE_REASON_SRC, "ScopeReason")
-      .filter((r) => r !== "cup")
+      .filter((r) => r !== "cup" && r !== "mid_long_game")
       .map((r) => `roundView.probe.scopedOutTeam.${r}`),
   },
   {
