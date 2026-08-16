@@ -54,6 +54,29 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
 - **The API answered cross-origin requests from any website.** It now names the
   origins the app is actually served from, so a page on an unrelated site can no
   longer read the API's replies.
+- **A long game was scored wrong in three ways.** Its two points arrived when its
+  first round finished, vanished when the next one started, and returned only
+  once that round completed — so the standings and the public page ranked the
+  field wrongly in between. One decided early, most often by a no-show, also
+  freed both players for the next round, letting a winner end two rounds with
+  three wins. And one nobody turned up for still counted as a game played,
+  skewing every tie-break that sums opponents (SOS, SODOS, Buchholz) and the
+  pairing of later rounds. A long game now takes both of its rounds however it
+  ends, and scores once, when the round it finishes in is complete.
+- **A player registered mid-tournament scored nothing for the rounds before they
+  arrived**, where a player marked absent scored half a point for each — so with
+  "half point for an absence" on, arriving late pushed them below players they
+  were level with and paired them against the bottom of the field for the rest of
+  the event. Those rounds now count as absences like anyone else's. One
+  consequence: the next round's draft offers them ticked as absent, so untick
+  them.
+- **The American Grid export could submit a document that was wrong**, and it is
+  the record the rating body gets. Asked for mid-round, it silently left out the
+  round still being played; an unfinished long game was written as a loss for
+  **both** players, a double defeat for a game nobody had played; and a long game
+  that never got its second round was scored as nothing at all. Each of the three
+  is now refused, naming the round and the way out, and the "Export grid" button
+  says so rather than failing on click.
 - **A handicap could be set on a board nobody turned up for**, and the odds then
   showed up in the cross-table and the exported results. Declaring a no-show now
   clears the board's handicap and greys the picker out, as it already did for
@@ -67,14 +90,26 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   make the standings fail outright and an open round draft refuse to be
   confirmed. They are now removed from the rounds and the draft along with
   everything else.
-- **Loading a CSV roster twice registered every player twice**, leaving a list
-  of homonyms to delete one by one. A file is now imported for the players it
-  names who are *not* registered yet; the others are skipped, and named above the
-  player list so you can see what was left out. Names are matched on last +
-  first name, ignoring case and accents.
+- **Loading a CSV roster twice registered every player twice**, leaving a list of
+  homonyms to delete one by one. A file now registers only the players it names
+  who are not registered yet, matched on name ignoring case and accents; the ones
+  skipped are named above the player list.
 - **A round with no game to play could not be finished**, and so blocked every
   later round: a round where every player is byed, absent or still on a long
   board has no board whose result could complete it.
+- **A round finishing a long game could not be re-paired**, so none of that
+  round's other pairings could be changed by hand; and after a long game, the
+  buttons that start the next round and export the cross-table stayed disabled
+  for good. A carried long game is now the one result that survives a re-pairing,
+  handicap included; everything else still refuses.
+- **Refusing to make a round long now says why**, instead of borrowing the
+  "can't re-pair a round with results" message, and the checkbox no longer keeps
+  the tick the referee just made under a banner saying it was refused. In a cup
+  the refusal now covers the whole round: ticking an unplayed board used to
+  retroactively double a result already recorded on another.
+- **A player finishing a long game can no longer be marked absent.** Marking them
+  gave them an absence *and* the game, which scored them twice and replaced the
+  game with a `0-` in the cross-table export.
 - Half points from a `0=` influenced Points and tie-breaks like SOS, SODOS, but
   they were not included in Wins, SOSW, SODOSW, etc.
 - "Why these pairings?" now warns if unreliable; this can occur if a referee
@@ -96,22 +131,17 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   played. Saves are now checked when they are loaded, exactly as imported ones
   are, and a file that fails appears in the picker with the reason it could not
   be opened, untouched. A file with no format version at all, or carrying a key
-  this version does not recognise, is now refused rather than read anyway. So is
-  one whose rounds leave a player out altogether: a player needs exactly one
-  board or one sit-out in every round they are in, and none at all quietly drops
-  a round out of their record.
+  this version does not recognise, is now refused rather than read anyway.
 - Some filesystem failures were silently swallowed; they are now surfaced as
   errors in the log. In particular, an unreadable backup directory was reported
   as "no backups yet", and an unreadable data directory (an unmounted volume,
   say) as a server with no tournaments on it.
 - The desktop app now respects `OSP_DATA_DIR` instead of putting its data in a
   hardcoded location.
-- **Switching away from the window and back cleared a pairing explanation**:
-  the two players you had picked, and the answer you were reading. Coming back
-  resyncs with the server, and that was enough to look like the round had been
-  re-paired. An explanation now survives anything that leaves the pairing
-  alone — a resync, another referee's edit elsewhere, recording a result — and
-  is cleared only when the round really is paired differently.
+- **Switching away from the window and back cleared a pairing explanation** — the
+  two players you had picked, and the answer you were reading. An explanation now
+  survives anything that leaves the pairing alone, and is cleared only when the
+  round really is paired differently.
 
 ### Changed
 
@@ -140,123 +170,28 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   nothing the cell didn't already, and the rating answers what the hover is
   usually for: how strong was that opponent. An unrated opponent keeps the bare
   name.
-- **A pairing probe says which boards its answer comes from.** "Why paired?"
-  and "Why not paired?" used to name the rules that got better or worse and
-  leave it there; they now break each rule down into the boards that move it —
-  the ones the alternative would add, then the ones it would drop, each with
-  its own worse-by or better-by — in the same shape the round's list of
-  compromises is read in, and below the boards that would change rather than
-  above them.
+- **A pairing probe says which boards its answer comes from.** "Why paired?" and
+  "Why not paired?" used to name the rules that got better or worse and stop
+  there; each rule is now broken down into the boards that move it — those the
+  alternative would add, then those it would drop — each with its own worse-by or
+  better-by.
 - **A pairing probe is no longer offered on a round whose data has moved** since
-  it was paired — a corrected result in an earlier round, an edited rating, a
-  changed setting. It would answer from the data as it stands now rather than
-  from what the engine used, and against a pairing chosen under the old data,
-  which can make the engine's own choice look like a mistake it never made. The
-  two tabs are greyed and say so; the round's compromises, which are the record
-  of what the engine actually did, stay readable. Pairing the round again makes
-  the probe available once more.
+  it was paired — a corrected result, an edited rating, a changed setting. It
+  would answer from today's data against a pairing chosen under the old, which
+  can make the engine look wrong where it wasn't. The round's compromises stay
+  readable, and pairing the round again brings the probe back.
+- **A long game is now a board of both rounds it is played over.** The round it
+  is being played in stays open until its result is recorded, like any other
+  unfinished game, and the results cross-table draws it the way it was played:
+  **one cell spanning the two rounds**, instead of a blank followed by a result
+  that read like two separate games. The exported grid keeps one column per
+  round, as that format requires.
+- **Players are typed, not scrolled for**: the round draft's forced pairings and
+  forced bye, and the "Question a pairing" panel, take part of a name or a
+  tournament number in an autocomplete field, and accept only someone the round
+  can actually pair.
 - If `OSP_ADMIN_PASSWORD` is set, only published tournaments are visible to
   anyone without that password.
-- **A round finishing a long game could not be re-paired.** Forcing a pairing
-  re-pairs the round, so it is refused when the round already holds results —
-  but a long game carried over from the previous round counts as a result from
-  the moment the round starts, which left the referee unable to change any of
-  that round's other pairings. Carrying a long game is now understood as what it
-  is: the one result that survives a re-pairing, since it is rebuilt from the
-  round it started in, handicap included. Everything else still refuses, whether
-  the pairing came from the engine, the cup bracket or the referee.
-- **A long game's points disappeared from the standings for a whole round.** A
-  long board decided early — most often because one player never turned up —
-  scored its two points as soon as its first round finished, then lost them again
-  the moment the next round was started, getting them back only once that round
-  was complete. In the meantime the standings, and the public page, showed the
-  wrong ranking. A long game's points now simply arrive once, when the round it
-  finishes in is completed, like every other result of that round.
-- **A long game nobody turned up for was still counted as a game played.** For
-  tie-breaks a no-show is not a game: neither player is recorded as having faced
-  the other. That held in the round the game finished in but not in the round it
-  started, so the pair were counted as having met once — where the rule says
-  either nought or, for a long game played out, twice. Every published tie-break
-  that sums opponents (SOS, SODOS, Buchholz) was affected, as was the pairing of
-  later rounds.
-- **The American Grid export dropped a round that was still being played,
-  instead of refusing.** Asking for the grid mid-round produced a document that
-  was simply missing that round, with nothing to say so — and it is the record
-  sent to a rating body. Every round in the grid must now be finished, and the
-  export says which one is not.
-- **A long game that never got its second round is now refused by the grid
-  export.** Flagging a board in the final round as a long game leaves it having
-  taken one round rather than two, so what it is worth is genuinely undecided —
-  and it was quietly being scored as nothing while still appearing in the exported
-  grid. The export now says so and names the two ways out: start the next round,
-  which the game carries into, or untick the box to score it as one ordinary game.
-- **A player registered mid-tournament was scored as if they had not missed
-  anything, which cost them points where half-point absences are on.** Someone
-  added after a round has been played has now simply missed it, exactly like a
-  player who was registered from the start and marked absent — the rounds before
-  they arrived appear as absences and are worth what the tournament's
-  "half point for an absence" setting says. They used to have no record of those
-  rounds at all, so they scored nothing for them while an absentee scored half a
-  point each, which pushed them below players they were level with and paired
-  them against the bottom of the field for the rest of the event — the opposite of
-  what that setting is for. With the setting off, nothing changes. One
-  consequence to know about: the next round's draft now offers them ticked as
-  absent, like anyone else who missed the previous round, so untick them.
-- **The buttons that start a round and export the cross-table now ask the
-  server whether they should be available, instead of working it out
-  themselves.** Both had re-implemented the rule in the browser, and both had
-  drifted from it: after a long game they stayed disabled for good, with the
-  server willing all along. They now show the server's own reason, translated.
-- **Refusing to make a round long now says why, and the checkbox stops
-  pretending it worked.** The refusal borrowed the "can't re-pair a round with
-  results" message, which described something else entirely; and because the
-  refusal leaves nothing to redraw, the box kept the tick the referee had just
-  made — showing the change as applied, under a banner saying it wasn't.
-- **Making a cup round long is refused once any of its games has a result.** The
-  flag covers the whole cup round at once, but the check only looked at the board
-  clicked — so ticking an unplayed board retroactively doubled a result already
-  recorded on another.
-- **A qualifier cup's first round now goes long as one session.** The
-  pre-qualified players' games in the open take the same length as the
-  qualification boards, instead of staying short and freeing them a round ahead
-  of the bracket they are about to join.
-- **A player finishing a long game can no longer be marked absent.** They are
-  playing, so the draft no longer offers them: marking them anyway gave them an
-  absence *and* the game, which scored them twice and replaced the game with a
-  `0-` in the cross-table export.
-- **A long game is now a board of both rounds it is played over.** It used to
-  live only in the round it started, which meant the round it was actually being
-  played in did not know about it: that round could close with the game
-  unfinished, the cross-table had to reach back a round to find the result, and
-  the pairing had to scan every round to work out who was still busy. It now
-  keeps one record per round — a placeholder in the round it began, and the live
-  game in the round it is finished in, where the result is entered. The round it
-  is played in stays open until that result is in, exactly like any other
-  unfinished game. In the results cross-table it is drawn the way it was played:
-  **one cell spanning the two rounds**, showing the result once, instead of a
-  blank followed by a result that read like two separate games. The grid exported
-  for the rating body keeps one column per round, as that format requires.
-- **The American Grid export invented a result for an unfinished long game.** A
-  long board carries its result into the *next* round's column, so one that had
-  not been entered yet was written as a loss for **both** players — a double
-  defeat, submitted to the rating body, for a game nobody had played. The export
-  now refuses while any long game is unresolved, naming the round, and the
-  "Export grid" button says so rather than failing on click.
-- **A long game that finished early handed its players a third point.** A long
-  board is one game played across two rounds, which is why its winner scores
-  two points — but if it was decided inside its own round, or resolved by a
-  no-show, its players were freed for the next round and could win there too,
-  ending two rounds with three wins where the rest of the field could have at
-  most two. The likeliest way to hit it was an opponent who never turned up:
-  two free points, then a normal game. A long game now takes both of its rounds
-  whichever round it finishes in; a referee who decides it really only took one
-  unticks the box before the round advances, demoting it to an ordinary
-  one-point board, exactly as before.
-- **Players are typed, not scrolled for**: the round draft's forced pairings and
-  forced bye, and the "Question a pairing" panel, all use the same autocomplete
-  field the Teams tab adds a member with. Type part of a name, or the tournament
-  number, and it narrows to a line; only someone the round can actually pair —
-  or, in the panel, someone the engine did pair — can be committed.
 
 ## [1.3.0] - 2026-08-05
 
