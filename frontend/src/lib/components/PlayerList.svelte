@@ -593,6 +593,24 @@
     font-size: 0.8rem;
     padding: 0.4rem;
   }
+  /* Pinned to the window, as the standings' header is: a roster is long enough
+     that the column a name is under stops being obvious a screen down. Nothing
+     between this table and <html> scrolls, so `sticky` resolves against the
+     document — see the longer note in ResultsView, which explains why the table
+     is left to overflow rather than wrapped in a scroller.
+
+     The border on a collapsed table belongs to the table, so it would stay
+     behind while the cell travels; the line under the header is an inset shadow
+     instead, painted by the cell. `z-index` stays below the 10 the registration
+     form's suggestion list uses, which hangs over this table and must keep
+     covering it. */
+  thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-surface);
+    box-shadow: inset 0 -1px 0 var(--border-divider);
+  }
   .num {
     text-align: right;
     font-variant-numeric: tabular-nums;
