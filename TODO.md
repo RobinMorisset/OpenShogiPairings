@@ -53,7 +53,6 @@ Known limitations and future work, roughly ordered by area.
   [pairing-explanations.md](docs/archive/pairing-explanations.md),
   [public-access.md](docs/archive/public-access.md),
   [team-tournaments.md](docs/archive/team-tournaments.md),
-  [two-round-boards.md](docs/archive/two-round-boards.md).
   `public-access.md` is the one exception to "then delete": the phase-3 entry
   under Multi-referee server still cites it as that phase's specification, and
   the HelloAsso entry cites its non-goals — so it has to outlive the others, or
@@ -80,10 +79,8 @@ Known limitations and future work, roughly ordered by area.
 - The difference between HalfPoints and Wins is no longer important since b69d35e, think about
   getting rid of the Wins unit.
 
-- At the bottom of the screen, rather than just the version number, maybe also a commit hash if it does not match the version number's tag ?
-
 - More cost details in Question this pairing
 
-- Reuse the team roster UI to pick forced pairings/byes
-
 - Finer invalidation for the Why these pairings at the top of each round's pairings: it is now a flag per round, so a new round is always valid, but a settings change still invalidates every round wholesale. A bunch of changes should not affect it at all, e.g. altering the tiebreak criteria.
+
+- Do a pass clearing extraneous comments.
