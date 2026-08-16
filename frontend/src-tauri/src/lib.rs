@@ -47,9 +47,13 @@ fn read_text_file(path: String) -> Result<String, String> {
 /// `publication.svelte.ts`), so returning early means printing the ordinary
 /// page instead. On macOS that is what [`print_macos::print_and_wait`] is for.
 ///
-/// Elsewhere `WebviewWindow::print` is all there is — on Windows it opens
-/// WebView2's print UI and returns just as immediately, with no completion to
-/// hook into, so those two buttons keep that race there.
+/// Only macOS calls this at all: everywhere else `printPage` stays with
+/// `window.print()`, which blocks the way this waits. The other platforms are
+/// kept working here anyway rather than made to error, because the only way to
+/// reach them is `platform.ts` failing to recognise a Mac — and a print that
+/// comes out wrong beats a button that does nothing at all. What they get is
+/// `WebviewWindow::print`, which on Windows opens WebView2's print UI and
+/// returns immediately, race and all.
 #[tauri::command]
 async fn print_window(webview_window: tauri::WebviewWindow, landscape: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
