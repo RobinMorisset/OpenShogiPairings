@@ -7,6 +7,14 @@ This project does NOT adhere to semantic versioning. Assume that even minor
 version changes can change the save format and thus break compatibility; it
 will be explicitly mentioned in the changelog for that version though.
 
+## [Unreleased]
+
+### Changed
+
+- `POST /undo` now answers `409` when there is nothing left to undo, instead of
+  `200` with an unchanged tournament — which told the caller an undo had
+  happened when none had.
+
 ## [1.4.0] - 2026-08-18
 
 The save format changed again, but a **tournament that has not started yet can

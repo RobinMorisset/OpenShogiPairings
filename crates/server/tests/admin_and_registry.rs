@@ -287,10 +287,11 @@ async fn creating_two_tournaments_keeps_them_isolated() {
         .unwrap()
         .is_empty());
 
-    // Undo history is per-tournament: undoing B (no history) is a no-op,
-    // and does not touch A.
-    let (status, body_b) = send(router(state.clone()), post_empty(&t(b, "/undo"))).await;
-    assert_eq!(status, StatusCode::OK);
+    // Undo history is per-tournament: B has none of its own, so undoing it is
+    // refused (409) rather than reaching for A's — and A is left alone.
+    let (status, _) = send(router(state.clone()), post_empty(&t(b, "/undo"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (_, body_b) = send(router(state.clone()), get(&t(b, ""))).await;
     assert!(body_b["tournament"]["players"]
         .as_array()
         .unwrap()

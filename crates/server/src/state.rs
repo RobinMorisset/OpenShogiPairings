@@ -384,15 +384,34 @@ impl TournamentStore {
         }
     }
 
-    /// Revert to the previous state, if any. No-op when history is empty.
-    pub fn undo(&mut self) {
-        if let Some(previous) = self.history.pop() {
-            self.current = Some(previous);
-            self.persist();
-            self.bump_and_notify();
-        }
+    /// Revert to the previous state.
+    ///
+    /// An empty history is an error rather than a silent no-op. Everything that
+    /// empties it — an undo, a load, a restored backup — bumps the version, so a
+    /// caller that passed [`ensure_current_version`](Self::ensure_current_version)
+    /// cannot legitimately arrive here: reaching it means the request was built
+    /// from a view that has moved, and answering as though an undo had happened
+    /// would report a change that never took place.
+    pub fn undo(&mut self) -> Result<(), NothingToUndo> {
+        let previous = self.history.pop().ok_or(NothingToUndo)?;
+        self.current = Some(previous);
+        self.persist();
+        self.bump_and_notify();
+        Ok(())
     }
 }
+
+/// [`TournamentStore::undo`] was asked to revert with an empty history.
+#[derive(Debug, Clone, Copy)]
+pub struct NothingToUndo;
+
+impl std::fmt::Display for NothingToUndo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("there is nothing left to undo")
+    }
+}
+
+impl std::error::Error for NothingToUndo {}
 
 /// No tournament with this id is registered.
 #[derive(Debug, Clone, Copy)]
@@ -1471,13 +1490,28 @@ mod tests {
                 .map(|_| ())
             })
             .unwrap();
-        store.undo();
+        store.undo().expect("the add is undoable");
 
         // The on-disk copy reflects the undo (no players), not the pre-undo state.
         let reloaded = TournamentStore::with_persistence(path.clone());
         assert!(reloaded.current().unwrap().players.is_empty());
 
         std::fs::remove_file(&path).ok();
+    }
+
+    /// An undo with nothing to revert must say so rather than report success:
+    /// a caller told `Ok` would believe a change it never made had landed.
+    #[test]
+    fn undo_with_an_empty_history_is_an_error_not_a_no_op() {
+        let mut store = TournamentStore::empty(None);
+        store.set_current(Tournament::new("Cup").unwrap());
+        let version = store.version();
+
+        assert!(!store.can_undo());
+        assert!(store.undo().is_err());
+        // And it changed nothing: no phantom version bump for subscribers to
+        // refetch on, so a rejected undo cannot look like somebody's edit.
+        assert_eq!(store.version(), version);
     }
 
     #[test]

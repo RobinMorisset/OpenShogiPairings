@@ -44,7 +44,7 @@ use crate::{auth, live, public};
 ///
 /// - `GET    /`               fetch the tournament
 /// - `DELETE /`               delete the tournament
-/// - `POST   /undo`           revert the last player change
+/// - `POST   /undo`           revert the last player change (409 if there is none)
 /// - `GET    /american-grid` export the cross-table for ELO (text)
 /// - `PUT    /settings`      update tournament settings (MacMahon, …)
 /// - `POST   /cancel-round`           cancel the last round (or draft)
@@ -417,6 +417,11 @@ async fn delete_tournament(
 }
 
 /// Revert the last player change.
+///
+/// `409` when there is nothing left to undo, rather than a `200` reporting a
+/// change that never happened — see [`TournamentStore::undo`]. The client's own
+/// button is disabled on `can_undo`, so this answers a stale or third-party
+/// client, which is worth a line in the log.
 async fn undo(
     TournamentCtx(instance): TournamentCtx,
     ExpectedVersion(expected): ExpectedVersion,
@@ -426,7 +431,9 @@ async fn undo(
         return Err(ApiError::NoTournament);
     }
     store.ensure_current_version(expected)?;
-    store.undo();
+    store.undo().inspect_err(|err| {
+        tracing::warn!("refusing an undo: {err}");
+    })?;
     view(&store)
 }
 

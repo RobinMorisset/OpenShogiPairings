@@ -49,7 +49,7 @@ pub use auth::AuthConfig;
 // type down.
 pub use ratings::CachedRatings;
 pub use state::{
-    AppState, MutateError, NoSuchTournament, TournamentInstance, TournamentProblem,
+    AppState, MutateError, NoSuchTournament, NothingToUndo, TournamentInstance, TournamentProblem,
     TournamentRegistry, TournamentStore, TournamentSummary,
 };
 

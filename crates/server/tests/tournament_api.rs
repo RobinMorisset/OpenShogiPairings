@@ -359,6 +359,18 @@ async fn edit_then_undo_reverts_step_by_step() {
     assert_eq!(status, StatusCode::OK);
     assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
     assert_eq!(body["can_undo"], false);
+
+    // One undo too many is refused, not silently answered `200` with an
+    // unchanged tournament — which a client would read as an undo that landed.
+    let (status, body) = send(router(state.clone()), post_empty(&t(id, "/undo"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("nothing left to undo"),
+        "{body}"
+    );
 }
 
 #[tokio::test]
