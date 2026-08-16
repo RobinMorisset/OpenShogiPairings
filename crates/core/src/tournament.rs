@@ -3156,13 +3156,13 @@ impl Tournament {
     /// The registered players themselves: distinct ids, distinct tournament
     /// numbers, and a number each once registration is finalized.
     ///
-    /// [`compute_scores`](crate::scoring::compute_scores) keys every score by
-    /// tournament number and reaches for it with `tournament_id.unwrap()`, so a
-    /// finalized file with an unnumbered player panics the first `GET` that
-    /// derives standings. Two players sharing a number is quieter and worse:
-    /// they share one score slot, and the table simply reports the wrong
-    /// results. Both are states [`finalize_registration_with`] cannot produce
-    /// and a file has never been held to.
+    /// [`compute_scores`] keys every score by tournament number and reaches for
+    /// it with `tournament_id.unwrap()`, so a finalized file with an unnumbered
+    /// player panics the first `GET` that derives standings. Two players
+    /// sharing a number is quieter and worse: they share one score slot, and
+    /// the table simply reports the wrong results. Both are states
+    /// [`finalize_registration_with`] cannot produce and a file has never been
+    /// held to.
     ///
     /// [`finalize_registration_with`]: Self::finalize_registration_with
     fn validate_field(&self) -> Result<(), TournamentError> {
