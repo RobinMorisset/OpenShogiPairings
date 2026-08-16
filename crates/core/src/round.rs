@@ -888,6 +888,36 @@ pub struct Round {
     /// part of why the server's format upgrade covers only tournaments that have
     /// not started — a round is the thing it could not honestly convert.
     pub explanation: RoundExplanation,
+    /// Whether [`explanation`](Self::explanation) still describes the tournament
+    /// as it now stands. `false` means it is to be shown with a "the data behind
+    /// this has changed since" warning.
+    ///
+    /// The explanation itself stays permanently faithful to the pairing it
+    /// describes (that is the point of freezing it), but the *present* moves: the
+    /// stored round-3 ledger may cite a score that a later correction to round 2
+    /// has since changed. So this starts `true` — a round is confirmed from the
+    /// model that just paired it — and is only ever cleared, by
+    /// `Tournament::invalidate_explanations_after` for an edit inside an earlier
+    /// round and `Tournament::invalidate_all_explanations` for a player or
+    /// settings edit, which sits under every round at once.
+    ///
+    /// Per round rather than the single "faithful through round n" watermark this
+    /// replaces, which could not express the common state it produced: after a
+    /// global edit the watermark was `0`, and it advanced only over an unbroken
+    /// prefix, so every round confirmed afterwards was born warning-flagged
+    /// despite having been paired from the very data the referee had just
+    /// changed. An edit cannot invalidate a round that has not been drafted yet.
+    ///
+    /// Lives in the save rather than in server session state because, unlike the
+    /// undo/redo `version`, it must survive save/load, travel with a mailed save
+    /// file, and be restored by undo and by a backup restore alongside the state
+    /// it describes.
+    ///
+    /// Deliberately not `#[serde(default)]`, for the same reason as
+    /// [`explanation`](Self::explanation): a save that lacks it predates
+    /// explanations entirely, and defaulting would vouch for ledgers that aren't
+    /// there (or paper over a hand-edited current save that dropped the field).
+    pub pairing_explanation_valid: bool,
 }
 
 impl Round {

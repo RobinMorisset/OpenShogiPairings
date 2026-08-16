@@ -86,4 +86,4 @@ Known limitations and future work, roughly ordered by area.
 
 - Reuse the team roster UI to pick forced pairings/byes
 
-- Better invalidation for the Why these pairings at the top of each round's pairings: not really a prefix, instead should be a bitfield, so starting a new round always gives a valid result for this new round. Also a bunch of changes should not affect it, e.g. altering the tiebreak criteria.
+- Finer invalidation for the Why these pairings at the top of each round's pairings: it is now a flag per round, so a new round is always valid, but a settings change still invalidates every round wholesale. A bunch of changes should not affect it at all, e.g. altering the tiebreak criteria.

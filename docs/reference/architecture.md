@@ -204,10 +204,11 @@ can also **explain itself**
 ([`docs/archive/pairing-explanations.md`](../archive/pairing-explanations.md)): a per-board
 penalty ledger and a per-round report of which rules had to bend are **frozen
 onto the round when it is confirmed**, so correcting an earlier result or a
-rating can never rewrite why a later round was paired the way it was. The
-tournament carries a watermark saying how far those ledgers still match the
-present, and rounds above it are shown with a "the data behind this has changed
-since" warning rather than quietly. A referee can also probe a specific
+rating can never rewrite why a later round was paired the way it was. Each round
+also carries a flag saying whether its ledger still matches the present — an
+edit clears it on the rounds it could have disturbed, and a round paired
+afterwards is born valid again — and a round whose flag is down is shown with a
+"the data behind this has changed since" warning rather than quietly. A referee can also probe a specific
 counterfactual — "why weren't these two paired?" or "why were they?" — via
 `POST /rounds/{n}/counterfactual`, which re-solves with that pairing forced or
 forbidden and reports the chain of boards that would change and why.

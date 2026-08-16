@@ -98,12 +98,13 @@ fn malformed(e: serde_json::Error) -> TournamentError {
 /// current format, in place.
 ///
 /// Everything a v5 save says about its players and settings is still said the
-/// same way today: the five bumps since only *added* fields, all of which carry
-/// a serde default, so the referee's floater style, MacMahon thresholds,
-/// handicap policy, categories and point adjustments all survive untouched. Only
-/// two added fields have no default, both by deliberate choice at the time —
-/// `Tournament::explanations_faithful_through` (v10) and `Cup::format` (the
-/// qualifier format) — so those are all this has to supply.
+/// same way today: the bumps since only *added* fields, all of which carry a
+/// serde default, so the referee's floater style, MacMahon thresholds, handicap
+/// policy, categories and point adjustments all survive untouched. One added
+/// field has no default, by deliberate choice at the time — `Cup::format`, the
+/// qualifier format — so that is all this has to supply. (The other two,
+/// `Round::explanation` and `Round::pairing_explanation_valid`, live on a round,
+/// and a tournament this accepts has none.)
 ///
 /// Refuses a tournament that is under way, for the reason on [`UPGRADABLE_FROM`].
 /// A pending `draft` counts as under way: its `forced_boards` are v5-shaped
@@ -134,10 +135,6 @@ fn upgrade_from_v5(save: &mut Value) -> Result<(), TournamentError> {
         "format_version".into(),
         Value::from(TOURNAMENT_FORMAT_VERSION),
     );
-    // v10. `0` — "no round's explanation is faithful" — is the only honest value
-    // for a save that predates explanations, and it is what a tournament with no
-    // rounds carries anyway.
-    save.insert("explanations_faithful_through".into(), Value::from(0));
     // A tournament finalized with a cup, but not yet started, already has its
     // bracket frozen. v5 had only the direct format, so name it from the enum
     // rather than a string literal — a renamed variant then breaks the build
@@ -193,7 +190,6 @@ mod tests {
         let t = load(V5_SETTINGS.as_bytes()).expect("a v1.3.0 save must still open");
         assert_eq!(t.format_version, TOURNAMENT_FORMAT_VERSION);
         assert_eq!(t.name, "Maximal v1.3.0 Open");
-        assert_eq!(t.explanations_faithful_through, 0);
 
         // Settings the referee set, all the way down the nested enums.
         let s = &t.settings;
@@ -203,7 +199,7 @@ mod tests {
         assert_eq!(s.categories.len(), 1);
         assert_eq!(s.categories[0].name, "Juniors");
         // Everything added since v5 takes its default, which is what makes the
-        // upgrade a no-op beyond the two undefaulted fields.
+        // upgrade a no-op beyond the one undefaulted field it has to supply.
         assert_eq!(s.cup_format, CupFormat::Direct);
         assert!(s.teams.is_none());
         assert_eq!(s.city, None);

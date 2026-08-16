@@ -120,18 +120,18 @@ pub(crate) struct PublicTournament {
     settings: TournamentSettings,
     players: Vec<Player>,
     registration_finalized: bool,
-    /// Each round carries its frozen pairing `explanation`, so the ledger rides
-    /// along with the projection — nothing in it goes beyond what is published
-    /// here anyway (it names the same players and the same rules). No public UI
-    /// reads it yet; showing it is phase 4 in `docs/archive/public-access.md`.
+    /// Each round carries its frozen pairing `explanation` and whether that
+    /// explanation still matches the present, so both ride along with the
+    /// projection — nothing in the ledger goes beyond what is published here
+    /// anyway (it names the same players and the same rules), and a reader shown
+    /// an explanation must be shown whether the data behind it has moved since.
+    /// No public UI reads either yet; showing them is phase 4 in
+    /// `docs/archive/public-access.md`.
     rounds: Vec<Round>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cup: Option<Cup>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     teams: Vec<Team>,
-    /// Published with the ledgers it qualifies: a reader shown an explanation
-    /// must be shown whether the data behind it has moved since.
-    explanations_faithful_through: u32,
 }
 
 impl From<TournamentView> for PublicTournamentView {
@@ -173,7 +173,6 @@ impl From<TournamentView> for PublicTournamentView {
             rounds,
             cup,
             teams,
-            explanations_faithful_through,
         } = tournament;
         let suggested_handicaps = match settings.handicap_policy {
             HandicapPolicy::Enabled {
@@ -193,7 +192,6 @@ impl From<TournamentView> for PublicTournamentView {
                 rounds,
                 cup,
                 teams,
-                explanations_faithful_through,
             },
             version,
             standings,

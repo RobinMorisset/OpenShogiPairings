@@ -424,6 +424,7 @@ mod tests {
         t.rounds.push(Round {
             number: 1,
             explanation: RoundExplanation::empty(1),
+            pairing_explanation_valid: true,
             boards: vec![board],
             sitouts: Vec::new(),
             completed: true,
@@ -593,6 +594,7 @@ mod tests {
         t.rounds.push(Round {
             number: 1,
             explanation: RoundExplanation::empty(1),
+            pairing_explanation_valid: true,
             boards: vec![Board {
                 record: GameRecord::LongCarried,
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
@@ -605,6 +607,7 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             explanation: RoundExplanation::empty(2),
+            pairing_explanation_valid: true,
             boards: vec![Board {
                 record: GameRecord::LongEnd(Outcome::won(Winner::Player1)),
                 ..Board::pending(a, b, 0, PairingSource::Carried)
@@ -633,6 +636,7 @@ mod tests {
         t.rounds.push(Round {
             number: 1,
             explanation: RoundExplanation::empty(1),
+            pairing_explanation_valid: true,
             boards: vec![Board {
                 record: GameRecord::LongCarried,
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
@@ -643,6 +647,7 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             explanation: RoundExplanation::empty(2),
+            pairing_explanation_valid: true,
             boards: vec![Board {
                 record: GameRecord::LongEnd(Outcome::PENDING),
                 ..Board::pending(a, b, 0, PairingSource::Carried)
@@ -683,6 +688,7 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             explanation: RoundExplanation::empty(2),
+            pairing_explanation_valid: true,
             boards: vec![Board::pending(a, b, 0, PairingSource::Swiss)],
             sitouts: Vec::new(),
             completed: false,
@@ -718,6 +724,7 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             explanation: RoundExplanation::empty(2),
+            pairing_explanation_valid: true,
             boards: vec![Board {
                 record: GameRecord::LongEnd(Outcome::PENDING),
                 ..Board::pending(a, b, 0, PairingSource::Carried)
@@ -748,6 +755,7 @@ mod tests {
         t.rounds.push(Round {
             number: 1,
             explanation: RoundExplanation::empty(1),
+            pairing_explanation_valid: true,
             boards: vec![Board {
                 record: GameRecord::Short(Outcome::won(Winner::Player1)),
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
@@ -767,6 +775,7 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             explanation: RoundExplanation::empty(2),
+            pairing_explanation_valid: true,
             boards: vec![Board {
                 record: GameRecord::Short(Outcome::won(Winner::Player2)),
                 ..Board::pending(a, b, 0, PairingSource::Swiss)
@@ -792,6 +801,7 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             explanation: RoundExplanation::empty(2),
+            pairing_explanation_valid: true,
             boards: vec![Board {
                 record: GameRecord::Short(Outcome::Forfeit {
                     absent: Forfeit::Player2(AbsenceKind::NoShow),
@@ -819,6 +829,7 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             explanation: RoundExplanation::empty(2),
+            pairing_explanation_valid: true,
             boards: vec![Board {
                 record: GameRecord::Short(Outcome::Forfeit {
                     absent: Forfeit::Player2(AbsenceKind::Justified),
@@ -850,6 +861,7 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             explanation: RoundExplanation::empty(2),
+            pairing_explanation_valid: true,
             boards: vec![Board {
                 record: GameRecord::Short(Outcome::Forfeit {
                     absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
@@ -878,6 +890,7 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             explanation: RoundExplanation::empty(2),
+            pairing_explanation_valid: true,
             boards: Vec::new(),
             sitouts: vec![Sitout {
                 player: p1,
@@ -900,6 +913,7 @@ mod tests {
         t.rounds.push(Round {
             number: 2,
             explanation: RoundExplanation::empty(2),
+            pairing_explanation_valid: true,
             boards: Vec::new(),
             sitouts: vec![Sitout {
                 player: p2,

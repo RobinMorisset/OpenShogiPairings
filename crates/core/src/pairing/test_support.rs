@@ -65,6 +65,7 @@ pub(super) fn pair_players_forced(
     Round {
         number,
         explanation: RoundExplanation::empty(number),
+        pairing_explanation_valid: true,
         boards: paired
             .pairs
             .iter()
@@ -192,6 +193,7 @@ pub(super) fn completed_round(
     Round {
         number,
         explanation: RoundExplanation::empty(number),
+        pairing_explanation_valid: true,
         boards: boards
             .iter()
             .map(|&(a, b, w)| Board {

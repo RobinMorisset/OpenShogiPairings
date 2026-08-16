@@ -453,6 +453,7 @@ mod tests {
         let round = Round {
             number: 1,
             explanation: RoundExplanation::empty(1),
+            pairing_explanation_valid: true,
             boards: vec![Board {
                 record: GameRecord::Short(Outcome::won(Winner::Player1)),
                 ..Board::pending(
@@ -486,6 +487,7 @@ mod tests {
         let round = Round {
             number: 1,
             explanation: RoundExplanation::empty(1),
+            pairing_explanation_valid: true,
             boards: vec![Board {
                 record: GameRecord::Short(Outcome::Forfeit {
                     absent: Forfeit::Player2(AbsenceKind::NoShow),
@@ -525,6 +527,7 @@ mod tests {
         let round = Round {
             number: 1,
             explanation: RoundExplanation::empty(1),
+            pairing_explanation_valid: true,
             boards: vec![Board {
                 record: GameRecord::Short(Outcome::Forfeit {
                     absent: Forfeit::Both(AbsenceKind::NoShow, AbsenceKind::NoShow),
@@ -558,6 +561,7 @@ mod tests {
         let round = Round {
             number: 1,
             explanation: RoundExplanation::empty(1),
+            pairing_explanation_valid: true,
             boards: Vec::new(),
             sitouts: vec![Sitout {
                 player: a.tournament_id.unwrap(),
@@ -586,6 +590,7 @@ mod tests {
         let round = |value| Round {
             number: 1,
             explanation: RoundExplanation::empty(1),
+            pairing_explanation_valid: true,
             boards: Vec::new(),
             sitouts: vec![Sitout {
                 player: a.tournament_id.unwrap(),
@@ -628,6 +633,7 @@ mod tests {
         let round = Round {
             number: 1,
             explanation: RoundExplanation::empty(1),
+            pairing_explanation_valid: true,
             boards: Vec::new(),
             sitouts: vec![Sitout {
                 player: a.tournament_id.unwrap(),
@@ -667,6 +673,7 @@ mod tests {
             Round {
                 number: 1,
                 explanation: RoundExplanation::empty(1),
+                pairing_explanation_valid: true,
                 boards: vec![paired.clone()],
                 sitouts: Vec::new(),
                 completed: true,
@@ -674,6 +681,7 @@ mod tests {
             Round {
                 number: 2,
                 explanation: RoundExplanation::empty(2),
+                pairing_explanation_valid: true,
                 boards: vec![Board {
                     record: GameRecord::LongEnd(outcome),
                     source: PairingSource::Carried,
@@ -735,6 +743,7 @@ mod tests {
             Round {
                 number: 1,
                 explanation: RoundExplanation::empty(1),
+                pairing_explanation_valid: true,
                 boards: vec![paired.clone()],
                 sitouts: Vec::new(),
                 completed: true,
@@ -742,6 +751,7 @@ mod tests {
             Round {
                 number: 2,
                 explanation: RoundExplanation::empty(2),
+                pairing_explanation_valid: true,
                 boards: vec![Board {
                     record: GameRecord::LongEnd(Outcome::won(Winner::Player1)),
                     source: PairingSource::Carried,
@@ -785,6 +795,7 @@ mod tests {
             let round = Round {
                 number: 1,
                 explanation: RoundExplanation::empty(1),
+                pairing_explanation_valid: true,
                 boards: vec![Board {
                     record: GameRecord::LongStart(outcome),
                     ..Board::pending(atid, btid, 2, PairingSource::Swiss)
@@ -908,6 +919,7 @@ mod tests {
         let round = Round {
             number: 1,
             explanation: RoundExplanation::empty(1),
+            pairing_explanation_valid: true,
             boards: vec![Board {
                 record: GameRecord::Short(Outcome::won(Winner::Player1)),
                 ..Board::pending(
@@ -953,6 +965,7 @@ mod tests {
             .map(|(i, o)| Round {
                 number: i as u32 + 1,
                 explanation: RoundExplanation::empty(i as u32 + 1),
+                pairing_explanation_valid: true,
                 boards: vec![Board {
                     record: GameRecord::Short(Outcome::won(Winner::Player1)), // A wins every game
                     ..Board::pending(

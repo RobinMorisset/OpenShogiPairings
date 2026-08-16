@@ -1520,6 +1520,7 @@ mod tests {
         t.rounds.push(crate::round::Round {
             number: 1,
             explanation: RoundExplanation::empty(1),
+            pairing_explanation_valid: true,
             boards: Vec::new(),
             sitouts: vec![Sitout {
                 player: fr_absent_tid,

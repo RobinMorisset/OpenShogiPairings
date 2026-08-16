@@ -233,6 +233,7 @@ fn a_half_point_reaches_pairing_at_half_point_granularity() {
     let r1 = Round {
         number: 1,
         explanation: RoundExplanation::empty(1),
+        pairing_explanation_valid: true,
         boards: vec![Board {
             record: GameRecord::Short(Outcome::won(Winner::Player1)),
             ..Board::pending(

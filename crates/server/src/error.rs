@@ -316,11 +316,10 @@ pub(crate) fn domain_payload(
         // The UI only offers a justified absence in team mode, so this means a
         // client sent a kind it never renders there.
         | TournamentError::JustifiedAbsenceOutsideTeamMode
-        // Frozen-explanation invariants nothing this program writes can break —
-        // a file reaching these was hand-edited, not merely old (an old one is
+        // A frozen-explanation invariant nothing this program writes can break —
+        // a file reaching this was hand-edited, not merely old (an old one is
         // caught by its format version, which *is* translated).
         | TournamentError::MisplacedExplanation { .. }
-        | TournamentError::WatermarkPastLastRound { .. }
         // Same class for the cup: its bracket size and seed list are frozen
         // together at finalization, so a file where they disagree (or that seeds
         // a player it doesn't contain) was hand-edited.

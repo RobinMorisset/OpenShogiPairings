@@ -190,12 +190,11 @@
   // of its own — and stays the ledger the round was really paired from, whatever
   // has been edited since (see the appendix of docs/archive/public-access.md).
   //
-  // What *can* go stale is the data it cites: the tournament's watermark says how
-  // far the explanations still match the present, and every round above it is
-  // shown with a warning rather than silently.
-  const explanationStale = $derived(
-    !!activeRound && !!tournament && activeRound.number > tournament.explanations_faithful_through,
-  );
+  // What *can* go stale is the data it cites: the round itself says whether its
+  // explanation still matches the present, and one that no longer does is shown
+  // with a warning rather than silently. The server decides it (an edit clears
+  // the flag on the rounds it can have disturbed), so this only reads it.
+  const explanationStale = $derived(!!activeRound && !activeRound.pairing_explanation_valid);
 
   // Tournament phase, derived from the finalize flag, the draft, and the last
   // round's state.

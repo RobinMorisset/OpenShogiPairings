@@ -77,6 +77,7 @@ const round = (number: number, boards: Board[]): Round =>
     sitouts: [],
     completed: true,
     explanation: { round: number, boards: [], report: [] },
+    pairing_explanation_valid: true,
   }) as Round;
 
 /** A two-player tournament with one played round. */

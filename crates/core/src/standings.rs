@@ -594,6 +594,7 @@ mod tests {
         Round {
             number,
             explanation: RoundExplanation::empty(number),
+            pairing_explanation_valid: true,
             boards,
             sitouts: Vec::new(),
             completed: true,
@@ -939,6 +940,7 @@ mod tests {
             Round {
                 number: 2,
                 explanation: RoundExplanation::empty(2),
+                pairing_explanation_valid: true,
                 boards: Vec::new(),
                 sitouts: vec![half_bye(1), half_bye(2)],
                 completed: true,

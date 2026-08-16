@@ -432,7 +432,7 @@ impl Tournament {
         p.pairing_rating = rating;
         // A pairing ELO feeds the MacMahon starting points every round's model
         // was built on, and it stays editable after finalization.
-        self.explanations_all_stale();
+        self.invalidate_all_explanations();
         self.players
             .iter()
             .find(|p| p.id == player)
@@ -669,9 +669,11 @@ impl Tournament {
             sitouts,
             completed: false,
             explanation,
+            // Frozen a few lines ago from the model that paired this very round,
+            // so there is nothing it could already be out of date with.
+            pairing_explanation_valid: true,
         });
         self.draft = None;
-        self.explanations_extend_through(draft.number);
         // Same invariant as the individual path, checked for the same reason —
         // here the partition is "every member of a paired team is on a board,
         // every member of a byed team has a sit-out", and an absent player of a
@@ -718,7 +720,7 @@ impl Tournament {
         });
         // The team's points are what every round was paired on, and an adjustment
         // carries no round of its own, so it lands under all of them.
-        self.explanations_all_stale();
+        self.invalidate_all_explanations();
         self.team_mut(team).map(|t| &*t)
     }
 
@@ -740,7 +742,7 @@ impl Tournament {
                 adjustment,
             });
         }
-        self.explanations_all_stale();
+        self.invalidate_all_explanations();
         self.team_mut(team).map(|t| &*t)
     }
 

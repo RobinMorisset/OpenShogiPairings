@@ -59,34 +59,4 @@ cup?: Cup | null,
  * *stored*, everything else about a team being replayed from the boards.
  * Empty (and absent from JSON) outside team mode.
  */
-teams?: Array<Team>, 
-/**
- * How far the frozen [`Round::explanation`]s still match the tournament a
- * reader is looking at: rounds `1..=n` are faithful, every round above `n`
- * is to be shown with a "the data behind this has changed since" warning.
- * `0` means none are.
- *
- * The explanations themselves stay permanently faithful to the pairing they
- * describe (that is the point of freezing them), but the *present* moves:
- * the stored round-3 ledger may cite a score that a later correction to
- * round 2 has since changed. Round `r` is paired from `rounds[..r-1]`, so an
- * edit inside round `k` can only disturb rounds *after* `k` — which makes
- * the faithful rounds a prefix, and this watermark decreasing-only:
- * [`min(mark, k)`](Self::explanations_stale_after) on a per-round edit and
- * [`0`](Self::explanations_all_stale) on a player or settings edit, which
- * are global. Round 1 is never disturbed by anything.
- *
- * Lives here rather than in server session state because, unlike the
- * undo/redo `version`, it must survive save/load, travel with a mailed save
- * file, and be restored by undo and by a backup restore alongside the state
- * it describes.
- *
- * Not defaulted on load, for the same reason [`Round::explanation`] is not:
- * a save that lacks it predates explanations entirely, and guessing a
- * watermark for it would vouch for ledgers that aren't there. The one older
- * save this build reads (v5, see [`TOURNAMENT_FORMAT_VERSION`]) has no
- * rounds by construction, so the upgrade supplies the only honest value,
- * `0` — it does not default it, which would just as happily paper over a
- * hand-edited current save that dropped the field.
- */
-explanations_faithful_through: number, };
+teams?: Array<Team>, };

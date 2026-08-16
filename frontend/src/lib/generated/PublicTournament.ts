@@ -15,14 +15,12 @@ import type { TournamentSettings } from "./TournamentSettings";
  */
 export type PublicTournament = { format_version: number, id: string, name: string, settings: TournamentSettings, players: Array<Player>, registration_finalized: boolean, 
 /**
- * Each round carries its frozen pairing `explanation`, so the ledger rides
- * along with the projection — nothing in it goes beyond what is published
- * here anyway (it names the same players and the same rules). No public UI
- * reads it yet; showing it is phase 4 in `docs/archive/public-access.md`.
+ * Each round carries its frozen pairing `explanation` and whether that
+ * explanation still matches the present, so both ride along with the
+ * projection — nothing in the ledger goes beyond what is published here
+ * anyway (it names the same players and the same rules), and a reader shown
+ * an explanation must be shown whether the data behind it has moved since.
+ * No public UI reads either yet; showing them is phase 4 in
+ * `docs/archive/public-access.md`.
  */
-rounds: Array<Round>, cup: Cup | null, teams: Array<Team>, 
-/**
- * Published with the ledgers it qualifies: a reader shown an explanation
- * must be shown whether the data behind it has moved since.
- */
-explanations_faithful_through: number, };
+rounds: Array<Round>, cup: Cup | null, teams: Array<Team>, };

@@ -888,6 +888,7 @@ mod tests {
         Round {
             number,
             explanation: RoundExplanation::empty(number),
+            pairing_explanation_valid: true,
             boards: results
                 .iter()
                 .map(|&(w, l, stage)| Board {
