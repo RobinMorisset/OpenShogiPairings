@@ -34,8 +34,8 @@
   }: Props = $props();
 
   // Distinct values of one player field (first spelling kept) with their player
-  // count, for an exempt datalist — sorted by decreasing count (ties broken
-  // alphabetically) so the entries most worth exempting sort first.
+  // count, to fill an exemption's picker — sorted by decreasing count (ties
+  // broken alphabetically) so the entries most worth exempting sort first.
   function distinctValues(pick: (p: Player) => string | null | undefined) {
     const counts = new Map<string, { name: string; count: number }>();
     for (const p of players) {
@@ -53,6 +53,35 @@
 
   const knownClubs = $derived.by(() => distinctValues((p) => p.club));
   const knownNationalities = $derived.by(() => distinctValues((p) => p.nationality));
+
+  /** What one exemption row may be set to: every value some registered player
+   *  carries, less the ones the other rows have already taken.
+   *
+   *  A row's own value stays on the list even when nobody carries it any more —
+   *  the last player of that club left, or was edited — with no count beside it.
+   *  A `<select>` whose value matches no option shows blank and reports the
+   *  first one, so dropping it would quietly rewrite the setting on the next
+   *  save, which is precisely the exemption nobody would think to check. */
+  function exemptOptions(
+    known: { name: string; count: number }[],
+    chosen: string[],
+    current: string,
+  ): { name: string; count: number }[] {
+    const taken = new Set(
+      chosen.filter((v) => v && v !== current).map((v) => v.trim().toLowerCase()),
+    );
+    const options = known.filter((k) => !taken.has(k.name.trim().toLowerCase()));
+    const has = options.some((k) => k.name.trim().toLowerCase() === current.trim().toLowerCase());
+    if (current && !has) options.push({ name: current, count: 0 });
+    return options;
+  }
+
+  /** Whether another row could name anything: with no players registered yet,
+   *  or every club already exempt, a new row could only sit there empty. */
+  function canAddExempt(known: { name: string; count: number }[], chosen: string[]): boolean {
+    const taken = new Set(chosen.map((v) => v.trim().toLowerCase()));
+    return known.some((k) => !taken.has(k.name.trim().toLowerCase()));
+  }
 
   function setFloaterStyle(v: "classic" | "median") {
     floaterStyle = v;
@@ -201,15 +230,23 @@
           <div class="thresholds">
             {#each exemptClubs as c, i (i)}
               <div class="threshold-row">
-                <input
-                  type="text"
+                <!-- A list of what the room actually holds, commonest first, so
+                     the club worth exempting is at the top of it — rather than a
+                     text field to type a name into and a dropdown that spends
+                     two lines on each suggestion. -->
+                <select
                   class="club-input control-sm control-quiet"
-                  list="known-clubs"
-                  placeholder={$_("settings.clubNamePlaceholder")}
                   value={c}
                   disabled={busy}
                   onchange={(e) => editExempt(i, e.currentTarget.value)}
-                />
+                >
+                  <option value="">{$_("settings.clubNamePlaceholder")}</option>
+                  {#each exemptOptions(knownClubs, exemptClubs, c) as club (club.name)}
+                    <option value={club.name}
+                      >{club.count > 0 ? `${club.name} (${club.count})` : club.name}</option
+                    >
+                  {/each}
+                </select>
                 <button
                   type="button"
                   class="remove"
@@ -225,22 +262,10 @@
             <button
               type="button"
               class="ghost control-xs control-quiet"
-              disabled={busy}
+              disabled={busy || !canAddExempt(knownClubs, exemptClubs)}
               onclick={addExempt}>{$_("settings.addExemptClub")}</button
             >
           </div>
-          {#if knownClubs.length > 0}
-            <datalist id="known-clubs">
-              {#each knownClubs as club (club.name)}
-                <!-- Label is the count *alone*: browsers already show the value
-                     (it is what selecting inserts) and add the label beside it
-                     only when the two differ, so repeating the name here shows it
-                     twice. Text content would be ignored outright — a `label`
-                     attribute supersedes it. -->
-                <option value={club.name} label={`(${club.count})`}></option>
-              {/each}
-            </datalist>
-          {/if}
         </div>
       {/if}
     </fieldset>
@@ -288,15 +313,19 @@
           <div class="thresholds">
             {#each exemptNationalities as c, i (i)}
               <div class="threshold-row">
-                <input
-                  type="text"
+                <select
                   class="club-input control-sm control-quiet"
-                  list="known-nationalities"
-                  placeholder={$_("settings.nationalityPlaceholder")}
                   value={c}
                   disabled={busy}
                   onchange={(e) => editExemptNationality(i, e.currentTarget.value)}
-                />
+                >
+                  <option value="">{$_("settings.nationalityPlaceholder")}</option>
+                  {#each exemptOptions(knownNationalities, exemptNationalities, c) as nat (nat.name)}
+                    <option value={nat.name}
+                      >{nat.count > 0 ? `${nat.name} (${nat.count})` : nat.name}</option
+                    >
+                  {/each}
+                </select>
                 <button
                   type="button"
                   class="remove"
@@ -312,17 +341,10 @@
             <button
               type="button"
               class="ghost control-xs control-quiet"
-              disabled={busy}
+              disabled={busy || !canAddExempt(knownNationalities, exemptNationalities)}
               onclick={addExemptNationality}>{$_("settings.addExemptNationality")}</button
             >
           </div>
-          {#if knownNationalities.length > 0}
-            <datalist id="known-nationalities">
-              {#each knownNationalities as nat (nat.name)}
-                <option value={nat.name} label={`(${nat.count})`}></option>
-              {/each}
-            </datalist>
-          {/if}
         </div>
       {/if}
     </fieldset>
