@@ -540,8 +540,9 @@ because that is the point at which "the tournament is over" is being asserted.
    - the same via a **no-show** on a long board, which is the likeliest trigger;
    - a pending carried game rendered across an N+1 grid column (the double-loss
      case);
-   - back-to-back long boards (covered on the rendering side by
-     `crossTableColumns`; still untested through the engine);
+   - back-to-back long boards — `back_to_back_long_games_each_keep_their_own_result`
+     drives two of them through four rounds and asserts the exported grid
+     alternates `0-` with each result in the round it was finished in;
    - a cancelled N+1, asserting the outcome landed back on the round-N record;
    - a long cup round with its results withheld. The existing
      `a_long_cup_round_consumes_two_tournament_rounds_and_the_bracket_resumes_after`

@@ -4068,6 +4068,178 @@ mod tests {
         );
     }
 
+    /// Back-to-back long games: a player finishes one and is flagged long again
+    /// in their very next round.
+    ///
+    /// This is defect (2) of `docs/long-boards-v2.md`'s own list — under the
+    /// shipped model the "am I long *this* round?" test was made before the "did
+    /// I carry one?" test, so a game decided in round N-1 whose players went long
+    /// again in round N rendered in no column at all, and its result simply left
+    /// the tournament. The v2 records make the question local, and this drives it
+    /// through the engine end to end: two long games, four rounds, one player on
+    /// both of them.
+    ///
+    /// It is the last of the three tests §6 of that document asked for, and the
+    /// only one that exercises two carries in sequence — the state where a
+    /// `LongCarried`, a `LongEnd` and a fresh `LongStart` are all live at once.
+    #[test]
+    fn back_to_back_long_games_each_keep_their_own_result() {
+        let mut t = Tournament::new("Back to back").unwrap();
+        for (n, r) in [
+            ("A", 2000),
+            ("B", 1900),
+            ("C", 1800),
+            ("D", 1700),
+            ("E", 1600),
+            ("F", 1500),
+        ] {
+            t.add_player(rated(n, r)).unwrap();
+        }
+        t.settings.long_boards_enabled = true;
+        t.finalize_registration().unwrap();
+
+        /// Decide every board of `round` that has no result yet, the lower seat
+        /// winning, leaving any already-decided (carried) board alone.
+        fn finish_round(t: &mut Tournament, number: u32) {
+            let pending: Vec<usize> = t
+                .rounds
+                .iter()
+                .find(|r| r.number == number)
+                .unwrap()
+                .boards
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| !b.is_decided())
+                .map(|(i, _)| i)
+                .collect();
+            for i in pending {
+                t.toggle_board_winner(number, i, Winner::Player1).unwrap();
+            }
+        }
+        // Which side of their board in `number` this player sits on.
+        let side_of = |t: &Tournament, number: u32, who: TournamentId| {
+            let round = t.rounds.iter().find(|r| r.number == number).unwrap();
+            let i = round
+                .boards
+                .iter()
+                .position(|b| b.player1 == who || b.player2 == who)
+                .expect("the player has a board this round");
+            let side = if round.boards[i].player1 == who {
+                Winner::Player1
+            } else {
+                Winner::Player2
+            };
+            (i, side)
+        };
+
+        // Round 1: board 0 goes long. `a` is on it and will win both long games.
+        start_next_round(&mut t);
+        t.set_board_long(1, 0, true).unwrap();
+        let (a, b) = (t.rounds[0].boards[0].player1, t.rounds[0].boards[0].player2);
+        finish_round(&mut t, 1);
+
+        // Round 2 carries the first game and finishes it.
+        start_next_round(&mut t);
+        assert_eq!(t.rounds[0].boards[0].record, GameRecord::LongCarried);
+        let first = t.rounds[1]
+            .boards
+            .iter()
+            .find(|bd| matches!(bd.record, GameRecord::LongEnd(_)))
+            .expect("the first long game is finished in round 2");
+        assert_eq!((first.player1, first.player2), (a, b));
+        assert_eq!(first.outcome(), Outcome::won(Winner::Player1));
+        finish_round(&mut t, 2);
+
+        // Round 3: `a` is free again, and their new board goes long straight
+        // away. This is the state the old model could not render.
+        start_next_round(&mut t);
+        let (i3, side3) = side_of(&t, 3, a);
+        assert_eq!(
+            t.rounds[2].boards[i3].source,
+            PairingSource::Swiss,
+            "the second game is a fresh pairing, not the first one lingering"
+        );
+        let c = if side3 == Winner::Player1 {
+            t.rounds[2].boards[i3].player2
+        } else {
+            t.rounds[2].boards[i3].player1
+        };
+        assert_ne!(c, b, "a different opponent, or this proves nothing");
+        t.set_board_long(3, i3, true).unwrap();
+        t.toggle_board_winner(3, i3, side3).unwrap();
+        finish_round(&mut t, 3);
+
+        // Round 4 carries the second game. All three long records now coexist:
+        // round 1 and round 3 hold inert ones, round 4 a live one.
+        start_next_round(&mut t);
+        assert_eq!(t.rounds[2].boards[i3].record, GameRecord::LongCarried);
+        let second = t.rounds[3]
+            .boards
+            .iter()
+            .find(|bd| matches!(bd.record, GameRecord::LongEnd(_)))
+            .expect("the second long game is finished in round 4");
+        assert!(
+            (second.player1 == a && second.player2 == c)
+                || (second.player1 == c && second.player2 == a)
+        );
+        assert!(second.is_decided(), "its result came across with it");
+        finish_round(&mut t, 4);
+
+        // Neither game lost its result, and neither was counted twice: four
+        // rounds, two long games, four points.
+        let scores = crate::scoring::compute_scores(&t.players, &t.settings, &t.rounds);
+        let id_of = |who: TournamentId| {
+            t.players
+                .iter()
+                .find(|p| p.tournament_id == Some(who))
+                .unwrap()
+                .id
+        };
+        let s = scores.get(&id_of(a));
+        assert_eq!(s.points(), crate::HalfPoints::from_whole(4));
+        assert_eq!(s.victories, crate::Wins::from_whole(4));
+        assert_eq!(
+            s.opponents.iter().filter(|&&o| o == b).count(),
+            2,
+            "the first long game is two games faced, not one or four"
+        );
+        assert_eq!(s.opponents.iter().filter(|&&o| o == c).count(), 2);
+        assert_eq!(s.opponents.len(), 4, "and nothing else was played");
+        assert_eq!(s.defeated.iter().filter(|&&o| o == b).count(), 2);
+        assert_eq!(s.defeated.iter().filter(|&&o| o == c).count(), 2);
+
+        // And the exported grid alternates: the round each game *started* in
+        // reads as a non-game, the round each was *finished* in carries the
+        // result. Four cells, `[0- <rank>+ 0- <rank>+]`. Under the model this
+        // replaces, the second game's result appeared in no column at all.
+        assert_eq!(t.validate_loaded(), Ok(()));
+        let grid = crate::american_grid::to_grid(&t, &t.standings()).unwrap();
+        let row = grid
+            .lines()
+            .find(|l| l.contains("[A]"))
+            .expect("the player has a row");
+        // The round cells are the last bracketed group of the row; the points
+        // follow it unbracketed.
+        let cells: Vec<&str> = row[row.rfind('[').unwrap() + 1..row.rfind(']').unwrap()]
+            .split_whitespace()
+            .collect();
+        assert_eq!(cells.len(), 4, "one cell per round, in: {row}");
+        assert_eq!(cells[0], "0-", "round 1 started a long game: {row}");
+        assert!(
+            cells[1].ends_with('+'),
+            "round 2 finished it, and it was won: {row}"
+        );
+        assert_eq!(cells[2], "0-", "round 3 started the second one: {row}");
+        assert!(
+            cells[3].ends_with('+'),
+            "round 4 finished it, and it was won: {row}"
+        );
+        assert_ne!(
+            cells[1], cells[3],
+            "two different opponents, so neither result is the other's: {row}"
+        );
+    }
+
     #[test]
     fn new_rejects_blank_name() {
         assert_eq!(
