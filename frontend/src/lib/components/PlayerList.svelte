@@ -862,5 +862,27 @@
       color: #000;
       font-weight: normal;
     }
+    /* Ink on white, whichever theme the screen is in — as the pairings and the
+       standings already print. Grey says "secondary" on a screen and only says
+       "faint" on paper, and a divider taken from the palette would come out a
+       different shade depending on what the referee happened to be looking at
+       when they hit print. */
+    table,
+    th,
+    td,
+    .elig-count,
+    .empty {
+      color: #000 !important;
+      background: transparent !important;
+      border-color: #000 !important;
+    }
+    /* Nothing is pinned on paper: the browser repeats `<thead>` on each page by
+       itself, and sticky has no scrollport to stick to in a paginated flow. The
+       shadow under it goes with the pinning — the row of black borders above
+       already separates the header from the names. */
+    thead th {
+      position: static;
+      box-shadow: none;
+    }
   }
 </style>
