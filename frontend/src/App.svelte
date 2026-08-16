@@ -1468,6 +1468,12 @@
   .card.wide-table > :not(.tab-content) {
     width: 0;
     min-width: 100%;
+    /* That `min-width` is the card's *content* width, so a child with a border
+       and padding of its own — the backups and public-page panels — would put
+       them outside it and hang past the card's rounded edge. Only here: with no
+       width of their own (every other tab) those panels are laid out to fit,
+       padding included. */
+    box-sizing: border-box;
   }
   .toolbar {
     display: flex;
