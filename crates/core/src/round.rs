@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::pairing::RoundExplanation;
-use crate::units::{HalfPoints, TeamId, TournamentId, Wins};
+use crate::units::{HalfPoints, HalfWins, TeamId, TournamentId};
 
 /// Which player won a board. Colour (sente/gote) is chosen at random per game
 /// and isn't tracked, so the result is simply which of the two players won.
@@ -789,11 +789,11 @@ impl SitoutValue {
     /// convention. It used to be worth half a point and no win at all, which
     /// left the Wins column reading `0` beside a Points column reading `1½` —
     /// the two describing the same round and disagreeing about it.
-    pub fn wins(self) -> Wins {
+    pub fn wins(self) -> HalfWins {
         match self {
-            SitoutValue::Zero => Wins::ZERO,
-            SitoutValue::Half => Wins::from_halves(1),
-            SitoutValue::Full => Wins::from_whole(1),
+            SitoutValue::Zero => HalfWins::ZERO,
+            SitoutValue::Half => HalfWins::from_halves(1),
+            SitoutValue::Full => HalfWins::from_whole(1),
         }
     }
 

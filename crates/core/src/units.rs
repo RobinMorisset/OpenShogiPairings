@@ -1,12 +1,12 @@
 //! Strongly-typed score quantities.
 //!
 //! The results tables juggle two kinds of integer that must never be mixed: a
-//! **win count** ([`Wins`]) and a score in **half-point units** ([`HalfPoints`],
-//! stored ×2 so a half-point stays an exact integer). Giving each its own type
-//! makes the compiler reject adding wins to half-points, and makes the ×2
-//! half-point convention impossible to cross by accident — [`HalfPoints`] hides
-//! its inner value, so the only ways in and out are its named constructors and
-//! [`halves`](HalfPoints::halves).
+//! win count in **half-win units** ([`HalfWins`]) and a score in **half-point
+//! units** ([`HalfPoints`]). Both are stored ×2, so a half of either stays an
+//! exact integer; the names say so. Giving each its own type makes the compiler
+//! reject adding wins to points, and makes the ×2 convention impossible to
+//! cross by accident — both hide their inner value, so the only ways in and out
+//! are their named constructors and `halves`.
 //!
 //! Both serialize as a bare JSON number and export to TypeScript as `number`, so
 //! they stay wire- and TS-compatible with the plain `u32` they replace — no
@@ -57,16 +57,16 @@ use ts_rs::TS;
 /// Still a type of its own rather than a second [`HalfPoints`]: a win count and
 /// a point score are different quantities that happen to share a scale, and
 /// mixing them up is precisely the mistake worth making impossible. Convert
-/// deliberately through [`From<Wins>`], which is the one place the (now
+/// deliberately through [`From<HalfWins>`], which is the one place the (now
 /// one-to-one) relation is written.
 ///
 /// The inner value is private — construct with [`from_whole`] / [`from_halves`]
 /// and read the raw units with [`halves`], so the ×2 convention lives here and
 /// nowhere else.
 ///
-/// [`from_whole`]: Wins::from_whole
-/// [`from_halves`]: Wins::from_halves
-/// [`halves`]: Wins::halves
+/// [`from_whole`]: HalfWins::from_whole
+/// [`from_halves`]: HalfWins::from_halves
+/// [`halves`]: HalfWins::halves
 #[derive(
     Debug,
     Clone,
@@ -85,19 +85,19 @@ use ts_rs::TS;
     TS,
 )]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
-pub struct Wins(u32);
+pub struct HalfWins(u32);
 
-impl Wins {
-    pub const ZERO: Wins = Wins(0);
+impl HalfWins {
+    pub const ZERO: HalfWins = HalfWins(0);
 
     /// `whole` whole wins (doubled into half-win units).
     pub fn from_whole(whole: u32) -> Self {
-        Wins(whole * 2)
+        HalfWins(whole * 2)
     }
 
     /// `halves` raw half-win units (already ×2).
     pub fn from_halves(halves: u32) -> Self {
-        Wins(halves)
+        HalfWins(halves)
     }
 
     /// The count in raw half-win units (×2) — for the wire and for ordinal
@@ -159,8 +159,8 @@ impl HalfPoints {
 /// A win is worth a point, and half a win half a point — the single place that
 /// conversion is written. Both are doubled, so this is a change of *quantity*,
 /// not of scale.
-impl From<Wins> for HalfPoints {
-    fn from(w: Wins) -> Self {
+impl From<HalfWins> for HalfPoints {
+    fn from(w: HalfWins) -> Self {
         HalfPoints::from_halves(w.halves())
     }
 }
@@ -179,7 +179,7 @@ impl From<Wins> for HalfPoints {
 ///
 /// It is also the player reference carried across the wire — on [`crate::Board`],
 /// [`crate::Round`], [`crate::Player::tournament_id`], … — so it derives serde and
-/// [`TS`]. Like [`Wins`] / [`HalfPoints`], it serializes as a **bare number** (a
+/// [`TS`]. Like [`HalfWins`] / [`HalfPoints`], it serializes as a **bare number** (a
 /// one-field tuple struct forwards to its inner value, so **no**
 /// `#[serde(transparent)]` — that only trips a ts-rs warning) and exports to
 /// TypeScript as a transparent `number` alias; the `serializes_as_a_bare_number`
@@ -325,13 +325,13 @@ impl PartialEq<u32> for TournamentId {
 }
 
 /// Test-only convenience: compare a score against a bare integer literal in its
-/// raw unit — **half-units for both** [`Wins`] and [`HalfPoints`], so a bare `2`
+/// raw unit — **half-units for both** [`HalfWins`] and [`HalfPoints`], so a bare `2`
 /// is one win or one point. Assertions read `standing.points == 4` rather
 /// than `standing.points.halves() == 4`. Gated on `test` so production code
 /// keeps the strict typing — you still can't compare the two units to each other
 /// or to a stray `u32` outside tests.
 #[cfg(test)]
-impl PartialEq<u32> for Wins {
+impl PartialEq<u32> for HalfWins {
     fn eq(&self, other: &u32) -> bool {
         self.0 == *other
     }
@@ -354,14 +354,14 @@ mod tests {
     /// refactor can't silently wrap them in an object.
     #[test]
     fn serializes_as_a_bare_number() {
-        assert_eq!(serde_json::to_string(&Wins(5)).unwrap(), "5");
+        assert_eq!(serde_json::to_string(&HalfWins(5)).unwrap(), "5");
         assert_eq!(
             serde_json::to_string(&HalfPoints::from_whole(2)).unwrap(),
             "4"
         );
         assert_eq!(serde_json::to_string(&TournamentId(7)).unwrap(), "7");
         // ...and round-trips back.
-        assert_eq!(serde_json::from_str::<Wins>("5").unwrap(), Wins(5));
+        assert_eq!(serde_json::from_str::<HalfWins>("5").unwrap(), HalfWins(5));
         assert_eq!(
             serde_json::from_str::<HalfPoints>("4").unwrap(),
             HalfPoints::from_halves(4)

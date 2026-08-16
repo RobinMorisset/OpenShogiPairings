@@ -56,7 +56,7 @@ use crate::player::Player;
 use crate::round::Round;
 use crate::scoring::{compute_scores, Cumulative};
 use crate::settings::{Tiebreak, TournamentSettings};
-use crate::units::{HalfPoints, TournamentId, Wins};
+use crate::units::{HalfPoints, HalfWins, TournamentId};
 
 use typed_index_collections::TiVec;
 
@@ -67,8 +67,8 @@ use typed_index_collections::TiVec;
 pub struct Standing {
     pub player_id: Uuid,
     /// Games won (effective winner; a bye counts as a win), in half-wins — a
-    /// `0=` sit-out is worth half of one, so this can be odd. See [`Wins`].
-    pub victories: Wins,
+    /// `0=` sit-out is worth half of one, so this can be odd. See [`HalfWins`].
+    pub victories: HalfWins,
     /// MacMahon starting points, with any manual point adjustment folded in.
     pub macmahon: HalfPoints,
     /// Total score. **Derived**, not accumulated: exactly `macmahon +
@@ -97,7 +97,7 @@ pub struct Standing {
     /// Running points total after each completed round (the sequence CUSSM sums).
     pub running_points: Vec<HalfPoints>,
     /// Running win total after each completed round (the sequence CUSSW sums).
-    pub running_wins: Vec<Wins>,
+    pub running_wins: Vec<HalfWins>,
     /// The player's current estimated ELO (rounded), from the Bayesian estimate
     /// (see [`crate::estimate_elos`]). `None` unless a live estimate is maintained
     /// — [`TournamentSettings::elo_estimate_live`], i.e. ELO pairing *or*
@@ -143,33 +143,33 @@ pub struct Tiebreaks {
     /// Sum of opponents' points.
     pub sosm: HalfPoints,
     /// Sum of opponents' wins.
-    pub sosw: Wins,
+    pub sosw: HalfWins,
     /// Sum of defeated opponents' points.
     pub sodosm: HalfPoints,
     /// Sum of defeated opponents' wins.
-    pub sodosw: Wins,
+    pub sodosw: HalfWins,
     /// Sum of opponents' SOSM.
     pub sososm: HalfPoints,
     /// Sum of opponents' SOSW.
-    pub sososw: Wins,
+    pub sososw: HalfWins,
     /// SOSM dropping the single lowest-scoring opponent.
     pub sosm1: HalfPoints,
     /// SOSM dropping the two lowest-scoring opponents.
     pub sosm2: HalfPoints,
     /// SOSW dropping the single lowest-scoring opponent.
-    pub sosw1: Wins,
+    pub sosw1: HalfWins,
     /// SOSW dropping the two lowest-scoring opponents.
-    pub sosw2: Wins,
+    pub sosw2: HalfWins,
     /// Cumulative sum of the running points total after each round.
     pub cussm: HalfPoints,
     /// Cumulative sum of the running win total after each round.
-    pub cussw: Wins,
+    pub cussw: HalfWins,
     /// Direct confrontation: this unit's wins against the other units it was
     /// still tied with once every earlier configured criterion ran out (0 if
     /// that tied group never played a complete round-robin among themselves, or
     /// if `Dc` isn't configured, or wasn't reached). Filled in by the ranking,
     /// which is what decides who is tied — [`rank_groups`].
-    pub dc: Wins,
+    pub dc: HalfWins,
 }
 
 impl Tiebreaks {
@@ -211,7 +211,7 @@ pub(crate) struct ScoreRow<'a, K> {
     pub opponents: &'a [K],
     pub defeated: &'a [K],
     pub points: HalfPoints,
-    pub victories: Wins,
+    pub victories: HalfWins,
     pub cumulative: &'a Cumulative,
 }
 
@@ -238,7 +238,7 @@ where
     // Indexed by number so the SOSOS pass (a sum over opponents, which are
     // numbers) is a plain array walk with no hashing.
     let mut sosm: TiVec<K, HalfPoints> = vec![HalfPoints::ZERO; capacity].into();
-    let mut sosw: TiVec<K, Wins> = vec![Wins::ZERO; capacity].into();
+    let mut sosw: TiVec<K, HalfWins> = vec![HalfWins::ZERO; capacity].into();
     for &k in numbers {
         let s = row(k);
         sosm[k] = s.opponents.iter().map(|&o| row(o).points).sum();
@@ -251,7 +251,7 @@ where
         // Scoring an opponent is a direct table lookup — `…M` by their points,
         // `…W` by their wins.
         let opp_m: Vec<HalfPoints> = s.opponents.iter().map(|&o| row(o).points).collect();
-        let opp_w: Vec<Wins> = s.opponents.iter().map(|&o| row(o).victories).collect();
+        let opp_w: Vec<HalfWins> = s.opponents.iter().map(|&o| row(o).victories).collect();
         tiebreaks[k] = Tiebreaks {
             sosm: sosm[k],
             sosw: sosw[k],
@@ -267,7 +267,7 @@ where
             cussw: s.cumulative.cuss_w,
             // Filled in below, while the ranking order is computed, since it
             // depends on which units end up tied on the earlier criteria.
-            dc: Wins::ZERO,
+            dc: HalfWins::ZERO,
         };
     }
     tiebreaks
@@ -445,7 +445,7 @@ pub(crate) fn compute_standings(
         &rows,
     );
     for (i, wins) in dc.into_iter().enumerate() {
-        standings[i].tiebreaks.dc = Wins::from_whole(wins);
+        standings[i].tiebreaks.dc = HalfWins::from_whole(wins);
     }
     order.into_iter().map(|i| standings[i].clone()).collect()
 }

@@ -3531,7 +3531,7 @@ mod tests {
             .expect("the long winner is in the standings");
         assert_eq!(
             standing.victories,
-            crate::Wins::from_whole(2),
+            crate::HalfWins::from_whole(2),
             "a long game is worth exactly two wins over the two rounds it took"
         );
         assert_eq!(standing.points, crate::HalfPoints::from_whole(2));
@@ -3933,9 +3933,9 @@ mod tests {
         );
         // The one who turned up is scored like a bye — at the long weight, since
         // the board still took both rounds.
-        assert_eq!(p.victories, crate::Wins::from_whole(2));
+        assert_eq!(p.victories, crate::HalfWins::from_whole(2));
         assert!(p.had_bye);
-        assert_eq!(a.victories, crate::Wins::ZERO);
+        assert_eq!(a.victories, crate::HalfWins::ZERO);
     }
 
     /// A long game that never gets its second round is refused by the export
@@ -4235,7 +4235,7 @@ mod tests {
         };
         let s = scores.get(&id_of(a));
         assert_eq!(s.points(), crate::HalfPoints::from_whole(4));
-        assert_eq!(s.victories, crate::Wins::from_whole(4));
+        assert_eq!(s.victories, crate::HalfWins::from_whole(4));
         assert_eq!(
             s.opponents.iter().filter(|&&o| o == b).count(),
             2,

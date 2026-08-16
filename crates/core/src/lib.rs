@@ -77,7 +77,7 @@ pub use standings::{Standing, Tiebreaks};
 pub use team::{pairing_rating, Team};
 pub use team_scoring::{TeamMatchView, TeamStanding};
 pub use tournament::{Tournament, TournamentError, TOURNAMENT_FORMAT_VERSION};
-pub use units::{HalfPoints, TeamId, TournamentId, UnitKey, Wins};
+pub use units::{HalfPoints, HalfWins, TeamId, TournamentId, UnitKey};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::player::{Grade, Player, PointAdjustment};
 use crate::round::{Round, Winner};
 use crate::settings::TournamentSettings;
-use crate::units::{HalfPoints, TournamentId, Wins};
+use crate::units::{HalfPoints, HalfWins, TournamentId};
 
 /// One player's accumulated state going into the next round. Defaultable so a
 /// [`Scores`] table can leave a gap for any tournament number no current player
@@ -24,7 +24,7 @@ pub(crate) struct PlayerScore {
     /// player sat out was worth them — a `0+` (the usual bye) a whole win, a
     /// `0=` half of one. In half-wins, like [`Self::macmahon`] is in
     /// half-points.
-    pub victories: Wins,
+    pub victories: HalfWins,
     /// The player's starting score: MacMahon points, with any manual
     /// bonus/malus folded in and the total floored at zero.
     ///
@@ -68,17 +68,17 @@ pub(crate) struct Cumulative {
     /// flavour of the tie-break).
     pub cuss_m: HalfPoints,
     /// Cumulative sum of the running win total (the wins-only flavour).
-    pub cuss_w: Wins,
+    pub cuss_w: HalfWins,
     /// The points total as it stood after each completed round (one entry per
     /// round) — the sequence CUSSM sums, kept for the breakdown.
     pub running_points: Vec<HalfPoints>,
     /// The win total after each completed round — the sequence CUSSW sums.
-    pub running_wins: Vec<Wins>,
+    pub running_wins: Vec<HalfWins>,
 }
 
 impl Cumulative {
     /// Fold in the unit's totals as they stand at the end of a completed round.
-    pub(crate) fn push_round(&mut self, points: HalfPoints, victories: Wins) {
+    pub(crate) fn push_round(&mut self, points: HalfPoints, victories: HalfWins) {
         self.cuss_m += points;
         self.cuss_w += victories;
         self.running_points.push(points);
@@ -375,7 +375,7 @@ pub(crate) fn compute_scores(
                 None => continue,
             };
             let s = &mut by_tid[winner];
-            s.victories += Wins::from_whole(reps); // one win per game (two for a long board)
+            s.victories += HalfWins::from_whole(reps); // one win per game (two for a long board)
             for _ in 0..reps {
                 s.defeated.push(loser);
             }
@@ -398,7 +398,7 @@ pub(crate) fn compute_scores(
             };
             if let Some(present) = board.no_show_opponent() {
                 let s = &mut by_tid[present];
-                s.victories += Wins::from_whole(reps); // one win (two for a long board)
+                s.victories += HalfWins::from_whole(reps); // one win (two for a long board)
             }
         }
 

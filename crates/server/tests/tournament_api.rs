@@ -576,7 +576,7 @@ async fn team_rosters_are_built_and_played_over_http() {
     );
 
     // Recording a board moves the match score with it — in half-wins, like
-    // every `Wins` on the wire, so one board win is 2.
+    // every `HalfWins` on the wire, so one board win is 2.
     let (status, body) = send(
         router(state.clone()),
         json_req(

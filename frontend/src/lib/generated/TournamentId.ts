@@ -15,7 +15,7 @@
  *
  * It is also the player reference carried across the wire — on [`crate::Board`],
  * [`crate::Round`], [`crate::Player::tournament_id`], … — so it derives serde and
- * [`TS`]. Like [`Wins`] / [`HalfPoints`], it serializes as a **bare number** (a
+ * [`TS`]. Like [`HalfWins`] / [`HalfPoints`], it serializes as a **bare number** (a
  * one-field tuple struct forwards to its inner value, so **no**
  * `#[serde(transparent)]` — that only trips a ts-rs warning) and exports to
  * TypeScript as a transparent `number` alias; the `serializes_as_a_bare_number`

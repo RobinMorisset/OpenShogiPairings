@@ -14,15 +14,15 @@
  * Still a type of its own rather than a second [`HalfPoints`]: a win count and
  * a point score are different quantities that happen to share a scale, and
  * mixing them up is precisely the mistake worth making impossible. Convert
- * deliberately through [`From<Wins>`], which is the one place the (now
+ * deliberately through [`From<HalfWins>`], which is the one place the (now
  * one-to-one) relation is written.
  *
  * The inner value is private — construct with [`from_whole`] / [`from_halves`]
  * and read the raw units with [`halves`], so the ×2 convention lives here and
  * nowhere else.
  *
- * [`from_whole`]: Wins::from_whole
- * [`from_halves`]: Wins::from_halves
- * [`halves`]: Wins::halves
+ * [`from_whole`]: HalfWins::from_whole
+ * [`from_halves`]: HalfWins::from_halves
+ * [`halves`]: HalfWins::halves
  */
-export type Wins = number;
+export type HalfWins = number;

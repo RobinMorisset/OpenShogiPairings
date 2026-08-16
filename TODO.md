@@ -76,9 +76,6 @@ Known limitations and future work, roughly ordered by area.
   (for a late arrival, or to replace a lost slip) currently leaves rounds already
   played blank, so they have to be copied over by hand.
 
-- The difference between HalfPoints and Wins is no longer important since b69d35e, think about
-  getting rid of the Wins unit.
-
 - More cost details in Question this pairing
 
 - Finer invalidation for the Why these pairings at the top of each round's pairings: it is now a flag per round, so a new round is always valid, but a settings change still invalidates every round wholesale. A bunch of changes should not affect it at all, e.g. altering the tiebreak criteria.
