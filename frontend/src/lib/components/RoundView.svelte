@@ -1541,11 +1541,16 @@
     width: 0;
     min-width: 100%;
   }
-  /* Prose gets a readable measure of its own: the panels are as wide as the
-     standings-sized card, and a 1400px line is not a line anybody reads. */
+  /* One measure for everything inside the panel: the panels are as wide as the
+     standings-sized card, and a 1400px line is not a line anybody reads — while
+     a board's two sides, named in full and with their ratings, need more room
+     than a column of prose would suggest. So the rows that put a board against
+     a number are held to the same width as the prose above them rather than to
+     one of their own. */
   .report-stale,
   .probe-hint,
-  .probe-status {
+  .probe-status,
+  .report-affected li {
     max-width: 70ch;
   }
 
@@ -1621,7 +1626,6 @@
     display: flex;
     justify-content: space-between;
     gap: 0.75rem;
-    max-width: 22rem;
     padding: 0.05rem 0;
   }
   .report-units {
