@@ -51,12 +51,14 @@
     SitoutValue,
     TournamentResponse,
     TournamentSettings,
+    UndoLabel,
     Winner,
   } from "./lib/types";
   import { saveAmericanGrid, saveTournament } from "./lib/tournamentFile";
   import { pickCsvFile } from "./lib/csvImport";
   import { handicapChoice } from "./lib/handicap";
   import { buildSheetPlayers, macMahonRowShown } from "./lib/resultSheets";
+  import { isMac } from "./lib/platform";
   import { Publication, PrintJobs } from "./lib/publication.svelte";
   import { createTeamActions } from "./lib/teamActions";
   import { TournamentStore } from "./lib/tournamentStore.svelte";
@@ -98,7 +100,24 @@
   const draftLongPlayers = $derived(store.draftLongPlayers);
   const suggestedHandicaps = $derived(store.suggestedHandicaps);
   const effectiveWinners = $derived(store.effectiveWinners);
-  const canUndo = $derived(store.canUndo);
+  const undoLabel = $derived(store.undoLabel);
+  const canUndo = $derived(undoLabel !== null);
+  /** The Undo shortcut, spelled the way this platform spells it. Presentation
+   *  only — `handleKeydown` takes Ctrl and Cmd everywhere. */
+  const undoShortcut = isMac() ? "⌘Z" : "Ctrl+Z";
+  /** What the Undo button says it would take back, and how to reach it from the
+   *  keyboard — the server names the change (see `crates/server/src/undo.rs`),
+   *  the catalogues word it. Falls back to the generic wording when there is
+   *  nothing to undo, which is also when the button is disabled; the shortcut
+   *  rides along either way, since that is the half a referee is here to learn. */
+  function undoTitle(label: UndoLabel | null): string {
+    const action = label
+      ? $_(`undo.${label.code}`, { values: label.values })
+      : $_("app.undoTitle");
+    return $_("app.undoTitleShortcut", {
+      values: { action, shortcut: undoShortcut },
+    });
+  }
   const hasUnsavedChanges = $derived(store.hasUnsavedChanges);
   const persisted = $derived(store.persisted);
   const apply = (res: TournamentResponse) => store.apply(res);
@@ -946,7 +965,7 @@
             data-testid="undo"
             onclick={handleUndo}
             disabled={busy || !canUndo}
-            title={$_("app.undoTitle")}
+            title={undoTitle(undoLabel)}
           >
             {$_("app.undo")}
           </button>

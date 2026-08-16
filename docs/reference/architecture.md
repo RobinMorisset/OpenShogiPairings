@@ -284,12 +284,16 @@ recorded and showing `5?` until then; the scored columns and the ranking count
 completed rounds only, so the table re-sorts in one step once the round ends.
 
 Mutations go through a `TournamentStore` that keeps the current tournament plus a
-stack of prior snapshots (the undo history); create/load/restore reset it.
-Endpoints return a `TournamentView` — the tournament, `can_undo`, the change
-`version`, server-computed `standings`, the cup podium (once decided), and
-suggested handicaps per board — so the client refreshes the view, the undo
-button, and the ranked table together from one response (the persisted
-save-file shape stays the bare `Tournament`). `standings` is computed
+stack of prior snapshots (the undo history); create/load/restore reset it. Each
+snapshot carries an `UndoLabel` naming the change it precedes — a stable machine
+code plus interpolation values, like an error's (`crates/server/src/undo.rs`) —
+because a snapshot alone cannot say what an undo would take back, and the button
+reverts whichever referee acted last. Endpoints return a `TournamentView` — the
+tournament, `undo_label` (absent when there is nothing to undo, which is also
+what disables the button), the change `version`, server-computed `standings`,
+the cup podium (once decided), and suggested handicaps per board — so the client
+refreshes the view, the undo button, and the ranked table together from one
+response (the persisted save-file shape stays the bare `Tournament`). `standings` is computed
 server-side (in `osp-core`) so every client — and the American Grid export —
 shares one canonical ranking: by the criteria chosen in the settings (in
 order; points is one of them, normally first), then tournament number.

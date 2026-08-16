@@ -37,7 +37,7 @@ async fn create_then_add_and_remove_player() {
         osp_core::TOURNAMENT_FORMAT_VERSION
     );
     assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
-    assert_eq!(body["can_undo"], false); // nothing to undo on a fresh tournament
+    assert!(body["undo_label"].is_null()); // nothing to undo on a fresh tournament
 
     // Register a player.
     let (status, body) = send(
@@ -55,7 +55,9 @@ async fn create_then_add_and_remove_player() {
     assert_eq!(players[0]["last_name"], "Kobayashi");
     assert_eq!(players[0]["first_name"], "Taichi");
     assert_eq!(players[0]["nationality"], "JP"); // uppercased server-side
-    assert_eq!(body["can_undo"], true); // a mutation is now undoable
+                                                 // A mutation is now undoable, and the button can say what it would take back.
+    assert_eq!(body["undo_label"]["code"], "register_player");
+    assert_eq!(body["undo_label"]["values"]["name"], "Kobayashi Taichi");
     let player_id = players[0]["id"].as_str().unwrap().to_string();
 
     // Remove that player.
@@ -91,7 +93,7 @@ async fn import_players_csv_registers_the_roster_as_one_undo_step() {
     assert_eq!(players[0]["rating"], 2000);
     assert_eq!(players[0]["club"], "Paris");
     // The whole import is a single mutation, so one undo clears all of it.
-    assert_eq!(body["can_undo"], true);
+    assert_eq!(body["undo_label"]["code"], "import_players");
     let (_, body) = send(router(state.clone()), post_empty(&t(id, "/undo"))).await;
     assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
 }
@@ -352,13 +354,15 @@ async fn edit_then_undo_reverts_step_by_step() {
     let (status, body) = send(router(state.clone()), post_empty(&t(id, "/undo"))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["tournament"]["players"][0]["rating"], 1500);
-    assert_eq!(body["can_undo"], true); // the add is still undoable
+    // The add below it is still undoable, and now names itself.
+    assert_eq!(body["undo_label"]["code"], "register_player");
+    assert_eq!(body["undo_label"]["values"]["name"], "Alice");
 
     // Undo the add → back to empty, nothing left to undo.
     let (status, body) = send(router(state.clone()), post_empty(&t(id, "/undo"))).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
-    assert_eq!(body["can_undo"], false);
+    assert!(body["undo_label"].is_null());
 
     // One undo too many is refused, not silently answered `200` with an
     // unchanged tournament — which a client would read as an undo that landed.

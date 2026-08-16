@@ -6,12 +6,18 @@ export function isTauri(): boolean {
 }
 
 /**
- * True on macOS — the one webview whose `window.print()` does nothing, so the
- * only place [`printPage`] has to leave the web platform. Every webview that
- * runs this code says "Macintosh" there exactly when it is one: WebView2 says
- * "Windows NT", WebKitGTK "Linux".
+ * True on macOS.
+ *
+ * Two callers, both presentational: [`printPage`] below, which has to leave the
+ * web platform on the one webview whose `window.print()` does nothing, and the
+ * Undo/Redo tooltips, which spell their shortcut `⌘Z` rather than `Ctrl+Z`.
+ * Neither breaks if this is wrong — the print falls back to the standard path,
+ * and the handlers take Ctrl and Cmd everywhere regardless.
+ *
+ * Every webview that runs this code says "Macintosh" there exactly when it is
+ * one: WebView2 says "Windows NT", WebKitGTK "Linux".
  */
-function isMac(): boolean {
+export function isMac(): boolean {
   return typeof navigator !== "undefined" && navigator.userAgent.includes("Macintosh");
 }
 

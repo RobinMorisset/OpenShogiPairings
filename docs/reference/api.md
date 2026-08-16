@@ -82,7 +82,12 @@ Clients pull the list once and filter locally.
 
 Known limitations and future work are tracked in [TODO.md](../../TODO.md).
 
-Every mutating endpoint returns the full updated `TournamentView`. Save/load is
+Every mutating endpoint returns the full updated `TournamentView`. Its
+`undo_label` — `{ code, values }`, absent when there is nothing to undo — says
+what `POST /undo` would revert, so the button can name somebody else's change
+rather than only offering to take it back; the codes are the `UndoCode` enum in
+`crates/server/src/undo.rs`, and the client localizes them under `undo.*`.
+Save/load is
 platform-aware: in the **Tauri** desktop app it uses native OS file dialogs (the
 `dialog` plugin plus small `read_text_file`/`write_text_file` commands), and in
 the browser it falls back to a JSON download / file-picker upload. Either way a

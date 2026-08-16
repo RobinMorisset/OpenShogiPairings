@@ -143,7 +143,9 @@ async fn backups_are_taken_on_round_transitions_and_can_be_restored() {
     assert_eq!(body["tournament"]["players"].as_array().unwrap().len(), 2);
     assert_eq!(body["tournament"]["registration_finalized"], true);
     assert!(body["tournament"]["rounds"].as_array().unwrap().is_empty());
-    assert_eq!(body["can_undo"], false); // restoring resets undo history, like load
+    // Restoring resets the undo history, like a load: nothing to revert, so
+    // nothing to name.
+    assert!(body["undo_label"].is_null());
 
     // An unknown backup id is a 404.
     let (status, _) = send(

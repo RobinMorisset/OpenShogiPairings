@@ -8,6 +8,7 @@ import type { TeamMatchView } from "./TeamMatchView";
 import type { TeamStanding } from "./TeamStanding";
 import type { Tournament } from "./Tournament";
 import type { TournamentId } from "./TournamentId";
+import type { UndoLabel } from "./UndoLabel";
 import type { Winner } from "./Winner";
 
 /**
@@ -24,7 +25,13 @@ export type ImportCsvResponse = {
  * Names skipped because a player with that name was already registered, in
  * file order and spelled as the file spelled them.
  */
-skipped_duplicates: Array<string>, tournament: Tournament, can_undo: boolean, 
+skipped_duplicates: Array<string>, tournament: Tournament, 
+/**
+ * What the undo button would revert, or absent when there is nothing to
+ * undo — which is also how the client knows to disable it (see
+ * [`crate::undo`]).
+ */
+undo_label?: UndoLabel, 
 /**
  * `false` when the server could not write this state to disk: the edit was
  * applied and answered `200`, but it lives only in memory and a restart

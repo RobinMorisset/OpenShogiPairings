@@ -8,18 +8,25 @@ import type { TeamMatchView } from "./TeamMatchView";
 import type { TeamStanding } from "./TeamStanding";
 import type { Tournament } from "./Tournament";
 import type { TournamentId } from "./TournamentId";
+import type { UndoLabel } from "./UndoLabel";
 import type { Winner } from "./Winner";
 
 /**
- * API response: the current tournament, undo availability, and the derived
- * standings.
+ * API response: the current tournament, what an undo would revert, and the
+ * derived standings.
  *
  * Deliberately *not* the bare `Tournament` (which is what save/load uses) — the
- * `can_undo` flag is server session state and `standings` is derived, both kept
+ * `undo_label` is server session state and `standings` is derived, both kept
  * out of the persisted shape. Standings are computed server-side so every
  * client (and the future American grid) shares one ranking.
  */
-export type TournamentResponse = { tournament: Tournament, can_undo: boolean, 
+export type TournamentResponse = { tournament: Tournament, 
+/**
+ * What the undo button would revert, or absent when there is nothing to
+ * undo — which is also how the client knows to disable it (see
+ * [`crate::undo`]).
+ */
+undo_label?: UndoLabel, 
 /**
  * `false` when the server could not write this state to disk: the edit was
  * applied and answered `200`, but it lives only in memory and a restart

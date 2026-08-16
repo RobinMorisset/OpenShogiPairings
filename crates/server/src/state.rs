@@ -24,6 +24,7 @@ use uuid::Uuid;
 
 use crate::auth::AuthConfig;
 use crate::ratings::CachedRatings;
+use crate::undo::UndoLabel;
 
 /// Capacity of the change-notification channel. Small on purpose: subscribers
 /// only care about the *latest* version, and one that lags past the buffer is
@@ -69,6 +70,18 @@ impl LoadProblem {
     }
 }
 
+/// One step of the undo history: the tournament as it stood before a change,
+/// and what that change was.
+///
+/// The label is carried rather than derived, because by the time anyone asks,
+/// the change has been folded into the tournament and the two snapshots on
+/// either side of it no longer say which edit produced the difference — see
+/// [`crate::undo`].
+struct HistoryEntry {
+    before: Tournament,
+    label: UndoLabel,
+}
+
 /// The current tournament plus a linear undo history.
 ///
 /// The history is a stack of full tournament snapshots taken *before* each
@@ -89,7 +102,7 @@ impl LoadProblem {
 /// [`crate::live`].
 pub struct TournamentStore {
     current: Option<Tournament>,
-    history: Vec<Tournament>,
+    history: Vec<HistoryEntry>,
     /// Where to write the current tournament, or `None` for in-memory only
     /// (embedded desktop / dev / tests).
     persist_path: Option<PathBuf>,
@@ -300,9 +313,14 @@ impl TournamentStore {
         self.current.as_ref()
     }
 
-    /// Whether there is anything to undo.
-    pub fn can_undo(&self) -> bool {
-        !self.history.is_empty()
+    /// What an undo would revert, or `None` when there is nothing to undo.
+    ///
+    /// Doubles as the "is the button live" flag it replaced: a caller that only
+    /// wants to know whether an undo is possible asks `is_some()`. Keeping the
+    /// two as one field is deliberate — a separate boolean could disagree with
+    /// the label beside it, and there is no state in which it should.
+    pub(crate) fn undo_label(&self) -> Option<&UndoLabel> {
+        self.history.last().map(|entry| &entry.label)
     }
 
     /// Set the current tournament and clear the undo history.
@@ -322,6 +340,11 @@ impl TournamentStore {
     /// previous state onto the history and swap in the new one. A failed
     /// mutation (e.g. validation error) leaves state and history untouched.
     ///
+    /// `label` says what the change was, for the undo button to name (see
+    /// [`crate::undo`]). It is built by the caller *before* the mutation runs,
+    /// since a label naming a player or a team has to be read from the state
+    /// the change is about to replace — the very thing that is gone afterwards.
+    ///
     /// `expected` is the tournament version the client's edit was based on, or
     /// `None` to skip the check. Comparing it here — under the same write lock the
     /// mutation runs in — is what makes optimistic-concurrency detection actually
@@ -329,7 +352,12 @@ impl TournamentStore {
     /// reads the version and releases the lock before the handler runs), so two
     /// edits racing from the same base version must be separated *here*, or the
     /// later one would silently clobber the earlier one with no `409`.
-    pub fn mutate<F>(&mut self, expected: Option<u32>, f: F) -> Result<(), MutateError>
+    pub(crate) fn mutate<F>(
+        &mut self,
+        expected: Option<u32>,
+        label: UndoLabel,
+        f: F,
+    ) -> Result<(), MutateError>
     where
         F: FnOnce(&mut Tournament) -> Result<(), TournamentError>,
     {
@@ -348,8 +376,8 @@ impl TournamentStore {
             None => return Err(MutateError::NoTournament),
         };
         f(&mut next).map_err(MutateError::Domain)?;
-        let previous = self.current.replace(next).expect("current was Some");
-        self.history.push(previous);
+        let before = self.current.replace(next).expect("current was Some");
+        self.history.push(HistoryEntry { before, label });
         self.persist();
         self.bump_and_notify();
         Ok(())
@@ -393,8 +421,8 @@ impl TournamentStore {
     /// from a view that has moved, and answering as though an undo had happened
     /// would report a change that never took place.
     pub fn undo(&mut self) -> Result<(), NothingToUndo> {
-        let previous = self.history.pop().ok_or(NothingToUndo)?;
-        self.current = Some(previous);
+        let entry = self.history.pop().ok_or(NothingToUndo)?;
+        self.current = Some(entry.before);
         self.persist();
         self.bump_and_notify();
         Ok(())
@@ -1388,6 +1416,13 @@ mod tests {
     use super::*;
     use osp_core::NewPlayer;
 
+    /// A stand-in label for the tests that exercise the snapshot, version and
+    /// persistence machinery rather than the wording — which is every test here
+    /// but the one that reads a label back.
+    fn any_label() -> UndoLabel {
+        UndoLabel::settings()
+    }
+
     #[test]
     fn persists_current_and_reloads_from_disk() {
         let path = std::env::temp_dir().join(format!("osp-persist-{}.json", uuid::Uuid::new_v4()));
@@ -1397,7 +1432,7 @@ mod tests {
             let mut store = TournamentStore::with_persistence(path.clone());
             store.set_current(Tournament::new("Persisted Cup").unwrap());
             store
-                .mutate(None, |t| {
+                .mutate(None, any_label(), |t| {
                     t.add_player(NewPlayer {
                         last_name: "Bob".into(),
                         ..Default::default()
@@ -1437,7 +1472,7 @@ mod tests {
         // And it clears once writing works again.
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         store
-            .mutate(None, |t| {
+            .mutate(None, any_label(), |t| {
                 t.add_player(NewPlayer {
                     last_name: "Bob".into(),
                     ..Default::default()
@@ -1463,7 +1498,7 @@ mod tests {
         assert_eq!(rx.recv().await.unwrap(), 1);
 
         store
-            .mutate(None, |t| {
+            .mutate(None, any_label(), |t| {
                 t.add_player(NewPlayer {
                     last_name: "Bob".into(),
                     ..Default::default()
@@ -1482,7 +1517,7 @@ mod tests {
         let mut store = TournamentStore::with_persistence(path.clone());
         store.set_current(Tournament::new("Cup").unwrap());
         store
-            .mutate(None, |t| {
+            .mutate(None, any_label(), |t| {
                 t.add_player(NewPlayer {
                     last_name: "Alice".into(),
                     ..Default::default()
@@ -1499,6 +1534,37 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
+    /// The label names the change at the *top* of the stack, and each undo
+    /// uncovers the one below — which is what lets the button keep saying what
+    /// it would take back rather than only whether it could.
+    #[test]
+    fn the_label_tracks_the_top_of_the_stack() {
+        let mut store = TournamentStore::empty(None);
+        store.set_current(Tournament::new("Cup").unwrap());
+        assert!(store.undo_label().is_none());
+
+        for name in ["Alice", "Bob"] {
+            let new = NewPlayer {
+                last_name: name.into(),
+                ..Default::default()
+            };
+            store
+                .mutate(None, UndoLabel::register_player(&new), add_named(name))
+                .unwrap();
+        }
+
+        let label = store.undo_label().expect("Bob's registration");
+        assert_eq!(label.code, crate::undo::UndoCode::RegisterPlayer);
+        assert_eq!(label.values.get("name").map(String::as_str), Some("Bob"));
+
+        store.undo().unwrap();
+        let label = store.undo_label().expect("Alice's, below it");
+        assert_eq!(label.values.get("name").map(String::as_str), Some("Alice"));
+
+        store.undo().unwrap();
+        assert!(store.undo_label().is_none());
+    }
+
     /// An undo with nothing to revert must say so rather than report success:
     /// a caller told `Ok` would believe a change it never made had landed.
     #[test]
@@ -1507,7 +1573,7 @@ mod tests {
         store.set_current(Tournament::new("Cup").unwrap());
         let version = store.version();
 
-        assert!(!store.can_undo());
+        assert!(store.undo_label().is_none());
         assert!(store.undo().is_err());
         // And it changed nothing: no phantom version bump for subscribers to
         // refetch on, so a rejected undo cannot look like somebody's edit.
@@ -1538,7 +1604,7 @@ mod tests {
             .store
             .write()
             .unwrap()
-            .mutate(None, |t| {
+            .mutate(None, any_label(), |t| {
                 t.add_player(NewPlayer {
                     last_name: "Alice".into(),
                     ..Default::default()
@@ -1747,19 +1813,21 @@ mod tests {
 
         // An edit based on a stale version is rejected atomically, changing nothing.
         assert!(matches!(
-            store.mutate(Some(0), add_named("Alice")),
+            store.mutate(Some(0), any_label(), add_named("Alice")),
             Err(MutateError::VersionConflict)
         ));
         assert_eq!(store.version(), 1);
         assert!(store.current().unwrap().players.is_empty());
 
         // Based on the current version it goes through and advances the version.
-        store.mutate(Some(1), add_named("Alice")).unwrap();
+        store
+            .mutate(Some(1), any_label(), add_named("Alice"))
+            .unwrap();
         assert_eq!(store.version(), 2);
         assert_eq!(store.current().unwrap().players.len(), 1);
 
         // `None` opts out of the check entirely (the desktop/local path).
-        store.mutate(None, add_named("Bob")).unwrap();
+        store.mutate(None, any_label(), add_named("Bob")).unwrap();
         assert_eq!(store.current().unwrap().players.len(), 2);
     }
 
@@ -1779,7 +1847,7 @@ mod tests {
         // A mutation still in flight against this store now refuses rather than
         // recreating the deleted file — the delete/edit resurrection is closed.
         assert!(matches!(
-            store.mutate(None, add_named("Alice")),
+            store.mutate(None, any_label(), add_named("Alice")),
             Err(MutateError::NoTournament)
         ));
         assert!(
@@ -1801,7 +1869,7 @@ mod tests {
                 .store
                 .write()
                 .unwrap()
-                .mutate(None, add_named("Alice")),
+                .mutate(None, any_label(), add_named("Alice")),
             Err(MutateError::NoTournament)
         ));
         assert!(instance.store.read().unwrap().is_deleted());
@@ -2138,7 +2206,7 @@ mod tests {
 
         // Writer A commits first.
         store
-            .mutate(Some(base), add_named("Alice"))
+            .mutate(Some(base), any_label(), add_named("Alice"))
             .expect("A is based on the current version");
         assert_eq!(store.version(), base + 1);
 

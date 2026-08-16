@@ -112,7 +112,7 @@ async fn the_public_projection_drops_the_draft_and_the_referee_only_fields() {
     let (_, referee) = send(router(state.clone()), get(&t(id, ""))).await;
     assert!(referee["tournament"]["draft"].is_object());
     assert!(body["tournament"]["draft"].is_null());
-    assert!(body["can_undo"].is_null());
+    assert!(body["undo_label"].is_null());
     assert!(body["draft_cup_players"].is_null());
 
     // Everything the reader is there for is present, and identical to the
@@ -386,7 +386,7 @@ async fn the_referee_can_read_the_projection_without_publishing_it() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["tournament"]["name"], "Locked");
-    assert!(body["can_undo"].is_null());
+    assert!(body["undo_label"].is_null());
     assert!(body["tournament"]["draft"].is_null());
 
     // It is the referee's route, so it wants the referee's password — the
@@ -597,7 +597,7 @@ async fn the_reader_stream_pushes_the_projection_on_connect() {
     assert_eq!(payload["tournament"]["name"], "Streamed Cup");
     // Same projection as the plain GET: the draft is absent here too.
     assert!(payload["tournament"]["draft"].is_null());
-    assert!(payload["can_undo"].is_null());
+    assert!(payload["undo_label"].is_null());
 
     // And the stream, like the GET, is closed to a wrong key.
     let (status, _) = send(router(state.clone()), get(&t(id, "/public/events?k=wrong"))).await;

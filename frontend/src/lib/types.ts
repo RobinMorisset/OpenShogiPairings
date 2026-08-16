@@ -12,6 +12,7 @@ export type { AffectedCycle } from "./generated/AffectedCycle";
 export type { BackupInfo } from "./generated/BackupInfo";
 export type { BackupList } from "./generated/BackupList";
 export type { BlockedReason } from "./generated/BlockedReason";
+export type { UndoLabel } from "./generated/UndoLabel";
 export type { Board } from "./generated/Board";
 export type { BracketMatch } from "./generated/BracketMatch";
 export type { CupBracketView } from "./generated/CupBracketView";

@@ -40,6 +40,7 @@ mod save;
 mod scope;
 mod state;
 mod tournament;
+mod undo;
 
 pub use auth::AuthConfig;
 // Everything [`AppState`] hands back — the registry and its instances, a store

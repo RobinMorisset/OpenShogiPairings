@@ -11,6 +11,10 @@ will be explicitly mentioned in the changelog for that version though.
 
 ### Changed
 
+- **The Undo button now says what it would take back** — "Undo registering Habu
+  Yoshiharu", "Undo the result on board 3 of round 2" — instead of a generic
+  "Undo the last change". It matters most with several referees on one
+  tournament, where the button reverts whoever acted last rather than you.
 - `POST /undo` now answers `409` when there is nothing left to undo, instead of
   `200` with an unchanged tournament — which told the caller an undo had
   happened when none had.
