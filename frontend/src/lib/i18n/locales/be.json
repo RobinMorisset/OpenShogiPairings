@@ -329,8 +329,6 @@
     "removeForcedBye": "Выдаліць гэты прызначаны вольны тур",
     "automaticBye": "Аўтаматычна (найніжэйшы з астатніх)",
     "startRound": "Пачаць тур {number}",
-    "useUndoHintPrefix": "Скарыстайцеся",
-    "useUndoHintSuffix": ", каб адкінуць гэты чарнавік.",
     "needAtLeastTwoPresent": "Патрэбна не менш за 2 прысутных гульцоў.",
     "teamEllipsis": "Каманда…",
     "needAtLeastTwoTeams": "Для тура патрэбны прынамсі дзве прысутныя каманды.",

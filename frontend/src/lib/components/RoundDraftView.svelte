@@ -598,11 +598,6 @@
       {$_("roundDraftView.startRound", { values: { number: draft.number } })}
     </button>
   </div>
-  <p class="muted small">
-    {$_("roundDraftView.useUndoHintPrefix")} <strong>{$_("app.undo")}</strong>{$_(
-      "roundDraftView.useUndoHintSuffix",
-    )}
-  </p>
 </div>
 
 <style>

@@ -329,8 +329,6 @@
     "removeForcedBye": "Вилучити цей примусовий бай",
     "automaticBye": "Автоматично (найслабший з тих, хто залишився)",
     "startRound": "Стартувати тур {number}",
-    "useUndoHintPrefix": "Натисніть",
-    "useUndoHintSuffix": ", щоб відкинути цю чернетку.",
     "needAtLeastTwoPresent": "Потрібно щонайменше 2 присутні гравці.",
     "teamEllipsis": "Команда…",
     "needAtLeastTwoTeams": "Для туру потрібно щонайменше дві присутні команди.",

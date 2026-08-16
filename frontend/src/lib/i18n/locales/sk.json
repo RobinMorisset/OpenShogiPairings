@@ -329,8 +329,6 @@
     "removeForcedBye": "Odstrániť toto vynútené voľno",
     "automaticBye": "Automaticky (najslabší zo zvyšných)",
     "startRound": "Spustiť {number}. kolo",
-    "useUndoHintPrefix": "Použite",
-    "useUndoHintSuffix": ", ak chcete tento návrh zahodiť.",
     "needAtLeastTwoPresent": "Sú potrební aspoň 2 prítomní hráči.",
     "teamEllipsis": "Družstvo…",
     "needAtLeastTwoTeams": "Kolo potrebuje aspoň dve prítomné družstvá.",

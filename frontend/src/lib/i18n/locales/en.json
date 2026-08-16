@@ -329,8 +329,6 @@
     "removeForcedBye": "Remove this forced bye",
     "automaticBye": "Automatic (lowest of remaining)",
     "startRound": "Start round {number}",
-    "useUndoHintPrefix": "Use",
-    "useUndoHintSuffix": " to discard this draft.",
     "needAtLeastTwoPresent": "Need at least 2 present players.",
     "teamEllipsis": "Team…",
     "needAtLeastTwoTeams": "A round needs at least two present teams.",

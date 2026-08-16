@@ -329,8 +329,6 @@
     "removeForcedBye": "この指定を削除",
     "automaticBye": "自動（残りのうち最下位）",
     "startRound": "第{number}回戦を開始",
-    "useUndoHintPrefix": "この準備中の回戦を破棄するには",
-    "useUndoHintSuffix": "を使ってください。",
     "needAtLeastTwoPresent": "出場者が2名以上必要です。",
     "teamEllipsis": "チーム…",
     "needAtLeastTwoTeams": "1ラウンドには少なくとも2チームの参加が必要です。",
