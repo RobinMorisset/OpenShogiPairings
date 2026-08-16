@@ -219,7 +219,7 @@ pub enum TournamentError {
     /// A loaded file has half of a carried long game: a starting record with no
     /// live one after it, a live one with no starting record before it, or a
     /// start that was never carried although a later round exists. See
-    /// `docs/long-boards-v2.md`.
+    /// `docs/reference/two-round-boards.md`.
     #[error("round {round} holds half of a carried long game")]
     OrphanedLongGame { round: u32 },
     /// The American Grid export was asked for while a long game in the last
@@ -2536,7 +2536,7 @@ impl Tournament {
 
     /// Flag (or unflag) a board as a "long game": double time control, lasting two
     /// rounds and scoring two points for the winner (see
-    /// `docs/archive/two-round-boards.md`).
+    /// `docs/reference/two-round-boards.md`).
     ///
     /// Allowed only on the **current** (last) round, and only when the tournament
     /// enables long boards. Flagging *on* requires the board undecided; flagging
@@ -3012,7 +3012,7 @@ impl Tournament {
         Ok(())
     }
 
-    /// The pairing invariants of carried long games (`docs/long-boards-v2.md`).
+    /// The pairing invariants of carried long games (`docs/reference/two-round-boards.md`).
     ///
     /// A long game holds one record per round it occupies, and the two are only
     /// meaningful together: the inert `LongCarried` one in the round it started,
@@ -3943,7 +3943,7 @@ mod tests {
     /// Forcing a pairing in a round that is finishing a long game keeps the long
     /// game — result, handicap and all — and re-pairs everything else.
     ///
-    /// This is the hazard `docs/long-boards-v2.md` calls Issue 1, and it had no
+    /// This is the hazard `docs/reference/two-round-boards.md` calls Issue 1, and it had no
     /// test. It also covers the regression that came with the redesign: the guard
     /// refused on *any* decided board, and a carried game decided early is a
     /// decided board from the moment the round is confirmed, so the referee could
@@ -4071,17 +4071,17 @@ mod tests {
     /// Back-to-back long games: a player finishes one and is flagged long again
     /// in their very next round.
     ///
-    /// This is defect (2) of `docs/long-boards-v2.md`'s own list — under the
-    /// shipped model the "am I long *this* round?" test was made before the "did
-    /// I carry one?" test, so a game decided in round N-1 whose players went long
+    /// One of the defects that motivated one record per round: under the model
+    /// before it, the "am I long *this* round?" test was made before the "did I
+    /// carry one?" test, so a game decided in round N-1 whose players went long
     /// again in round N rendered in no column at all, and its result simply left
-    /// the tournament. The v2 records make the question local, and this drives it
-    /// through the engine end to end: two long games, four rounds, one player on
-    /// both of them.
+    /// the tournament. Making each question local to one round fixes it by
+    /// construction; this drives that end to end through the engine — two long
+    /// games, four rounds, one player on both of them.
     ///
-    /// It is the last of the three tests §6 of that document asked for, and the
-    /// only one that exercises two carries in sequence — the state where a
-    /// `LongCarried`, a `LongEnd` and a fresh `LongStart` are all live at once.
+    /// It is the only test that exercises two carries in sequence — the state
+    /// where a `LongCarried`, a `LongEnd` and a fresh `LongStart` are all live at
+    /// once.
     #[test]
     fn back_to_back_long_games_each_keep_their_own_result() {
         let mut t = Tournament::new("Back to back").unwrap();

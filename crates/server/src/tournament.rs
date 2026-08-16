@@ -886,7 +886,7 @@ struct SetLongRequest {
 }
 
 /// Flag (or unflag) a board as a two-round "long game" (see
-/// `docs/archive/two-round-boards.md`).
+/// `docs/reference/two-round-boards.md`).
 ///
 /// Like recording a winner, flagging the last-undecided board long can complete
 /// the round, so the automatic "round N completed" backup is taken here too, only

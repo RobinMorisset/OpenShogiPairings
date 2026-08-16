@@ -243,7 +243,7 @@ impl Cup {
     /// second is a gap round the rest of the field plays through as pure Swiss —
     /// so every later bracket round shifts one further on. Derived by replaying
     /// the recorded long flags forward; a bracket round not yet played (or not
-    /// marked long) defaults to a single round. See `docs/archive/two-round-boards.md`.
+    /// marked long) defaults to a single round. See `docs/reference/two-round-boards.md`.
     fn cup_schedule(&self, rounds: &[Round]) -> Vec<u32> {
         let mut sched = Vec::with_capacity(self.cup_rounds() as usize);
         let mut t = 1u32;

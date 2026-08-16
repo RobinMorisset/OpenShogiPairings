@@ -433,7 +433,7 @@ pub struct Board {
 ///
 /// That the carried record has nowhere to *put* an outcome is the point: it is
 /// why this is an enum around [`Outcome`] rather than a flag beside one. See
-/// `docs/long-boards-v2.md`.
+/// `docs/reference/two-round-boards.md`.
 // Adjacently tagged, not internally: [`Outcome`] is itself tagged `kind`, so
 // flattening it in here would emit that key twice and lose one of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

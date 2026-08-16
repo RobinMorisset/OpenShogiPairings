@@ -77,7 +77,7 @@ cup_format: CupFormat,
 /**
  * Whether the referee may flag individual boards as "long games" that last
  * two rounds and score two points for the winner. Off by default. See
- * `docs/archive/two-round-boards.md`.
+ * `docs/reference/two-round-boards.md`.
  */
 long_boards_enabled: boolean, 
 /**

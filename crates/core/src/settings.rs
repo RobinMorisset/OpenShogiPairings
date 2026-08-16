@@ -982,7 +982,7 @@ pub struct TournamentSettings {
     pub cup_format: CupFormat,
     /// Whether the referee may flag individual boards as "long games" that last
     /// two rounds and score two points for the winner. Off by default. See
-    /// `docs/archive/two-round-boards.md`.
+    /// `docs/reference/two-round-boards.md`.
     #[serde(default)]
     pub long_boards_enabled: bool,
     /// How handicap games are treated (see [`HandicapPolicy`]).

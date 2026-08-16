@@ -14,6 +14,9 @@ document is a bug.
   change as any route added, changed or removed.
 - [`swiss-fold.md`](reference/swiss-fold.md) — the fold rule and why its penalty
   is quadratic.
+- [`two-round-boards.md`](reference/two-round-boards.md) — "long games": why a
+  board spanning two rounds is stored as one record per round, and the
+  invariants that keeps.
 
 ## [`guides/`](guides) — how to do a thing
 

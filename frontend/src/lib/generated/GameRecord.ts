@@ -16,6 +16,6 @@ import type { Outcome } from "./Outcome";
  *
  * That the carried record has nowhere to *put* an outcome is the point: it is
  * why this is an enum around [`Outcome`] rather than a flag beside one. See
- * `docs/long-boards-v2.md`.
+ * `docs/reference/two-round-boards.md`.
  */
 export type GameRecord = { "kind": "short", "outcome": Outcome } | { "kind": "long_start", "outcome": Outcome } | { "kind": "long_carried" } | { "kind": "long_end", "outcome": Outcome };
