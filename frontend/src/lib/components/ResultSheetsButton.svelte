@@ -18,7 +18,7 @@
     /** How many players get a filled-in slip. */
     playerCount: number;
     /** Whether the slips carry a MacMahon row — one more row per slip, which can
-     *  tip a page from six slips down to four. */
+     *  tip a page down to one row of slips fewer. */
     macMahonRow: boolean;
     onPrint: (rounds: number, blanks: number) => void;
     busy?: boolean;

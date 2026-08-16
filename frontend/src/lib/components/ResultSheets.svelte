@@ -6,7 +6,15 @@
   import { _ } from "svelte-i18n";
   import { formatGrade } from "../grade";
   import { formatScore } from "../score";
-  import { paginate, sheetsPerPage, type SheetPlayer } from "../resultSheets";
+  import {
+    paginate,
+    sheetsPerPage,
+    slipHeightCm,
+    SLIP_HEADER_CM,
+    SLIP_ROW_CM,
+    SLIP_TITLES_CM,
+    type SheetPlayer,
+  } from "../resultSheets";
 
   interface Props {
     tournamentName: string;
@@ -29,8 +37,19 @@
     ...players,
     ...Array.from({ length: blanks }, () => null),
   ]);
-  const perPage = $derived(sheetsPerPage(rounds + (macMahonRow ? 1 : 0)));
+  const bodyRows = $derived(rounds + (macMahonRow ? 1 : 0));
+  const perPage = $derived(sheetsPerPage(bodyRows));
   const pages = $derived(paginate(slips, perPage));
+  // The print geometry lives in `resultSheets.ts` (which is also what decides
+  // how many slips a page holds), and reaches the stylesheet below as these.
+  const sizes = $derived(
+    [
+      `--slip-height: ${slipHeightCm(bodyRows)}cm`,
+      `--slip-header: ${SLIP_HEADER_CM}cm`,
+      `--slip-titles: ${SLIP_TITLES_CM}cm`,
+      `--slip-row: ${SLIP_ROW_CM}cm`,
+    ].join("; "),
+  );
   const roundNumbers = $derived(Array.from({ length: rounds }, (_v, i) => i + 1));
 
   // `macMahonRow` and every slip's `macmahon` are set by the same rule (see
@@ -44,31 +63,29 @@
   }
 </script>
 
-<div class="result-sheets" data-testid="result-sheets">
+<div class="result-sheets" data-testid="result-sheets" style={sizes}>
   {#each pages as page, pageIndex (pageIndex)}
     <!-- One printed page per grid, so the breaks fall between slips rather than
          wherever a long flow happens to reach the bottom of the paper. -->
-    <div
-      class="page"
-      class:four-up={perPage === 4}
-      class:last={pageIndex === pages.length - 1}
-    >
+    <div class="page" class:last={pageIndex === pages.length - 1}>
       {#each page as slip, slipIndex (slipIndex)}
         <section class="slip">
-          <div class="tournament">{tournamentName}</div>
-          <div class="who">
-            <span class="tid rule">{slip ? slip.tournamentId : ""}</span>
-            <span class="name rule">{slip ? slip.name : ""}</span>
-          </div>
-          <div class="meta">
-            <span class="field"
-              >{$_("resultSheets.elo")}
-              <span class="rule">{slip?.rating ?? ""}</span></span
-            >
-            <span class="field"
-              >{$_("resultSheets.grade")}
-              <span class="rule">{slip?.grade ? formatGrade(slip.grade) : ""}</span></span
-            >
+          <div class="header">
+            <div class="tournament">{tournamentName}</div>
+            <div class="who">
+              <span class="tid rule">{slip ? slip.tournamentId : ""}</span>
+              <span class="name rule">{slip ? slip.name : ""}</span>
+            </div>
+            <div class="meta">
+              <span class="field"
+                >{$_("resultSheets.elo")}
+                <span class="rule">{slip?.rating ?? ""}</span></span
+              >
+              <span class="field"
+                >{$_("resultSheets.grade")}
+                <span class="rule">{slip?.grade ? formatGrade(slip.grade) : ""}</span></span
+              >
+            </div>
           </div>
           <table>
             <colgroup>
@@ -130,17 +147,15 @@
          are predictable in `em`. */
       line-height: 1.2;
     }
-    /* Six slips to an A4 (2 × 3 of 8.4cm), or four (2 × 2 of 12.6cm) once the
-       round count would squeeze the rows too small — either way 25.2cm of the
-       page, which clears the widest default print margin. */
+    /* Slips two to a row, each exactly as tall as its own fixed-height contents
+       (`--slip-height`, from `resultSheets.ts`), and as many rows as fit the
+       page. A short tournament therefore prints short slips and leaves the foot
+       of the page blank, rather than blowing the same slip up to fill it. */
     .page {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      grid-auto-rows: 8.4cm;
+      grid-auto-rows: var(--slip-height);
       break-after: page;
-    }
-    .page.four-up {
-      grid-auto-rows: 12.6cm;
     }
     /* Without this the last page break emits a trailing blank sheet. */
     .page.last {
@@ -151,9 +166,13 @@
       /* The cut lines. */
       border: 1px dashed #999;
       padding: 0.3cm 0.35cm;
-      display: flex;
-      flex-direction: column;
       overflow: hidden;
+    }
+    /* Fixed, so that the table below starts at the same height on every slip and
+       `slipHeightCm` can say how tall the whole thing comes out. The three lines
+       inside add up to about 1.47cm, so they fit with a little to spare. */
+    .header {
+      height: var(--slip-header);
     }
     .tournament {
       font-size: 7pt;
@@ -198,9 +217,8 @@
     }
     /* Every header value is a ruled blank carrying its value when we know it, so
        an unrated player — or a whole blank slip — has somewhere to write it.
-       The height is fixed because an empty inline-block is zero-tall: without it
-       a blank slip's header collapses and the table below, which stretches to
-       fill the slip, grows into the space it left. */
+       The height is fixed because an empty inline-block is zero-tall, which
+       would leave a blank slip's rules floating above a filled one's. */
     .rule {
       display: inline-block;
       min-width: 1.4cm;
@@ -209,7 +227,6 @@
       border-bottom: 1px solid #000;
     }
     table {
-      flex: 1;
       width: 100%;
       margin-top: 0.2cm;
       border-collapse: collapse;
@@ -234,14 +251,15 @@
       padding: 0 0.08cm;
       text-align: center;
     }
+    /* Both exact, not floors: the table is only as tall as its rows make it, and
+       the slip is sized from these same numbers. */
     th {
+      height: var(--slip-titles);
       font-size: 7pt;
       font-weight: 600;
     }
-    /* A floor, not the final height: the table stretches to the bottom of the
-       slip and the rows share out whatever is left over. */
     td {
-      height: 0.5cm;
+      height: var(--slip-row);
     }
   }
 </style>

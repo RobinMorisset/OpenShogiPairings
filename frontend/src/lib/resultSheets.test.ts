@@ -3,9 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   buildSheetPlayers,
   macMahonRowShown,
+  MAX_ROUNDS,
+  MAX_SLIP_ROWS_PER_PAGE,
+  PAGE_CM,
   paginate,
   sheetsPerPage,
-  SIX_UP_MAX_ROWS,
+  slipHeightCm,
+  SLIP_ROW_CM,
 } from "./resultSheets";
 import type { Player, Standing, TournamentSettings } from "./types";
 
@@ -102,15 +106,41 @@ describe("buildSheetPlayers", () => {
   });
 });
 
-describe("sheetsPerPage", () => {
-  it("fits six to a page while the rows stay legible", () => {
-    expect(sheetsPerPage(1)).toBe(6);
-    expect(sheetsPerPage(SIX_UP_MAX_ROWS)).toBe(6);
+describe("slipHeightCm", () => {
+  // The point of the fixed geometry: a round costs one row, always the same
+  // one, instead of the slip's contents being blown up to fill the paper.
+  it("grows by exactly one row per row", () => {
+    expect(slipHeightCm(4) - slipHeightCm(3)).toBeCloseTo(SLIP_ROW_CM);
+    expect(slipHeightCm(31) - slipHeightCm(30)).toBeCloseTo(SLIP_ROW_CM);
   });
 
-  it("drops to four rather than shrink the rows further", () => {
-    expect(sheetsPerPage(SIX_UP_MAX_ROWS + 1)).toBe(4);
-    expect(sheetsPerPage(30)).toBe(4);
+  it("keeps even the longest tournament's slip on the page", () => {
+    expect(slipHeightCm(MAX_ROUNDS + 1)).toBeLessThan(PAGE_CM);
+  });
+});
+
+describe("sheetsPerPage", () => {
+  it("fits ten to a page at most, however short the slips get", () => {
+    // A one-row slip is 3.35cm: seven rows of them would fit, and be stamps.
+    expect(sheetsPerPage(1)).toBe(2 * MAX_SLIP_ROWS_PER_PAGE);
+    expect(sheetsPerPage(4)).toBe(2 * MAX_SLIP_ROWS_PER_PAGE);
+  });
+
+  it("drops a row of slips at a time as the slips get taller", () => {
+    expect(sheetsPerPage(5)).toBe(8);
+    expect(sheetsPerPage(6)).toBe(8);
+    expect(sheetsPerPage(7)).toBe(6);
+    expect(sheetsPerPage(11)).toBe(6);
+    expect(sheetsPerPage(12)).toBe(4);
+    expect(sheetsPerPage(19)).toBe(4);
+    expect(sheetsPerPage(20)).toBe(2);
+    expect(sheetsPerPage(MAX_ROUNDS + 1)).toBe(2);
+  });
+
+  // Only reachable by raising `MAX_ROUNDS` past what a page can hold, which
+  // should say so rather than print slips with their last rounds cut off.
+  it("throws rather than page a slip that cannot fit", () => {
+    expect(() => sheetsPerPage(100)).toThrow(/taller than/);
   });
 });
 

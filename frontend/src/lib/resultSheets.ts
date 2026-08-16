@@ -87,20 +87,55 @@ export function buildSheetPlayers(
     .sort((a, b) => a.tournamentId - b.tournamentId);
 }
 
-/**
- * The most rows a slip can carry and still be legible at six to an A4 page.
- *
- * A 6-up slip is 8.4cm tall, of which the header and the column titles take
- * about 2.4cm; eleven rows then get ~5.5mm each, which is about as small as a
- * hand-written board number gets. Past that the sheets go 4-up (12.6cm) rather
- * than shrink further.
- */
-export const SIX_UP_MAX_ROWS = 11;
+// The printed geometry of a slip, in centimetres. Every part of it is a fixed
+// height: three rounds print three rows of exactly the size nine rounds print
+// nine of, and the paper left over is left blank at the bottom of the page.
+// (Stretching the table to the foot of the slip instead poured the spare
+// centimetres into the column-title row, which looked absurd on a short
+// tournament.)
+//
+// `ResultSheets.svelte` applies these numbers as the actual heights, so they are
+// the layout rather than a description of it. The one thing it has to keep in
+// step is that the header's three lines fit inside `SLIP_HEADER_CM`.
+
+/** The block above the table: tournament name, the ruled number and name line,
+ *  and the ELO and grade line. */
+export const SLIP_HEADER_CM = 1.5;
+/** The table's column-title row. */
+export const SLIP_TITLES_CM = 0.4;
+/** One round's row — about as short as a hand-written board number gets. */
+export const SLIP_ROW_CM = 0.5;
+/** The slip's own padding and cut border, plus the gap above the table. A
+ *  millimetre more than they measure, so the collapsed cell borders round the
+ *  last row's line down into the padding rather than off the bottom of a slip
+ *  that clips what does not fit. */
+export const SLIP_CHROME_CM = 0.95;
+
+/** How much of an A4's height the slips may use: 25.2cm clears the widest
+ *  default print margin. */
+export const PAGE_CM = 25.2;
+
+/** Slips print two to a row, and at most this many rows to a page: a one-round
+ *  slip would otherwise pack seven rows of stamps onto an A4. Five rows is a
+ *  4.9cm slip, still enough of one to write on and hand out. */
+export const MAX_SLIP_ROWS_PER_PAGE = 5;
+
+/** How tall a slip carrying `rows` body rows prints. */
+export function slipHeightCm(rows: number): number {
+  return SLIP_CHROME_CM + SLIP_HEADER_CM + SLIP_TITLES_CM + rows * SLIP_ROW_CM;
+}
 
 /** How many slips fit on an A4, for `rows` body rows (rounds, plus the MacMahon
  *  row when there is one). */
-export function sheetsPerPage(rows: number): 6 | 4 {
-  return rows <= SIX_UP_MAX_ROWS ? 6 : 4;
+export function sheetsPerPage(rows: number): number {
+  const height = slipHeightCm(rows);
+  const perColumn = Math.floor(PAGE_CM / height);
+  // `MAX_ROUNDS` keeps this out of reach — 31 rows is an 18.8cm slip — so it
+  // means someone raised that bound past what a page of fixed rows can hold.
+  if (perColumn < 1) {
+    throw new Error(`a ${rows}-row slip is ${height}cm, taller than the ${PAGE_CM}cm page`);
+  }
+  return 2 * Math.min(perColumn, MAX_SLIP_ROWS_PER_PAGE);
 }
 
 /** Split the slips into pages of `perPage`, so each page is its own printed
