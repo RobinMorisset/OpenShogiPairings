@@ -25,6 +25,8 @@
   import { printPage } from "../platform";
   import { formatScore } from "../score";
   import type { HandicapChoice } from "../handicap";
+  import type { PickerOption } from "../picker";
+  import Combobox from "./Combobox.svelte";
   import ResultSheetsButton from "./ResultSheetsButton.svelte";
 
   interface Props {
@@ -619,6 +621,37 @@
     probeMode === "forbid" && probeA !== "" ? opponentOf.get(probeA) : undefined,
   );
   const effectiveB = $derived(probeMode === "force" ? probeB : (forbidPartner ?? ""));
+
+  // The pickers are the `Combobox` the round draft and the Teams tab use: the
+  // list here is the whole Swiss field, which a <select> made the referee
+  // scroll through to ask about one board. Both sides keep what they picked
+  // until "Explain" is pressed, so each is given the label it chose; the
+  // resets below clear the selection and the field follows.
+  const probeOptions = $derived<PickerOption[]>(
+    swissPlayers.map((id) => ({ key: String(id), label: unitName(id) })),
+  );
+  // Neither side offers what the other already holds — but only while both are
+  // being picked: a "forbid" probe derives the partner and leaves whatever
+  // "force" last put in `probeB` behind, which must not quietly remove someone
+  // from the one list that is still shown.
+  const probeAOptions = $derived(
+    probeMode === "force" ? probeOptions.filter((o) => o.key !== String(probeB)) : probeOptions,
+  );
+  // Only the second side can be the bye: the question is "why wasn't A paired
+  // with the bye?", and the bye is never the side being asked about.
+  const probeBOptions = $derived<PickerOption[]>(
+    (swissByeUnit != null
+      ? [...probeOptions, { key: String(PHANTOM), label: $_("roundView.probe.bye") }]
+      : probeOptions
+    ).filter((o) => o.key !== String(probeA)),
+  );
+  const probeNoMatch = $derived(
+    $_(teamMode ? "roundView.probe.noMatchTeams" : "roundView.probe.noMatch"),
+  );
+  /** The label a picked side shows: the unit's own, or the bye it stands for. */
+  function pickedName(id: number | ""): string {
+    return id === "" ? "" : probeName(id);
+  }
 
   const canProbe = $derived(
     !!onProbe && probeA !== "" && effectiveB !== "" && probeA !== effectiveB && !probeBusy,
@@ -1234,23 +1267,28 @@
               : $_(teamMode ? "roundView.probe.hintForbidTeams" : "roundView.probe.hintForbid")}
           </p>
           <div class="probe-controls">
-            <select class="control-sm control-quiet" bind:value={probeA} disabled={probeBusy}>
-              <option value="">{probePickLabel}</option>
-              {#each swissPlayers as id (id)}
-                <option value={id}>{unitName(id)}</option>
-              {/each}
-            </select>
+            <Combobox
+              id="probe-a"
+              options={probeAOptions}
+              text={pickedName(probeA)}
+              placeholder={probePickLabel}
+              ariaLabel={$_("roundView.probe.sideA")}
+              noMatch={probeNoMatch}
+              disabled={probeBusy}
+              onPick={(option) => (probeA = Number(option.key))}
+            />
             {#if probeMode === "force"}
               <span class="probe-vs">{$_("roundView.probe.and")}</span>
-              <select class="control-sm control-quiet" bind:value={probeB} disabled={probeBusy}>
-                <option value="">{probePickLabel}</option>
-                {#each swissPlayers as id (id)}
-                  <option value={id}>{unitName(id)}</option>
-                {/each}
-                {#if swissByeUnit != null}
-                  <option value={PHANTOM}>{$_("roundView.probe.bye")}</option>
-                {/if}
-              </select>
+              <Combobox
+                id="probe-b"
+                options={probeBOptions}
+                text={pickedName(probeB)}
+                placeholder={probePickLabel}
+                ariaLabel={$_("roundView.probe.sideB")}
+                noMatch={probeNoMatch}
+                disabled={probeBusy}
+                onPick={(option) => (probeB = Number(option.key))}
+              />
             {:else}
               <span class="probe-vs">{$_("roundView.probe.pairedWith")}</span>
               <span class="probe-partner">
@@ -1565,10 +1603,6 @@
     flex-wrap: wrap;
     gap: 0.5rem;
   }
-  /* The inset background is the shared one, and deliberately not `transparent`:
-     a transparent native <select> falls back to the OS light combobox on
-     Windows/WebView2, giving white-on-white with the inherited light text in
-     dark mode. */
   .probe-vs {
     color: var(--text-secondary);
   }

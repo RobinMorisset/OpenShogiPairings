@@ -231,10 +231,11 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   whichever round it finishes in; a referee who decides it really only took one
   unticks the box before the round advances, demoting it to an ordinary
   one-point board, exactly as before.
-- **Forced pairings and the forced bye are typed, not scrolled for**: the round
-  draft's dropdowns are now the same autocomplete field the Teams tab adds a
-  member with. Type part of a name, or the tournament number, and it narrows to
-  a line; only someone the round can actually pair can be committed.
+- **Players are typed, not scrolled for**: the round draft's forced pairings and
+  forced bye, and the "Question a pairing" panel, all use the same autocomplete
+  field the Teams tab adds a member with. Type part of a name, or the tournament
+  number, and it narrows to a line; only someone the round can actually pair —
+  or, in the panel, someone the engine did pair — can be committed.
 
 ## [1.3.0] - 2026-08-05
 
