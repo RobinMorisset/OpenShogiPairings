@@ -95,7 +95,7 @@ mod rules;
 mod test_support;
 
 pub use counterfactual::{
-    AffectedCycle, Counterfactual, CounterfactualMode, RuleDelta, ScopeReason,
+    AffectedCycle, BoardDelta, Counterfactual, CounterfactualMode, RuleDelta, ScopeReason,
 };
 pub use explain::{BoardLedger, RoundExplanation, RuleContribution, RuleTotal};
 pub use rules::RuleId;

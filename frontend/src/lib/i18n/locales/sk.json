@@ -221,10 +221,11 @@
       "working": "Počíta sa…",
       "bye": "(voľno)",
       "noChange": "Žiadna zmena — spárovanie od algoritmu to neovplyvní.",
-      "worseOn": "Horšie v:",
-      "betterOn": "Lepšie v:",
       "newBoardsLabel": "Stoly, ktoré by sa zmenili:",
       "newBoard": "{a} proti {b}",
+      "rulesLabel": "Pravidlo za pravidlom:",
+      "worseBy": "horšie o {units}",
+      "betterBy": "lepšie o {units}",
       "newBye": "{name} dostáva voľno",
       "apply": "Vynútiť toto spárovanie",
       "scopedOut": {

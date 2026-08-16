@@ -3,6 +3,7 @@
   import {
     HANDICAPS,
     type Board,
+    type BoardDelta,
     type BoardLedger,
     type Counterfactual,
     type CounterfactualMode,
@@ -748,13 +749,24 @@
     });
   }
 
-  // Rules that got worse / better under the probe, as label lists.
-  const worseRules = $derived(
-    (probeResult?.cost_delta ?? []).filter((d) => d.units > 0).map((d) => ruleLabel(d.rule)),
-  );
-  const betterRules = $derived(
-    (probeResult?.cost_delta ?? []).filter((d) => d.units < 0).map((d) => ruleLabel(d.rule)),
-  );
+  /** A signed delta as words: the sign convention is the server's — units are
+   *  positive for what the counterfactual would add, so positive is worse. */
+  function deltaText(units: number): string {
+    return units > 0
+      ? $_("roundView.probe.worseBy", { values: { units } })
+      : $_("roundView.probe.betterBy", { values: { units: -units } });
+  }
+
+  /** A board of a rule's delta, named as the compromise report names its own —
+   *  "A vs B", or "X (bye)" — since the two lists are read the same way. */
+  function deltaBoardLabel(board: BoardDelta): string {
+    if (!board.player2) {
+      return $_("roundView.explanation.byeBoard", { values: { name: unitName(board.player1) } });
+    }
+    return $_("roundView.explanation.board", {
+      values: { a: unitName(board.player1), b: unitName(board.player2) },
+    });
+  }
 
   function name(id: number): string {
     const p = byId.get(id);
@@ -1366,24 +1378,38 @@
                 <p class="probe-status">{$_("roundView.probe.noChange")}</p>
               {:else}
                 <div class="probe-result">
-                  {#if worseRules.length}
-                    <p class="probe-cost">
-                      <strong>{$_("roundView.probe.worseOn")}</strong>
-                      {worseRules.join(", ")}
-                    </p>
-                  {/if}
-                  {#if betterRules.length}
-                    <p class="probe-cost">
-                      <strong>{$_("roundView.probe.betterOn")}</strong>
-                      {betterRules.join(", ")}
-                    </p>
-                  {/if}
                   <p class="probe-boards-label">{$_("roundView.probe.newBoardsLabel")}</p>
                   <ul class="probe-boards">
                     {#each probeResult.changed as board, i (i)}
                       <li>{changedBoardText(board)}</li>
                     {/each}
                   </ul>
+                  <!-- What those boards cost, read the way the compromises tab
+                       is read: a rule at a time, highest priority first, and
+                       under each the boards that move it — the ones this
+                       pairing would add, then the ones it would drop. The
+                       reasons come after the boards they are about. -->
+                  {#if probeResult.cost_delta.length}
+                    <p class="probe-boards-label">{$_("roundView.probe.rulesLabel")}</p>
+                    <ul class="report-list">
+                      {#each probeResult.cost_delta as delta (delta.rule)}
+                        <li>
+                          <div class="report-rule-head">
+                            <span class="report-rule">{ruleLabel(delta.rule)}</span>
+                            <span class="report-boards">{deltaText(delta.units)}</span>
+                          </div>
+                          <ul class="report-affected">
+                            {#each delta.boards as board, i (i)}
+                              <li>
+                                <span>{deltaBoardLabel(board)}</span>
+                                <span class="report-units">{deltaText(board.units)}</span>
+                              </li>
+                            {/each}
+                          </ul>
+                        </li>
+                      {/each}
+                    </ul>
+                  {/if}
                   {#if canApplyForce}
                     <button type="button" class="probe-apply" disabled={probeBusy} onclick={applyForce}>
                       {$_("roundView.probe.apply")}
@@ -1671,9 +1697,6 @@
   }
   .probe-result {
     margin-top: 0.6rem;
-  }
-  .probe-cost {
-    margin: 0.2rem 0;
   }
   .probe-boards-label {
     margin: 0.5rem 0 0.2rem;

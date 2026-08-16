@@ -221,10 +221,11 @@
       "working": "Calcul…",
       "bye": "(exempt)",
       "noChange": "Aucun changement — l'appariement du moteur n'est pas affecté.",
-      "worseOn": "Moins bon sur :",
-      "betterOn": "Meilleur sur :",
       "newBoardsLabel": "Les tables qui changeraient :",
       "newBoard": "{a} contre {b}",
+      "rulesLabel": "Règle par règle :",
+      "worseBy": "moins bon de {units}",
+      "betterBy": "meilleur de {units}",
       "newBye": "{name} devient exempt",
       "apply": "Forcer cet appariement",
       "scopedOut": {

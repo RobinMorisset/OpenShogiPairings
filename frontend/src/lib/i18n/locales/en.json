@@ -221,10 +221,11 @@
       "working": "Working…",
       "bye": "(bye)",
       "noChange": "No change — the engine's pairing is unaffected.",
-      "worseOn": "Worse on:",
-      "betterOn": "Better on:",
       "newBoardsLabel": "The boards that would change:",
       "newBoard": "{a} vs {b}",
+      "rulesLabel": "Rule by rule:",
+      "worseBy": "worse by {units}",
+      "betterBy": "better by {units}",
       "newBye": "{name} takes the bye",
       "apply": "Force this pairing",
       "scopedOut": {

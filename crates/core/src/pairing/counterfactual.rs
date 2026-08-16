@@ -52,6 +52,25 @@ pub enum ScopeReason {
     Absent,
 }
 
+/// One board's share of a rule's change: the units that rule scores on it,
+/// signed as [`RuleDelta::units`] is — positive for a board the counterfactual
+/// *adds*, negative for one it takes away. `player2` is `None` for a bye.
+///
+/// This is what makes a net delta readable: "worse by 1 on repeat float" is a
+/// number, while "this new board costs 2, and the board it replaces cost 1" is
+/// an explanation.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/lib/generated/")]
+#[serde(deny_unknown_fields)]
+pub struct BoardDelta {
+    pub player1: UnitKey,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub player2: Option<UnitKey>,
+    #[ts(type = "number")]
+    pub units: i64,
+}
+
 /// One rule's net change between the confirmed pairing and the counterfactual:
 /// signed penalty units, where a positive value means the alternative is *worse*
 /// on this rule.
@@ -61,6 +80,11 @@ pub struct RuleDelta {
     pub rule: RuleId,
     #[ts(type = "number")]
     pub units: i64,
+    /// Where that net came from, board by board: the boards the counterfactual
+    /// adds first, then the ones it drops, each in a stable order. Only boards
+    /// this rule actually scores on appear, so the list is never empty and its
+    /// units always sum to [`Self::units`].
+    pub boards: Vec<BoardDelta>,
 }
 
 /// A ring of players who must reshuffle to honour the probe — a vertex-disjoint
@@ -302,33 +326,59 @@ fn diff_matchings(
         }
     };
 
+    // Sorted, so both the sums below and the per-rule board lists come out in
+    // the same order every time a probe is repeated.
+    let mut added: Vec<(UnitKey, UnitKey)> = m1.difference(m0).copied().collect();
+    added.sort();
+    let mut removed: Vec<(UnitKey, UnitKey)> = m0.difference(m1).copied().collect();
+    removed.sort();
+
     // Net per-rule delta: added boards contribute +units, removed boards −units;
-    // boards common to both matchings cancel.
+    // boards common to both matchings cancel. Each board that scores at all is
+    // also kept against its rule, which is what turns the net into something
+    // that can be read board by board.
     let mut delta: HashMap<RuleId, i64> = HashMap::new();
-    for e in m1.difference(m0) {
-        for (r, &u) in rules.iter().zip(&units_of(e)) {
-            *delta.entry(r.id()).or_insert(0) += u as i64;
-        }
-    }
-    for e in m0.difference(m1) {
-        for (r, &u) in rules.iter().zip(&units_of(e)) {
-            *delta.entry(r.id()).or_insert(0) -= u as i64;
+    let mut boards: HashMap<RuleId, Vec<BoardDelta>> = HashMap::new();
+    for (edges, sign) in [(&added, 1i64), (&removed, -1i64)] {
+        for e in edges {
+            let (x, y) = *e;
+            let (player1, player2) = if x == UnitKey::PHANTOM {
+                (y, None)
+            } else if y == UnitKey::PHANTOM {
+                (x, None)
+            } else {
+                (x, Some(y))
+            };
+            for (r, &u) in rules.iter().zip(&units_of(e)) {
+                if u == 0 {
+                    continue;
+                }
+                let units = sign * u as i64;
+                *delta.entry(r.id()).or_insert(0) += units;
+                boards.entry(r.id()).or_default().push(BoardDelta {
+                    player1,
+                    player2,
+                    units,
+                });
+            }
         }
     }
     let cost_delta: Vec<RuleDelta> = rules
         .iter()
         .filter_map(|r| {
             let u = delta.get(&r.id()).copied().unwrap_or(0);
-            (u != 0).then_some(RuleDelta {
+            // A rule can score on both sides and come out even — that is not a
+            // change, and reporting it as one would read as "this costs
+            // something" when it costs nothing.
+            (u != 0).then(|| RuleDelta {
                 rule: r.id(),
                 units: u,
+                boards: boards.remove(&r.id()).unwrap_or_default(),
             })
         })
         .collect();
 
-    // The new boards (added edges), sorted for a stable order, as ledgers.
-    let mut added: Vec<(UnitKey, UnitKey)> = m1.difference(m0).copied().collect();
-    added.sort();
+    // The new boards (added edges) as ledgers.
     let changed: Vec<BoardLedger> = added.iter().map(ledger_of).collect();
 
     Counterfactual {
@@ -515,6 +565,59 @@ mod tests {
             matches!(fold, Some(d) if d.units > 0),
             "forcing the worse fold costs units"
         );
+    }
+
+    #[test]
+    fn a_rule_delta_is_its_boards_added_and_dropped() {
+        // Same forced pairing as above, read board by board: every rule that
+        // moved says which boards moved it, the signs say which way (added
+        // boards positive, dropped ones negative), and they add up to the net.
+        let p: Vec<Player> = (1..=4)
+            .map(|i| player(i, Some(2000 - i * 10), None))
+            .collect();
+        let boards = [
+            (p[0].tournament_id.unwrap(), p[2].tournament_id.unwrap()),
+            (p[1].tournament_id.unwrap(), p[3].tournament_id.unwrap()),
+        ];
+
+        let cf = force_players(
+            1,
+            &p,
+            &TournamentSettings::default(),
+            &boards,
+            None,
+            p[0].tournament_id.unwrap(),
+            p[1].tournament_id.unwrap(),
+        );
+
+        assert!(!cf.cost_delta.is_empty(), "the forced fold has a cost");
+        let added: HashSet<(UnitKey, UnitKey)> = cf
+            .changed
+            .iter()
+            .map(|b| unord_pair(b.player1, b.player2.unwrap_or(UnitKey::PHANTOM)))
+            .collect();
+        for delta in &cf.cost_delta {
+            assert!(
+                !delta.boards.is_empty(),
+                "{:?} moved, so some board moved it",
+                delta.rule
+            );
+            assert_eq!(
+                delta.units,
+                delta.boards.iter().map(|b| b.units).sum::<i64>(),
+                "{:?}'s net is what its boards add up to",
+                delta.rule
+            );
+            for board in &delta.boards {
+                assert_ne!(board.units, 0, "a board that scores nothing is not listed");
+                let pair = unord_pair(board.player1, board.player2.unwrap_or(UnitKey::PHANTOM));
+                assert_eq!(
+                    board.units > 0,
+                    added.contains(&pair),
+                    "a board is positive exactly when the counterfactual adds it"
+                );
+            }
+        }
     }
 
     #[test]

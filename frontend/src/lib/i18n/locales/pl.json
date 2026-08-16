@@ -221,10 +221,11 @@
       "working": "Obliczanie…",
       "bye": "(pauza)",
       "noChange": "Bez zmian — kojarzenie wykonane przez algorytm pozostaje takie samo.",
-      "worseOn": "Gorzej pod względem:",
-      "betterOn": "Lepiej pod względem:",
       "newBoardsLabel": "Stoliki, które by się zmieniły:",
       "newBoard": "{a} vs {b}",
+      "rulesLabel": "Reguła po regule:",
+      "worseBy": "gorzej o {units}",
+      "betterBy": "lepiej o {units}",
       "newBye": "{name} pauzuje",
       "apply": "Wymuś to kojarzenie",
       "scopedOut": {

@@ -221,10 +221,11 @@
       "working": "Berechnung…",
       "bye": "(Freilos)",
       "noChange": "Keine Änderung — die Paarung der Engine bleibt unberührt.",
-      "worseOn": "Schlechter bei:",
-      "betterOn": "Besser bei:",
       "newBoardsLabel": "Diese Bretter würden sich ändern:",
       "newBoard": "{a} gegen {b}",
+      "rulesLabel": "Regel für Regel:",
+      "worseBy": "um {units} schlechter",
+      "betterBy": "um {units} besser",
       "newBye": "{name} erhält das Freilos",
       "apply": "Diese Paarung erzwingen",
       "scopedOut": {

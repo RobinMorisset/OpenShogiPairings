@@ -134,6 +134,13 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   nothing the cell didn't already, and the rating answers what the hover is
   usually for: how strong was that opponent. An unrated opponent keeps the bare
   name.
+- **A pairing probe says which boards its answer comes from.** "Why paired?"
+  and "Why not paired?" used to name the rules that got better or worse and
+  leave it there; they now break each rule down into the boards that move it —
+  the ones the alternative would add, then the ones it would drop, each with
+  its own worse-by or better-by — in the same shape the round's list of
+  compromises is read in, and below the boards that would change rather than
+  above them.
 - If `OSP_ADMIN_PASSWORD` is set, only published tournaments are visible to
   anyone without that password.
 - **A round finishing a long game could not be re-paired.** Forcing a pairing

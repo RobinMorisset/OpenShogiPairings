@@ -221,10 +221,11 @@
       "working": "計算中…",
       "bye": "（不戦勝）",
       "noChange": "変化なし — 組み合わせに影響はありません。",
-      "worseOn": "悪化する項目:",
-      "betterOn": "改善する項目:",
       "newBoardsLabel": "変わる卓:",
       "newBoard": "{a} 対 {b}",
+      "rulesLabel": "ルール別:",
+      "worseBy": "{units} 悪化",
+      "betterBy": "{units} 改善",
       "newBye": "{name} が不戦勝になります",
       "apply": "この組み合わせを指定する",
       "scopedOut": {
