@@ -31,9 +31,11 @@
   {#if state.phase === "loading"}
     <span>{$_("serverStatus.contacting")}</span>
   {:else if state.phase === "ok"}
+    <!-- The build description is present only when the version alone wouldn't
+         say which build this is: anything but a clean build of the release tag. -->
     <span
       >{$_("serverStatus.serverPrefix")} <code>{state.health.service}</code> v{state.health
-        .version}</span
+        .version}{state.health.build ? ` (${state.health.build})` : ""}</span
     >
   {:else}
     <span>{$_("serverStatus.unreachable")} <code>cargo run -p osp-server</code></span>

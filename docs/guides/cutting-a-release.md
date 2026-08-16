@@ -69,6 +69,28 @@ the rest.
    Use `vX.Y.Z` — the leading `v` is what the workflow's tag filter (`v*`)
    matches.
 
+   The tag is also what makes the build stop advertising a commit. Every build
+   bakes in its `git describe` (`crates/core/build.rs`) and the app's status
+   line shows it — `Server openshogipairings-server v1.3.0
+   (v1.3.0-14-ga031b12)`, fourteen commits past that release — because the
+   version number alone can't tell two builds between releases apart. A build
+   made from a tree with uncommitted changes appends `-dirty`, since no commit
+   describes it. When the tree is clean and HEAD carries a tag naming exactly
+   this version (`1.3.0` or `v1.3.0`), the description is dropped: the version
+   *is* the identity of the build. So the released installers show the bare
+   `v1.3.0`, and anything else says how far it strayed from one — and whether
+   even that was the whole truth.
+
+   Only `v*` tags count towards this, so a tag that isn't an app release — a
+   scratch marker, or an [`integer-blossom`](#releasing-the-integer-blossom-crate)
+   crates.io release, should you ever start tagging those — can't become the
+   name this app answers to. Keep such tags off the `v*` spelling.
+
+   Which means a release built from a dirty tree is visibly labelled as one.
+   That is deliberate: if you ever see `-dirty` on something you meant to
+   publish, the installers don't match the tag, and the fix is to commit (or
+   discard) the difference and rebuild rather than to ship it.
+
 4. **Watch the build** on the repo's **Actions** tab. The workflow runs four jobs
    in three stages:
 

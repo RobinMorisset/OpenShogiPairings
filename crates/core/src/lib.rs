@@ -88,6 +88,23 @@ pub const SERVICE_NAME: &str = "openshogipairings-server";
 /// The crate version, surfaced to clients so they can detect a server upgrade.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// How `git describe` names this build: `v1.3.0-14-ga031b12` for the fourteenth
+/// commit past that release, a bare hash where no release tag is reachable, and
+/// a `-dirty` suffix when the tree had uncommitted changes.
+///
+/// `None` when [`VERSION`] already identifies the build: a clean tree whose HEAD
+/// carried a tag naming this very version, i.e. the build *is* that release. See
+/// `build.rs`, which computes all of this at compile time; it is also `None` when
+/// building outside a git checkout.
+pub const GIT_DESCRIPTION: Option<&str> = {
+    let described = env!("OSP_GIT_DESCRIPTION");
+    if described.is_empty() {
+        None
+    } else {
+        Some(described)
+    }
+};
+
 /// Payload returned by the server's health check.
 ///
 /// Defined here (rather than in the server) precisely so every client — the web
@@ -101,6 +118,10 @@ pub struct HealthStatus {
     pub service: String,
     /// Semantic version of the running server.
     pub version: String,
+    /// How git describes the build the server came from, e.g.
+    /// `v1.3.0-14-ga031b12-dirty`, or `None` when `version` pins it down on its
+    /// own — see [`GIT_DESCRIPTION`].
+    pub build: Option<String>,
 }
 
 impl HealthStatus {
@@ -110,6 +131,7 @@ impl HealthStatus {
             status: "ok".to_string(),
             service: SERVICE_NAME.to_string(),
             version: VERSION.to_string(),
+            build: GIT_DESCRIPTION.map(str::to_string),
         }
     }
 }
@@ -124,5 +146,20 @@ mod tests {
         assert_eq!(status.status, "ok");
         assert_eq!(status.service, SERVICE_NAME);
         assert_eq!(status.version, VERSION);
+        assert_eq!(status.build.as_deref(), GIT_DESCRIPTION);
+    }
+
+    #[test]
+    fn git_description_is_a_single_word_when_present() {
+        // Either the build sits on the release tag with a clean tree (nothing to
+        // report), or it reports one `git describe` token. Anything blank or
+        // spread over several words would mean the build script fell through to
+        // a non-answer, or passed an error message on as if it were one.
+        if let Some(described) = GIT_DESCRIPTION {
+            assert!(
+                !described.is_empty() && !described.chars().any(char::is_whitespace),
+                "not a git description: {described:?}"
+            );
+        }
     }
 }

@@ -41,6 +41,8 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
 - **An application icon of its own** — a shogi piece bearing a pairing list —
   in place of the generic Tauri placeholder, and a favicon for the browser
   client, which had none at all.
+- The server status line now says **which build the server is**, not just its
+  version number, so a bug report can name it exactly.
 
 ### Fixed
 
