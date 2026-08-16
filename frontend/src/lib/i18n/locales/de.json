@@ -207,6 +207,7 @@
     "probe": {
       "modeForce": "Warum nicht gepaart?",
       "modeForbid": "Warum gepaart?",
+      "staleDisabled": "Nicht verfügbar: Die zugrunde liegenden Daten haben sich seit der Paarung dieser Runde geändert — die Antwort käme aus den heutigen Daten, nicht aus denen, die die Engine herangezogen hat.",
       "hintForce": "Wählen Sie zwei Spieler, um zu sehen, was es kosten würde, sie zu paaren.",
       "hintForbid": "Wählen Sie zwei gepaarte Spieler, um zu sehen, warum die Engine sie zusammengebracht hat.",
       "pick": "Spieler wählen…",

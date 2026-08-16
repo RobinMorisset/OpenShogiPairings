@@ -147,6 +147,14 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   its own worse-by or better-by — in the same shape the round's list of
   compromises is read in, and below the boards that would change rather than
   above them.
+- **A pairing probe is no longer offered on a round whose data has moved** since
+  it was paired — a corrected result in an earlier round, an edited rating, a
+  changed setting. It would answer from the data as it stands now rather than
+  from what the engine used, and against a pairing chosen under the old data,
+  which can make the engine's own choice look like a mistake it never made. The
+  two tabs are greyed and say so; the round's compromises, which are the record
+  of what the engine actually did, stay readable. Pairing the round again makes
+  the probe available once more.
 - If `OSP_ADMIN_PASSWORD` is set, only published tournaments are visible to
   anyone without that password.
 - **A round finishing a long game could not be re-paired.** Forcing a pairing

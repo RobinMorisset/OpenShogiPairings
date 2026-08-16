@@ -207,6 +207,7 @@
     "probe": {
       "modeForce": "Pourquoi pas ?",
       "modeForbid": "Pourquoi eux ?",
+      "staleDisabled": "Indisponible : les données sous-jacentes ont changé depuis l'appariement de cette ronde, la réponse porterait donc sur les données actuelles et non sur celles utilisées par le moteur.",
       "hintForce": "Choisissez deux joueurs pour voir ce que coûterait de les apparier.",
       "hintForbid": "Choisissez deux joueurs appariés pour voir pourquoi le moteur les a réunis.",
       "pick": "Choisir un joueur…",

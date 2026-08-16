@@ -578,12 +578,26 @@
   /** Whether the probe can run at all: it re-pairs the round to compare, and
    *  under four Swiss units there is nothing left to re-pair. */
   const probeAvailable = $derived(!!onProbe && swissPlayers.length >= 4);
+  /**
+   * ...and whether it may be asked at all. A probe re-solves from the data as
+   * it stands *now*, while the compromises beside it are the ledger frozen when
+   * the round was paired — so on a round whose data has moved since, the two
+   * tabs would answer from different worlds. Worse, the pairing it compares
+   * against was chosen under the old data and may no longer be the best one, so
+   * the probe can report an alternative as *better* — which reads as the engine
+   * having erred when all that happened is that a rating was corrected.
+   *
+   * Not a caveat anyone should have to hold in their head mid-tournament, so
+   * the two probe tabs are simply closed until the round is re-paired.
+   */
+  const probeUsable = $derived(probeAvailable && !explanationStale);
   /** The tab actually showing — `explainTab`, unless it names one that isn't
-   *  there (a round with no compromises, a field too small to probe). */
+   *  there (a round with no compromises, a field too small to probe, or a probe
+   *  closed by the round's data having moved). */
   const shownTab = $derived<"compromises" | "probe">(
     explainTab === "compromises" && !hasReport
       ? "probe"
-      : explainTab === "probe" && !probeAvailable
+      : explainTab === "probe" && !probeUsable
         ? "compromises"
         : explainTab,
   );
@@ -1250,7 +1264,7 @@
        what the round conceded, why two units were paired, why two others were
        not. The last two are the probe's two modes, which were a toggle of their
        own inside it until the panel gave them a tab strip to live in. -->
-  {#if hasReport || probeAvailable}
+  {#if hasReport || probeUsable}
     <div class="explain print-hide">
       <button
         type="button"
@@ -1279,7 +1293,11 @@
         <div class="explain-body">
           <!-- The strip is the probe's own mode switch, grown a third tab. A
                field too small to probe therefore has none: the compromises are
-               then the only answer there is, and need no tab to be picked. -->
+               then the only answer there is, and need no tab to be picked.
+
+               A round whose data has moved keeps its two probe tabs on show and
+               closed, rather than losing them: a tab that says why it cannot
+               answer is worth more than one that has quietly gone. -->
           {#if probeAvailable}
             <div class="explain-tabs" role="tablist">
               {#if hasReport}
@@ -1296,7 +1314,8 @@
                 type="button"
                 class="explain-tab control-sm control-quiet"
                 class:active={onProbeTab("forbid")}
-                disabled={probeBusy}
+                disabled={probeBusy || !probeUsable}
+                title={probeUsable ? undefined : $_("roundView.probe.staleDisabled")}
                 onclick={() => showProbe("forbid")}
               >
                 {$_("roundView.probe.modeForbid")}
@@ -1305,7 +1324,8 @@
                 type="button"
                 class="explain-tab control-sm control-quiet"
                 class:active={onProbeTab("force")}
-                disabled={probeBusy}
+                disabled={probeBusy || !probeUsable}
+                title={probeUsable ? undefined : $_("roundView.probe.staleDisabled")}
                 onclick={() => showProbe("force")}
               >
                 {$_("roundView.probe.modeForce")}

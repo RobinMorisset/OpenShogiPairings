@@ -207,6 +207,7 @@
     "probe": {
       "modeForce": "Prečo nie sú spárovaní?",
       "modeForbid": "Prečo sú spárovaní?",
+      "staleDisabled": "Nedostupné: údaje, z ktorých toto vychádza, sa od zlosovania tohto kola zmenili, takže odpoveď by vychádzala z dnešných údajov, a nie z tých, ktoré použil algoritmus.",
       "hintForce": "Vyberte dvoch hráčov a uvidíte, čo by stálo ich vzájomné spárovanie.",
       "hintForbid": "Vyberte dvoch spárovaných hráčov a uvidíte, prečo ich algoritmus dal k sebe.",
       "pick": "Vyberte hráča…",
