@@ -182,6 +182,7 @@
     "cupByeOpponent": "VOĽNO V POHÁRI",
     "explanation": {
       "reportTitle": "Prečo práve tieto dvojice?",
+      "compromisesTab": "Ústupky",
       "staleWarning": "Údaje, z ktorých toto vychádza, sa od zlosovania tohto kola zmenili — bol upravený výsledok, rating alebo nastavenie. Nižšie sú aj naďalej dôvody, ktoré vtedy použil algoritmus.",
       "compromiseOn": "Ústupok pri: {rules}",
       "ruleCount": "{count} × {rule}",
@@ -204,7 +205,6 @@
       }
     },
     "probe": {
-      "title": "Otázka k spárovaniu",
       "modeForce": "Prečo nie sú spárovaní?",
       "modeForbid": "Prečo sú spárovaní?",
       "hintForce": "Vyberte dvoch hráčov a uvidíte, čo by stálo ich vzájomné spárovanie.",

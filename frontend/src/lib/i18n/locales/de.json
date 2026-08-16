@@ -182,6 +182,7 @@
     "cupByeOpponent": "POKAL-FREILOS",
     "explanation": {
       "reportTitle": "Warum diese Paarungen?",
+      "compromisesTab": "Kompromisse",
       "staleWarning": "Die zugrunde liegenden Daten haben sich seit der Paarung dieser Runde geändert — ein Ergebnis, eine Wertung oder eine Einstellung wurde bearbeitet. Dies sind weiterhin die Gründe, die die Engine damals herangezogen hat.",
       "compromiseOn": "Kompromiss bei: {rules}",
       "ruleCount": "{count} × {rule}",
@@ -204,7 +205,6 @@
       }
     },
     "probe": {
-      "title": "Eine Paarung hinterfragen",
       "modeForce": "Warum nicht gepaart?",
       "modeForbid": "Warum gepaart?",
       "hintForce": "Wählen Sie zwei Spieler, um zu sehen, was es kosten würde, sie zu paaren.",

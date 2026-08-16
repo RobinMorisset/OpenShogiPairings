@@ -379,7 +379,6 @@
 
   // Report line: rules relaxed this round, with counts, in priority order.
   const hasReport = $derived((explanation?.report.length ?? 0) > 0);
-  let reportOpen = $state(false);
 
   // A ledger as readable text: "A vs B" or "X (bye)". It names whatever the
   // engine paired — players in an individual tournament, teams in a team one.
@@ -555,7 +554,6 @@
     return [...ids].sort((x, y) => unitName(x).localeCompare(unitName(y)));
   });
 
-  let probeOpen = $state(false);
   let probeMode = $state<CounterfactualMode>("force");
   let probeA = $state<number | "">("");
   let probeB = $state<number | "">("");
@@ -565,6 +563,40 @@
   // shows for a force probe, not after the pickers/mode change).
   let resultMode = $state<CounterfactualMode>("force");
   let probeError = $state("");
+
+  // --- The "Why these pairings?" panel --------------------------------------
+  //
+  // One panel below the boards, answering the same question three ways: what
+  // the round conceded (the report above), why the engine paired two units, and
+  // why it didn't. The last two are the probe in its two modes, so a tab there
+  // sets `probeMode` rather than replacing it — which is also why stepping over
+  // to the compromises and back leaves an answer the probe has already computed
+  // alone (only changing the pickers or the mode clears it, see below).
+  let explainOpen = $state(false);
+  let explainTab = $state<"compromises" | "probe">("compromises");
+  /** Whether the probe can run at all: it re-pairs the round to compare, and
+   *  under four Swiss units there is nothing left to re-pair. */
+  const probeAvailable = $derived(!!onProbe && swissPlayers.length >= 4);
+  /** The tab actually showing — `explainTab`, unless it names one that isn't
+   *  there (a round with no compromises, a field too small to probe). */
+  const shownTab = $derived<"compromises" | "probe">(
+    explainTab === "compromises" && !hasReport
+      ? "probe"
+      : explainTab === "probe" && !probeAvailable
+        ? "compromises"
+        : explainTab,
+  );
+
+  function showProbe(mode: CounterfactualMode) {
+    explainTab = "probe";
+    probeMode = mode;
+  }
+
+  /** Whether a probe tab is the one showing: the two share `shownTab`, and are
+   *  told apart by the mode they would run in. */
+  function onProbeTab(mode: CounterfactualMode): boolean {
+    return shownTab === "probe" && probeMode === mode;
+  }
 
   // Reset the probe whenever the round changes (its pairings changed under us).
   function resetProbe() {
@@ -1179,173 +1211,186 @@
     {/if}
   {/if}
 
-  <!-- Both explanations of the round live below it, next to each other: the
+  <!-- Everything that explains the round lives below it, in one panel: the
        pairings are what the referee came to read, and neither the tally of
        compromises nor the questions asked of a board is worth pushing them down
-       the page for. -->
-  {#if hasReport}
-    <div class="report print-hide">
+       the page for. Its title is the question; its tabs are the three answers —
+       what the round conceded, why two units were paired, why two others were
+       not. The last two are the probe's two modes, which were a toggle of their
+       own inside it until the panel gave them a tab strip to live in. -->
+  {#if hasReport || probeAvailable}
+    <div class="explain print-hide">
       <button
         type="button"
-        class="report-toggle"
-        aria-expanded={reportOpen}
-        onclick={() => (reportOpen = !reportOpen)}
+        class="explain-toggle"
+        aria-expanded={explainOpen}
+        onclick={() => (explainOpen = !explainOpen)}
       >
-        <span class="report-title">{$_("roundView.explanation.reportTitle")}</span>
-        <span class="report-summary"
-          >{explanation?.report
-            .map((t) =>
-              $_("roundView.explanation.ruleCount", {
-                values: { count: t.boards, rule: ruleLabel(t.rule) },
-              }),
-            )
-            .join(" · ")}</span
+        <span class="explain-title">{$_("roundView.explanation.reportTitle")}</span>
+        <!-- The tally reads as the panel's summary, so it stays legible with
+             the panel shut — it is the one answer that needs no question. But
+             not once the data behind it has moved: the caveat that says so is
+             inside, and a header cannot state these counts flatly while the tab
+             they come from is busy qualifying them. -->
+        <span class="explain-summary"
+          >{#if !explanationStale}{explanation?.report
+              .map((t) =>
+                $_("roundView.explanation.ruleCount", {
+                  values: { count: t.boards, rule: ruleLabel(t.rule) },
+                }),
+              )
+              .join(" · ")}{/if}</span
         >
-        <span class="report-caret">{reportOpen ? "▾" : "▸"}</span>
+        <span class="explain-caret">{explainOpen ? "▾" : "▸"}</span>
       </button>
-      {#if explanationStale}
-        <p class="report-stale">{$_("roundView.explanation.staleWarning")}</p>
-      {/if}
-      {#if reportOpen}
-        <ul class="report-list">
-          {#each explanation?.report ?? [] as total (total.rule)}
-            <li>
-              <div class="report-rule-head">
-                <span class="report-rule">{ruleLabel(total.rule)}</span>
-                <span class="report-boards"
-                  >{$_("roundView.explanation.boardsCount", {
-                    values: { count: total.boards },
-                  })}</span
+      {#if explainOpen}
+        <div class="explain-body">
+          <!-- The strip is the probe's own mode switch, grown a third tab. A
+               field too small to probe therefore has none: the compromises are
+               then the only answer there is, and need no tab to be picked. -->
+          {#if probeAvailable}
+            <div class="explain-tabs" role="tablist">
+              {#if hasReport}
+                <button
+                  type="button"
+                  class="explain-tab control-sm control-quiet"
+                  class:active={shownTab === "compromises"}
+                  onclick={() => (explainTab = "compromises")}
                 >
-              </div>
-              <ul class="report-affected">
-                {#each boardsForRule(total.rule) as board (board.label)}
-                  <li>
-                    <span>{board.label}</span>
-                    <span class="report-units">{board.units}</span>
-                  </li>
-                {/each}
-              </ul>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </div>
-  {/if}
-
-  {#if onProbe && swissPlayers.length >= 4}
-    <div class="probe print-hide">
-      <button
-        type="button"
-        class="probe-toggle"
-        aria-expanded={probeOpen}
-        onclick={() => (probeOpen = !probeOpen)}
-      >
-        <span class="probe-title">{$_("roundView.probe.title")}</span>
-        <span class="report-caret">{probeOpen ? "▾" : "▸"}</span>
-      </button>
-      {#if probeOpen}
-        <div class="probe-body">
-          <div class="probe-modes">
-            <button
-              type="button"
-              class="probe-mode control-sm control-quiet"
-              class:active={probeMode === "force"}
-              disabled={probeBusy}
-              onclick={() => (probeMode = "force")}
-            >
-              {$_("roundView.probe.modeForce")}
-            </button>
-            <button
-              type="button"
-              class="probe-mode control-sm control-quiet"
-              class:active={probeMode === "forbid"}
-              disabled={probeBusy}
-              onclick={() => (probeMode = "forbid")}
-            >
-              {$_("roundView.probe.modeForbid")}
-            </button>
-          </div>
-          <p class="probe-hint">
-            {probeMode === "force"
-              ? $_(teamMode ? "roundView.probe.hintForceTeams" : "roundView.probe.hintForce")
-              : $_(teamMode ? "roundView.probe.hintForbidTeams" : "roundView.probe.hintForbid")}
-          </p>
-          <div class="probe-controls">
-            <Combobox
-              id="probe-a"
-              options={probeAOptions}
-              text={pickedName(probeA)}
-              placeholder={probePickLabel}
-              ariaLabel={$_("roundView.probe.sideA")}
-              noMatch={probeNoMatch}
-              disabled={probeBusy}
-              onPick={(option) => (probeA = Number(option.key))}
-            />
-            {#if probeMode === "force"}
-              <span class="probe-vs">{$_("roundView.probe.and")}</span>
+                  {$_("roundView.explanation.compromisesTab")}
+                </button>
+              {/if}
+              <button
+                type="button"
+                class="explain-tab control-sm control-quiet"
+                class:active={onProbeTab("forbid")}
+                disabled={probeBusy}
+                onclick={() => showProbe("forbid")}
+              >
+                {$_("roundView.probe.modeForbid")}
+              </button>
+              <button
+                type="button"
+                class="explain-tab control-sm control-quiet"
+                class:active={onProbeTab("force")}
+                disabled={probeBusy}
+                onclick={() => showProbe("force")}
+              >
+                {$_("roundView.probe.modeForce")}
+              </button>
+            </div>
+          {/if}
+          {#if shownTab === "compromises"}
+            <!-- The ledger is what the engine wrote at pairing time, so the
+                 caveat belongs to this tab: the two probe tabs re-run the
+                 engine against the data as it stands now. -->
+            {#if explanationStale}
+              <p class="report-stale">{$_("roundView.explanation.staleWarning")}</p>
+            {/if}
+            <ul class="report-list">
+              {#each explanation?.report ?? [] as total (total.rule)}
+                <li>
+                  <div class="report-rule-head">
+                    <span class="report-rule">{ruleLabel(total.rule)}</span>
+                    <span class="report-boards"
+                      >{$_("roundView.explanation.boardsCount", {
+                        values: { count: total.boards },
+                      })}</span
+                    >
+                  </div>
+                  <ul class="report-affected">
+                    {#each boardsForRule(total.rule) as board (board.label)}
+                      <li>
+                        <span>{board.label}</span>
+                        <span class="report-units">{board.units}</span>
+                      </li>
+                    {/each}
+                  </ul>
+                </li>
+              {/each}
+            </ul>
+          {:else}
+            <p class="probe-hint">
+              {probeMode === "force"
+                ? $_(teamMode ? "roundView.probe.hintForceTeams" : "roundView.probe.hintForce")
+                : $_(teamMode ? "roundView.probe.hintForbidTeams" : "roundView.probe.hintForbid")}
+            </p>
+            <div class="probe-controls">
               <Combobox
-                id="probe-b"
-                options={probeBOptions}
-                text={pickedName(probeB)}
+                id="probe-a"
+                options={probeAOptions}
+                text={pickedName(probeA)}
                 placeholder={probePickLabel}
-                ariaLabel={$_("roundView.probe.sideB")}
+                ariaLabel={$_("roundView.probe.sideA")}
                 noMatch={probeNoMatch}
                 disabled={probeBusy}
-                onPick={(option) => (probeB = Number(option.key))}
+                onPick={(option) => (probeA = Number(option.key))}
               />
-            {:else}
-              <span class="probe-vs">{$_("roundView.probe.pairedWith")}</span>
-              <span class="probe-partner">
-                {#if probeA}
-                  {forbidPartner ? probeName(forbidPartner) : $_("roundView.probe.noPartner")}
-                {:else}
-                  —
-                {/if}
-              </span>
-            {/if}
-            <button type="button" class="ghost" disabled={!canProbe} onclick={runProbe}>
-              {$_("roundView.probe.submit")}
-            </button>
-          </div>
+              {#if probeMode === "force"}
+                <span class="probe-vs">{$_("roundView.probe.and")}</span>
+                <Combobox
+                  id="probe-b"
+                  options={probeBOptions}
+                  text={pickedName(probeB)}
+                  placeholder={probePickLabel}
+                  ariaLabel={$_("roundView.probe.sideB")}
+                  noMatch={probeNoMatch}
+                  disabled={probeBusy}
+                  onPick={(option) => (probeB = Number(option.key))}
+                />
+              {:else}
+                <span class="probe-vs">{$_("roundView.probe.pairedWith")}</span>
+                <span class="probe-partner">
+                  {#if probeA}
+                    {forbidPartner ? probeName(forbidPartner) : $_("roundView.probe.noPartner")}
+                  {:else}
+                    —
+                  {/if}
+                </span>
+              {/if}
+              <button type="button" class="ghost" disabled={!canProbe} onclick={runProbe}>
+                {$_("roundView.probe.submit")}
+              </button>
+            </div>
 
-          {#if probeBusy}
-            <p class="probe-status">{$_("roundView.probe.working")}</p>
-          {:else if probeError}
-            <p class="probe-status error">{probeError}</p>
-          {:else if probeResult}
-            {#if probeResult.scoped_out}
-              <p class="probe-status">
-                {scopedOutText(probeResult.scoped_out)}
-              </p>
-            {:else if probeResult.changed.length === 0}
-              <p class="probe-status">{$_("roundView.probe.noChange")}</p>
-            {:else}
-              <div class="probe-result">
-                {#if worseRules.length}
-                  <p class="probe-cost">
-                    <strong>{$_("roundView.probe.worseOn")}</strong>
-                    {worseRules.join(", ")}
-                  </p>
-                {/if}
-                {#if betterRules.length}
-                  <p class="probe-cost">
-                    <strong>{$_("roundView.probe.betterOn")}</strong>
-                    {betterRules.join(", ")}
-                  </p>
-                {/if}
-                <p class="probe-boards-label">{$_("roundView.probe.newBoardsLabel")}</p>
-                <ul class="probe-boards">
-                  {#each probeResult.changed as board, i (i)}
-                    <li>{changedBoardText(board)}</li>
-                  {/each}
-                </ul>
-                {#if canApplyForce}
-                  <button type="button" class="probe-apply" disabled={probeBusy} onclick={applyForce}>
-                    {$_("roundView.probe.apply")}
-                  </button>
-                {/if}
-              </div>
+            {#if probeBusy}
+              <p class="probe-status">{$_("roundView.probe.working")}</p>
+            {:else if probeError}
+              <p class="probe-status error">{probeError}</p>
+            {:else if probeResult}
+              {#if probeResult.scoped_out}
+                <p class="probe-status">
+                  {scopedOutText(probeResult.scoped_out)}
+                </p>
+              {:else if probeResult.changed.length === 0}
+                <p class="probe-status">{$_("roundView.probe.noChange")}</p>
+              {:else}
+                <div class="probe-result">
+                  {#if worseRules.length}
+                    <p class="probe-cost">
+                      <strong>{$_("roundView.probe.worseOn")}</strong>
+                      {worseRules.join(", ")}
+                    </p>
+                  {/if}
+                  {#if betterRules.length}
+                    <p class="probe-cost">
+                      <strong>{$_("roundView.probe.betterOn")}</strong>
+                      {betterRules.join(", ")}
+                    </p>
+                  {/if}
+                  <p class="probe-boards-label">{$_("roundView.probe.newBoardsLabel")}</p>
+                  <ul class="probe-boards">
+                    {#each probeResult.changed as board, i (i)}
+                      <li>{changedBoardText(board)}</li>
+                    {/each}
+                  </ul>
+                  {#if canApplyForce}
+                    <button type="button" class="probe-apply" disabled={probeBusy} onclick={applyForce}>
+                      {$_("roundView.probe.apply")}
+                    </button>
+                  {/if}
+                </div>
+              {/if}
             {/if}
           {/if}
         </div>
@@ -1394,7 +1439,7 @@
     gap: 0.5rem;
     margin-bottom: 0.5rem;
   }
-  /* Matches `.probe-mode.active`: an accent border on the ghost button's
+  /* Matches `.explain-tab.active`: an accent border on the ghost button's
      transparent background. (`--text-on-accent` is for text *on* an accent
      fill, so it would be invisible here.) */
   .round-toolbar .ghost.active {
@@ -1460,8 +1505,7 @@
      of that measurement and `min-width` gives them back whatever the table and
      the window settled on, so they follow the page instead of stretching it.
      Same reasoning, and same pair of declarations, as the card's own children. */
-  .report,
-  .probe {
+  .explain {
     width: 0;
     min-width: 100%;
   }
@@ -1473,11 +1517,11 @@
     max-width: 70ch;
   }
 
-  .report {
+  .explain {
     margin-top: 1rem;
     font-size: 0.85rem;
   }
-  .report-toggle {
+  .explain-toggle {
     display: flex;
     align-items: baseline;
     gap: 0.5rem;
@@ -1491,17 +1535,17 @@
     text-align: left;
     cursor: pointer;
   }
-  .report-toggle:hover {
+  .explain-toggle:hover {
     background: var(--bg-hover);
   }
-  .report-title {
+  .explain-title {
     font-weight: 600;
   }
-  .report-summary {
+  .explain-summary {
     color: var(--text-secondary);
     flex: 1;
   }
-  .report-caret {
+  .explain-caret {
     color: var(--text-tertiary);
   }
   /* The ledger is still the one this round was paired from; what moved is the
@@ -1553,49 +1597,27 @@
     color: var(--text-tertiary);
   }
 
-  .probe {
-    margin-top: 1rem;
-    font-size: 0.85rem;
-  }
-  .probe-toggle {
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-    padding: 0.35rem 0.5rem;
-    border: 1px solid var(--border-divider);
-    border-radius: 0.4rem;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
-  }
-  .probe-toggle:hover {
-    background: var(--bg-hover);
-  }
-  .probe-title {
-    font-weight: 600;
-  }
-  .probe-body {
+  .explain-body {
     margin-top: 0.5rem;
     padding: 0.5rem;
     border: 1px solid var(--border-divider);
     border-radius: 0.4rem;
   }
-  .probe-modes {
+  .explain-tabs {
     display: flex;
     gap: 0.4rem;
     margin-bottom: 0.5rem;
   }
-  .probe-mode {
+  .explain-tab {
     background: transparent;
     color: var(--text-secondary);
     font: inherit;
     cursor: pointer;
   }
-  .probe-mode:hover:not(:disabled) {
+  .explain-tab:hover:not(:disabled) {
     background: var(--bg-hover);
   }
-  .probe-mode.active {
+  .explain-tab.active {
     border-color: var(--color-accent, var(--border-strong));
     color: var(--text-primary);
     font-weight: 600;

@@ -182,6 +182,7 @@
     "cupByeOpponent": "PAUZA PUCHAROWA",
     "explanation": {
       "reportTitle": "Dlaczego takie kojarzenie?",
+      "compromisesTab": "Ustępstwa",
       "staleWarning": "Dane leżące u podstaw tego kojarzenia zmieniły się od czasu rundy — zmieniono wynik, ranking lub ustawienie. Poniżej nadal widnieją powody, którymi algorytm kierował się wówczas.",
       "compromiseOn": "Ustępstwa w zakresie: {rules}",
       "ruleCount": "{count} × {rule}",
@@ -204,7 +205,6 @@
       }
     },
     "probe": {
-      "title": "Zapytaj o kojarzenie",
       "modeForce": "Dlaczego nie razem?",
       "modeForbid": "Dlaczego razem?",
       "hintForce": "Wybierz dwóch graczy, aby zobaczyć, ile kosztowałoby skojarzenie ich ze sobą.",

@@ -182,6 +182,7 @@
     "cupByeOpponent": "EXEMPT COUPE",
     "explanation": {
       "reportTitle": "Pourquoi ces appariements ?",
+      "compromisesTab": "Compromis",
       "staleWarning": "Les données sous-jacentes ont changé depuis l'appariement de cette ronde : un résultat, un classement ou un réglage a été modifié. Ce sont toujours les raisons utilisées par le moteur à l'époque.",
       "compromiseOn": "Compromis sur : {rules}",
       "ruleCount": "{count} × {rule}",
@@ -204,7 +205,6 @@
       }
     },
     "probe": {
-      "title": "Interroger un appariement",
       "modeForce": "Pourquoi pas ?",
       "modeForbid": "Pourquoi eux ?",
       "hintForce": "Choisissez deux joueurs pour voir ce que coûterait de les apparier.",

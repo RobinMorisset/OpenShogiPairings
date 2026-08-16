@@ -182,6 +182,7 @@
     "cupByeOpponent": "CUP BYE",
     "explanation": {
       "reportTitle": "Why these pairings?",
+      "compromisesTab": "Compromises",
       "staleWarning": "The data behind this has changed since the round was paired — a result, a rating or a setting has been edited. These are still the reasons the engine used at the time.",
       "compromiseOn": "Compromise on: {rules}",
       "ruleCount": "{count} × {rule}",
@@ -204,7 +205,6 @@
       }
     },
     "probe": {
-      "title": "Question a pairing",
       "modeForce": "Why not paired?",
       "modeForbid": "Why paired?",
       "hintForce": "Pick two players to see what pairing them together would cost.",
