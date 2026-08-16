@@ -1458,6 +1458,15 @@
   .card.wide-table {
     width: max-content;
     min-width: 100%;
+    /* The same trap this card sets for its children below, one level up: that
+       `min-width` is a percentage, so without this it floors the *content* box
+       at the page width and the card's own padding and border — 3rem and 2px —
+       land outside it. Every tab with this class was that much wider than every
+       tab without, whatever it contained, which is why they all came out to
+       exactly the same width. `max-content` is a keyword, not a length, so
+       `box-sizing` leaves it alone (css-sizing-3 §5.1): a table that really is
+       wider than the page still widens the card, padding outside it, as before. */
+    box-sizing: border-box;
   }
   /* `max-content` asks every child how wide it would like to be with nothing
      wrapped — which for the button rows is "all of them side by side", and
