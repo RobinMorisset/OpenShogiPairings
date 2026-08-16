@@ -357,7 +357,7 @@
 {/snippet}
 
 <div class="player-toolbar print-hide">
-  <button type="button" class="ghost control-lg" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
+  <button type="button" class="ghost control-sm" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
 </div>
 {#if showEligible}
   <p class="elig-count">{$_("playerList.eligibleCount", { values: { count: eligibleCount } })}</p>

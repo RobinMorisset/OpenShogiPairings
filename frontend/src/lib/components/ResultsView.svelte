@@ -915,7 +915,7 @@
       </p>
     {/if}
     {#if !staticPage}
-      <button type="button" class="ghost print-hide" onclick={() => printPage(true)}
+      <button type="button" class="ghost control-sm print-hide" onclick={() => printPage(true)}
         >🖨 {$_("roundView.print")}</button
       >
     {/if}

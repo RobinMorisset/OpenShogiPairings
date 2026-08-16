@@ -613,8 +613,12 @@
   }
   /* Matches the round view's toolbar, so the print buttons sit in the same
      corner whether the round is being drafted or played. */
+  /* Centred for the same reason as `.round-toolbar`: the result-sheets button
+     is wrapped, and a stretched wrapper would hang its popover below the
+     button's real edge. */
   .draft-toolbar {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
     margin-bottom: -0.75rem;
   }

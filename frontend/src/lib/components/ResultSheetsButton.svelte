@@ -60,7 +60,7 @@
 <div class="sheets">
   <button
     type="button"
-    class="ghost"
+    class="ghost control-sm"
     class:active={open}
     data-testid="print-result-sheets"
     aria-expanded={open}
@@ -99,10 +99,10 @@
         </p>
       {/if}
       <div class="actions">
-        <button type="button" class="ghost" onclick={() => (open = false)}>
+        <button type="button" class="ghost control-sm" onclick={() => (open = false)}>
           {$_("resultSheets.cancel")}
         </button>
-        <button type="button" disabled={!valid || busy} onclick={print}>
+        <button type="button" class="control-sm" disabled={!valid || busy} onclick={print}>
           {$_("resultSheets.print")}
         </button>
       </div>

@@ -810,7 +810,7 @@
     <div class="round-toolbar print-hide">
       <button
         type="button"
-        class="ghost"
+        class="ghost control-sm"
         class:active={alphabetical}
         aria-pressed={alphabetical}
         title={$_("roundView.alphabeticalTitle")}
@@ -818,7 +818,7 @@
       >
         🔤 {$_("roundView.alphabetical")}
       </button>
-      <button type="button" class="ghost control-lg" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
+      <button type="button" class="ghost control-sm" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
       {#if onPrintSheets}
         <ResultSheetsButton
           playerCount={players.length}
@@ -1348,7 +1348,7 @@
                   {/if}
                 </span>
               {/if}
-              <button type="button" class="ghost" disabled={!canProbe} onclick={runProbe}>
+              <button type="button" class="ghost control-sm" disabled={!canProbe} onclick={runProbe}>
                 {$_("roundView.probe.submit")}
               </button>
             </div>
@@ -1433,8 +1433,14 @@
     font-weight: 400;
   }
 
+  /* Centred rather than stretched, which is the default: the result-sheets
+     button comes wrapped in its own element (the popover hangs off it), and a
+     stretched wrapper grows to the row's height while the button inside it
+     keeps its own — so that one button read a size smaller than the two beside
+     it, and the popover hung from a phantom edge below it. */
   .round-toolbar {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
     gap: 0.5rem;
     margin-bottom: 0.5rem;
