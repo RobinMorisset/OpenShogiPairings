@@ -117,6 +117,12 @@ export interface SheetPrint {
  * The two "print something other than the page" modes. Each is set only for the
  * duration of its print: the flag switches the print stylesheet over, and — for
  * the sheets — supplies the slips themselves.
+ *
+ * "For the duration" is the whole contract: the document has to be in the DOM
+ * before the print starts and still there when it renders, or what comes out is
+ * the ordinary page. That is why `printPage` resolves when the print is over
+ * rather than when it starts (see `platform.ts`), and why nothing below clears
+ * a flag before awaiting it.
  */
 export class PrintJobs {
   qr = $state(false);

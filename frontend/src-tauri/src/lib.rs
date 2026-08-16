@@ -1,5 +1,8 @@
 use tauri::Manager;
 
+#[cfg(target_os = "macos")]
+mod print_macos;
+
 /// The base URL of the embedded API server, resolved at startup and exposed to
 /// the frontend via the [`api_base`] command.
 struct ApiBase(String);
@@ -29,41 +32,34 @@ fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
-/// Open the native print dialog for the calling webview window.
+/// Open the native print dialog for the calling webview window, and answer only
+/// once the print is over.
 ///
 /// The webview's JavaScript `window.print()` is a no-op in WKWebView on macOS,
 /// so the print buttons must go through this native path instead, which
-/// delegates to the platform webview's own print operation.
+/// delegates to the platform webview's own print operation. `landscape`
+/// requests landscape paper, which that path does not take from the CSS
+/// `@page { size: landscape }` the browser build relies on.
 ///
-/// `landscape` requests landscape paper. wry's macOS print builds its
-/// `NSPrintInfo` from `sharedPrintInfo()` and never touches orientation (and it
-/// ignores the CSS `@page { size: landscape }` the browser build relies on), so
-/// we set the shared print info's orientation ourselves just before printing —
-/// see [`set_mac_print_orientation`]. This runs on the main thread because
-/// synchronous Tauri commands do.
+/// Waiting for the print to *finish* is as much of the contract as starting it:
+/// the QR-code and result-sheet buttons print a document they put into the DOM
+/// for the occasion and take out again as soon as this returns (see
+/// `publication.svelte.ts`), so returning early means printing the ordinary
+/// page instead. On macOS that is what [`print_macos::print_and_wait`] is for.
+///
+/// Elsewhere `WebviewWindow::print` is all there is — on Windows it opens
+/// WebView2's print UI and returns just as immediately, with no completion to
+/// hook into, so those two buttons keep that race there.
 #[tauri::command]
-fn print_window(webview_window: tauri::WebviewWindow, landscape: bool) -> Result<(), String> {
+async fn print_window(webview_window: tauri::WebviewWindow, landscape: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    set_mac_print_orientation(landscape);
+    let result = print_macos::print_and_wait(webview_window, landscape).await;
     #[cfg(not(target_os = "macos"))]
-    let _ = landscape;
-    webview_window.print().map_err(|e| e.to_string())
-}
-
-/// Set the *shared* `NSPrintInfo`'s paper orientation, which wry's print
-/// operation then inherits. A global side effect that persists between print
-/// jobs, so every caller passes its intended orientation explicitly.
-#[cfg(target_os = "macos")]
-fn set_mac_print_orientation(landscape: bool) {
-    use objc2_app_kit::{NSPaperOrientation, NSPrintInfo};
-    let orientation = if landscape {
-        NSPaperOrientation::Landscape
-    } else {
-        NSPaperOrientation::Portrait
+    let result = {
+        let _ = landscape;
+        webview_window.print().map_err(|e| e.to_string())
     };
-    // `sharedPrintInfo` is the process-wide singleton; mutating it on the main
-    // thread (where sync commands run) is what AppKit expects.
-    NSPrintInfo::sharedPrintInfo().setOrientation(orientation);
+    result
 }
 
 /// Where the embedded server persists its tournaments, so the desktop app's

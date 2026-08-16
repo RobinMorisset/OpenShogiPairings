@@ -61,10 +61,18 @@ tokio = { version = "1", features = ["net", "rt"] }
 # tournaments live alongside them.
 dirs = "5"
 
-# macOS-only: Tauri/wry's native print builds its NSPrintInfo from the *shared*
-# print info and never sets orientation, so the wide Results table would always
-# print portrait. We reach for AppKit to set the shared print info's orientation
-# just before printing. Versions pinned to what wry already resolves.
+# macOS-only: Tauri/wry's native print starts an AppKit modal print operation
+# and returns before the page has been rendered, which is no good for the two
+# buttons that print a document put into the DOM for the occasion. We build the
+# print operation ourselves instead, orientation included (wry never set it, so
+# the wide Results table always printed portrait) — see `src/print_macos.rs`.
+# Versions pinned to what wry already resolves.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSPrintInfo"] }
+objc2-app-kit = { version = "0.3", features = [
+  "NSPrintInfo",
+  "NSPrintOperation",
+  "NSResponder",
+  "NSWindow",
+] }
+objc2-web-kit = { version = "0.3", features = ["WKWebView"] }
