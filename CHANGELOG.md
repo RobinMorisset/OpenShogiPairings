@@ -61,6 +61,11 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   make the standings fail outright and an open round draft refuse to be
   confirmed. They are now removed from the rounds and the draft along with
   everything else.
+- **Loading a CSV roster twice registered every player twice**, leaving a list
+  of homonyms to delete one by one. A file is now imported for the players it
+  names who are *not* registered yet; the others are skipped, and named above the
+  player list so you can see what was left out. Names are matched on last +
+  first name, ignoring case and accents.
 - **A round with no game to play could not be finished**, and so blocked every
   later round: a round where every player is byed, absent or still on a long
   board has no board whose result could complete it.

@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+use crate::csv_import::name_key;
 use crate::cup::{cup_field_size, Cup, CupBracketView, CupPairings, CupPodium, CUP_SIZES};
 use crate::pairing::{
     counterfactual_forbid, counterfactual_force, explain_pairing, pair_round_weighted,
@@ -599,6 +600,57 @@ impl Tournament {
         } else {
             SitoutValue::Zero
         }
+    }
+
+    /// Register a whole roster at once — a CSV import — skipping every entry
+    /// whose name is already registered, and returning those skipped names.
+    ///
+    /// A referee who loads a file twice (the usual case: a corrected export of
+    /// the same roster) means "make sure these players are in", not "register
+    /// them a second time". Adding them again produced a tournament full of
+    /// homonyms that then had to be removed one by one, so an entry naming a
+    /// player already registered is left out.
+    ///
+    /// Names are compared on last + first name, folded the same way the FESA and
+    /// licence lookups fold them (see [`crate::csv_import`]), so `LE ROUX
+    /// Frédéric` matches `Le-Roux frederic`. Nothing else is compared: a
+    /// homonym's rating or club may differ, and it is still treated as the same
+    /// person — two genuinely different players with the same full name must be
+    /// registered by hand. Entries are also compared against the ones this call
+    /// has already added, so a file listing the same player twice registers them
+    /// once.
+    ///
+    /// The skipped names are returned (in file order, as the file wrote them) so
+    /// the caller can tell the referee what was left out rather than quietly
+    /// dropping rows.
+    ///
+    /// An entry [`add_player`](Self::add_player) refuses fails the whole import —
+    /// only *duplicates* are skipped. Note that this is not atomic on its own:
+    /// entries before the failing one have already been registered, so the caller
+    /// must discard the tournament rather than keep it (which is what the
+    /// server's `store.mutate` does, mutating a clone).
+    pub fn add_players_skipping_duplicates(
+        &mut self,
+        new_players: Vec<NewPlayer>,
+    ) -> Result<Vec<String>, TournamentError> {
+        let mut registered: HashSet<String> = self
+            .players
+            .iter()
+            .map(|p| name_key(&p.last_name, &p.first_name))
+            .collect();
+        let mut skipped = Vec::new();
+        for new_player in new_players {
+            let last = new_player.last_name.trim();
+            let first = new_player.first_name.as_deref().unwrap_or_default().trim();
+            if !registered.insert(name_key(last, first)) {
+                // `LE ROUX Frédéric`, as the file spelled it — the referee has to
+                // recognize it in their own spreadsheet.
+                skipped.push(format!("{last} {first}").trim_end().to_string());
+                continue;
+            }
+            self.add_player(new_player)?;
+        }
+        Ok(skipped)
     }
 
     /// The next unused tournament number (max assigned + 1). Numbers are never
@@ -4283,6 +4335,109 @@ mod tests {
             Err(TournamentError::EmptyPlayerName)
         );
         assert!(t.players.is_empty());
+    }
+
+    /// A registration entry with both names, as a CSV row gives it.
+    fn full_name(last: &str, first: &str) -> NewPlayer {
+        NewPlayer {
+            last_name: last.to_string(),
+            first_name: Some(first.to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn importing_a_roster_twice_registers_each_player_once() {
+        let mut t = Tournament::new("Paris Open").unwrap();
+        let roster = || vec![full_name("Doe", "Jane"), full_name("Roe", "John")];
+
+        assert_eq!(t.add_players_skipping_duplicates(roster()), Ok(Vec::new()));
+        assert_eq!(t.players.len(), 2);
+
+        // The same file again adds nobody, and names who it left out.
+        assert_eq!(
+            t.add_players_skipping_duplicates(roster()),
+            Ok(vec!["Doe Jane".to_string(), "Roe John".to_string()])
+        );
+        assert_eq!(t.players.len(), 2);
+    }
+
+    #[test]
+    fn a_duplicate_is_matched_on_both_names_ignoring_case_and_accents() {
+        let mut t = Tournament::new("Paris Open").unwrap();
+        t.add_player(full_name("Le Roux", "Frédéric")).unwrap();
+
+        let skipped = t
+            .add_players_skipping_duplicates(vec![
+                // Same player, as another export spelled them.
+                full_name("LE-ROUX", "frederic"),
+                // Same last name, different first name: a different player.
+                full_name("Le Roux", "Marie"),
+                // Same first name, different last name: likewise.
+                full_name("Durand", "Frédéric"),
+                // No first name at all is not the same as having one.
+                NewPlayer {
+                    last_name: "Le Roux".into(),
+                    ..Default::default()
+                },
+            ])
+            .unwrap();
+
+        assert_eq!(skipped, vec!["LE-ROUX frederic".to_string()]);
+        assert_eq!(t.players.len(), 4);
+    }
+
+    #[test]
+    fn a_file_naming_the_same_player_twice_registers_them_once() {
+        let mut t = Tournament::new("Paris Open").unwrap();
+        let skipped = t
+            .add_players_skipping_duplicates(vec![
+                full_name("Doe", "Jane"),
+                full_name("  Doe  ", "  Jane  "),
+            ])
+            .unwrap();
+        assert_eq!(skipped, vec!["Doe Jane".to_string()]);
+        assert_eq!(t.players.len(), 1);
+    }
+
+    #[test]
+    fn a_skipped_player_keeps_the_registered_ones_data() {
+        let mut t = Tournament::new("Paris Open").unwrap();
+        t.add_player(NewPlayer {
+            last_name: "Doe".into(),
+            first_name: Some("Jane".into()),
+            rating: Some(1800),
+            club: Some("Paris".into()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        // The second file has a different rating and club for the same name.
+        // Skipping means the registered player is left exactly as they were —
+        // an import never edits a player, it only adds the missing ones.
+        t.add_players_skipping_duplicates(vec![NewPlayer {
+            last_name: "Doe".into(),
+            first_name: Some("Jane".into()),
+            rating: Some(1200),
+            club: Some("Lyon".into()),
+            ..Default::default()
+        }])
+        .unwrap();
+
+        assert_eq!(t.players.len(), 1);
+        assert_eq!(t.players[0].rating, Some(1800));
+        assert_eq!(t.players[0].club.as_deref(), Some("Paris"));
+    }
+
+    #[test]
+    fn an_unregistrable_entry_fails_the_whole_import() {
+        // Whatever `add_player` refuses, the import refuses too, rather than
+        // quietly dropping that entry the way it drops a duplicate.
+        let mut t = Tournament::new("Paris Open").unwrap();
+        assert_eq!(
+            t.add_players_skipping_duplicates(vec![full_name("Doe", "Jane"), named("  ")]),
+            Err(TournamentError::EmptyPlayerName)
+        );
     }
 
     #[test]

@@ -103,6 +103,7 @@
     "addPlayer": "Dodaj gracza",
     "importCsv": "Wczytaj CSV…",
     "importCsvTitle": "Importuj graczy z pliku CSV (wymagane: nazwisko i imię; opcjonalne: ELO, stopień, narodowość, klub). Brakujące ELO, stopień lub narodowość są uzupełniane z listy FESA, gdy nazwisko pasuje.",
+    "csvSkippedDuplicates": "{count, plural, one {# gracz z pliku był już zgłoszony i nie został dodany ponownie} few {# gracze z pliku byli już zgłoszeni i nie zostali dodani ponownie} many {# graczy z pliku było już zgłoszonych i nie zostało dodanych ponownie} other {# gracza z pliku było już zgłoszonych i nie zostało dodanych ponownie}}: {names}",
     "checkLicences": "Sprawdź licencje…",
     "checkLicencesTitle": "Sprawdź zgłoszonych graczy jednej narodowości względem listy CSV opłaconych licencji (nazwisko, imię) i pokaż, kogo na niej brakuje.",
     "csvErrorEmpty": "Plik CSV nie zawiera graczy.",

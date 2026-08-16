@@ -302,6 +302,28 @@ pub(crate) struct TournamentView {
     pub(crate) effective_winners: Vec<Vec<Option<Winner>>>,
 }
 
+/// What a CSV roster import answers: the usual tournament view, plus the entries
+/// the file named that were already registered and so were not added again.
+///
+/// The view is flattened in, so this stays a [`TournamentView`] as far as every
+/// client-side state update is concerned and only the extra field has to be read
+/// specially. `skipped_duplicates` is empty on the ordinary import — the referee
+/// is only told about rows that were left out.
+#[derive(Serialize, ts_rs::TS)]
+#[ts(
+    export,
+    rename = "ImportCsvResponse",
+    export_to = "../../../frontend/src/lib/generated/"
+)]
+pub(crate) struct ImportCsvView {
+    #[serde(flatten)]
+    #[ts(flatten)]
+    pub(crate) view: TournamentView,
+    /// Names skipped because a player with that name was already registered, in
+    /// file order and spelled as the file spelled them.
+    pub(crate) skipped_duplicates: Vec<String>,
+}
+
 /// Build the view from the store, or 404 if no tournament exists.
 ///
 /// Shared with [`crate::public`], which projects it down to what a reader may
@@ -955,23 +977,34 @@ async fn add_player(
 /// undo reverts the entire import rather than one player at a time. Returns 400 on
 /// a malformed file (empty, missing name columns, or any row with no last name);
 /// enrichment is best-effort against whatever FESA list is cached.
+///
+/// A file naming players who are already registered — the same file loaded
+/// twice, or a corrected export of it — registers only the ones missing; the
+/// rest come back in `skipped_duplicates` so the referee is told rather than
+/// left to spot the homonyms (see
+/// [`osp_core::Tournament::add_players_skipping_duplicates`]).
 async fn import_players_csv(
     State(state): State<AppState>,
     TournamentCtx(instance): TournamentCtx,
     ExpectedVersion(expected): ExpectedVersion,
     body: String,
-) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
+) -> Result<(StatusCode, Json<ImportCsvView>), ApiError> {
     let ratings = ratings::cached_ratings(&state);
     // A parse failure carries a machine code so the client can localize it.
     let new_players = osp_core::parse_players_csv(&body, &ratings).map_err(ApiError::CsvImport)?;
     let mut store = instance.write();
+    let mut skipped_duplicates = Vec::new();
     store.mutate(expected, |t| {
-        for new_player in new_players {
-            t.add_player(new_player)?;
-        }
+        skipped_duplicates = t.add_players_skipping_duplicates(new_players)?;
         Ok(())
     })?;
-    Ok((StatusCode::CREATED, view(&store)?))
+    Ok((
+        StatusCode::CREATED,
+        Json(ImportCsvView {
+            view: build_view(&store)?,
+            skipped_duplicates,
+        }),
+    ))
 }
 
 /// Body of the licence-check endpoint: which nationality to check, and the

@@ -103,6 +103,7 @@
     "addPlayer": "選手を追加",
     "importCsv": "CSVを読み込み…",
     "importCsvTitle": "CSVファイルから選手を取り込みます（姓・名は必須。レーティング・段級・国籍・所属は任意）。レーティング・段級・国籍が未記入の場合、氏名が一致すればFESA一覧から補完されます。",
+    "csvSkippedDuplicates": "{count, plural, other {ファイル内の#名はすでに登録済みのため、追加しませんでした}}: {names}",
     "checkLicences": "会員資格を確認…",
     "checkLicencesTitle": "指定した国籍の登録選手を、会費納入済みの選手のCSV一覧（姓・名）と照合し、一覧にない選手を表示します。",
     "csvErrorEmpty": "このCSVファイルには選手がいません。",

@@ -5,6 +5,7 @@ import type {
   DeletedTournament,
   Handicap,
   HealthStatus,
+  ImportCsvResponse,
   LicenceCheck,
   NewPlayer,
   Forfeit,
@@ -822,9 +823,14 @@ export function addPlayer(player: NewPlayer): Promise<TournamentResponse> {
  * roster as a single all-or-nothing mutation — so one undo reverts the whole
  * import. A malformed file comes back as a 400 {@link ApiError} whose message is
  * shown to the referee.
+ *
+ * Players the file names who are already registered — the same file loaded
+ * twice, say — are not registered again; their names come back in
+ * `skipped_duplicates` to be shown. Otherwise the answer is the usual
+ * {@link TournamentResponse}, so it applies to the store like any other.
  */
-export function importPlayersCsv(csv: string): Promise<TournamentResponse> {
-  return request<TournamentResponse>(scopedPath("/players/import-csv"), {
+export function importPlayersCsv(csv: string): Promise<ImportCsvResponse> {
+  return request<ImportCsvResponse>(scopedPath("/players/import-csv"), {
     method: "POST",
     headers: { "content-type": "text/plain" },
     body: csv,

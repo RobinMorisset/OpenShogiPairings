@@ -103,6 +103,7 @@
     "addPlayer": "Pridať hráča",
     "importCsv": "Načítať CSV…",
     "importCsvTitle": "Importovať hráčov zo súboru CSV (priezvisko a meno sú povinné; ELO, stupeň, národnosť a klub nepovinné). Chýbajúce ELO, stupeň a národnosť sa doplnia zo zoznamu FESA, ak sa meno zhoduje.",
+    "csvSkippedDuplicates": "{count, plural, one {# hráč zo súboru už bol prihlásený a nebol pridaný znova} few {# hráči zo súboru už boli prihlásení a neboli pridaní znova} other {# hráčov zo súboru už bolo prihlásených a neboli pridaní znova}}: {names}",
     "checkLicences": "Skontrolovať licencie…",
     "checkLicencesTitle": "Porovnať prihlásených hráčov jednej národnosti so zoznamom CSV zaplatených licencií (priezvisko, meno) a ukázať, kto v ňom chýba.",
     "csvErrorEmpty": "Súbor CSV neobsahuje žiadnych hráčov.",

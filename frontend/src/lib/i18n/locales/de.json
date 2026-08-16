@@ -103,6 +103,7 @@
     "addPlayer": "Spieler hinzufügen",
     "importCsv": "CSV laden…",
     "importCsvTitle": "Spieler aus einer CSV-Datei importieren (Nachname und Vorname erforderlich; ELO, Grad, Nationalität und Verein optional). Fehlende Angaben zu ELO, Grad und Nationalität werden aus der FESA-Liste ergänzt, wenn der Name übereinstimmt.",
+    "csvSkippedDuplicates": "{count, plural, one {# Spieler aus der Datei war bereits gemeldet und wurde nicht erneut hinzugefügt} other {# Spieler aus der Datei waren bereits gemeldet und wurden nicht erneut hinzugefügt}}: {names}",
     "checkLicences": "Lizenzen prüfen…",
     "checkLicencesTitle": "Die gemeldeten Spieler einer Nationalität gegen eine CSV-Liste gültiger Lizenzen (Nachname, Vorname) prüfen und anzeigen, wer darin fehlt.",
     "csvErrorEmpty": "Die CSV-Datei enthält keine Spieler.",

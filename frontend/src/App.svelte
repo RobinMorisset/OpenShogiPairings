@@ -448,6 +448,9 @@
     backupListing = null;
     publication.reset();
     error = null;
+    // Names skipped by an import into the *previous* tournament say nothing
+    // about this one.
+    csvSkipped = [];
     // Read (and clear) the requested tab *untracked*: this effect must depend
     // only on `currentTournamentId`. Subscribing to `initialTab` here would let
     // the `set(null)` below re-trigger the effect and immediately reset the tab
@@ -515,16 +518,28 @@
     });
   }
 
+  // Players the last import left out because they were already registered (see
+  // `handleImportCsv`). Shown until the next import, so the referee can compare
+  // the list against their file.
+  let csvSkipped = $state<string[]>([]);
+
   /**
    * Import players from a CSV file. The file's text is sent to the server, which
    * parses it (column detection, FESA enrichment) and registers the roster as a
    * single undo-able step. A malformed file surfaces as an error banner.
+   *
+   * Loading the same file twice registers nobody twice: the server skips the
+   * players already registered and names them back, which we show — a skipped
+   * row is a deliberate choice, not something to leave the referee to notice.
    */
   function handleImportCsv() {
     run(async () => {
       const text = await pickCsvFile();
       if (text === null) return; // cancelled
-      apply(await importPlayersCsv(text));
+      csvSkipped = [];
+      const imported = await importPlayersCsv(text);
+      apply(imported);
+      csvSkipped = imported.skipped_duplicates;
     });
   }
 
@@ -1253,6 +1268,13 @@
               </button>
             </div>
           </div>
+          {#if csvSkipped.length > 0}
+            <p class="csv-skipped print-hide" role="status" data-testid="csv-skipped">
+              {$_("playerRegistration.csvSkippedDuplicates", {
+                values: { count: csvSkipped.length, names: csvSkipped.join(", ") },
+              })}
+            </p>
+          {/if}
           {#if showLicenceCheck}
             <div class="licence-check print-hide">
               <LicenceCheckPanel
@@ -1670,6 +1692,17 @@
   }
   .licence-check {
     margin-top: 0.6rem;
+  }
+  /* The import did what was asked — it just left some rows out — so this reads
+     as a notice about the file, not as an error. */
+  .csv-skipped {
+    margin: 0.6rem 0 0;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border-warning);
+    border-radius: 4px;
+    background: var(--bg-warning);
+    color: var(--color-warning-strong);
+    font-size: 0.85rem;
   }
   .players {
     margin-top: 1.25rem;

@@ -34,6 +34,7 @@ export type { Handicap } from "./generated/Handicap";
 export type { HandicapGame } from "./generated/HandicapGame";
 export type { HandicapPolicy } from "./generated/HandicapPolicy";
 export type { HealthStatus } from "./generated/HealthStatus";
+export type { ImportCsvResponse } from "./generated/ImportCsvResponse";
 export type { LicenceCheck } from "./generated/LicenceCheck";
 export type { UnlicensedPlayer } from "./generated/UnlicensedPlayer";
 export type { MacMahonThreshold } from "./generated/MacMahonThreshold";

@@ -92,6 +92,38 @@ async fn import_players_csv_registers_the_roster_as_one_undo_step() {
 }
 
 #[tokio::test]
+async fn import_players_csv_skips_players_already_registered() {
+    let state = AppState::default();
+    let id = create(&state, "Paris Open").await;
+
+    let csv = "Last name,First name,ELO\nAlpha,Ann,2000\n";
+    let (_, body) = send(
+        router(state.clone()),
+        post_text(&t(id, "/players/import-csv"), csv),
+    )
+    .await;
+    assert_eq!(body["skipped_duplicates"].as_array().unwrap().len(), 0);
+
+    // The same roster again, with one new player and the first one respelled:
+    // only the new player is registered, and the skipped name comes back so the
+    // referee is told rather than left with two Ann Alphas.
+    let (status, body) = send(
+        router(state.clone()),
+        post_text(
+            &t(id, "/players/import-csv"),
+            "Last name,First name,ELO\nALPHA,ann,2000\nBeta,Bo,1800\n",
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let players = body["tournament"]["players"].as_array().unwrap();
+    assert_eq!(players.len(), 2);
+    assert_eq!(players[0]["last_name"], "Alpha");
+    assert_eq!(players[1]["last_name"], "Beta");
+    assert_eq!(body["skipped_duplicates"], json!(["ALPHA ann"]));
+}
+
+#[tokio::test]
 async fn import_players_csv_rejects_a_malformed_file() {
     let state = AppState::default();
     let id = create(&state, "Paris Open").await;
