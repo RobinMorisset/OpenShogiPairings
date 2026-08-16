@@ -2,6 +2,7 @@
   import { _ } from "svelte-i18n";
   import type { NewPlayer, RatedPlayer } from "../types";
   import { formatGrade, parseGrade } from "../grade";
+  import { normalize } from "../picker";
 
   interface Props {
     /** Register a new player. */
@@ -44,16 +45,10 @@
   let showSuggestions = $state(false);
   let highlighted = $state(-1);
 
-  /** Lowercase + strip diacritics so "thune" matches "Thuné". */
-  function normalize(text: string): string {
-    return text
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "")
-      .toLowerCase()
-      .trim();
-  }
-
-  // Suggestions are driven by what's typed in the last-name field.
+  // Suggestions are driven by what's typed in the last-name field. This is not
+  // the `Combobox` the other pickers use: the FESA list is a lookup that fills
+  // a whole form and a name that matches nothing is still a valid registration,
+  // so free text has to commit here. Only the name matching is shared.
   const suggestions = $derived.by<RatedPlayer[]>(() => {
     const query = normalize(lastName);
     if (query.length < 2 || ratings.length === 0) return [];

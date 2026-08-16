@@ -12,7 +12,9 @@
 
   import { _ } from "svelte-i18n";
   import type { Player, Team } from "../types";
+  import type { PickerOption } from "../picker";
   import { pairingRating, sortedByRating, teamAverageRating } from "../teams";
+  import Combobox from "./Combobox.svelte";
 
   interface Props {
     teams: Team[];
@@ -121,60 +123,27 @@
 
   // --- The member picker -------------------------------------------------
   //
-  // A combobox over the unassigned pool rather than a free-text field: every
-  // candidate is already registered, so text matching nothing can only be a
-  // typo — there is deliberately no commit path for it, and no "create player"
-  // fallback (that is the Players tab's job, and team mode refuses late
-  // registration anyway). Empty and focused it lists the pool, so it still
-  // answers "just show me who's left" the way the old dropdown did.
+  // A `Combobox` over the unassigned pool rather than a free-text field: every
+  // candidate is already registered, so there is no "create player" fallback
+  // (that is the Players tab's job, and team mode refuses late registration
+  // anyway). It keeps no choice of its own — a picked member moves to the
+  // roster and the field goes back to empty, ready for the next one — so its
+  // `text` stays "".
 
-  /** The card whose picker is focused, what is typed in it, and which
-   *  suggestion the arrow keys are on (-1 = none). */
-  let pickerTeam: string | null = $state(null);
-  let pickerQuery = $state("");
-  let highlighted = $state(-1);
-
-  /** Enough to choose from without covering the card below. */
-  const MAX_SUGGESTIONS = 8;
-
-  /** Lowercase + strip diacritics so "thune" matches "Thuné". */
-  function normalize(text: string): string {
-    return text
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "")
-      .toLowerCase()
-      .trim();
-  }
-
-  const suggestions = $derived.by<Player[]>(() => {
-    const query = normalize(pickerQuery);
-    if (query === "") return unassigned.slice(0, MAX_SUGGESTIONS);
-    const matches = unassigned.filter((p) => normalize(name(p)).includes(query));
-    // Last names that start with the query first; `sort` is stable, so the rest
-    // keep the pool's order (registration order — strongest first, usually).
-    matches.sort(
-      (a, b) =>
-        (normalize(a.last_name).startsWith(query) ? 0 : 1) -
-        (normalize(b.last_name).startsWith(query) ? 0 : 1),
-    );
-    return matches.slice(0, MAX_SUGGESTIONS);
-  });
-
-  function openPicker(teamId: string) {
-    pickerTeam = teamId;
-    pickerQuery = "";
-    highlighted = -1;
-  }
-
-  function closePicker() {
-    pickerTeam = null;
-    pickerQuery = "";
-    highlighted = -1;
-  }
+  /** The unassigned pool as the picker's options, each showing the rating its
+   *  row in the roster would. */
+  const memberOptions = $derived<PickerOption[]>(
+    unassigned.map((p) => ({
+      key: p.id,
+      label: name(p),
+      meta: ratingLabel(p),
+      metaUnofficial: p.rating == null,
+    })),
+  );
 
   /** The card pickers and the new-team field, so focus can be placed after a
    *  request completes. */
-  const pickerInputs: Record<string, HTMLInputElement | undefined> = {};
+  const pickerInputs: Record<string, { focus(): void } | undefined> = {};
   let newTeamInput: HTMLInputElement | undefined = $state();
   let refocusTeam: string | null = $state(null);
   /** A team just asked for, waiting on the server to create it. */
@@ -207,44 +176,9 @@
     }
   });
 
-  function pickMember(teamId: string, player: Player) {
-    onAddMember(teamId, player.id);
-    pickerQuery = "";
-    highlighted = -1;
+  function pickMember(teamId: string, playerId: string) {
+    onAddMember(teamId, playerId);
     refocusTeam = teamId;
-  }
-
-  function pickerKeydown(event: KeyboardEvent, teamId: string) {
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        if (suggestions.length > 0) highlighted = (highlighted + 1) % suggestions.length;
-        break;
-      case "ArrowUp":
-        event.preventDefault();
-        if (suggestions.length > 0) {
-          highlighted = (highlighted - 1 + suggestions.length) % suggestions.length;
-        }
-        break;
-      case "Enter": {
-        event.preventDefault();
-        // An arrowed-to suggestion wins; failing that, a single match is
-        // unambiguous. Anything else — none, or several — has nothing to
-        // commit, so Enter does nothing rather than guessing.
-        const choice =
-          highlighted >= 0
-            ? suggestions[highlighted]
-            : suggestions.length === 1
-              ? suggestions[0]
-              : null;
-        if (choice) pickMember(teamId, choice);
-        break;
-      }
-      case "Escape":
-        event.preventDefault();
-        closePicker();
-        break;
-    }
   }
 
   /** Move a member one place up or down the board order. */
@@ -599,62 +533,17 @@
         </ol>
 
         {#if !finalized && roster.length < size && unassigned.length > 0}
-          {@const open = pickerTeam === team.id}
           <div class="assign">
-            <input
-              type="text"
-              class="assign-input control-sm control-quiet"
+            <Combobox
               bind:this={pickerInputs[team.id]}
+              id={`team-picker-${team.id}`}
+              options={memberOptions}
               placeholder={$_("teams.addMember")}
-              value={open ? pickerQuery : ""}
+              noMatch={$_("teams.noMemberMatch")}
               disabled={busy}
-              autocomplete="off"
-              autocapitalize="off"
-              autocorrect="off"
-              spellcheck="false"
-              aria-label={$_("teams.addMember")}
-              role="combobox"
-              aria-expanded={open && suggestions.length > 0}
-              aria-controls={`team-picker-${team.id}`}
-              aria-activedescendant={open && highlighted >= 0
-                ? `team-opt-${team.id}-${highlighted}`
-                : undefined}
-              onfocus={() => openPicker(team.id)}
-              oninput={(e) => {
-                pickerQuery = e.currentTarget.value;
-                highlighted = -1;
-              }}
-              onkeydown={(e) => pickerKeydown(e, team.id)}
-              onblur={closePicker}
+              width="100%"
+              onPick={(option) => pickMember(team.id, option.key)}
             />
-            {#if open && suggestions.length > 0}
-              <ul class="suggestions" id={`team-picker-${team.id}`} role="listbox">
-                {#each suggestions as s, i (s.id)}
-                  <!-- Keyboard selection runs through the input (arrow keys +
-                       Enter, tracked via aria-activedescendant); this handler is
-                       the mouse-only affordance. `mousedown` is cancelled so the
-                       click lands before the input's blur closes the list. -->
-                  <!-- svelte-ignore a11y_click_events_have_key_events -->
-                  <li
-                    id={`team-opt-${team.id}-${i}`}
-                    role="option"
-                    aria-selected={i === highlighted}
-                    class:highlighted={i === highlighted}
-                    onmousedown={(e) => e.preventDefault()}
-                    onclick={() => pickMember(team.id, s)}
-                  >
-                    <span class="s-name">{name(s)}</span>
-                    <span class="s-meta" class:unofficial={s.rating == null}>
-                      {ratingLabel(s)}
-                    </span>
-                  </li>
-                {/each}
-              </ul>
-            {:else if open && pickerQuery.trim() !== ""}
-              <!-- Every candidate is already registered, so there is nothing to
-                   create here — say where a missing player comes from instead. -->
-              <p class="no-match">{$_("teams.noMemberMatch")}</p>
-            {/if}
           </div>
         {/if}
       </div>
@@ -702,12 +591,6 @@
     color: var(--muted);
     font-size: 0.9em;
   }
-  /* Every field in the panel — the new-team name, the rename box, the pairing
-     ELO, the adjustment pair and the member picker. `button` is styled globally
-     in app.css but `input` is not, so without this they fall back to the
-     browser's own form font, visibly smaller than the app's. `border-box` keeps
-     the widths declared below meaning the whole control, so the picker still
-     fits its card. */
   .new-team {
     display: flex;
     gap: 0.5rem;
@@ -873,61 +756,10 @@
     padding: 0 0.35rem;
     font-size: 0.85em;
   }
-  /* The member picker: a combobox whose list is positioned against this box. */
+  /* The member picker sits at the foot of the card; the field and its list are
+     `Combobox`'s own. */
   .assign {
-    position: relative;
     margin-top: 0.4rem;
-  }
-  .assign-input {
-    width: 100%;
-  }
-  .suggestions {
-    position: absolute;
-    z-index: 10;
-    top: calc(100% + 2px);
-    left: 0;
-    right: 0;
-    margin: 0;
-    padding: 0.25rem;
-    list-style: none;
-    background: var(--bg-hover);
-    border: 1px solid var(--border-soft);
-    border-radius: 0.5rem;
-    box-shadow: 0 8px 24px var(--shadow-dropdown);
-    max-height: 16rem;
-    overflow-y: auto;
-  }
-  .suggestions li {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 0.75rem;
-    padding: 0.35rem 0.5rem;
-    border-radius: 0.35rem;
-    cursor: pointer;
-  }
-  .suggestions li.highlighted,
-  .suggestions li:hover {
-    background: var(--bg-hover-strong);
-  }
-  .s-name {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .s-meta {
-    color: var(--text-secondary);
-    font-size: 0.8rem;
-    font-variant-numeric: tabular-nums;
-    flex: none;
-  }
-  .s-meta.unofficial {
-    font-style: italic;
-  }
-  .no-match {
-    margin: 0.25rem 0 0;
-    color: var(--muted);
-    font-size: 0.85em;
   }
   .pool {
     margin-top: 1rem;

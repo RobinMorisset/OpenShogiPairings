@@ -1,8 +1,10 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
   import type { DraftUpdate } from "../api";
+  import type { PickerOption } from "../picker";
   import { attendingPlayers, MIN_PRESENT_PLAYERS, MIN_PRESENT_TEAMS } from "../roundDraft";
   import type { Player, RoundDraft, Team } from "../types";
+  import Combobox from "./Combobox.svelte";
   import ResultSheetsButton from "./ResultSheetsButton.svelte";
 
   interface Props {
@@ -148,10 +150,29 @@
     return `${num}${p.last_name} ${p.first_name}`.trim();
   }
 
-  /** Parse a `<select>`'s raw string value into a tournament number, or `""`
-   *  for the empty/placeholder option. */
-  function parseId(raw: string): number | "" {
-    return raw === "" ? "" : Number(raw);
+  // --- The forcing pickers -------------------------------------------------
+  //
+  // A `Combobox` each, the same one the Teams tab picks a member with: the
+  // forceable list is the whole present field, which a <select> made the
+  // referee scroll through to fix one board. Typing part of a name — or the
+  // tournament number, which the label starts with — narrows it to a line, and
+  // nothing but one of the offered entries can be committed.
+  //
+  // What is offered is a team or a player depending on the mode, because that
+  // is the unit this tournament pairs.
+  const forceableOptions = $derived<PickerOption[]>(
+    teamMode
+      ? forceableTeams.map((t) => ({
+          key: String(t.tournament_id ?? -1),
+          label: teamLabel(t.tournament_id ?? -1),
+        }))
+      : forceable.map((p) => ({ key: String(tid(p)), label: label(tid(p)) })),
+  );
+  /** The label a picked side shows while the other one is still being chosen —
+   *  a pairing is only committed once both are in. */
+  function pickedLabel(id: number | ""): string {
+    if (id === "") return "";
+    return teamMode ? teamLabel(id) : label(id);
   }
 
   /** The current draft as an update payload. */
@@ -257,6 +278,19 @@
   // both are picked, the pairing is forced immediately — no separate button.
   let pairA = $state<number | "">("");
   let pairB = $state<number | "">("");
+  /** The first picker, so the next pairing can be typed without reaching for
+   *  the mouse: committing one sends the caret back here. */
+  let pairAPicker: Combobox | undefined = $state();
+  let refocusPair = $state(false);
+
+  // Committing a pairing disables the pickers while the request is in flight,
+  // which drops focus; put it back once it lands.
+  $effect(() => {
+    if (refocusPair && !busy) {
+      refocusPair = false;
+      pairAPicker?.focus();
+    }
+  });
 
   function addForcedPair() {
     if (pairA === "" || pairB === "" || pairA === pairB) return;
@@ -268,6 +302,7 @@
     }
     pairA = "";
     pairB = "";
+    refocusPair = true;
     onUpdate(update);
   }
 
@@ -301,11 +336,11 @@
     (teamMode ? presentTeams.length : present.length) % 2 === 0,
   );
 
-  function addForcedBye(id: number | "") {
+  function addForcedBye(id: number) {
     // One bye is all a round can use: the engine byes at most one unit, and a
     // second would leave someone else unpaired for it to bye as well. Sitting
     // more out is what marking them absent is for.
-    if (id === "" || forcedByeList.length > 0) return;
+    if (forcedByeList.length > 0) return;
     const update = base();
     if (teamMode) {
       if (update.forced_team_byes.includes(id)) return;
@@ -477,49 +512,28 @@
       </ul>
     {/if}
     <div class="add-pair">
-      <select
-        class="control-sm"
-        value={pairA}
+      <Combobox
+        bind:this={pairAPicker}
+        id="forced-pair-a"
+        options={forceableOptions.filter((o) => o.key !== String(pairB))}
+        text={pickedLabel(pairA)}
+        placeholder={$_(teamMode ? "roundDraftView.teamEllipsis" : "roundDraftView.playerEllipsis")}
+        ariaLabel={$_("roundDraftView.pairSideA")}
+        noMatch={$_(teamMode ? "roundDraftView.noTeamMatch" : "roundDraftView.noPlayerMatch")}
         disabled={busy}
-        onchange={(e) => selectPairA(parseId(e.currentTarget.value))}
-      >
-        <option value=""
-          >{$_(teamMode ? "roundDraftView.teamEllipsis" : "roundDraftView.playerEllipsis")}</option
-        >
-        {#if teamMode}
-          {#each forceableTeams as t (t.id)}
-            <option value={t.tournament_id}>{teamLabel(t.tournament_id ?? -1)}</option>
-          {/each}
-        {:else}
-          {#each forceable as p (p.id)}
-            <option value={tid(p)}>{label(tid(p))}</option>
-          {/each}
-        {/if}
-      </select>
+        onPick={(option) => selectPairA(Number(option.key))}
+      />
       <span class="vs">{$_("roundDraftView.vs")}</span>
-      <select
-        class="control-sm"
-        value={pairB}
+      <Combobox
+        id="forced-pair-b"
+        options={forceableOptions.filter((o) => o.key !== String(pairA))}
+        text={pickedLabel(pairB)}
+        placeholder={$_(teamMode ? "roundDraftView.teamEllipsis" : "roundDraftView.playerEllipsis")}
+        ariaLabel={$_("roundDraftView.pairSideB")}
+        noMatch={$_(teamMode ? "roundDraftView.noTeamMatch" : "roundDraftView.noPlayerMatch")}
         disabled={busy}
-        onchange={(e) => selectPairB(parseId(e.currentTarget.value))}
-      >
-        <option value=""
-          >{$_(teamMode ? "roundDraftView.teamEllipsis" : "roundDraftView.playerEllipsis")}</option
-        >
-        {#if teamMode}
-          {#each forceableTeams as t (t.id)}
-            {#if t.tournament_id !== pairA}
-              <option value={t.tournament_id}>{teamLabel(t.tournament_id ?? -1)}</option>
-            {/if}
-          {/each}
-        {:else}
-          {#each forceable as p (p.id)}
-            {#if tid(p) !== pairA}
-              <option value={tid(p)}>{label(tid(p))}</option>
-            {/if}
-          {/each}
-        {/if}
-      </select>
+        onPick={(option) => selectPairB(Number(option.key))}
+      />
     </div>
   </section>
 
@@ -554,24 +568,19 @@
       </p>
     {/if}
     <!-- Gone once a bye is forced: there is only ever one to give, and the ✕
-         above takes it back. -->
+         above takes it back. Left empty, the engine picks the bye itself, which
+         is what the placeholder says. -->
     {#if forcedByeList.length === 0}
-      <select
-        class="control-sm"
-        value=""
-        disabled={busy || byesClosed || (teamMode ? forceableTeams : forceable).length === 0}
-        onchange={(e) => addForcedBye(parseId(e.currentTarget.value))}
-      >
-        <option value="">{$_("roundDraftView.automaticBye")}</option>
-        {#if teamMode}
-          {#each forceableTeams as t (t.id)}
-            <option value={t.tournament_id}>{teamLabel(t.tournament_id ?? -1)}</option>
-          {/each}
-        {/if}
-        {#each teamMode ? [] : forceable as p (p.id)}
-          <option value={tid(p)}>{label(tid(p))}</option>
-        {/each}
-      </select>
+      <Combobox
+        id="forced-bye"
+        options={forceableOptions}
+        placeholder={$_("roundDraftView.automaticBye")}
+        ariaLabel={$_("roundDraftView.forcedBye")}
+        noMatch={$_(teamMode ? "roundDraftView.noTeamMatch" : "roundDraftView.noPlayerMatch")}
+        disabled={busy || byesClosed || forceableOptions.length === 0}
+        width="20rem"
+        onPick={(option) => addForcedBye(Number(option.key))}
+      />
     {/if}
   </section>
 
