@@ -98,10 +98,9 @@
           {$_("resultSheets.pagesHint", { values: { slips, pages, perPage } })}
         </p>
       {/if}
+      <!-- No way out of here but printing: the button that opened this closes
+           it again, right above, and lit while the panel is up. -->
       <div class="actions">
-        <button type="button" class="ghost control-sm" onclick={() => (open = false)}>
-          {$_("resultSheets.cancel")}
-        </button>
         <button type="button" class="control-sm" disabled={!valid || busy} onclick={print}>
           {$_("resultSheets.print")}
         </button>

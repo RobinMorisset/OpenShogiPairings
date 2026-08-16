@@ -348,7 +348,6 @@
     "blanksTitle": "Feuillets supplémentaires à en-tête vide, à remplir à la main pour les joueurs qui s'inscrivent une fois le tournoi commencé.",
     "pagesHint": "{slips} feuillets sur {pages} pages A4, {perPage} par page",
     "print": "Imprimer",
-    "cancel": "Annuler",
     "roundColumn": "Ronde",
     "boardColumn": "Table",
     "opponentColumn": "Adversaire",

@@ -348,7 +348,6 @@
     "blanksTitle": "Ďalšie lístky s prázdnou hlavičkou, na ručné vyplnenie pre hráčov, ktorí sa prihlásia po začiatku turnaja.",
     "pagesHint": "{slips} lístkov na {pages} stranách A4, {perPage} na stranu",
     "print": "Tlačiť",
-    "cancel": "Zrušiť",
     "roundColumn": "Kolo",
     "boardColumn": "Stôl",
     "opponentColumn": "Súper",

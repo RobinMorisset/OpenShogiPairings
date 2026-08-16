@@ -348,7 +348,6 @@
     "blanksTitle": "Zusätzliche Zettel mit leerem Kopf, von Hand auszufüllen für Spieler, die sich erst nach Turnierbeginn anmelden.",
     "pagesHint": "{slips} Zettel auf {pages} A4-Seiten, {perPage} pro Seite",
     "print": "Drucken",
-    "cancel": "Abbrechen",
     "roundColumn": "Runde",
     "boardColumn": "Brett",
     "opponentColumn": "Gegner",

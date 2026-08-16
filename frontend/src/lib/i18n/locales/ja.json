@@ -348,7 +348,6 @@
     "blanksTitle": "見出しが空欄の予備の用紙。大会開始後に参加する選手のために手書きで記入します。",
     "pagesHint": "用紙{slips}枚、A4{pages}ページ（1ページあたり{perPage}枚）",
     "print": "印刷",
-    "cancel": "キャンセル",
     "roundColumn": "回戦",
     "boardColumn": "卓",
     "opponentColumn": "対戦相手",

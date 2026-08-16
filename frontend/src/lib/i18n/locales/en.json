@@ -348,7 +348,6 @@
     "blanksTitle": "Extra slips with an empty header, to fill in by hand for players who register once the tournament has started.",
     "pagesHint": "{slips} slips on {pages} A4 pages, {perPage} per page",
     "print": "Print",
-    "cancel": "Cancel",
     "roundColumn": "Round",
     "boardColumn": "Board",
     "opponentColumn": "Opponent",
