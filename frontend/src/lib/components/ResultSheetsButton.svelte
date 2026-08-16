@@ -50,6 +50,21 @@
   const slips = $derived(playerCount + (blanks ?? 0));
   const pages = $derived(Math.ceil(slips / perPage));
 
+  /** The button that opens the panel, so Escape can hand focus back to it. */
+  let trigger = $state<HTMLButtonElement | null>(null);
+
+  // On the window rather than on the panel: the panel opens with the focus
+  // still on the trigger beside it, which is exactly when Escape is likeliest,
+  // and a referee who has clicked away should be able to dismiss it too.
+  function onKeydown(event: KeyboardEvent) {
+    if (!open || event.key !== "Escape") return;
+    // Escape in a number field otherwise reverts what was typed, in some
+    // browsers, instead of reaching this.
+    event.preventDefault();
+    open = false;
+    trigger?.focus();
+  }
+
   function print() {
     if (!valid) return;
     open = false;
@@ -57,8 +72,11 @@
   }
 </script>
 
+<svelte:window onkeydown={onKeydown} />
+
 <div class="sheets">
   <button
+    bind:this={trigger}
     type="button"
     class="ghost control-sm"
     class:active={open}
@@ -98,8 +116,8 @@
           {$_("resultSheets.pagesHint", { values: { slips, pages, perPage } })}
         </p>
       {/if}
-      <!-- No way out of here but printing: the button that opened this closes
-           it again, right above, and lit while the panel is up. -->
+      <!-- No cancel button: Escape closes this, and so does the button that
+           opened it — right above, and lit while the panel is up. -->
       <div class="actions">
         <button type="button" class="control-sm" disabled={!valid || busy} onclick={print}>
           {$_("resultSheets.print")}
