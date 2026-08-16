@@ -1448,6 +1448,26 @@
     cursor: help;
   }
 
+  /* These two panels are prose inside a card sized with `max-content` (see
+     `.card.wide-table` in App.svelte), and `max-content` for a paragraph is the
+     whole sentence on one line — the stale warning below is 160 characters, and
+     it was setting the width of the entire round view. `width: 0` keeps them out
+     of that measurement and `min-width` gives them back whatever the table and
+     the window settled on, so they follow the page instead of stretching it.
+     Same reasoning, and same pair of declarations, as the card's own children. */
+  .report,
+  .probe {
+    width: 0;
+    min-width: 100%;
+  }
+  /* Prose gets a readable measure of its own: the panels are as wide as the
+     standings-sized card, and a 1400px line is not a line anybody reads. */
+  .report-stale,
+  .probe-hint,
+  .probe-status {
+    max-width: 70ch;
+  }
+
   .report {
     margin-bottom: 0.75rem;
     font-size: 0.85rem;
