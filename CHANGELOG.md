@@ -63,24 +63,12 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   skewing every tie-break that sums opponents (SOS, SODOS, Buchholz) and the
   pairing of later rounds. A long game now takes both of its rounds however it
   ends, and scores once, when the round it finishes in is complete.
-- **A player registered mid-tournament scored nothing for the rounds before they
-  arrived**, where a player marked absent scored half a point for each — so with
-  "half point for an absence" on, arriving late pushed them below players they
-  were level with and paired them against the bottom of the field for the rest of
-  the event. Those rounds now count as absences like anyone else's. One
-  consequence: the next round's draft offers them ticked as absent, so untick
-  them.
-- **The American Grid export could submit a document that was wrong**, and it is
-  the record the rating body gets. Asked for mid-round, it silently left out the
-  round still being played; an unfinished long game was written as a loss for
-  **both** players, a double defeat for a game nobody had played; and a long game
-  that never got its second round was scored as nothing at all. Each of the three
-  is now refused, naming the round and the way out, and the "Export grid" button
-  says so rather than failing on click.
-- **A handicap could be set on a board nobody turned up for**, and the odds then
-  showed up in the cross-table and the exported results. Declaring a no-show now
-  clears the board's handicap and greys the picker out, as it already did for
-  the draw button.
+- A player registered mid-tournament was not affected by the "half point for
+  an absence" setting.
+- The American Grid export could be used even when some games had not been
+  completed, and sometimes emitted a wrong grid in that case.
+- It was possible to declare a sennichite, or to set a handicap, in a game
+  that did not occur because of a no-show.
 - **Discarding the draft of round 1 left registration closed for good**, with no
   draft and no round either — a state nothing but undo could get out of.
   Cancelling that first draft now reopens registration, exactly as cancelling
@@ -112,13 +100,8 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   game with a `0-` in the cross-table export.
 - Half points from a `0=` influenced Points and tie-breaks like SOS, SODOS, but
   they were not included in Wins, SOSW, SODOSW, etc.
-- "Why these pairings?" now warns if unreliable; this can occur if a referee
-  changed the results of an earlier round, or the settings of the tournament,
-  or did a manual adjustment to MacMahon points.
 - Manual points adjustments now interact with airtight groups, since they
   are MacMahon points like any other.
-- It was possible to declare a sennichite in a game that did not occur because
-  of a no-show.
 - The float markers in the standings table were doubled: a player who
   played one point up showed `^^`, two points up `^^^^`.
 - **An internal server error used to hang up instead of answering**, which a
@@ -165,29 +148,12 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   moves focus to the next field in the Settings tab, useless and redundant
   elements are gone, columns that were misaligned are now properly aligned,
   etc.
-- **A cross-table cell's tooltip names the opponent with their rating** —
-  `Doe Jane (1800)` — where it used to read `vs Doe Jane`. The "vs" said
-  nothing the cell didn't already, and the rating answers what the hover is
-  usually for: how strong was that opponent. An unrated opponent keeps the bare
-  name.
-- **A pairing probe says which boards its answer comes from.** "Why paired?" and
-  "Why not paired?" used to name the rules that got better or worse and stop
-  there; each rule is now broken down into the boards that move it — those the
-  alternative would add, then those it would drop — each with its own worse-by or
-  better-by.
-- **A pairing probe is no longer offered on a round whose data has moved** since
-  it was paired — a corrected result, an edited rating, a changed setting. It
-  would answer from today's data against a pairing chosen under the old, which
-  can make the engine look wrong where it wasn't. The round's compromises stay
-  readable, and pairing the round again brings the probe back.
-- **A long game is now a board of both rounds it is played over.** The round it
-  is being played in stays open until its result is recorded, like any other
-  unfinished game, and the results cross-table draws it the way it was played:
-  **one cell spanning the two rounds**, instead of a blank followed by a result
-  that read like two separate games. The exported grid keeps one column per
-  round, as that format requires.
+- **Better explanations of pairings**, with much more detail. And if the
+  explanation would be inaccurate (because the referee corrected an earlier
+  round's result, edited a player, or changed a setting since that round was
+  paired), it avoids giving wrong information.
 - **Players are typed, not scrolled for**: the round draft's forced pairings and
-  forced bye, and the "Question a pairing" panel, take part of a name or a
+  forced bye, and the "Why these pairings?" panel, take part of a name or a
   tournament number in an autocomplete field, and accept only someone the round
   can actually pair.
 - If `OSP_ADMIN_PASSWORD` is set, only published tournaments are visible to
