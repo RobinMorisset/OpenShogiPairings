@@ -46,8 +46,24 @@ if [ -n "$staged_rs" ]; then
   fi
 fi
 
-echo "== cargo clippy =="
-cargo clippy --workspace --all-targets -- -D warnings
+# Clippy is workspace-wide and takes ~10s on every commit, even one that touches
+# no Rust at all: osp-core's build script watches .git, so committing anything
+# invalidates it and everything downstream. A commit that stages nothing the
+# Rust build reads cannot introduce a lint, so skip it there.
+#   Deliberately generous about what counts: every .rs anywhere, the whole of
+#   crates/ (a fixture or an include_str! target is an input too) and of
+#   frontend/src-tauri/, both manifests and lockfiles, and the toolchain and lint
+#   configuration. Pathspecs that match nothing are not an error here, so naming
+#   files this repo does not have yet costs nothing.
+staged_rust=$(git diff --cached --name-only --diff-filter=ACM -- \
+  '*.rs' 'crates/' 'Cargo.toml' 'Cargo.lock' 'frontend/src-tauri/' \
+  'rust-toolchain.toml' 'clippy.toml' '.cargo/')
+if [ -n "$staged_rust" ]; then
+  echo "== cargo clippy =="
+  cargo clippy --workspace --all-targets -- -D warnings
+else
+  echo "== cargo clippy: skipped (no staged Rust changes) =="
+fi
 
 echo "== Cargo.lock freshness =="
 # Both lockfiles have a habit of landing a few commits late, for two reasons:
