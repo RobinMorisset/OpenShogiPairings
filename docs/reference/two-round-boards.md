@@ -125,27 +125,35 @@ so no never-completing deadlock.
 `LongCarried` and no following `LongEnd` (or the reverse), a `LongEnd` in round
 1, or a `LongStart` in any round but the last.
 
-## Where it is refused
+## What blocks the American Grid export
 
-Two states are legal mid-tournament but block the American Grid export
-(`grid_export_blocker`), because exporting asserts the tournament is over:
+Exporting the grid asserts the tournament is over, so `grid_export_blocker`
+refuses two states that are perfectly legal while it is still running:
 
-- a long game with **no result** — it would otherwise be submitted to a rating
-  body as a loss for both players;
-- a long game that was **never carried**, still sitting as a `LongStart` in the
-  last round. It has taken one round rather than two, so two points would let its
-  players outscore a field that played the same single round, and the scoring
-  rule gives it none. The referee plays the next round, which carries it, or
-  unticks the box, which demotes it.
+- **A long game still being played** — its live record has no result. Worth
+  refusing rather than leaving to the round's own completeness, because the grid
+  *omits* rounds that are not complete instead of refusing them: the round
+  holding the unfinished game would simply be dropped, leaving `0-` in the column
+  of the round it started and no column at all for the round it should have
+  finished in. The game would disappear from a document sent to a rating body.
+- **A long game that was never carried** — a `LongStart` still sitting in the
+  last round, decided or not. It has taken one round rather than two, so two
+  points would let its players outscore a field that played the same single
+  round, and the scoring rule gives it none. The referee plays the next round,
+  which carries it, or unticks the box, which demotes it to an ordinary
+  one-point game.
+
+An undecided `LongStart` is caught by both; the first fires, which is the more
+useful message of the two.
 
 ## Rendering
 
 The two surfaces differ deliberately, and neither should be "fixed" into the
 other.
 
-The **American Grid** keeps one column per round, as that fixed format requires:
-`LongCarried` renders `0-`, and the result appears in the round the game was
-finished in.
+The **American Grid** keeps one column per completed round, as that fixed format
+requires: `LongCarried` renders `0-`, and the result appears in the round the
+game was finished in.
 
 The **results cross-table** in the app draws the game the way it was played: one
 cell straddling both round columns, showing the result once (`crossTableColumns`
