@@ -254,6 +254,17 @@ pub enum TournamentError {
     /// A board pairs a player with themselves.
     #[error("round {round} pairs player {player} against themselves")]
     BoardAgainstSelf { round: u32, player: TournamentId },
+    /// A player takes part in one round more than once — on two boards, in two
+    /// sit-outs, or on a board *and* in a sit-out.
+    ///
+    /// A round is one thing per player: one game, or one reason there was no
+    /// game. Every count downstream assumes it — a player listed absent twice is
+    /// paid the absence twice (invisible while an absence is worth nothing,
+    /// which is the default, and free points the moment `half_point_absences` is
+    /// on), a player on two boards plays two games in one round, and the
+    /// cross-table grows a second cell for a round that has one.
+    #[error("round {round} has player {player} taking part more than once")]
+    PlayerTwiceInRound { round: u32, player: TournamentId },
     /// The ELO estimate is enabled but nothing anchors its scale: every player is
     /// on a flat prior and none is pinned, so the estimate has no absolute
     /// reference (see [`crate::elo::has_scale_anchor`]).
@@ -1354,6 +1365,18 @@ impl Tournament {
             .filter(|id| !cup_players.contains(id) && !busy_long.contains(id))
             .collect();
         let swiss_set: HashSet<TournamentId> = swiss_present.iter().copied().collect();
+
+        // A player is absent at most once. The forced halves get their own
+        // "once each" checks below (via `placed`), and being absent already
+        // excludes a player from those, so this is the one way a player could
+        // still reach the round twice — as two sit-out rows, each scoring
+        // separately.
+        if let Some(player) = first_repeat(draft.absent.iter().copied()) {
+            return Err(TournamentError::PlayerTwiceInRound {
+                round: draft.number,
+                player,
+            });
+        }
 
         // Validate the referee's forced boards/bye against the Swiss pool.
         let mut placed: HashSet<TournamentId> = HashSet::new();
@@ -2597,9 +2620,41 @@ impl Tournament {
                     player: sitout.player,
                 });
             }
+            // One game, or one reason there was no game — never two of either,
+            // and never one of each. See [`TournamentError::PlayerTwiceInRound`]
+            // for what a second entry costs.
+            if let Some(player) = first_repeat(round_participants(round)) {
+                return Err(TournamentError::PlayerTwiceInRound {
+                    round: round.number,
+                    player,
+                });
+            }
         }
         Ok(())
     }
+}
+
+/// Everyone the round accounts for: both sides of every board, and every
+/// sit-out. Exactly the players a round is allowed to name once each.
+fn round_participants(round: &Round) -> impl Iterator<Item = TournamentId> + '_ {
+    round
+        .boards
+        .iter()
+        .flat_map(|b| [b.player1, b.player2])
+        .chain(round.sitouts.iter().map(|s| s.player))
+}
+
+/// The first value that appears twice, if any.
+///
+/// Shared by the load-time check above and by the absent-list check both
+/// confirmation paths run ([`Tournament::confirm_round`] and
+/// [`Tournament::confirm_team_round`]), so "a player takes part once" is one
+/// rule written once rather than the same loop spelled out per call site.
+pub(crate) fn first_repeat<T: Eq + std::hash::Hash + Copy>(
+    items: impl IntoIterator<Item = T>,
+) -> Option<T> {
+    let mut seen = HashSet::new();
+    items.into_iter().find(|&item| !seen.insert(item))
 }
 
 #[cfg(test)]
@@ -3533,6 +3588,42 @@ mod tests {
         assert_eq!(round.boards.len(), 2);
     }
 
+    /// Every other way of naming a player twice in a draft was already refused
+    /// at confirmation — two forced pairings, a pairing and a bye, a forced
+    /// player who is also absent. Repeating them inside the *absent* list was
+    /// the one that got through, and it wrote one sit-out row per entry: silent
+    /// while an absence is worth nothing (the default), and free points the
+    /// moment `half_point_absences` is on. Found by the fuzzer.
+    #[test]
+    fn a_player_named_absent_twice_is_refused_rather_than_paid_twice() {
+        let mut t = Tournament::new("Absent twice").unwrap();
+        for n in ["A", "B", "C", "D", "E", "F"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.settings.half_point_absences = true;
+        t.finalize_registration().unwrap();
+        let all: Vec<TournamentId> = t.players.iter().map(|p| p.tournament_id.unwrap()).collect();
+
+        t.prepare_round().unwrap();
+        t.update_draft(vec![all[5], all[5], all[5]], vec![], vec![])
+            .unwrap();
+        assert_eq!(
+            t.confirm_round().err(),
+            Some(TournamentError::PlayerTwiceInRound {
+                round: 1,
+                player: all[5],
+            })
+        );
+
+        // Named once, the same draft confirms and pays the absence once.
+        t.update_draft(vec![all[5]], vec![], vec![]).unwrap();
+        let round = t.confirm_round().unwrap();
+        assert_eq!(
+            round.sitouts.iter().filter(|s| s.player == all[5]).count(),
+            1
+        );
+    }
+
     #[test]
     fn several_byes_can_be_forced_in_one_round() {
         // Two of five players are forced onto byes, leaving three to pair — an odd
@@ -4183,6 +4274,40 @@ mod tests {
             Err(TournamentError::BoardAgainstSelf {
                 round: 1,
                 player: TournamentId(1)
+            })
+        );
+
+        // Two sit-out rows for one player: each one scores, so the round pays
+        // them twice for the one round they missed.
+        let mut twice_absent = played_one_round();
+        for _ in 0..2 {
+            twice_absent.rounds[0].sitouts.push(crate::round::Sitout {
+                player: TournamentId(1),
+                kind: crate::round::SitoutKind::Absent,
+                value: crate::round::SitoutValue::Half,
+            });
+        }
+        assert_eq!(
+            twice_absent.validate_loaded(),
+            Err(TournamentError::PlayerTwiceInRound {
+                round: 1,
+                player: TournamentId(1)
+            })
+        );
+
+        // A board *and* a sit-out is the same problem wearing a different hat:
+        // the player both played and did not play.
+        let mut played_and_sat = played_one_round();
+        played_and_sat.rounds[0].sitouts.push(crate::round::Sitout {
+            player: TournamentId(2),
+            kind: crate::round::SitoutKind::Bye,
+            value: crate::round::SitoutValue::Full,
+        });
+        assert_eq!(
+            played_and_sat.validate_loaded(),
+            Err(TournamentError::PlayerTwiceInRound {
+                round: 1,
+                player: TournamentId(2)
             })
         );
 

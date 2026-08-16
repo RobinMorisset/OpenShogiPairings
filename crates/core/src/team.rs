@@ -486,6 +486,16 @@ impl Tournament {
     pub(crate) fn confirm_team_round(&mut self) -> Result<&Round, TournamentError> {
         let draft = self.draft.clone().ok_or(TournamentError::NoDraft)?;
         let slots = self.team_slots();
+        // A player is absent at most once. The `absent` set below folds repeats
+        // away for the *membership* tests, but the sit-out rows are built from
+        // the list itself, so a repeat there would write one row per entry and
+        // pay the absence once per row.
+        if let Some(player) = crate::tournament::first_repeat(draft.absent.iter().copied()) {
+            return Err(TournamentError::PlayerTwiceInRound {
+                round: draft.number,
+                player,
+            });
+        }
         let absent: HashSet<TournamentId> = draft.absent.iter().copied().collect();
 
         // Player-level forcing has no meaning when teams are what get paired.

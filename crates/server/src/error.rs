@@ -320,6 +320,12 @@ pub(crate) fn domain_payload(
         | TournamentError::MisnumberedRound { .. }
         | TournamentError::UnknownRoundPlayer { .. }
         | TournamentError::BoardAgainstSelf { .. }
+        // Reachable two ways, both of which the referee's own UI cannot produce:
+        // a hand-edited file whose round names somebody twice, and a client that
+        // sends the same player twice in one draft. The English message names the
+        // round and the player, which is what whoever is holding the broken
+        // request or the broken file needs.
+        | TournamentError::PlayerTwiceInRound { .. }
         // Deliberately English: unfinished scaffolding (the UI offers no team
         // probe yet), not a state the product is meant to have.
         // TODO: `InvalidDraft` carries a free-form English string built at ~8
