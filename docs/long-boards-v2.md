@@ -259,6 +259,24 @@ through `pop_round_uncarrying`, which moves the outcome back before removing the
 round. `cancel_last_round` and both `force_pairing` variants use it; a bare
 `self.rounds.pop()` is now the bug.
 
+That machinery then has to be *allowed* to run, which the first implementation
+forgot: `force_pairing` refused outright on any decided board, and a carried game
+decided early is a decided board from the moment the gap round is confirmed — so
+the round's own fresh boards could never be re-paired again, a regression against
+the model this replaces. The guard is now per-board and asks the question it
+means: *would this result survive the rebuild?* (`result_survives_repairing`).
+Almost nothing does — the engine re-picks the Swiss boards, the bracket
+re-derives the cup ones, and even the referee's own forced boards come back
+through `Board::pending` — so the answer is yes only for a carried game, which
+round-trips exactly through the un-carry and re-carry. Phrasing it as a property
+of the result rather than of `PairingSource::Carried` is deliberate: the source
+is only today's cheapest way to answer it.
+
+Tested by `forcing_a_pairing_preserves_the_long_game_the_round_is_finishing`,
+which forces a pairing in a gap round and checks the long game comes through with
+its pair, its result and its handicap intact — the path this section is about,
+which had no test at all.
+
 ### 2. `cancel_last_round` must move the outcome back — handled
 
 Cancelling round N+1 flips round N's record from `LongCarried` back to
@@ -522,7 +540,8 @@ because that is the point at which "the tournament is over" is being asserted.
    - the same via a **no-show** on a long board, which is the likeliest trigger;
    - a pending carried game rendered across an N+1 grid column (the double-loss
      case);
-   - back-to-back long boards;
+   - back-to-back long boards (covered on the rendering side by
+     `crossTableColumns`; still untested through the engine);
    - a cancelled N+1, asserting the outcome landed back on the round-N record;
    - a long cup round with its results withheld. The existing
      `a_long_cup_round_consumes_two_tournament_rounds_and_the_bracket_resumes_after`

@@ -125,6 +125,14 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   name.
 - If `OSP_ADMIN_PASSWORD` is set, only published tournaments are visible to
   anyone without that password.
+- **A round finishing a long game could not be re-paired.** Forcing a pairing
+  re-pairs the round, so it is refused when the round already holds results —
+  but a long game carried over from the previous round counts as a result from
+  the moment the round starts, which left the referee unable to change any of
+  that round's other pairings. Carrying a long game is now understood as what it
+  is: the one result that survives a re-pairing, since it is rebuilt from the
+  round it started in, handicap included. Everything else still refuses, whether
+  the pairing came from the engine, the cup bracket or the referee.
 - **A long game's points disappeared from the standings for a whole round.** A
   long board decided early — most often because one player never turned up —
   scored its two points as soon as its first round finished, then lost them again

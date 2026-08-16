@@ -479,6 +479,26 @@ pub enum TournamentError {
     JustifiedAbsenceOutsideTeamMode,
 }
 
+/// Whether a result recorded on this board would still be there after its round
+/// is re-paired ([`Tournament::force_pairing`] pops the round and rebuilds it
+/// from a reconstructed draft).
+///
+/// Almost nothing does. The engine re-picks the Swiss boards, the bracket
+/// re-derives the cup ones, and even the referee's own forced boards are rebuilt
+/// with `Board::pending` — every one of them comes back with no result. The sole
+/// exception is a long game carried in from the previous round:
+/// [`Tournament::pop_round_uncarrying`] puts its outcome *and* its handicap back
+/// on the record it came from, and the re-carry brings them forward again, so it
+/// round-trips exactly.
+///
+/// Phrased as a question about the *result* rather than about the source,
+/// because the source is only the cheapest way to answer it today. If another
+/// kind of board ever became reproducible with its result, this is the one place
+/// that would need to say so.
+fn result_survives_repairing(board: &Board) -> bool {
+    matches!(board.source, PairingSource::Carried)
+}
+
 impl Tournament {
     /// Create a new, empty tournament with the given name.
     ///
@@ -2136,16 +2156,37 @@ impl Tournament {
     /// the other player onto the bye" rather than a real pairing — the engine
     /// re-picks everyone else's boards around that fixed bye.
     ///
-    /// Refuses if the round is completed or already has recorded results (re-
-    /// pairing would discard them). The pair is validated by the re-pairing path
-    /// exactly like any referee-forced board/bye (must be a present Swiss
-    /// player, neither a cup player nor already forced elsewhere).
+    /// Refuses if the round holds a result that re-pairing would discard. The
+    /// pair is validated by the re-pairing path exactly like any referee-forced
+    /// board/bye (must be a present Swiss player, neither a cup player nor
+    /// already forced elsewhere).
     pub fn force_pairing(&mut self, a: UnitKey, b: UnitKey) -> Result<&Round, TournamentError> {
         let round = self.rounds.last().ok_or(TournamentError::NoCurrentRound)?;
-        if round.completed {
-            return Err(TournamentError::RoundHasResults);
-        }
-        if round.boards.iter().any(|bd| bd.is_decided()) {
+        // Re-pairing rebuilds this round from a reconstructed draft, and every
+        // board that comes back does so *pending*: the engine re-picks the Swiss
+        // ones, the bracket re-derives the cup ones, and even the referee's own
+        // forced boards are rebuilt with `Board::pending` below. A result
+        // recorded on any of them would be discarded without a word, which is
+        // what this refuses.
+        //
+        // A long game carried in from the previous round is the exception, and
+        // the reason this is a per-board test rather than "does the round have
+        // any result at all". `pop_round_uncarrying` puts its outcome *and* its
+        // handicap back on the record it came from, and the re-carry brings them
+        // forward again, so it survives the round trip exactly — that function
+        // exists for this. Refusing on it froze the whole gap round: a long game
+        // decided early meant the round's *fresh* boards could never be
+        // re-paired, which the model before this one allowed.
+        //
+        // This subsumes the old `round.completed` check. A completed round whose
+        // only results are carried is precisely the case worth unblocking (the
+        // rest of the field was byed or absent, so the round was born complete),
+        // and a completed round holding anything else is caught here anyway.
+        if round
+            .boards
+            .iter()
+            .any(|bd| bd.is_decided() && !result_survives_repairing(bd))
+        {
             return Err(TournamentError::RoundHasResults);
         }
         if self.settings.team_mode() {
@@ -3410,27 +3451,39 @@ mod tests {
         t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
         assert!(t.rounds[0].completed);
 
-        // Round 2. If the winner is (wrongly) paired again, let them win that too.
+        // Round 2. The winner must be on the board finishing their long game and
+        // on nothing else — asserted rather than probed, because "they were not
+        // paired again" is the whole claim. Reaching for the seat and shrugging
+        // if it is absent is how this test used to pass without checking it.
         start_next_round(&mut t);
-        let number = t.rounds.last().unwrap().number;
-        let seat = t
-            .rounds
-            .last()
-            .unwrap()
+        let round2 = t.rounds.last().unwrap();
+        let theirs: Vec<&Board> = round2
             .boards
             .iter()
-            .position(|b| b.player1 == winner || b.player2 == winner)
-            .map(|i| {
-                let side = if t.rounds.last().unwrap().boards[i].player1 == winner {
-                    Winner::Player1
-                } else {
-                    Winner::Player2
-                };
-                (i, side)
-            });
-        if let Some((i, side)) = seat {
-            t.toggle_board_winner(number, i, side).unwrap();
-        }
+            .filter(|b| b.player1 == winner || b.player2 == winner)
+            .collect();
+        assert_eq!(theirs.len(), 1, "one board in round 2, not two");
+        assert_eq!(
+            theirs[0].source,
+            PairingSource::Carried,
+            "and it is the long game being finished, not a fresh pairing"
+        );
+        assert!(
+            round2.sitout(winner).is_none(),
+            "they are playing, not sitting"
+        );
+
+        // Finish the round so it is scored at all, and check the exact total. The
+        // old assertion was `<= 2`, which a long board scoring *nothing* also
+        // satisfies — so it would have passed through the two bugs that made a
+        // carried game score zero.
+        let fresh = round2
+            .boards
+            .iter()
+            .position(|b| b.source != PairingSource::Carried)
+            .expect("the other two players have an ordinary board");
+        t.toggle_board_winner(2, fresh, Winner::Player1).unwrap();
+        assert!(t.rounds[1].completed);
 
         let standing = t
             .standings()
@@ -3441,11 +3494,12 @@ mod tests {
                     .any(|p| p.id == s.player_id && p.tournament_id == Some(winner))
             })
             .expect("the long winner is in the standings");
-        assert!(
-            standing.victories <= crate::Wins::from_whole(2),
-            "two completed rounds cannot yield more than two wins, got {:?}",
-            standing.victories
+        assert_eq!(
+            standing.victories,
+            crate::Wins::from_whole(2),
+            "a long game is worth exactly two wins over the two rounds it took"
         );
+        assert_eq!(standing.points, crate::HalfPoints::from_whole(2));
     }
 
     /// A long game reaches exactly one round forward, and lets go after it.
@@ -3884,6 +3938,134 @@ mod tests {
             .unwrap();
         t.toggle_board_winner(2, fresh, Winner::Player1).unwrap();
         assert_eq!(t.grid_export_blocker(), None);
+    }
+
+    /// Forcing a pairing in a round that is finishing a long game keeps the long
+    /// game — result, handicap and all — and re-pairs everything else.
+    ///
+    /// This is the hazard `docs/long-boards-v2.md` calls Issue 1, and it had no
+    /// test. It also covers the regression that came with the redesign: the guard
+    /// refused on *any* decided board, and a carried game decided early is a
+    /// decided board from the moment the round is confirmed, so the referee could
+    /// never re-pair that round's fresh boards again.
+    #[test]
+    fn forcing_a_pairing_preserves_the_long_game_the_round_is_finishing() {
+        let mut t = Tournament::new("Force").unwrap();
+        // Rated, and spread out, so the long board can also carry a handicap —
+        // the thing most likely to be dropped on the way back through the carry.
+        for (n, r) in [
+            ("A", 2000),
+            ("B", 1400),
+            ("C", 1900),
+            ("D", 1500),
+            ("E", 1800),
+            ("F", 1600),
+        ] {
+            t.add_player(rated(n, r)).unwrap();
+        }
+        t.settings.long_boards_enabled = true;
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+
+        // Board 0 goes long, is given a handicap, and is decided inside round 1.
+        t.set_board_long(1, 0, true).unwrap();
+        t.set_board_handicap(1, 0, Some(Handicap::Lance)).unwrap();
+        let long_pair = (t.rounds[0].boards[0].player1, t.rounds[0].boards[0].player2);
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+        t.toggle_board_winner(1, 2, Winner::Player1).unwrap();
+        assert!(t.rounds[0].completed);
+
+        // Round 2 carries it. The four players not on the long board are paired.
+        start_next_round(&mut t);
+        let free: Vec<TournamentId> = t.rounds[1]
+            .boards
+            .iter()
+            .filter(|b| b.source != PairingSource::Carried)
+            .flat_map(|b| [b.player1, b.player2])
+            .collect();
+        assert_eq!(free.len(), 4, "four players are free in the gap round");
+        // Two of them the engine did *not* put together.
+        let (x, y) = (free[0], free[2]);
+        assert!(
+            !t.rounds[1]
+                .boards
+                .iter()
+                .any(|b| (b.player1 == x && b.player2 == y) || (b.player1 == y && b.player2 == x)),
+            "x and y start unpaired"
+        );
+
+        let round = t
+            .force_pairing(UnitKey::from(x), UnitKey::from(y))
+            .expect("a carried result must not freeze the round it is finishing");
+        assert_eq!(round.number, 2);
+        assert!(
+            round
+                .boards
+                .iter()
+                .any(|b| (b.player1 == x && b.player2 == y) || (b.player1 == y && b.player2 == x)),
+            "the forced pair is on a board together"
+        );
+
+        // The long game came through untouched: same pair, same result, same
+        // handicap, still the carried record.
+        let carried = t.rounds[1]
+            .boards
+            .iter()
+            .find(|b| matches!(b.record, GameRecord::LongEnd(_)))
+            .expect("the carried game is still in round 2");
+        assert_eq!((carried.player1, carried.player2), long_pair);
+        assert_eq!(carried.source, PairingSource::Carried);
+        assert_eq!(carried.outcome(), Outcome::won(Winner::Player1));
+        assert_eq!(
+            carried.handicap.map(|h| h.handicap),
+            Some(Handicap::Lance),
+            "the handicap travels with the game, both ways"
+        );
+        // And its starting record is still inert in round 1, holding no outcome.
+        assert!(t.rounds[0]
+            .boards
+            .iter()
+            .any(|b| b.record == GameRecord::LongCarried));
+        assert_eq!(t.validate_loaded(), Ok(()));
+    }
+
+    /// The other half of the same rule: a result the re-pairing *would* discard
+    /// still refuses, whoever paired the board.
+    ///
+    /// Only a carried long game survives the rebuild. A Swiss board is re-picked
+    /// by the engine, a cup board re-derived from the bracket, and even the
+    /// referee's own forced boards are rebuilt pending — so a result on any of
+    /// them would vanish silently, which is what the guard is for.
+    #[test]
+    fn forcing_a_pairing_still_refuses_a_result_it_would_discard() {
+        let mut t = Tournament::new("Force").unwrap();
+        for n in ["A", "B", "C", "D"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        t.confirm_round().unwrap();
+        let (a, b) = (t.rounds[0].boards[1].player1, t.rounds[0].boards[1].player2);
+
+        // An ordinary engine-paired board with a result.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        assert_eq!(
+            t.force_pairing(UnitKey::from(a), UnitKey::from(b)),
+            Err(TournamentError::RoundHasResults)
+        );
+
+        // The same, once that board has been forced by the referee rather than
+        // chosen by the engine: still a result the rebuild would throw away.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap(); // clear it
+        t.rounds[0].boards[0].source = PairingSource::Forced;
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        assert_eq!(
+            t.force_pairing(UnitKey::from(a), UnitKey::from(b)),
+            Err(TournamentError::RoundHasResults),
+            "a forced board is rebuilt pending, so its result would be lost too"
+        );
     }
 
     #[test]
