@@ -797,55 +797,6 @@
       {/if}
     </div>
   {/if}
-  {#if hasReport}
-    <div class="report print-hide">
-      <button
-        type="button"
-        class="report-toggle"
-        aria-expanded={reportOpen}
-        onclick={() => (reportOpen = !reportOpen)}
-      >
-        <span class="report-title">{$_("roundView.explanation.reportTitle")}</span>
-        <span class="report-summary"
-          >{explanation?.report
-            .map((t) =>
-              $_("roundView.explanation.ruleCount", {
-                values: { count: t.boards, rule: ruleLabel(t.rule) },
-              }),
-            )
-            .join(" · ")}</span
-        >
-        <span class="report-caret">{reportOpen ? "▾" : "▸"}</span>
-      </button>
-      {#if explanationStale}
-        <p class="report-stale">{$_("roundView.explanation.staleWarning")}</p>
-      {/if}
-      {#if reportOpen}
-        <ul class="report-list">
-          {#each explanation?.report ?? [] as total (total.rule)}
-            <li>
-              <div class="report-rule-head">
-                <span class="report-rule">{ruleLabel(total.rule)}</span>
-                <span class="report-boards"
-                  >{$_("roundView.explanation.boardsCount", {
-                    values: { count: total.boards },
-                  })}</span
-                >
-              </div>
-              <ul class="report-affected">
-                {#each boardsForRule(total.rule) as board (board.label)}
-                  <li>
-                    <span>{board.label}</span>
-                    <span class="report-units">{board.units}</span>
-                  </li>
-                {/each}
-              </ul>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </div>
-  {/if}
   {#if round.boards.length === 0 && byeSitouts.length === 0}
     <p class="empty">{$_("roundView.noBoards")}</p>
   {:else if alphabetical}
@@ -1228,6 +1179,60 @@
     {/if}
   {/if}
 
+  <!-- Both explanations of the round live below it, next to each other: the
+       pairings are what the referee came to read, and neither the tally of
+       compromises nor the questions asked of a board is worth pushing them down
+       the page for. -->
+  {#if hasReport}
+    <div class="report print-hide">
+      <button
+        type="button"
+        class="report-toggle"
+        aria-expanded={reportOpen}
+        onclick={() => (reportOpen = !reportOpen)}
+      >
+        <span class="report-title">{$_("roundView.explanation.reportTitle")}</span>
+        <span class="report-summary"
+          >{explanation?.report
+            .map((t) =>
+              $_("roundView.explanation.ruleCount", {
+                values: { count: t.boards, rule: ruleLabel(t.rule) },
+              }),
+            )
+            .join(" · ")}</span
+        >
+        <span class="report-caret">{reportOpen ? "▾" : "▸"}</span>
+      </button>
+      {#if explanationStale}
+        <p class="report-stale">{$_("roundView.explanation.staleWarning")}</p>
+      {/if}
+      {#if reportOpen}
+        <ul class="report-list">
+          {#each explanation?.report ?? [] as total (total.rule)}
+            <li>
+              <div class="report-rule-head">
+                <span class="report-rule">{ruleLabel(total.rule)}</span>
+                <span class="report-boards"
+                  >{$_("roundView.explanation.boardsCount", {
+                    values: { count: total.boards },
+                  })}</span
+                >
+              </div>
+              <ul class="report-affected">
+                {#each boardsForRule(total.rule) as board (board.label)}
+                  <li>
+                    <span>{board.label}</span>
+                    <span class="report-units">{board.units}</span>
+                  </li>
+                {/each}
+              </ul>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+  {/if}
+
   {#if onProbe && swissPlayers.length >= 4}
     <div class="probe print-hide">
       <button
@@ -1469,7 +1474,7 @@
   }
 
   .report {
-    margin-bottom: 0.75rem;
+    margin-top: 1rem;
     font-size: 0.85rem;
   }
   .report-toggle {
