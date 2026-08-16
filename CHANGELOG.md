@@ -106,6 +106,12 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   say) as a server with no tournaments on it.
 - The desktop app now respects `OSP_DATA_DIR` instead of putting its data in a
   hardcoded location.
+- **Switching away from the window and back cleared a pairing explanation**:
+  the two players you had picked, and the answer you were reading. Coming back
+  resyncs with the server, and that was enough to look like the round had been
+  re-paired. An explanation now survives anything that leaves the pairing
+  alone — a resync, another referee's edit elsewhere, recording a result — and
+  is cleared only when the round really is paired differently.
 
 ### Changed
 

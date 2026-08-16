@@ -606,9 +606,29 @@
     probeResult = null;
     probeError = "";
   }
+  /**
+   * What the probe's answers are about, as a *value*: who is on each board,
+   * where that board came from, and who the engine sat out — everything
+   * `swissPlayers` reads, which is everything the probe can be asked about.
+   *
+   * Watching the `round` object itself is what this replaces, and it was too
+   * blunt: the app resyncs on another referee's change *and* whenever the
+   * window regains focus, and a resync hands back a fresh object even when the
+   * round in it is identical — so leaving the window and coming back emptied
+   * the pickers and threw away the answer on screen.
+   *
+   * Results are deliberately not in here. Recording one re-pairs nothing, and a
+   * referee entering results should not lose the explanation they were reading.
+   */
+  const pairing = $derived(
+    [
+      round.number,
+      ...round.boards.map((b) => `${b.player1}-${b.player2}-${b.source?.kind ?? "swiss"}`),
+      swissBye ?? "",
+    ].join(" "),
+  );
   $effect(() => {
-    void round.number;
-    void round.boards;
+    void pairing;
     resetProbe();
   });
 
