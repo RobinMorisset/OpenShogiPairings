@@ -238,8 +238,17 @@
 </form>
 
 <style>
+  /* `width: 0; min-width: 100%` keeps this row out of the intrinsic width of
+     the card behind the Players tab (`.card.wide-table` in App.svelte), which
+     is sized with `max-content` — and `max-content` for a wrapping flex row is
+     every field on one line, wrapping be damned. So this form was setting the
+     width of the whole tab, and having set it wide enough, then had the room
+     never to wrap: the one thing it is written to do. The roster table is what
+     may widen that card; a form is not. */
   .registration {
     display: flex;
+    width: 0;
+    min-width: 100%;
     gap: 0.5rem;
     flex-wrap: wrap;
     align-items: flex-start;
