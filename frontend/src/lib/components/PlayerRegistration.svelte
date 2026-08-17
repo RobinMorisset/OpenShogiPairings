@@ -165,7 +165,17 @@
     />
     {#if showSuggestions && suggestions.length > 0}
       <ul class="suggestions" id="fesa-suggestions" role="listbox">
-        {#each suggestions as s, i (s.last_name + s.first_name + s.rating)}
+        <!-- Keyed by position, not by name+rating. A `RatedPlayer` has no id, and
+             any key built from its fields can collide: the list carries homonyms
+             (two "Kobayashi Riku" in the 2024-01-01 one), and two of those landing
+             on the same rating is not far-fetched with a crowded floor rating of 1.
+             A duplicate key throws `each_key_duplicate` — in production too — which
+             would take the registration form down for as long as the referee's
+             query matched both. Position is the real identity here anyway: the
+             rows are re-derived on every keystroke, hold no state, and are already
+             addressed by index (`fesa-opt-{i}`, what `aria-activedescendant`
+             points at). -->
+        {#each suggestions as s, i (i)}
           <!-- Keyboard selection is handled by the combobox input (arrow keys +
                Enter, tracked via aria-activedescendant); this handler is the
                mouse-only affordance. -->
