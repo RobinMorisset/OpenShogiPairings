@@ -155,12 +155,25 @@ code {
  * and public-page panels) would put them outside it and hang past the card's
  * rounded edge. It is harmless on the elements that have neither.
  *
- * Write it on anything inside a `wide-table` card that is not the table.
+ * Write it on anything inside a `wide-table` card that is not the table
+ * (`ContentCard.svelte`, which states the contract and owns the card's half
+ * of it).
  */
 .fit-width {
   width: 0;
   min-width: 100%;
   box-sizing: border-box;
+}
+
+/* Nothing to opt out of on paper: the card goes back to the page width there
+   (see `ContentCard`), so a child measured against it is measured against the
+   sheet, and `width: 0` would only be one more thing for a print rule to have
+   to undo. */
+@media print {
+  .fit-width {
+    width: auto;
+    min-width: 0;
+  }
 }
 
 /* Form controls -------------------------------------------------------------

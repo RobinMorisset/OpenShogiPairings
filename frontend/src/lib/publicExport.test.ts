@@ -306,6 +306,22 @@ describe("renderSnapshotBody", () => {
     expect(html.match(/data-tip=/g)!.length).toBe(html.match(/osp-tip(?![-\w])/g)!.length);
   });
 
+  it("grows the card behind the pages whose content is a table", () => {
+    // `ContentCard`'s `wide`, decided by `sectionNeedsWideCard` so that this
+    // export and the live reader page cannot disagree about it. The standings
+    // (a column per round) and the rounds (two named players a board) overflow
+    // a narrow screen; the cup bracket sizes itself.
+    const rounds = [round(1, [board(1, 2)])];
+    const withCupSections = publicSections(withCup(view(rounds)));
+    const wide = (html: string) => /<section class="card[^"]*\bwide-table\b/.test(html);
+    expect(withCupSections.map((s) => s.kind)).toEqual(["standings", "cup", "round"]);
+    expect(withCupSections.map((_, i) => wide(pageOf(withCup(view(rounds)), i)))).toEqual([
+      true,
+      false,
+      true,
+    ]);
+  });
+
   it("opens edge tooltips inwards, so none hangs off the page", () => {
     // The last tie-break column is at the right edge; a centred tooltip there
     // would widen the document and give it a horizontal scrollbar.

@@ -61,6 +61,7 @@
   import { Publication, PrintJobs } from "./lib/publication.svelte";
   import { createTeamActions } from "./lib/teamActions";
   import { TournamentStore } from "./lib/tournamentStore.svelte";
+  import ContentCard from "./lib/components/ContentCard.svelte";
   import PublicView from "./lib/components/PublicView.svelte";
   import QrCode from "./lib/components/QrCode.svelte";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
@@ -123,7 +124,7 @@
   /**
    * Whether the open tab's content is a table that will not wrap — so the card
    * should grow to stay behind it instead of letting it overflow the rounded
-   * panel (see `.card.wide-table`).
+   * panel (`ContentCard`'s `wide`).
    *
    * Deliberately a list rather than "always on": the card is sized with
    * `max-content`, which asks the content how wide it would like to be with
@@ -894,7 +895,7 @@
   {:else if initialLoad === "loading"}
     <p class="muted">{$_("app.loading")}</p>
   {:else if tournament}
-    <section class="card" class:wide-table={tabHasWideTable}>
+    <ContentCard wide={tabHasWideTable}>
       <div class="toolbar fit-width">
         <div class="title">
           <h2>{tournament.name}</h2>
@@ -1414,7 +1415,7 @@
           />
         {/if}
       </div>
-    </section>
+    </ContentCard>
   {/if}
 
   {#if prints.sheets && tournament}
@@ -1483,28 +1484,6 @@
   h1 {
     font-size: 1.8rem;
     margin: 0;
-  }
-  /* The standings table can be far wider than the screen — a column per round
-     plus the tie-breaks — and it is deliberately not wrapped in a scroller,
-     because that would pin its sticky header to the scroller instead of to the
-     window (see ResultsView). So it overflows, and the card grows to stay
-     behind it rather than letting the table hang out of the rounded box. */
-  .card.wide-table {
-    width: max-content;
-    min-width: 100%;
-    /* The same trap this card sets for its children, one level up: that
-       `min-width` is a percentage, so without this it floors the *content* box
-       at the page width and the card's own padding and border — 3rem and 2px —
-       land outside it. Every tab with this class was that much wider than every
-       tab without, whatever it contained, which is why they all came out to
-       exactly the same width. `max-content` is a keyword, not a length, so
-       `box-sizing` leaves it alone (css-sizing-3 §5.1): a table that really is
-       wider than the page still widens the card, padding outside it, as before.
-
-       The other half of the contract is in the markup: only the table inside
-       `.tab-content` may widen this card, so every other child of it carries
-       `.fit-width` (see app.css). A new child added here needs that class too. */
-    box-sizing: border-box;
   }
   .toolbar {
     display: flex;
@@ -1797,21 +1776,8 @@
       margin: 0;
       padding: 0;
     }
-    .card {
-      border: none;
-      background: transparent;
-      padding: 0;
-    }
-    /* On screen the card grows past the viewport so the standings table has a
-       background under it. On paper there is nothing to scroll and nothing to
-       overflow *of* — a card sized to the table would simply run off the sheet
-       and be cropped, so it goes back to the page width and the table lays
-       itself out inside it. */
-    .card.wide-table,
-    .card.wide-table > :not(.tab-content) {
-      width: auto;
-      min-width: 0;
-    }
+    /* (The card's own print reset — no border, no background, back to the page
+       width — is `ContentCard`'s, and `.fit-width`'s is app.css's.) */
 
     /* Printing the QR code for the wall is a different document from printing
        the pairings: one sheet, the tournament's name, the code as large as the
@@ -1851,10 +1817,14 @@
        card rather than inside it, so hiding every other child of `.app` — rather
        than naming the parts of whichever tab happens to be open — is what leaves
        them alone. The width and padding go as well: the grid inside sizes itself
-       to the printable area. */
+       to the printable area.
+
+       The card is `ContentCard`'s element rather than this component's, so it
+       takes a `:global()` to name — Svelte scopes a selector to the markup it
+       is written in, and would otherwise quietly match nothing. */
     .app.printing-sheets > header,
     .app.printing-sheets > .error-banner,
-    .app.printing-sheets > section,
+    .app.printing-sheets > :global(.card),
     .app.printing-sheets > footer {
       display: none;
     }

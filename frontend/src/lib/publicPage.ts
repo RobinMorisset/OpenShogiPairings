@@ -83,6 +83,26 @@ export function publicSections(view: PublicTournamentResponse): PublicSection[] 
 }
 
 /**
+ * Whether a section's content is a table that will not wrap, so its card
+ * should grow to stay behind it (`ContentCard`'s `wide`).
+ *
+ * Here rather than in either renderer because the two must agree: the live
+ * page and the export show the same tables to the same room, and the reason a
+ * standings table overflows a narrow window is not one of them. They did not
+ * agree before — the export widened its standings page and the live page had
+ * no wide card at all, so the reader's standings painted its zebra rows past
+ * the rounded border onto the page background.
+ *
+ * The same list as the referee app's `tabHasWideTable`, minus the tabs a
+ * reader has no equivalent of: standings (a column per round plus the
+ * tie-breaks) and the rounds (two named players and their ratings per board).
+ * The cup bracket is not a table and sizes itself.
+ */
+export function sectionNeedsWideCard(section: PublicSection): boolean {
+  return section.kind === "standings" || section.kind === "round";
+}
+
+/**
  * A section's identity: the live page's tab id, and what tells the export's
  * "you are here" tab from the links around it.
  */

@@ -15,9 +15,10 @@
   import { fetchPublicTournament, subscribeToPublicTournament } from "../api";
   import { describeApiError } from "../errorCodes";
   import type { PublicPage } from "../publicAccess";
-  import { publicSections, sectionId, sectionLabel } from "../publicPage";
+  import { publicSections, sectionId, sectionLabel, sectionNeedsWideCard } from "../publicPage";
   import type { PublicTournamentResponse } from "../types";
   import ConnectionStatus from "./ConnectionStatus.svelte";
+  import ContentCard from "./ContentCard.svelte";
   import LocaleSwitcher from "./LocaleSwitcher.svelte";
   import PublicSectionBody from "./PublicSectionBody.svelte";
   import ThemeSwitcher from "./ThemeSwitcher.svelte";
@@ -147,16 +148,18 @@
     <!-- No payload and no stream: a wrong, rotated, or never-issued key. The
          server answers the same 404 for all three on purpose, so this says the
          one thing that is certainly true. -->
-    <section class="card">
+    <ContentCard>
       <p class="muted">{$_("publicView.unavailable")}</p>
-    </section>
+    </ContentCard>
   {:else if tournament && activeSection}
-    <section class="card">
+    <ContentCard wide={sectionNeedsWideCard(activeSection)}>
       <!-- One section is the whole page: before round 1 with no cup there is
            only the entrant list, and a tab strip of one tab is furniture. The
            export hides its navigation on the same condition. -->
       {#if sections.length > 1}
-        <div class="tabs" role="tablist">
+        <!-- `fit-width` (app.css): a tab strip's max-content is every tab on
+             one line, and only the table below may widen this card. -->
+        <div class="tabs fit-width" role="tablist">
           {#each sections as section (sectionId(section))}
             <button
               type="button"
@@ -174,7 +177,7 @@
       <div class="tab-content">
         <PublicSectionBody {view} section={activeSection} />
       </div>
-    </section>
+    </ContentCard>
   {/if}
 </div>
 
@@ -282,10 +285,6 @@
     .tabs {
       display: none;
     }
-    .card {
-      border: none;
-      background: transparent;
-      padding: 0;
-    }
+    /* (The card's own print reset is `ContentCard`'s.) */
   }
 </style>

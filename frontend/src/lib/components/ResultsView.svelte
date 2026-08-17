@@ -1328,7 +1328,7 @@
    * and <html> establishes a scrollport. Wrapping the table in the obvious
    * `overflow-x: auto` would pin the header to that wrapper instead of to the
    * window, which is the opposite of what this is for — so the table is left to
-   * overflow, and `.card.wide-table` in App.svelte grows to cover it.
+   * overflow, and the card grows to cover it (`ContentCard`'s `wide`).
    *
    * With `border-collapse: collapse` a cell's border belongs to the *table*, so
    * it stays behind while the sticky cell travels. The rules that separate a
@@ -1366,11 +1366,13 @@
     /* `width` on a table cell is a suggestion the layout algorithm may shrink;
        `min-width` is not, and the two rules only agree while the column really
        is `--id-col` wide. In the referee app that never came up, because the
-       card around the table is `max-content` (see `.card.wide-table` in
-       App.svelte) so the table is always laid out at its natural width. The
-       reader page has no such card: in a narrow window the table is squeezed to
-       the viewport, this column went down to 28px while the name column went on
-       pinning at 52px, and the two froze with a 24px hole between them. */
+       card around the table is `max-content` (`ContentCard`'s `wide`) so the
+       table is always laid out at its natural width. The reader page had no
+       such card until that machinery became one component: in a narrow window
+       the table was squeezed to the viewport, this column went down to 28px
+       while the name column went on pinning at 52px, and the two froze with a
+       24px hole between them. Kept now that the card is there, because the
+       column agreeing with itself should not depend on what is around it. */
     min-width: var(--id-col);
     /* The table starts at the card's edge, so this cell's left padding is
        stacked on top of the card's own — and the numbers are right-aligned, so

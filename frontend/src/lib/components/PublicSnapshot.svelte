@@ -19,8 +19,15 @@
   // transport: the referee re-exports after every round, and a reader who cannot
   // tell an old file from a live one will trust the wrong standings.
   import { _ } from "svelte-i18n";
-  import { sectionFile, sectionId, sectionLabel, type PublicSection } from "../publicPage";
+  import {
+    sectionFile,
+    sectionId,
+    sectionLabel,
+    sectionNeedsWideCard,
+    type PublicSection,
+  } from "../publicPage";
   import type { PublicTournamentResponse } from "../types";
+  import ContentCard from "./ContentCard.svelte";
   import PublicSectionBody from "./PublicSectionBody.svelte";
 
   interface Props {
@@ -67,12 +74,9 @@
     </nav>
   {/if}
 
-  <!-- Same reason as the app's own card: the standings table overflows on a
-       narrow screen, and the box should grow behind it rather than let it
-       hang out of the rounded corner. -->
-  <section class="card" class:wide-table={current.kind === "standings"}>
+  <ContentCard wide={sectionNeedsWideCard(current)}>
     <PublicSectionBody {view} section={current} staticPage />
-  </section>
+  </ContentCard>
 </div>
 
 <style>
@@ -129,20 +133,15 @@
     border-color: var(--border);
     background: var(--bg-surface);
   }
-  .card.wide-table {
-    width: max-content;
-    min-width: 100%;
-  }
-
   @media print {
     /* The links are the one thing paper cannot follow. */
     .tabs {
       display: none;
     }
-    .card {
-      border: none;
-      background: transparent;
-      padding: 0;
-    }
+    /* (The card's own print reset is `ContentCard`'s. This page used to have a
+       partial copy of the card's screen rules and none of its print ones, so
+       an exported standings table wide enough to matter was cropped at the
+       edge of the sheet — in the one artifact whose whole point is being
+       printed.) */
   }
 </style>

@@ -39,7 +39,9 @@
   <!-- Before round 1 there is nothing to rank: everyone sits at their MacMahon
        start. The entrant list is what the page is for at that moment — players
        check that they are registered (docs/archive/public-access.md §2). -->
-  <p class="muted">{$_("publicView.notStarted")}</p>
+  <!-- `fit-width` (app.css): a sentence, and on the export it is a direct child
+       of a `max-content` card, whose width it would otherwise set. -->
+  <p class="muted fit-width">{$_("publicView.notStarted")}</p>
   <EntrantList players={tournament.players} />
 {:else if section.kind === "standings"}
   <ResultsView
