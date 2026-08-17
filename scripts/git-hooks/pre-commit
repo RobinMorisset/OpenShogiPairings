@@ -108,6 +108,13 @@ if [ -n "$staged_fe" ]; then
 
   echo "== i18n locale keys =="
   node scripts/check-i18n-keys.mjs
+
+  echo "== CSS custom properties =="
+  # Nothing else in this loop can see a `var(--typo)`: it is valid CSS, so the
+  # bundler and svelte-check both pass it, and at runtime it silently drops the
+  # whole declaration instead of erroring. Here rather than in pre-push because
+  # it costs ~0.1s and the fix is a one-word edit to the file you are committing.
+  node scripts/check-css-vars.mjs
 else
-  echo "== svelte-check / eslint / i18n: skipped (no staged frontend changes) =="
+  echo "== svelte-check / eslint / i18n / CSS vars: skipped (no staged frontend changes) =="
 fi

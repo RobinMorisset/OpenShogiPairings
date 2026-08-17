@@ -189,6 +189,13 @@ jobs:
         run: npm test
       - name: i18n locale keys in sync
         run: node scripts/check-i18n-keys.mjs
+      # Every `var(--name)` resolves to something. An undefined one is valid CSS
+      # — so the build above and svelte-check both pass it — and at runtime it
+      # invalidates the whole declaration rather than just that value, which is
+      # how a table's bracketing borders came to render nothing while looking
+      # right in review.
+      - name: CSS custom properties defined
+        run: node scripts/check-css-vars.mjs
       # npm advisories, the other half of what the `audit` job below does for the
       # Cargo lockfiles. Here rather than there because this job already has Node
       # and a warm npm cache; a job of its own would set both up again to run one
