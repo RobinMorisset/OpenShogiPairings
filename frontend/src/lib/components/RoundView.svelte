@@ -1495,7 +1495,7 @@
     font-variant-numeric: tabular-nums;
   }
   .match-score.pending {
-    color: var(--muted);
+    color: var(--text-secondary);
     font-weight: 400;
   }
 
@@ -1515,8 +1515,8 @@
      transparent background. (`--text-on-accent` is for text *on* an accent
      fill, so it would be invisible here.) */
   .round-toolbar .ghost.active {
-    border-color: var(--color-accent, var(--border-strong));
-    color: var(--text-primary);
+    border-color: var(--color-accent);
+    color: var(--text);
     font-weight: 600;
   }
   table {
@@ -1694,8 +1694,8 @@
     background: var(--bg-hover);
   }
   .explain-tab.active {
-    border-color: var(--color-accent, var(--border-strong));
-    color: var(--text-primary);
+    border-color: var(--color-accent);
+    color: var(--text);
     font-weight: 600;
   }
   .probe-hint {

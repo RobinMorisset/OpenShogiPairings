@@ -227,7 +227,7 @@
   }
   .no-match {
     margin: 0.25rem 0 0;
-    color: var(--muted);
+    color: var(--text-secondary);
     font-size: 0.85em;
   }
 </style>

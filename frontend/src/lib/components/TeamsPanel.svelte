@@ -588,7 +588,7 @@
   .count,
   .avg,
   .rating {
-    color: var(--muted);
+    color: var(--text-secondary);
     font-size: 0.9em;
   }
   .new-team {
@@ -609,7 +609,7 @@
   /* A roster that isn't the configured size blocks finalization, so it is
      visible at a glance rather than only in the error afterwards. */
   .card.incomplete {
-    border-color: var(--warning, #c90);
+    border-color: var(--color-warning);
   }
   .card-head {
     display: flex;
@@ -650,12 +650,12 @@
     cursor: default;
   }
   .num {
-    color: var(--muted);
+    color: var(--text-secondary);
     font-weight: 400;
     margin-right: 0.2rem;
   }
   .size.short {
-    color: var(--warning, #c90);
+    color: var(--color-warning);
     font-weight: 600;
   }
   .members {
@@ -670,7 +670,7 @@
     padding: 0.1rem 0;
   }
   .board {
-    color: var(--muted);
+    color: var(--text-secondary);
     width: 1.2em;
     text-align: right;
   }
@@ -698,7 +698,7 @@
   }
   /* Still missing, and MacMahon needs it before the tournament can start. */
   .rating-btn.missing {
-    color: var(--warning, #c90);
+    color: var(--color-warning);
     font-weight: 600;
   }
   .rating-input {
@@ -707,7 +707,7 @@
   }
   .adj-badge {
     font-variant-numeric: tabular-nums;
-    color: var(--muted);
+    color: var(--text-secondary);
   }
   .adjustments {
     margin-top: 0.4rem;
@@ -725,10 +725,10 @@
     gap: 0.4rem;
   }
   .bonus {
-    color: var(--win, green);
+    color: var(--color-success);
   }
   .malus {
-    color: var(--loss, crimson);
+    color: var(--color-danger);
   }
   .reason {
     flex: 1;
@@ -776,7 +776,7 @@
     gap: 0.25rem 1rem;
   }
   .empty {
-    color: var(--muted);
+    color: var(--text-secondary);
     margin: 0.25rem 0;
   }
 </style>

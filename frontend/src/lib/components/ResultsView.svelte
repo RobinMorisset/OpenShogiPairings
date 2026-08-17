@@ -1473,11 +1473,17 @@
      for real — so the cell is bracketed by its own side rules, saying "these
      two rounds, one game". Kept to borders and a faint tint rather than a
      background block: this table is read as a grid, and a filled cell in the
-     middle of it pulls the eye away from the rankings it exists to show. */
+     middle of it pulls the eye away from the rankings it exists to show.
+       `--border` rather than the `--border-divider` the cell rules use: this is
+       a mark, not another gridline, and in the dark theme a divider-coloured
+       rule (#2b2b31) on a row background of #232329 is not there at all. (Both
+       colours here named `--color-border`/`--color-text` until 2026-08-17 —
+       neither exists, so the whole declaration was invalid and the bracket drew
+       nothing at all. See scripts/check-css-vars.mjs.) */
   .long-span {
-    border-left: 1px solid var(--color-border);
-    border-right: 1px solid var(--color-border);
-    background: color-mix(in srgb, var(--color-text) 4%, transparent);
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    background: color-mix(in srgb, var(--text) 4%, transparent);
   }
   .win {
     color: var(--color-success);
