@@ -854,6 +854,14 @@
 <div class="round">
   {#if !staticPage}
     <div class="round-toolbar print-hide">
+      {#if onPrintSheets}
+        <ResultSheetsButton
+          playerCount={players.length}
+          macMahonRow={sheetMacMahonRow}
+          onPrint={onPrintSheets}
+          {busy}
+        />
+      {/if}
       <button
         type="button"
         class="ghost control-sm"
@@ -865,14 +873,6 @@
         🔤 {$_("roundView.alphabetical")}
       </button>
       <button type="button" class="ghost control-sm" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
-      {#if onPrintSheets}
-        <ResultSheetsButton
-          playerCount={players.length}
-          macMahonRow={sheetMacMahonRow}
-          onPrint={onPrintSheets}
-          {busy}
-        />
-      {/if}
     </div>
   {/if}
   {#if round.boards.length === 0 && byeSitouts.length === 0}
