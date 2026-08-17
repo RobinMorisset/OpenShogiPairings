@@ -912,28 +912,39 @@ async fn bulk_eligibility_applies_to_everyone_or_to_nobody() {
     );
 }
 
-/// Every path this crate's per-tournament router registers has a row in
-/// `docs/reference/api.md`.
+/// Every path this crate registers has a row in `docs/reference/api.md`.
 ///
 /// The ts-rs bindings have a gate that fails the build when a Rust type moves
 /// without them. This table has nothing of the sort, because it is prose: a
-/// route added to `tournament.rs` and not written up is invisible until somebody
-/// goes looking for an endpoint that was never documented. `POST
-/// /players/eligible` shipped that way and was caught by a reader asking, which
-/// is not a process.
+/// route added and not written up is invisible until somebody goes looking for
+/// an endpoint that was never documented. `POST /players/eligible` shipped that
+/// way and was caught by a reader asking, which is not a process.
+///
+/// All four routing modules, not just the per-tournament one: the registry
+/// routes in `registry.rs` and `lib.rs`, and the reader routes in `public.rs`,
+/// are in the same table and can go stale the same way. Nesting is not
+/// flattened, because the table does not flatten it either — `tournament.rs` and
+/// `public.rs` are written relative to `/api/tournaments/{id}` on both sides.
 ///
 /// Paths only, with placeholder *names* erased first — `{player_id}` in the
 /// router against `{id}` in the table, `{round_number}` against `{n}`. The doc
 /// names its parameters for legibility and that is not drift worth failing a
 /// build over; a missing path is.
 ///
-/// One direction only. The table also covers the registry-level routes from
-/// `lib.rs` and the reader routes from `public.rs`, so "documented but not in
-/// this file" is the normal case, not an error.
+/// One direction only, deliberately: `.fallback` serves the built frontend and
+/// has no business in an API table, so "documented but not registered" is not
+/// checked here.
 #[test]
 fn every_route_is_documented_in_the_api_doc() {
-    const ROUTER_SRC: &str = include_str!("../src/tournament.rs");
     const API_DOC: &str = include_str!("../../../docs/reference/api.md");
+    /// Every module that registers routes. Checked against the source directory
+    /// below, so adding a fifth cannot quietly go unexamined.
+    const ROUTING_MODULES: [(&str, &str); 4] = [
+        ("lib.rs", include_str!("../src/lib.rs")),
+        ("registry.rs", include_str!("../src/registry.rs")),
+        ("public.rs", include_str!("../src/public.rs")),
+        ("tournament.rs", include_str!("../src/tournament.rs")),
+    ];
 
     /// `/players/{player_id}/eligible` -> `/players/{}/eligible`.
     fn erase_placeholder_names(path: &str) -> String {
@@ -956,25 +967,58 @@ fn every_route_is_documented_in_the_api_doc() {
     }
 
     // Built rather than written out, so that this needle does not match the line
-    // it is written on: the text being scanned is the router's source, but a
-    // literal here would also appear in *this* file if the two were ever merged,
-    // and the failure would be a baffling phantom route.
+    // it is written on — the modules above are scanned as text, and one of them
+    // could one day be this file's neighbour in a merge.
     let call = concat!(".", "route", "(");
-    let registered: Vec<String> = ROUTER_SRC
-        .split(call)
-        .skip(1)
-        .filter_map(|chunk| {
-            let rest = chunk.split_once('"')?.1;
-            let path = rest.split_once('"')?.0;
-            path.starts_with('/').then(|| erase_placeholder_names(path))
+
+    // What the list above claims is complete, checked against the directory. A
+    // new routing module would otherwise be exempt from this test by the simple
+    // fact of nobody having added it here.
+    let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut unlisted: Vec<String> = std::fs::read_dir(&src_dir)
+        .expect("crates/server/src should be readable")
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            let name = path.file_name()?.to_str()?.to_owned();
+            let text = std::fs::read_to_string(&path).ok()?;
+            // Routes behind `#[cfg(test)]` are fixtures (error.rs builds a
+            // `/boom` router to check the error body), not API.
+            let production = text.split("#[cfg(test)]").next().unwrap_or("").to_owned();
+            (production.contains(call) && !ROUTING_MODULES.iter().any(|(m, _)| *m == name))
+                .then_some(name)
+        })
+        .collect();
+    unlisted.sort();
+    assert!(
+        unlisted.is_empty(),
+        "these modules register routes but are not in ROUTING_MODULES, so this test \
+         never looked at them: {unlisted:?}"
+    );
+
+    let registered: Vec<(&str, String)> = ROUTING_MODULES
+        .iter()
+        .flat_map(|(module, text)| {
+            text.split("#[cfg(test)]")
+                .next()
+                .unwrap_or("")
+                .split(call)
+                .skip(1)
+                .filter_map(move |chunk| {
+                    let rest = chunk.split_once('"')?.1;
+                    let path = rest.split_once('"')?.0;
+                    path.starts_with('/')
+                        .then(|| (*module, erase_placeholder_names(path)))
+                })
+                .collect::<Vec<_>>()
         })
         .collect();
 
     // A silent extraction failure must not read as "everything is documented".
     assert!(
-        registered.len() > 20,
-        "found only {} routes in tournament.rs — the extractor is broken, not the docs",
-        registered.len()
+        registered.len() > 40,
+        "found only {} routes across {} modules — the extractor is broken, not the docs",
+        registered.len(),
+        ROUTING_MODULES.len()
     );
 
     let documented: std::collections::HashSet<String> = API_DOC
@@ -988,21 +1032,18 @@ fn every_route_is_documented_in_the_api_doc() {
         })
         .collect();
 
-    let mut missing: Vec<&String> = registered
+    let mut missing: Vec<String> = registered
         .iter()
-        .filter(|path| !documented.contains(*path))
+        .filter(|(_, path)| !documented.contains(path))
+        .map(|(module, path)| format!("    {path}   ({module})"))
         .collect();
     missing.sort();
     missing.dedup();
 
     assert!(
         missing.is_empty(),
-        "these routes are registered in crates/server/src/tournament.rs but have no row in \
+        "these routes are registered in crates/server/src but have no row in \
          docs/reference/api.md:\n{}",
-        missing
-            .iter()
-            .map(|p| format!("    {p}"))
-            .collect::<Vec<_>>()
-            .join("\n")
+        missing.join("\n")
     );
 }
