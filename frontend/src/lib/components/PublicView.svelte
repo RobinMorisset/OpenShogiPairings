@@ -187,22 +187,47 @@
   header {
     margin-bottom: 1.5rem;
   }
+  /* The referee app's header grid, ported verbatim — see the long comment on
+     `.header-top` in App.svelte for why it is a grid. This page had the
+     `position: absolute` version that comment describes, because it was written
+     the same morning the fix landed and the fix only touched App.svelte. The
+     failure is worse here than it ever was there: the centred cell holds the
+     *tournament's own name*, so how much room it wants is up to the referee, and
+     the controls are wider (ConnectionStatus says "Reconnecting…", not "Live").
+     At a 560px window the controls sat 36px on top of the title.
+       `align-items: start` rather than App's `center` is the one difference, and
+     only because the middle cell is two lines here (name over subtitle): it
+     keeps the controls level with the title, which is where `top: 0.2rem` used
+     to put them. */
   .header-top {
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: start;
+    gap: 0.5rem;
   }
   .header-titles {
+    grid-column: 2;
     text-align: center;
   }
   .header-controls {
-    position: absolute;
-    right: 0;
-    top: 0.2rem;
+    grid-column: 3;
+    justify-self: end;
     display: flex;
     align-items: center;
     gap: 0.4rem;
+  }
+  /* Narrower than this the two would still fit side by side, but only by
+     squeezing the title against them. Stack instead. */
+  @media (max-width: 34rem) {
+    .header-top {
+      grid-template-columns: 1fr;
+      justify-items: center;
+    }
+    .header-titles,
+    .header-controls {
+      grid-column: 1;
+      justify-self: center;
+    }
   }
   h1 {
     font-size: 1.8rem;
