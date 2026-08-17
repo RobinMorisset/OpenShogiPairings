@@ -24,8 +24,9 @@ permissions:
 jobs:
   # Rust: formatting, lint, docs, and the full workspace test suite. `--locked`
   # makes a stale root Cargo.lock fail here (the lockfile-drift the pre-commit hook
-  # guards against locally). The excluded desktop crate (frontend/src-tauri) is not
-  # built here — it's covered by the release workflow.
+  # guards against locally). The excluded desktop crate (frontend/src-tauri) is
+  # not built here — `--workspace` cannot see it; the `desktop` job below covers
+  # it.
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -107,6 +108,51 @@ jobs:
           toolchain: ${{ steps.msrv.outputs.version }}
       - name: Check (workspace builds on the declared MSRV)
         run: cargo check --workspace --locked
+
+  # The desktop crate. It sits outside the workspace (see the `exclude` in the
+  # root Cargo.toml and the reasoning there), which means every `--workspace`
+  # command in the `rust` job skips it: until this job existed nothing on a push
+  # compiled it, linted it, or ran it. Its one test —
+  # tests/tracing_reaches_the_log_file.rs, asserting the Cargo feature that
+  # carries the embedded server's `tracing::warn!` into the log file the desktop
+  # app writes — had therefore never run anywhere automatic. The release workflow
+  # does build this crate, but only on a `v*` tag, which is the worst moment to
+  # learn it is broken.
+  #
+  # No `paths:` filter: it path-depends on osp-server, so an edit anywhere under
+  # crates/ can break it.
+  #
+  # windows-latest rather than the cheaper ubuntu. Linux is not a platform this
+  # project ships (the release matrix is macOS + Windows), so a Linux leg would
+  # be able to fail over a GTK/webkit packaging change that affects no artifact
+  # anyone installs — and it would need an apt list of webview dependencies that
+  # rots with the runner image. Windows needs none.
+  #   What this does NOT cover is src/print_macos.rs and the objc2 dependencies
+  #   behind cfg(target_os = "macos"): they compile on a macOS runner only, so
+  #   for those the pre-push hook (which checks whatever platform you are on) and
+  #   the release build are still the first line. A macos-latest leg would close
+  #   it, at 10x the billing multiplier of a job that runs on every push.
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri
+      - name: Format (cargo fmt)
+        run: cargo fmt --manifest-path frontend/src-tauri/Cargo.toml --all --check
+      - name: Lint (clippy, warnings denied)
+        run: cargo clippy --manifest-path frontend/src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+      # `--locked` here is also the only thing in CI that reads
+      # frontend/src-tauri/Cargo.lock, which drifts precisely because nothing in
+      # the usual loop resolves it (see the pre-commit hook's freshness block).
+      - name: Test
+        run: cargo test --manifest-path frontend/src-tauri/Cargo.toml --locked
 
   # Frontend: type-check, lint, unit tests, and the i18n locale-key parity check.
   frontend:

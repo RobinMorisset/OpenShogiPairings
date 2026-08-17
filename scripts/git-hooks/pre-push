@@ -46,6 +46,25 @@ echo "== rustdoc (broken links) =="
 # ~4s after a core edit, which is why this is here and not in pre-commit.
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --quiet
 
+echo "== desktop crate (frontend/src-tauri) =="
+# Outside the workspace (see the root Cargo.toml's `exclude`), so every
+# `--workspace` command above skips it. Until this block existed, nothing on a
+# push compiled it, linted it or ran its one test, and CI built it only on a
+# `v*` tag. It path-depends on osp-server, so an edit under crates/ can break it
+# without touching a file in this directory at all.
+#   Worth having here as well as in CI, not just for the earlier feedback: CI's
+#   `desktop` job pins windows-latest, so a push from a mac is the only thing
+#   that compiles src/print_macos.rs and the objc2 dependencies behind
+#   cfg(target_os = "macos"). Whichever platform you are on is the one this
+#   checks.
+# ~65s warm (0.8s fmt, 22s clippy, 43s test), and a good deal more the first time
+# after a dependency bump — it builds its own target/ directory, sharing nothing
+# with the workspace's. That is the trade this hook already makes: pushes happen
+# a couple of times a day, commits dozens of times.
+cargo fmt --manifest-path frontend/src-tauri/Cargo.toml --all --check
+cargo clippy --manifest-path frontend/src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+cargo test --manifest-path frontend/src-tauri/Cargo.toml --locked
+
 # On Windows (Git Bash / MSYS), node isn't on the PATH a hook runs with: hooks
 # don't source the interactive profile, so the entry a Node installer adds there
 # isn't in scope. Same guard pre-commit carries, hoisted above both npm calls

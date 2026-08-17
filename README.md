@@ -304,17 +304,25 @@ git config core.hooksPath scripts/git-hooks
 - `pre-push` — the full test suite (`cargo test --workspace` and the frontend
   tests, `npm test`), a check that the ts-rs bindings under
   `frontend/src/lib/generated/` match the Rust types they come from (the test
-  run above is what writes them, so this is just a diff — and nothing else
-  notices, since CI type-checks against the committed copy), a rustdoc pass with
+  run above is what writes them, so this is just a diff), a rustdoc pass with
   warnings denied (`cargo doc --workspace
   --no-deps --document-private-items`, catching doc links that stopped
-  resolving — rustdoc never fails a build over one), plus the
-  dependency-advisory check
-  (`scripts/check-advisories.py`, the same one CI runs). Slower, so it only runs
-  before sharing work. The advisory check needs
+  resolving — rustdoc never fails a build over one), format + clippy + tests for
+  the desktop crate under `frontend/src-tauri` (outside the workspace, so every
+  `--workspace` command misses it), and the dependency-advisory checks for both
+  ecosystems — `scripts/check-advisories.py` for the two Cargo lockfiles and
+  `npm audit --audit-level=high` for `package-lock.json`. Slower, so it only
+  runs before sharing work. The cargo advisory check needs
   [`cargo-audit`](https://github.com/rustsec/rustsec) (`cargo install
   cargo-audit`); without it the hook says so and skips rather than blocking the
   push, and CI catches what you miss.
+
+  Everything here also runs in CI, deliberately: `core.hooksPath` is local
+  config nobody can enforce and `--no-verify` skips the lot, so a hook is for
+  fast feedback and CI is the authority. The one thing that is *only* local is
+  the desktop crate on a non-Windows machine — CI's `desktop` job runs on
+  Windows, so the macOS-only print code is compiled by your own pre-push, or
+  else not until a release build.
 
 ### Dependency advisories
 
