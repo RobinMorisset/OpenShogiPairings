@@ -1629,20 +1629,13 @@
   .players {
     margin-top: 1.25rem;
   }
+  /* The box is app.css's. This one addition is not: preserve newlines so a
+     multi-line error (e.g. a list of bad rows) renders as separate lines
+     instead of running together. */
   .error-banner {
-    background: var(--bg-danger);
-    border: 1px solid var(--border-danger);
-    color: var(--text-on-danger);
-    padding: 0.6rem 0.9rem;
-    border-radius: 0.5rem;
-    font-size: 0.9rem;
-    margin-bottom: 1rem;
-    /* Preserve newlines so a multi-line error (e.g. a list of bad rows) renders
-       as separate lines instead of running together. */
     white-space: pre-line;
   }
   .muted {
-    color: var(--text-secondary);
     text-align: center;
   }
 

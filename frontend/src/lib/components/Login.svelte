@@ -67,7 +67,6 @@
   }
   .muted {
     margin: 0 0 1rem;
-    color: var(--text-secondary);
     font-size: 0.9rem;
   }
   form {
@@ -77,13 +76,9 @@
   input[type="password"] {
     flex: 1;
   }
+  /* Under the form rather than above the next thing, so it keeps its own
+     margin; the box is app.css's. */
   .error-banner {
     margin: 0.9rem 0 0;
-    padding: 0.6rem 0.9rem;
-    border-radius: 0.5rem;
-    background: var(--bg-danger);
-    border: 1px solid var(--border-danger);
-    color: var(--text-on-danger);
-    font-size: 0.9rem;
   }
 </style>

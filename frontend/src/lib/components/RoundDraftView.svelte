@@ -654,9 +654,6 @@
     margin: 0 0 0.4rem;
     font-size: 0.95rem;
   }
-  .muted {
-    color: var(--text-secondary);
-  }
   .small {
     font-size: 0.8rem;
   }

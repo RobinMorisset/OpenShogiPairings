@@ -1659,9 +1659,6 @@
     pointer-events: none;
     box-shadow: 0 4px 14px var(--shadow-dropdown);
   }
-  .muted {
-    color: var(--text-secondary);
-  }
   /* Sits above the table, so the gap goes below it. */
   .note {
     font-size: 0.85rem;

@@ -123,6 +123,33 @@ code {
   background: var(--bg-surface);
 }
 
+/* Something failed, said where the action was taken.
+ *
+ * Four components had their own copy of this box, agreeing on the colours and
+ * the padding by hand. What differs legitimately — the picker clamps its
+ * width, the login form sets its own margin, the referee app preserves the
+ * newlines of a multi-line error — stays with the component; the box is here.
+ */
+.error-banner {
+  background: var(--bg-danger);
+  border: 1px solid var(--border-danger);
+  color: var(--text-on-danger);
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+/* Text that is there to be read second: a hint, a count, an empty-state line.
+ *
+ * Seven components restated this colour and two more used the class without
+ * defining it anywhere — settings sections whose "no categories yet" lines
+ * were quietly full-strength text. Size, centring and margins are the
+ * component's business and stay there. */
+.muted {
+  color: var(--text-secondary);
+}
+
 /* Opt out of a `max-content` card's width measurement.
  *
  * A card holding a table too wide for the screen is sized `width: max-content;

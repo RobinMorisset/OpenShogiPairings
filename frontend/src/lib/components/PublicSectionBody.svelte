@@ -77,8 +77,8 @@
 {/if}
 
 <style>
+  /* The colour is app.css's; this is where it sits. */
   .muted {
-    color: var(--text-secondary);
     text-align: center;
   }
 </style>

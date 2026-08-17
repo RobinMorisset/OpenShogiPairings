@@ -503,7 +503,6 @@
     font-size: 1.15rem;
   }
   .muted {
-    color: var(--text-secondary);
     font-size: 0.9rem;
   }
   .restricted {
@@ -563,15 +562,13 @@
     display: flex;
     gap: 0.5rem;
   }
+  /* Held to the width of the column it sits in rather than the page's, and
+     with no margin of its own: this column is a flex box with a gap, which a
+     margin would add to rather than collapse into. The box is app.css's. */
   .error-banner {
     width: 100%;
     max-width: 26rem;
     box-sizing: border-box;
-    background: var(--bg-danger);
-    border: 1px solid var(--border-danger);
-    color: var(--text-on-danger);
-    padding: 0.6rem 0.9rem;
-    border-radius: 0.5rem;
-    font-size: 0.9rem;
+    margin-bottom: 0;
   }
 </style>

@@ -170,20 +170,10 @@
 </PageShell>
 
 <style>
-  /* The shell, the card and the tab strip are components of their own, and each
-     brings its own screen and print rules. What is left is this page's two
-     messages. */
-  .error-banner {
-    background: var(--bg-danger);
-    border: 1px solid var(--border-danger);
-    color: var(--text-on-danger);
-    padding: 0.6rem 0.9rem;
-    border-radius: 0.5rem;
-    font-size: 0.9rem;
-    margin-bottom: 1rem;
-  }
+  /* The shell, the card and the tab strip are components of their own, and the
+     error banner and the muted colour are app.css's. All that is left is where
+     this page's one message sits. */
   .muted {
-    color: var(--text-secondary);
     text-align: center;
   }
 </style>
