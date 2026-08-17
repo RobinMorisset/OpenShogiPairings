@@ -1260,6 +1260,16 @@
     grid-template-columns: 1fr auto 1fr;
     align-items: baseline;
     gap: 0.75rem;
+    /* Out of the card's width measurement, and then back to whatever that
+       measurement settled on. The card is `max-content` (`.card.wide-table` in
+       App.svelte) so that a wide *table* can widen it; this row is not a table,
+       and its max-content is its middle cell's whole sentence on one line —
+       750px of note, plus two `1fr` tracks that both size to the wider of them,
+       came to 1249px against a table needing 996. The card took the larger, and
+       the page scrolled sideways into empty space past the end of the table.
+       Same two declarations, and the same reason, as `.explain` in RoundView. */
+    width: 0;
+    min-width: 100%;
   }
   .results-head .category-filter {
     grid-column: 1;
