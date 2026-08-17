@@ -89,17 +89,26 @@ fn csv_error_payload(err: &CsvImportError) -> (&'static str, BTreeMap<String, St
         CsvImportError::Empty => ("csv_empty", BTreeMap::new()),
         CsvImportError::MissingNameColumns => ("csv_missing_name_columns", BTreeMap::new()),
         CsvImportError::RowsMissingLastName { rows } => {
-            let joined = rows
-                .iter()
-                .map(usize::to_string)
-                .collect::<Vec<_>>()
-                .join(", ");
-            (
-                "csv_rows_missing_last_name",
-                BTreeMap::from([("rows".to_string(), joined)]),
-            )
+            ("csv_rows_missing_last_name", row_values(rows))
+        }
+        CsvImportError::UnterminatedQuote => ("csv_unterminated_quote", BTreeMap::new()),
+        CsvImportError::RaggedRows { rows } => ("csv_ragged_rows", row_values(rows)),
+        CsvImportError::RowsWithBadRating { rows } => ("csv_rows_bad_rating", row_values(rows)),
+        CsvImportError::RowsWithBadGrade { rows } => ("csv_rows_bad_grade", row_values(rows)),
+        CsvImportError::RowsMatchingSeveralRatedPlayers { rows } => {
+            ("csv_rows_ambiguous_rated_player", row_values(rows))
         }
     }
+}
+
+/// The `rows` interpolation value shared by every row-listing CSV error.
+fn row_values(rows: &[usize]) -> BTreeMap<String, String> {
+    let joined = rows
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    BTreeMap::from([("rows".to_string(), joined)])
 }
 
 /// The HTTP status for a domain error: 404 when the request named something
@@ -244,6 +253,10 @@ pub(crate) fn domain_payload(
             "members_without_pairing_rating",
             [("count", count.to_string())],
         ),
+        TournamentError::PairingRatingsWouldBeDiscarded { count } => with(
+            "pairing_ratings_would_be_discarded",
+            [("count", count.to_string())],
+        ),
         TournamentError::NotEnoughTeams { have } => {
             with("not_enough_teams", [("have", have.to_string())])
         }
@@ -335,6 +348,12 @@ pub(crate) fn domain_payload(
         | TournamentError::DuplicatePlayerId { .. }
         | TournamentError::DuplicateTournamentNumber { .. }
         | TournamentError::UnnumberedPlayer { .. }
+        // The team half of the same: a duplicated team id or number, a finalized
+        // team with no number, a roster naming somebody who isn't registered.
+        | TournamentError::DuplicateTeamId { .. }
+        | TournamentError::DuplicateTeamNumber { .. }
+        | TournamentError::UnnumberedTeam { .. }
+        | TournamentError::UnknownTeamMember { .. }
         | TournamentError::MisnumberedRound { .. }
         | TournamentError::UnknownRoundPlayer { .. }
         | TournamentError::BoardAgainstSelf { .. }
@@ -600,6 +619,7 @@ mod tests {
                 need: 3,
             },
             TournamentError::MembersWithoutPairingRating { count: 1 },
+            TournamentError::PairingRatingsWouldBeDiscarded { count: 1 },
             TournamentError::NotEnoughTeams { have: 1 },
             TournamentError::PairingRatingNotApplicable,
             TournamentError::NoLateRegistrationInTeamMode,
@@ -609,6 +629,23 @@ mod tests {
             TournamentError::JustifiedAbsenceOutsideTeamMode,
             TournamentError::DrawnOnForfeitedBoard { round: 1, board: 0 },
             TournamentError::HandicapOnForfeitedBoard { round: 1, board: 0 },
+        ]
+    }
+
+    /// One of each [`CsvImportError`], for the same round-trip as
+    /// [`every_domain_error`]. The enum is small enough to list exhaustively,
+    /// and a new variant left out of it fails `every_registered_code_is_emitted`
+    /// as soon as its code is registered.
+    fn every_csv_error() -> Vec<CsvImportError> {
+        vec![
+            CsvImportError::Empty,
+            CsvImportError::MissingNameColumns,
+            CsvImportError::RowsMissingLastName { rows: vec![2, 5] },
+            CsvImportError::UnterminatedQuote,
+            CsvImportError::RaggedRows { rows: vec![3] },
+            CsvImportError::RowsWithBadRating { rows: vec![4] },
+            CsvImportError::RowsWithBadGrade { rows: vec![5] },
+            CsvImportError::RowsMatchingSeveralRatedPlayers { rows: vec![6] },
         ]
     }
 
@@ -627,11 +664,7 @@ mod tests {
                  LOCALIZED_ERROR_CODES, so no locale can translate it"
             );
         }
-        for err in [
-            CsvImportError::Empty,
-            CsvImportError::MissingNameColumns,
-            CsvImportError::RowsMissingLastName { rows: vec![2, 5] },
-        ] {
+        for err in every_csv_error() {
             let (code, _) = csv_error_payload(&err);
             assert!(
                 LOCALIZED_ERROR_CODES.contains(&code),
@@ -648,11 +681,11 @@ mod tests {
             .iter()
             .filter_map(|err| domain_payload(err).map(|(code, _)| code))
             .collect();
-        emitted.extend([
-            "csv_empty",
-            "csv_missing_name_columns",
-            "csv_rows_missing_last_name",
-        ]);
+        let csv: Vec<&str> = every_csv_error()
+            .iter()
+            .map(|err| csv_error_payload(err).0)
+            .collect();
+        emitted.extend(csv);
         // Not produced by a domain error: built directly in `into_response`.
         emitted.push("no_tournament");
 

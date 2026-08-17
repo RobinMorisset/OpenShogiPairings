@@ -240,11 +240,18 @@ fn parse_results_row(
 
     // A rated player's +/- feeds the strength; an unrated player has none (the `*`
     // ELO is already their post-tournament rating).
-    let delta: i64 = match trailing.last() {
-        Some(t) if !unrated && is_delta_token(t) => {
-            t.parse().map_err(|_| bad("unparseable +/- delta"))?
+    //
+    // The delta *is* the signal this importer exists to extract, so a rated row
+    // without a readable one fails the import rather than falling back to 0 —
+    // which would silently degrade that player's ground-truth strength to their
+    // pre-tournament ELO and leave every number computed from it looking fine.
+    let delta: i64 = if unrated {
+        0
+    } else {
+        match trailing.last() {
+            Some(t) if is_delta_token(t) => t.parse().map_err(|_| bad("unparseable +/- delta"))?,
+            _ => return Err(bad("no +/- column for a rated player")),
         }
-        _ => 0,
     };
 
     let strength = f64::from(elo) + delta as f64;
@@ -458,6 +465,74 @@ mod tests {
         assert_eq!(t.rounds.len(), 6);
         let pucher = find(&t, "Pucher", "Olivier");
         assert_eq!(strengths[&pucher.tournament_id.unwrap()], 1873.0); // 1887 - 14
+    }
+
+    #[test]
+    fn a_rated_row_without_a_readable_delta_is_refused() {
+        // The `+/-` is the whole reason this importer exists: it is what turns a
+        // pre-tournament ELO into the post-tournament strength every simulation
+        // is scored against. Reading a missing one as 0 would quietly hand that
+        // player their pre-tournament rating as ground truth.
+        let mut text = String::from("Deltaless Open : 2026\nNr Name Nat Grade ELO R1 Pts +/-\n");
+        text.push_str(&format!(
+            "{:>2} {:<15}{}\n",
+            1, "Alpha", "Ann FR 1 Dan 1500 2+ 1"
+        ));
+        text.push_str(&format!(
+            "{:>2} {:<15}{}\n",
+            2, "Beta", "Bob FR 1 Dan 1400 1- 0 -8"
+        ));
+        assert!(matches!(
+            import_fesa_results(&text),
+            Err(ResultImportError::BadRow { line: 3, .. })
+        ));
+
+        // A `+/-` that is there but unreadable is refused too, rather than
+        // falling through to the "no delta" arm and scoring as 0.
+        let mut bad = String::from("Deltaless Open : 2026\nNr Name Nat Grade ELO R1 Pts +/-\n");
+        bad.push_str(&format!(
+            "{:>2} {:<15}{}\n",
+            1, "Alpha", "Ann FR 1 Dan 1500 2+ 1 +x"
+        ));
+        bad.push_str(&format!(
+            "{:>2} {:<15}{}\n",
+            2, "Beta", "Bob FR 1 Dan 1400 1- 0 -8"
+        ));
+        assert!(matches!(
+            import_fesa_results(&bad),
+            Err(ResultImportError::BadRow { line: 3, .. })
+        ));
+
+        // The same table with both deltas present imports, so the two above fail
+        // for the delta and nothing else.
+        let mut good = String::from("Deltaless Open : 2026\nNr Name Nat Grade ELO R1 Pts +/-\n");
+        good.push_str(&format!(
+            "{:>2} {:<15}{}\n",
+            1, "Alpha", "Ann FR 1 Dan 1500 2+ 1 +8"
+        ));
+        good.push_str(&format!(
+            "{:>2} {:<15}{}\n",
+            2, "Beta", "Bob FR 1 Dan 1400 1- 0 -8"
+        ));
+        let (t, strengths) = import_fesa_results(&good).unwrap();
+        let ann = find(&t, "Alpha", "Ann");
+        assert_eq!(strengths[&ann.tournament_id.unwrap()], 1508.0);
+    }
+
+    #[test]
+    fn an_unrated_row_still_needs_no_delta() {
+        // The `*` rating is already the post-tournament one, so there is no
+        // `+/-` to demand — the strictness above must not reach these rows.
+        let mut text = String::from("Star Open : 2026\nNr Name Nat Grade ELO R1 Pts\n");
+        text.push_str(&format!(
+            "{:>2} {:<15}{}\n",
+            1, "Alpha", "Ann FR 1500* 2+ 1"
+        ));
+        text.push_str(&format!("{:>2} {:<15}{}\n", 2, "Beta", "Bob FR 1400* 1- 0"));
+        let (t, strengths) = import_fesa_results(&text).unwrap();
+        let ann = find(&t, "Alpha", "Ann");
+        assert_eq!(ann.rating, None);
+        assert_eq!(strengths[&ann.tournament_id.unwrap()], 1500.0);
     }
 
     #[test]

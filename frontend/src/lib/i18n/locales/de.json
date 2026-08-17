@@ -11,6 +11,7 @@
     "switchTournament": "Turnier wechseln…",
     "switchTournamentTitle": "Zurück zur Turnierliste",
     "unsavedChanges": "Nicht gespeicherte Änderungen",
+    "notPersisted": "Der Server konnte dieses Turnier nicht auf die Festplatte schreiben. Die Änderungen sind übernommen, liegen aber nur im Arbeitsspeicher und gingen bei einem Neustart des Servers verloren.",
     "noBackupsYet": "Noch keine Sicherungen — sie werden automatisch angelegt, wenn eine Runde finalisiert, vorbereitet, gestartet, abgeschlossen oder abgebrochen wird.",
     "restore": "Wiederherstellen",
     "tabSettings": "Einstellungen",
@@ -108,7 +109,12 @@
     "checkLicencesTitle": "Die gemeldeten Spieler einer Nationalität gegen eine CSV-Liste gültiger Lizenzen (Nachname, Vorname) prüfen und anzeigen, wer darin fehlt.",
     "csvErrorEmpty": "Die CSV-Datei enthält keine Spieler.",
     "csvErrorMissingColumns": "Die CSV-Datei benötigt eine Spalte für den Nachnamen und eine für den Vornamen.",
-    "csvErrorRowsMissingLastName": "In diesen Zeilen fehlt der Nachname: {rows}"
+    "csvErrorRowsMissingLastName": "In diesen Zeilen fehlt der Nachname: {rows}",
+    "csvErrorUnterminatedQuote": "Ein Feld in Anführungszeichen wird nie geschlossen, sodass alles danach als Teil dieses Feldes gelesen würde.",
+    "csvErrorRaggedRows": "Diese Zeilen haben nicht so viele Spalten wie die Kopfzeile: {rows}",
+    "csvErrorRowsBadRating": "In diesen Zeilen ist die Wertung keine einfache Zahl: {rows}",
+    "csvErrorRowsBadGrade": "In diesen Zeilen ist der Grad nicht lesbar: {rows}",
+    "csvErrorRowsAmbiguousRatedPlayer": "Diese Zeilen passen auf mehrere Spieler der FESA-Wertungsliste; tragen Sie Wertung und Grad von Hand ein: {rows}"
   },
   "licenceCheck": {
     "hint": "Laden Sie die CSV-Liste des Verbandes mit den Spielern, deren Lizenz bezahlt ist (Nachname, Vorname). Jeder gemeldete Spieler der gewählten Nationalität, der nicht darauf steht, wird hier aufgeführt. Die Namen werden über Nachname + Vorname verglichen, ohne Rücksicht auf Groß-/Kleinschreibung und Akzente.",
@@ -558,6 +564,7 @@
     "playersWithoutTeam": "{count} Spieler sind noch in keiner Mannschaft. Vor dem Abschluss muss jeder Spieler einer angehören.",
     "incompleteTeam": "Mannschaft {name} hat {have} von {need} Mitgliedern.",
     "membersWithoutPairingRating": "MacMahon-Startpunkte brauchen für jedes ungewertete Mannschaftsmitglied ein Auslosungs-ELO — {count} fehlen noch.",
+    "pairingRatingsWouldBeDiscarded": "{count} Spieler haben noch ein Auslosungs-ELO, das nur im Mannschaftsmodus mit MacMahon-Startpunkten etwas bedeutet — löschen Sie diese, bevor Sie das abschalten.",
     "notEnoughTeams": "Ein Mannschaftsturnier braucht mindestens 2 Mannschaften (vorhanden: {have}).",
     "noLateRegistrationInTeamMode": "Ein Mannschaftsturnier nimmt keine Nachmeldungen an: jeder Spieler muss in einer Mannschaft sein, und die Aufstellungen sind fixiert.",
     "notEnoughPresentTeams": "Eine Runde braucht mindestens {needed} anwesende Mannschaften — es sind nur {have} anwesend."

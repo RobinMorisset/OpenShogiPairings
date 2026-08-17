@@ -29,56 +29,61 @@ import type {
   Standing,
 } from "./types";
 
-const player = (tid: number, last: string, rating: number | null): Player =>
-  ({
-    id: `p${tid}`,
-    tournament_id: tid,
-    last_name: last,
-    first_name: "",
-    rating,
-    club: "Nantes",
-    nationality: "FR",
-    adjustments: [],
-  }) as unknown as Player;
+// Every fixture below is typed, with no `as unknown` anywhere: the projection
+// is generated from the Rust types, so a field added or renamed there has to
+// break this file. Cast through `unknown` and it fails open instead — the
+// fixture that used to be here was missing `team_matches` entirely and carried a
+// `pairing` mode (`{ kind: "macmahon" }`) that does not exist.
+const player = (tid: number, last: string, rating: number | null): Player => ({
+  id: `p${tid}`,
+  tournament_id: tid,
+  last_name: last,
+  first_name: "",
+  rating: rating ?? undefined,
+  club: "Nantes",
+  nationality: "FR",
+  adjustments: [],
+});
 
-const standing = (tid: number, points: number): Standing =>
-  ({
-    player_id: `p${tid}`,
-    victories: points,
-    macmahon: 0,
-    points,
-    sosm: 0,
-    sosw: 0,
-    sodosm: 0,
-    sodosw: 0,
-    sososm: 0,
-    sososw: 0,
-    sosm1: 0,
-    sosm2: 0,
-    sosw1: 0,
-    sosw2: 0,
-    cussm: 0,
-    cussw: 0,
-    dc: 0,
-    opponents: [],
-    defeated: [],
-    running_points: [],
-    running_wins: [],
-    estimated_elo: null,
-  }) as unknown as Standing;
+const standing = (tid: number, points: number): Standing => ({
+  player_id: `p${tid}`,
+  victories: points,
+  macmahon: 0,
+  points,
+  sosm: 0,
+  sosw: 0,
+  sodosm: 0,
+  sodosw: 0,
+  sososm: 0,
+  sososw: 0,
+  sosm1: 0,
+  sosm2: 0,
+  sosw1: 0,
+  sosw2: 0,
+  cussm: 0,
+  cussw: 0,
+  dc: 0,
+  opponents: [],
+  defeated: [],
+  running_points: [],
+  running_wins: [],
+  estimated_elo: null,
+});
 
-const board = (player1: number, player2: number): Board =>
-  ({ player1, player2, outcome: { kind: "won", winner: "player1" } }) as Board;
+const board = (player1: number, player2: number): Board => ({
+  player1,
+  player2,
+  record: { kind: "short", outcome: { kind: "won", winner: "player1" } },
+});
 
-const round = (number: number, boards: Board[]): Round =>
-  ({
-    number,
-    boards,
-    sitouts: [],
-    completed: true,
-    explanation: { round: number, boards: [], report: [] },
-    pairing_explanation_valid: true,
-  }) as Round;
+const round = (number: number, boards: Board[]): Round => ({
+  number,
+  boards,
+  sitouts: [],
+  completed: true,
+  explanation: { round: number, boards: [], report: [] },
+  pairing_explanation_valid: true,
+});
 
 /** A two-player tournament with one played round. */
 function view(rounds: Round[]): PublicTournamentResponse {
@@ -89,11 +94,19 @@ function view(rounds: Round[]): PublicTournamentResponse {
       name: "Tournoi <de> Nantes",
       settings: {
         tiebreaks: ["points", "sos_m"],
-        pairing: { kind: "macmahon" },
+        pairing: {
+          kind: "swiss",
+          floater_style: "classic",
+          macmahon: { thresholds: [], source: { kind: "static" } },
+        },
+        cup_enabled: false,
+        cup_format: "direct",
         handicap_policy: { kind: "none" },
+        half_point_absences: false,
         long_boards_enabled: false,
-        categories: [],
-        teams: null,
+        // A category, so the standings page really does have a control to drop:
+        // the filter chips render for the referee and must not survive here.
+        categories: [{ id: "cat", name: "Under 18" }],
       },
       players: [player(1, "Miyamoto", 2100), player(2, "Duchesne", 1650)],
       registration_finalized: true,
@@ -104,11 +117,12 @@ function view(rounds: Round[]): PublicTournamentResponse {
     version: 7,
     standings: [standing(1, 2), standing(2, 0)],
     team_standings: null,
+    team_matches: [],
     cup_podium: null,
     cup_bracket: null,
     suggested_handicaps: [],
     effective_winners: rounds.map((r) => r.boards.map(() => "player1" as const)),
-  } as unknown as PublicTournamentResponse;
+  };
 }
 
 /**
@@ -258,6 +272,28 @@ describe("renderSnapshotBody", () => {
     expect(html).not.toContain("<button");
     expect(html).not.toContain("<input");
     expect(html).not.toContain("<select");
+  });
+
+  it("leaves nothing clickable behind on any of its pages", () => {
+    // The assertion above is about `RoundView`; every other component the export
+    // renders has its own `staticPage` gating, and each is a separate chance to
+    // ship a dead control. `ResultsView` has two — the category filter chips and
+    // the print button — and neither had a guard here.
+    const cup = withCup(view([round(1, [board(1, 2)])]));
+    const sections = publicSections(cup);
+    expect(sections.length).toBeGreaterThan(2);
+    sections.forEach((_, index) => {
+      const html = pageOf(cup, index);
+      expect(html, `page ${index}`).not.toContain("<button");
+      expect(html, `page ${index}`).not.toContain("<input");
+      expect(html, `page ${index}`).not.toContain("<select");
+      expect(html, `page ${index}`).not.toContain("onclick");
+    });
+    // And specifically the standings page's filter: the fixture *has* a
+    // category, so the chips are a control the referee's page really renders.
+    const standings = pageOf(cup, 0);
+    expect(standings).toContain("SOSM"); // it is the standings page
+    expect(standings).not.toContain("Highlight category");
   });
 
   it("keeps the explanations as tooltips a static page can show", () => {

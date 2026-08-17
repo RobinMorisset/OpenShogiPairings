@@ -147,6 +147,10 @@ impl From<TournamentView> for PublicTournamentView {
             can_undo: _,
             next_round_blocked: _,
             grid_export_blocked: _,
+            // The referee's problem to see and act on, not the room's: a reader
+            // can do nothing about the server's disk, and the results on screen
+            // are correct either way.
+            persisted: _,
             version,
             standings,
             team_standings,
@@ -382,12 +386,28 @@ async fn public_events(
 /// One SSE event carrying the whole public projection — or, if the tournament
 /// has been deleted under the reader, a `gone` event saying so. Going quiet
 /// instead would leave the page showing a tournament that no longer exists.
+///
+/// Only [`ApiError::NoTournament`] means "deleted". Anything else out of
+/// [`payload`] is a serialization bug on our side, and answering *that* with
+/// `gone` would tell a room full of phones the tournament was deleted while the
+/// referee's own screen looks fine — with nothing logged anywhere. So it is
+/// logged and sent as its own `failure` event, which the reader shows as an error
+/// and retries from, rather than as a tombstone it can never come back from.
+/// (`failure`, not `error`: an SSE event named `error` is dispatched on the
+/// browser's `EventSource` object itself, where it reads as a dropped
+/// connection.)
 fn state_event(instance: &TournamentInstance) -> Event {
     match payload(instance) {
         Ok((_, body)) => Event::default()
             .event("state")
             .data(String::from_utf8(body.to_vec()).expect("serde_json emits UTF-8")),
-        Err(_) => Event::default().event("gone").data(""),
+        Err(ApiError::NoTournament) => Event::default().event("gone").data(""),
+        Err(e) => {
+            tracing::error!("public stream: could not build the projection: {e:?}");
+            Event::default()
+                .event("failure")
+                .data("the server could not build this tournament's public view")
+        }
     }
 }
 

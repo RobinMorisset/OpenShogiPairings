@@ -970,6 +970,117 @@ fn elo_mode_reacts_to_results_and_avoids_rematch() {
     );
 }
 
+/// The float-repeat rule's arithmetic, at the one place it is decided.
+///
+/// Driven directly rather than through a pairing because the *shape* of the
+/// penalty — full strength the round after a float, decaying with distance,
+/// never above the bound the ladder is built from — is what the engine's
+/// separation depends on, and a pairing only ever shows one point of it.
+#[test]
+fn float_units_decay_with_distance_and_stay_within_the_ladder_bound() {
+    use crate::pairing::rules::{float_units, FLOAT_BASE};
+
+    // Never floated that way: nothing to repeat.
+    assert_eq!(float_units(None, 5), 0);
+    // Floated in the round just gone: the full penalty.
+    assert_eq!(float_units(Some(4), 5), FLOAT_BASE);
+    // …and it decays as the float recedes, always strictly downwards.
+    let mut previous = FLOAT_BASE;
+    for round in 6..12u32 {
+        let units = float_units(Some(4), round);
+        assert!(units < previous, "round {round}: {units} vs {previous}");
+        assert!(units > 0, "a float never stops counting entirely");
+        previous = units;
+    }
+    // The bound `max_total_units` is derived from: one direction can never
+    // exceed FLOAT_BASE, so the two-direction edge term can never exceed twice
+    // it. A term above this would break the ladder's lexicographic separation.
+    for round in 5..40u32 {
+        assert!(float_units(Some(4), round) <= FLOAT_BASE);
+    }
+}
+
+#[test]
+#[should_panic(expected = "does not predate")]
+fn a_float_recorded_in_the_round_being_paired_is_a_bug_not_a_division_by_zero() {
+    // `round - k` would be 0 here. The history is replayed from *completed*
+    // rounds, so this can only mean the replay and the round number disagree —
+    // a bug in this crate, hence a debug assertion rather than a silent 0.
+    let _ = crate::pairing::rules::float_units(Some(5), 5);
+}
+
+/// Direction matters: a player who floated *up* is only penalised for floating
+/// up again, and the rule outranks floater selection, which would send the same
+/// player up a second time.
+#[test]
+fn a_repeat_float_is_avoided_even_when_floater_selection_asks_for_it() {
+    // MacMahon by *grade*, so the starting groups and the rating order can be
+    // set independently — which is what lets the two rules disagree.
+    let dan = |tid, rating| Player {
+        grade: Some(crate::player::Grade::dan(1)),
+        ..player(tid, Some(rating), None)
+    };
+    let kyu = |tid, rating| Player {
+        grade: Some(crate::player::Grade::kyu(5)),
+        ..player(tid, Some(rating), None)
+    };
+    // A and C start on 1 MacMahon point, B and D on 0. D is the *stronger* of
+    // the two who will end up on 1 point.
+    let p = vec![dan(1, 2000), kyu(2, 1000), dan(3, 1500), kyu(4, 1900)];
+    let id = |i: usize| p[i].tournament_id.unwrap();
+    let settings = TournamentSettings::default()
+        .with_thresholds(vec![MacMahonThreshold::grade(crate::player::Grade::dan(1))]);
+
+    // Round 1 is two cross-group boards — the ordinary shape of a MacMahon
+    // round 1. A and C float down (`points_diff` +2 = one point, frozen at
+    // pairing time), B and D float up. A wins; D wins.
+    let float_board = |a, b, winner| Board {
+        record: GameRecord::Short(Outcome::won(winner)),
+        ..Board::pending(a, b, 2, PairingSource::Swiss)
+    };
+    let r1 = Round {
+        number: 1,
+        explanation: RoundExplanation::empty(1),
+        pairing_explanation_valid: true,
+        boards: vec![
+            float_board(id(0), id(1), Winner::Player1),
+            float_board(id(2), id(3), Winner::Player2),
+        ],
+        sitouts: Vec::new(),
+        completed: true,
+    };
+
+    // Going into round 2: A on 2, C and D on 1, B on 0 — so one of C/D must
+    // float up to A and the other down to B.
+    let units = player_units(&p, &settings, std::slice::from_ref(&r1), &[]);
+    let points = |i: usize| units[UnitKey::from(id(i))].points.halves();
+    assert_eq!((points(0), points(1), points(2), points(3)), (4, 0, 2, 2));
+    // C has only ever floated down, D only up.
+    assert_eq!(units[UnitKey::from(id(2))].last_descended, Some(1));
+    assert_eq!(units[UnitKey::from(id(2))].last_ascended, None);
+    assert_eq!(units[UnitKey::from(id(3))].last_ascended, Some(1));
+    assert_eq!(units[UnitKey::from(id(3))].last_descended, None);
+
+    let present: Vec<TournamentId> = p.iter().map(|x| x.tournament_id.unwrap()).collect();
+    let round = pair_players(2, &p, &settings, &[r1], &present);
+    let pairs = board_pairs(&round);
+    assert!(
+        pairs.contains(&unord(id(0), id(2))),
+        "C, who has never floated up, should be the one to float up: {pairs:?}"
+    );
+    assert!(
+        pairs.contains(&unord(id(3), id(1))),
+        "D, who has never floated down, should be the one to float down: {pairs:?}"
+    );
+    // Not a restatement of floater selection: that rule (classic) wants the
+    // *strongest* of the group to float up, which is D — the very player the
+    // float-repeat rule refuses to send up again. It outranks it, so C goes.
+    assert!(
+        units[UnitKey::from(id(3))].fold_rating() > units[UnitKey::from(id(2))].fold_rating(),
+        "D must be the stronger, or the two rules would simply agree"
+    );
+}
+
 #[test]
 fn floater_selection_floats_down_the_weakest() {
     // Upper group (1 MacMahon point): X0>X1>X2 by rating. Lower group (0): a

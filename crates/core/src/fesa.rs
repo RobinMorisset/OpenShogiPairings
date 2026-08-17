@@ -37,6 +37,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::csv_import::name_key;
 use crate::player::Grade;
 
 /// Fallback last-name column width if detection finds nothing (e.g. an empty
@@ -54,8 +55,10 @@ pub struct RatedPlayer {
     pub first_name: String,
     pub rating: u32,
     /// Number of rated games behind this rating. Used to judge how established a
-    /// rating is (the ELO estimator widens the prior for provisional ratings);
-    /// 0 when the column was missing or unparseable.
+    /// rating is (the ELO estimator widens the prior for provisional ratings).
+    /// Always the value the list carried: a row whose `#games` column is missing
+    /// or unreadable is reported as malformed, never defaulted to 0 (which would
+    /// silently demote an established player to provisional).
     pub games: u32,
     /// Country code, uppercased (e.g. `JP`, `FR`).
     pub nationality: String,
@@ -77,19 +80,112 @@ pub fn decode_latin1(bytes: &[u8]) -> String {
     bytes.iter().map(|&b| b as char).collect()
 }
 
+/// A rating list that could not be read as published.
+///
+/// Rows that don't *look* like player rows at all (blank lines, a trailing
+/// footer) are skipped silently — they always were. A row that starts with a
+/// rank but doesn't parse is different: it means the columns moved under us, and
+/// dropping it would show the referee a list with players silently missing, or
+/// established players silently demoted to provisional. So it fails the parse
+/// and names the lines.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "the FESA rating list has {count} unreadable player row(s) (line {}) — the format may have changed",
+    format_lines(.lines, *.count)
+)]
+pub struct RatingListError {
+    /// How many rows failed, however many are named in `lines`.
+    pub count: usize,
+    /// 1-based line numbers of the first [`MAX_REPORTED_LINES`] of them.
+    pub lines: Vec<usize>,
+}
+
+/// How many bad line numbers an error names before giving up on listing them —
+/// a wholesale format change would otherwise put a thousand numbers in a message.
+const MAX_REPORTED_LINES: usize = 10;
+
+/// Render the reported line numbers as `4, 9, 27`, with a `…` when `count` says
+/// there were more than the ones named.
+fn format_lines(lines: &[usize], count: usize) -> String {
+    let joined = lines
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if count > lines.len() {
+        format!("{joined}, …")
+    } else {
+        joined
+    }
+}
+
 /// Parse the (already Latin-1 decoded) rating list into player entries.
 ///
-/// Malformed rows are skipped rather than failing the whole parse, so a future
-/// format tweak degrades gracefully instead of producing garbage.
-pub fn parse_rating_list(text: &str) -> Vec<RatedPlayer> {
+/// Fails — rather than returning a partial list — as soon as any row that looks
+/// like a player row doesn't parse: a silently shortened list reads exactly like
+/// a correct one, and half the field vanishing from registration autocomplete is
+/// not something a referee can be expected to notice.
+pub fn parse_rating_list(text: &str) -> Result<Vec<RatedPlayer>, RatingListError> {
     let data_lines: Vec<&str> = text.lines().skip(HEADER_LINES).collect();
     // The last-name column width varies between exports, so measure it from the
     // rows before parsing them.
     let width = detect_last_name_width(data_lines.iter().copied());
-    data_lines
-        .into_iter()
-        .filter_map(|line| parse_row(line, width))
-        .collect()
+    let mut players = Vec::new();
+    let mut lines = Vec::new();
+    let mut count = 0;
+    for (offset, line) in data_lines.into_iter().enumerate() {
+        match parse_row(line, width) {
+            Row::Player(p) => players.push(p),
+            Row::Malformed => {
+                count += 1;
+                if lines.len() < MAX_REPORTED_LINES {
+                    // 1-based line number in the file, past the header lines.
+                    lines.push(HEADER_LINES + offset + 1);
+                }
+            }
+            Row::Other => {}
+        }
+    }
+    if count == 0 {
+        Ok(players)
+    } else {
+        Err(RatingListError { count, lines })
+    }
+}
+
+/// Where a name lookup in the rating list landed.
+///
+/// `Ambiguous` exists because a European-wide list really does carry homonyms,
+/// and the two callers used to resolve them differently (first match here, last
+/// match in the simulator) — so the same name silently meant two different
+/// ratings depending on who asked. Now neither picks: the caller is told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lookup<'a> {
+    /// No entry with this name.
+    None,
+    /// Exactly one entry.
+    One(&'a RatedPlayer),
+    /// Several entries share this name; how many.
+    Ambiguous(usize),
+}
+
+/// Look a player up in the rating list by accent-folded `last + first` name —
+/// the single matching rule shared by every consumer of the list.
+pub fn lookup<'a>(list: &'a [RatedPlayer], last: &str, first: &str) -> Lookup<'a> {
+    let key = name_key(last, first);
+    let mut found: Option<&RatedPlayer> = None;
+    let mut count = 0;
+    for entry in list {
+        if name_key(&entry.last_name, &entry.first_name) == key {
+            count += 1;
+            found.get_or_insert(entry);
+        }
+    }
+    match (count, found) {
+        (0, _) | (_, None) => Lookup::None,
+        (1, Some(entry)) => Lookup::One(entry),
+        (n, Some(_)) => Lookup::Ambiguous(n),
+    }
 }
 
 /// The last-name column width (chars from the name start to the first name),
@@ -133,12 +229,33 @@ fn detect_last_name_width<'a>(lines: impl Iterator<Item = &'a str>) -> usize {
         .map_or(DEFAULT_LAST_NAME_WIDTH, |(w, _)| w)
 }
 
-/// Parse a single data row, or `None` if it doesn't look like a player row.
-fn parse_row(line: &str, width: usize) -> Option<RatedPlayer> {
-    // Drop the leading rank ("  1 ", "1000 ", …) and anchor to the name start;
-    // this absorbs the 4-digit rank column shift.
-    let after_rank = strip_rank(line)?;
+/// What one line of the list turned out to be.
+enum Row {
+    /// A player row that parsed.
+    Player(RatedPlayer),
+    /// A player row (it carries a leading rank) that did *not* parse.
+    Malformed,
+    /// Not a player row at all: a blank line or a footer. Skipped silently.
+    Other,
+}
 
+/// Classify and parse a single line.
+fn parse_row(line: &str, width: usize) -> Row {
+    // Drop the leading rank ("  1 ", "1000 ", …) and anchor to the name start;
+    // this absorbs the 4-digit rank column shift. No rank, no player row.
+    let Some(after_rank) = strip_rank(line) else {
+        return Row::Other;
+    };
+    match parse_ranked_row(after_rank, width) {
+        Some(player) => Row::Player(player),
+        None => Row::Malformed,
+    }
+}
+
+/// Parse the part of a player row after its rank, or `None` if it doesn't parse
+/// — which, the rank having already identified it as a player row, is a
+/// malformed row rather than a line to skip.
+fn parse_ranked_row(after_rank: &str, width: usize) -> Option<RatedPlayer> {
     let chars: Vec<char> = after_rank.chars().collect();
     if chars.len() <= width {
         return None;
@@ -157,10 +274,11 @@ fn parse_row(line: &str, width: usize) -> Option<RatedPlayer> {
     let mut tokens: Vec<&str> = rest.split_whitespace().collect();
 
     // The last three tokens are always nationality, #games, Elo (right to left).
+    // All three must parse: a `#games` that quietly became 0 would demote an
+    // established player to provisional and widen their ELO prior, which is
+    // invisible in the UI and changes what the estimator returns.
     let nationality = tokens.pop()?.to_uppercase();
-    // #games must be present, but tolerate a non-numeric value (→ 0) rather than
-    // dropping the whole row, matching the parser's graceful-degradation policy.
-    let games: u32 = tokens.pop()?.parse().unwrap_or(0);
+    let games: u32 = tokens.pop()?.parse().ok()?;
     let rating: u32 = tokens.pop()?.parse().ok()?;
 
     // Whatever grades remain sit at the end of the given-name region; strip
@@ -255,7 +373,11 @@ mod tests {
 
     fn parse_one(line: &str) -> RatedPlayer {
         let width = detect_last_name_width(std::iter::once(line));
-        parse_row(line, width).expect("row should parse")
+        match parse_row(line, width) {
+            Row::Player(p) => p,
+            Row::Malformed => panic!("row should parse"),
+            Row::Other => panic!("row should be recognized as a player row"),
+        }
     }
 
     #[test]
@@ -325,7 +447,7 @@ mod tests {
             a = row(50, "Imamura-Cornuejols", "Toru 3 Dan 2100 20 JP"),
             b = row(3, "Takita", "Hirotaka 2462 7 JP"),
         );
-        let players = parse_rating_list(&text);
+        let players = parse_rating_list(&text).expect("every row parses");
         let p = players
             .iter()
             .find(|p| p.last_name == "Imamura-Cornuejols")
@@ -380,12 +502,66 @@ mod tests {
              {b}\n",
             header = "    Name             Grades         Elo #games Nationality",
         );
-        let players = parse_rating_list(&text);
+        let players = parse_rating_list(&text).expect("every row parses");
         assert_eq!(players.len(), 2);
         assert_eq!(players[0].last_name, "Kobayashi");
         assert_eq!(players[0].first_name, "Taichi");
         assert_eq!(players[1].last_name, "Takita");
         assert_eq!(players[1].first_name, "Hirotaka");
+    }
+
+    #[test]
+    fn a_ranked_row_that_doesnt_parse_fails_the_whole_list() {
+        // The row carries a rank, so it is a player row — its #games column has
+        // just gone missing. Skipping it would drop the player from autocomplete
+        // (or, worse, keep them with 0 games and a provisional prior) with the
+        // list still looking perfectly healthy.
+        let text = format!(
+            "Elo list for 2026-06-01\n\n{header}\n{a}\n{b}\n",
+            header = "    Name                               Grades         Elo #games Nationality",
+            a = row(1, "Kobayashi", "Taichi 5 Dan 2556 55 JP"),
+            b = row(2, "Takita", "Hirotaka 2462 JP"),
+        );
+        let err = parse_rating_list(&text).expect_err("the second row is malformed");
+        assert_eq!(err.lines, vec![5]);
+        assert!(err.to_string().contains("format may have changed"));
+    }
+
+    #[test]
+    fn a_non_numeric_games_column_is_malformed_not_zero() {
+        // `unwrap_or(0)` here would silently demote an established player to
+        // provisional and widen their ELO prior.
+        let text = format!(
+            "Elo list for 2026-06-01\n\n{header}\n{a}\n",
+            header = "    Name                               Grades         Elo #games Nationality",
+            a = row(1, "Kobayashi", "Taichi 5 Dan 2556 n/a JP"),
+        );
+        assert!(parse_rating_list(&text).is_err());
+    }
+
+    #[test]
+    fn lookup_reports_homonyms_instead_of_picking_one() {
+        // Published lists really do carry these (two in the 2024-01-01 list).
+        let entry = |last: &str, first: &str, rating: u32| RatedPlayer {
+            last_name: last.to_string(),
+            first_name: first.to_string(),
+            rating,
+            games: 30,
+            nationality: "FR".to_string(),
+            grade: None,
+        };
+        let list = [
+            entry("Popovich", "Alexander", 1700),
+            entry("Takita", "Hirotaka", 2462),
+            entry("Popovich", "Alexander", 2100),
+        ];
+        assert_eq!(lookup(&list, "Popovich", "Alexander"), Lookup::Ambiguous(2));
+        assert_eq!(lookup(&list, "Nobody", "Here"), Lookup::None);
+        // Matching is accent- and case-folded, like every other name match here.
+        match lookup(&list, "takita", "Hirotaka") {
+            Lookup::One(p) => assert_eq!(p.rating, 2462),
+            other => panic!("expected exactly one match, got {other:?}"),
+        }
     }
 
     #[test]
@@ -401,7 +577,7 @@ mod tests {
             a = row(1, "Kobayashi", "Taichi 5 Dan 5 Dan 2556 55 JP"),
             b = row(2, "Takita", "Hirotaka 2462 7 JP"),
         );
-        let players = parse_rating_list(&text);
+        let players = parse_rating_list(&text).expect("every row parses");
         assert_eq!(players.len(), 2);
         assert_eq!(players[0].last_name, "Kobayashi");
         assert_eq!(players[1].last_name, "Takita");

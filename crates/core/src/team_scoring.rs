@@ -941,6 +941,69 @@ mod tests {
         assert_eq!(s.get(TeamId(1)).points(), HalfPoints::from_whole(1));
     }
 
+    /// Estimate-based MacMahon in team mode: the thresholds still apply to a team
+    /// average, but of the members' **live estimates** rather than of the ratings
+    /// they registered with. The two really can disagree — here by 690 points.
+    #[test]
+    fn estimate_based_macmahon_averages_the_members_estimates_not_their_ratings() {
+        // Team 1 is a 2000 player and an unrated newcomer the referee gave a
+        // pairing ELO of 1980, so on registration ratings it averages exactly the
+        // 1990 threshold and takes the head start. The estimate knows nothing
+        // about the newcomer that the referee's number told it — an unrated
+        // player sits at the unrated prior (600) until they play — so the same
+        // team averages 1300 there and starts level with everyone else.
+        let build = |settings: TournamentSettings| {
+            let mut t = Tournament::new("Teams").unwrap();
+            t.update_settings(TournamentSettings {
+                teams: Some(TeamSettings { size: 2 }),
+                ..settings
+            })
+            .unwrap();
+            let add = |t: &mut Tournament, name: &str, rating: Option<u32>| {
+                t.add_player(NewPlayer {
+                    last_name: name.into(),
+                    rating,
+                    ..Default::default()
+                })
+                .unwrap()
+                .id
+            };
+            let strong = add(&mut t, "Strong", Some(2000));
+            let newcomer = add(&mut t, "Newcomer", None);
+            let ordinary = [
+                add(&mut t, "Ordinary1", Some(1900)),
+                add(&mut t, "Ordinary2", Some(1890)),
+            ];
+            // MacMahon in team mode requires a pairing ELO for every unrated
+            // member, which is exactly the number the estimate will disagree with.
+            t.set_pairing_rating(newcomer, Some(1980)).unwrap();
+            let one = t.add_team("T1").unwrap().id;
+            t.add_team_member(one, strong).unwrap();
+            t.add_team_member(one, newcomer).unwrap();
+            let two = t.add_team("T2").unwrap().id;
+            for id in ordinary {
+                t.add_team_member(two, id).unwrap();
+            }
+            t.finalize_registration().unwrap();
+            t
+        };
+
+        let thresholds =
+            TournamentSettings::default().with_thresholds(vec![MacMahonThreshold::elo(1990)]);
+        // From the registration ratings: (2000 + 1980) / 2 = 1990, on the nose.
+        let from_ratings = scores(&build(thresholds.clone()));
+        assert_eq!(
+            from_ratings.get(TeamId(1)).macmahon,
+            HalfPoints::from_whole(1)
+        );
+        assert_eq!(from_ratings.get(TeamId(2)).macmahon, HalfPoints::ZERO);
+
+        // From the live estimates: (2000 + 600) / 2 = 1300, well under it.
+        let from_estimates = scores(&build(thresholds.with_macmahon_from_estimate()));
+        assert_eq!(from_estimates.get(TeamId(1)).macmahon, HalfPoints::ZERO);
+        assert_eq!(from_estimates.get(TeamId(2)).macmahon, HalfPoints::ZERO);
+    }
+
     /// The float frozen on a match's boards is the *team* difference, so the
     /// replay reads a team float straight off any board of the match.
     #[test]

@@ -125,6 +125,24 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   two players you had picked, and the answer you were reading. An explanation now
   survives anything that leaves the pairing alone, and is cleared only when the
   round really is paired differently.
+- **A CSV import quietly replaced values it could not read.** An ELO written
+  `2 100` or `2,100` — routine spreadsheet output — counted as no ELO at all, and
+  the player was then given the FESA list's rating instead, with nothing to show
+  for it. The import now refuses and names the rows, and does the same for an
+  unreadable grade, a row that doesn't line up with the header, a quoted cell
+  that is never closed (which used to swallow every row below it, so a roster of
+  forty imported as one player), and a name that matches two players in the FESA
+  list.
+- **Rows the FESA rating list parser could not read simply disappeared**, so a
+  change in the file's format would have shown the referee a list with players
+  missing — and no way to notice. Such a list is now refused with the reason.
+- **Turning off team mode or MacMahon starting points silently erased every
+  hand-entered pairing ELO**, and turning them back on did not restore the
+  values. The change is now refused until those are cleared deliberately.
+- **A server that cannot write to disk now says so** in a banner. Edits used to
+  be accepted and reported as saved while living only in memory, so a full disk
+  cost the whole tournament at the next restart with no warning anywhere.
+- Exporting the settings to a file reported nothing when the write failed.
 
 ### Changed
 

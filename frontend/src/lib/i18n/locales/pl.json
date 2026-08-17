@@ -11,6 +11,7 @@
     "switchTournament": "Zmień turniej…",
     "switchTournamentTitle": "Wróć do listy turniejów",
     "unsavedChanges": "Niezapisane zmiany",
+    "notPersisted": "Serwer nie mógł zapisać tego turnieju na dysku. Zmiany zostały zastosowane, ale istnieją tylko w pamięci i zostaną utracone po ponownym uruchomieniu serwera.",
     "noBackupsYet": "Brak kopii zapasowych — tworzone są automatycznie przy finalizacji, przygotowaniu, rozpoczęciu, zakończeniu i anulowaniu rundy.",
     "restore": "Przywróć",
     "tabSettings": "Ustawienia",
@@ -108,7 +109,12 @@
     "checkLicencesTitle": "Sprawdź zgłoszonych graczy jednej narodowości względem listy CSV opłaconych licencji (nazwisko, imię) i pokaż, kogo na niej brakuje.",
     "csvErrorEmpty": "Plik CSV nie zawiera graczy.",
     "csvErrorMissingColumns": "Plik CSV musi zawierać kolumnę z nazwiskiem i kolumnę z imieniem.",
-    "csvErrorRowsMissingLastName": "W tych wierszach brakuje nazwiska: {rows}"
+    "csvErrorRowsMissingLastName": "W tych wierszach brakuje nazwiska: {rows}",
+    "csvErrorUnterminatedQuote": "Komórka w cudzysłowie nie została zamknięta, więc wszystko po niej zostałoby wczytane jako jej część.",
+    "csvErrorRaggedRows": "Te wiersze mają inną liczbę kolumn niż nagłówek: {rows}",
+    "csvErrorRowsBadRating": "W tych wierszach ranking nie jest zwykłą liczbą: {rows}",
+    "csvErrorRowsBadGrade": "W tych wierszach nie da się odczytać stopnia: {rows}",
+    "csvErrorRowsAmbiguousRatedPlayer": "Te wiersze pasują do więcej niż jednego gracza z listy rankingowej FESA; wpisz ranking i stopień ręcznie: {rows}"
   },
   "licenceCheck": {
     "hint": "Wczytaj listę CSV federacji z graczami, którzy mają opłaconą licencję (nazwisko, imię). Każdy zgłoszony gracz wybranej narodowości, którego na niej nie ma, zostanie wypisany tutaj. Nazwiska są porównywane po nazwisku i imieniu, bez uwzględniania wielkości liter i znaków diakrytycznych.",
@@ -558,6 +564,7 @@
     "playersWithoutTeam": "{count} zawodników nie należy jeszcze do żadnej drużyny. Przed zamknięciem każdy musi być w drużynie.",
     "incompleteTeam": "Drużyna {name} ma {have} z {need} zawodników.",
     "membersWithoutPairingRating": "Punkty startowe MacMahona wymagają ELO do kojarzenia dla każdego nierankingowanego zawodnika — brakuje {count}.",
+    "pairingRatingsWouldBeDiscarded": "{count} zawodników nadal ma ELO do kojarzenia, które ma znaczenie tylko w trybie drużynowym z punktami startowymi MacMahona — usuń je przed wyłączeniem.",
     "notEnoughTeams": "Turniej drużynowy wymaga co najmniej 2 drużyn (jest {have}).",
     "noLateRegistrationInTeamMode": "Turniej drużynowy nie przyjmuje zgłoszeń po terminie: każdy zawodnik musi być w drużynie, a składy są zamrożone.",
     "notEnoughPresentTeams": "Runda wymaga co najmniej {needed} obecnych drużyn — obecnych jest tylko {have}."

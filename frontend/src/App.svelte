@@ -99,6 +99,7 @@
   const effectiveWinners = $derived(store.effectiveWinners);
   const canUndo = $derived(store.canUndo);
   const hasUnsavedChanges = $derived(store.hasUnsavedChanges);
+  const persisted = $derived(store.persisted);
   const apply = (res: TournamentResponse) => store.apply(res);
   const refetch = (force = false) => store.refetch(force);
 
@@ -877,6 +878,13 @@
 
   {#if error && !$authRequired}
     <p class="error-banner" role="alert">{error}</p>
+  {/if}
+
+  <!-- The server applied the edit but could not write it to disk. It answered
+       200, and so will every edit after it, so this banner is the only thing
+       that will ever say the tournament is one restart away from being lost. -->
+  {#if !persisted && !$authRequired}
+    <p class="error-banner" role="alert">{$_("app.notPersisted")}</p>
   {/if}
 
   {#if $currentTournamentId === null}

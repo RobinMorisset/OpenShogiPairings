@@ -54,7 +54,7 @@ pub use cup::{
     CupBracketView, CupFormat, CupMatch, CupPairings, CupPodium, CUP_SIZES,
 };
 pub use elo::estimate_elos;
-pub use fesa::{decode_latin1, parse_rating_list, RatedPlayer};
+pub use fesa::{decode_latin1, lookup, parse_rating_list, Lookup, RatedPlayer, RatingListError};
 pub use fesa_results::import_fesa_results;
 pub use licence::{check_licences, LicenceCheck, UnlicensedPlayer};
 pub use pairing::{

@@ -1109,6 +1109,16 @@ export function subscribeToPublicTournament(
       }
     });
     stream.addEventListener("gone", () => onGone());
+    // The server could not build the projection — a bug on its side, not a
+    // deleted tournament and not weather. Say so instead of sitting on stale
+    // standings; the stream stays open, so a fixed server heals the page.
+    //
+    // Named `failure`, not `error`: an SSE event named `error` is dispatched on
+    // the `EventSource` itself, where it would land in `onerror` below and be
+    // treated as a dropped connection.
+    stream.addEventListener("failure", (event) => {
+      onError(String((event as MessageEvent).data));
+    });
     stream.addEventListener("revoked", () => {
       // Terminal, so stop for good: reconnecting with a key the server has
       // already refused would just be a retry loop nobody can win, and the

@@ -1127,6 +1127,98 @@ mod tests {
         assert!(reconstruct_cup_from_final(&rounds, s[0], s[4]).is_none());
     }
 
+    /// `knockout_champion` is the seeding-robust "was this really run as a cup"
+    /// test the importer leans on, and it answers `None` for anything it cannot
+    /// confirm — so both halves are worth pinning: what it accepts, and what it
+    /// refuses.
+    #[test]
+    fn knockout_champion_follows_the_bracket_whatever_the_seeding() {
+        let p = ids(8);
+        let rounds = [
+            cup_round(
+                1,
+                &[
+                    (p[0], p[7], CupStage::Quarterfinal),
+                    (p[1], p[6], CupStage::Quarterfinal),
+                    (p[2], p[5], CupStage::Quarterfinal),
+                    (p[3], p[4], CupStage::Quarterfinal),
+                ],
+            ),
+            cup_round(
+                2,
+                &[
+                    (p[0], p[3], CupStage::Semifinal),
+                    (p[1], p[2], CupStage::Semifinal),
+                ],
+            ),
+            cup_round(
+                3,
+                &[
+                    (p[0], p[1], CupStage::Final),
+                    (p[3], p[2], CupStage::SmallFinal),
+                ],
+            ),
+        ];
+        assert_eq!(knockout_champion(&rounds, &p), Some(p[0]));
+        // Seeding order is irrelevant — the same games, listed any way round,
+        // are the same knockout. This is the whole point over `Cup::podium`,
+        // which replays one specific fold.
+        let mut shuffled = p.clone();
+        shuffled.reverse();
+        assert_eq!(knockout_champion(&rounds, &shuffled), Some(p[0]));
+    }
+
+    #[test]
+    fn knockout_champion_refuses_anything_it_cannot_confirm() {
+        let p = ids(8);
+        let bracket = [
+            cup_round(
+                1,
+                &[
+                    (p[0], p[7], CupStage::Quarterfinal),
+                    (p[1], p[6], CupStage::Quarterfinal),
+                    (p[2], p[5], CupStage::Quarterfinal),
+                    (p[3], p[4], CupStage::Quarterfinal),
+                ],
+            ),
+            cup_round(
+                2,
+                &[
+                    (p[0], p[3], CupStage::Semifinal),
+                    (p[1], p[2], CupStage::Semifinal),
+                ],
+            ),
+            cup_round(
+                3,
+                &[
+                    (p[0], p[1], CupStage::Final),
+                    (p[3], p[2], CupStage::SmallFinal),
+                ],
+            ),
+        ];
+        // A field that isn't a power of two, or is too small to knock out.
+        assert_eq!(knockout_champion(&bracket, &p[..7]), None);
+        assert_eq!(knockout_champion(&bracket, &p[..1]), None);
+        // A duplicated seed: the set is smaller than the list, so the halving
+        // arithmetic would be about a field that doesn't exist.
+        let doubled = [p[0], p[0], p[1], p[2]];
+        assert_eq!(knockout_champion(&bracket, &doubled), None);
+        // The rounds run out before the field resolves to one player.
+        assert_eq!(knockout_champion(&bracket[..2], &p), None);
+        // A "bracket" whose players play outside the set: swap one round-2 board
+        // for games against players who were already knocked out. The field never
+        // halves within itself, so this is a Swiss pool, not a knockout.
+        let mut leaky = bracket.to_vec();
+        leaky[1] = cup_round(
+            2,
+            &[
+                (p[0], p[7], CupStage::Semifinal),
+                (p[1], p[6], CupStage::Semifinal),
+            ],
+        );
+        assert_eq!(knockout_champion(&leaky, &p), None);
+    }
+
     /// A qualifier-format event: 4 pre-qualified (1-4) play the open in round 1
     /// while 5-12 play the qualification round, and the bracket of 8 runs from
     /// round 2. Walking back from the final, round 1 offers every alive player a

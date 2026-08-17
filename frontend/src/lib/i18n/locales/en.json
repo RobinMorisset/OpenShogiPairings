@@ -11,6 +11,7 @@
     "switchTournament": "Switch tournament…",
     "switchTournamentTitle": "Return to the tournament list",
     "unsavedChanges": "Unsaved changes",
+    "notPersisted": "The server could not write this tournament to disk. Your changes have been applied, but they exist only in memory and would be lost if the server restarts.",
     "noBackupsYet": "No backups yet — taken automatically as the round moves through finalize/prepare/start/complete/cancel.",
     "restore": "Restore",
     "tabSettings": "Settings",
@@ -108,7 +109,12 @@
     "checkLicencesTitle": "Check the registered players of one nationality against a CSV list of up-to-date licences (Last name, First name), and show which of them are missing from it.",
     "csvErrorEmpty": "The CSV file contains no players.",
     "csvErrorMissingColumns": "The CSV must have a last-name column and a first-name column.",
-    "csvErrorRowsMissingLastName": "These rows are missing a last name: {rows}"
+    "csvErrorRowsMissingLastName": "These rows are missing a last name: {rows}",
+    "csvErrorUnterminatedQuote": "A quoted cell in the CSV is never closed, so everything after it would be read as part of that cell.",
+    "csvErrorRaggedRows": "These rows don't have the same number of columns as the header: {rows}",
+    "csvErrorRowsBadRating": "These rows have a rating that isn't a plain number: {rows}",
+    "csvErrorRowsBadGrade": "These rows have a grade that can't be read: {rows}",
+    "csvErrorRowsAmbiguousRatedPlayer": "These rows match more than one player in the FESA rating list; enter their rating and grade by hand: {rows}"
   },
   "licenceCheck": {
     "hint": "Load the federation's CSV list of the players whose licence is paid up (Last name, First name). Every registered player of the chosen nationality who is not on it is listed here. Names are matched on last + first name, ignoring case and accents.",
@@ -558,6 +564,7 @@
     "playersWithoutTeam": "{count} players are not in a team yet. Every player must be in one before finalizing.",
     "incompleteTeam": "Team {name} has {have} of {need} members.",
     "membersWithoutPairingRating": "MacMahon starting points need a pairing ELO for every unrated team member — {count} are still missing one.",
+    "pairingRatingsWouldBeDiscarded": "{count} player(s) still have a pairing ELO, which only means something in team mode with MacMahon starting points — clear those before turning it off.",
     "notEnoughTeams": "A team tournament needs at least 2 teams (there are {have}).",
     "noLateRegistrationInTeamMode": "A team tournament can't take late registrations: every player has to be in a team, and the rosters are frozen.",
     "notEnoughPresentTeams": "A round needs at least {needed} present teams — only {have} are present."

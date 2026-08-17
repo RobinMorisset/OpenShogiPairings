@@ -11,16 +11,22 @@
 //! registration autocomplete). Club is never in that list, so it stays whatever
 //! the CSV gave.
 //!
-//! The whole import is **all-or-nothing**: any row without a last name (or an
-//! empty file / missing name columns) aborts it with a [`CsvImportError`], so a
-//! half-imported roster never lands. The parser is pure — it takes the FESA list
+//! The whole import is **all-or-nothing**, and it refuses anything it cannot
+//! read rather than guessing: a row without a last name, a row whose cell count
+//! doesn't match the header, a non-empty ELO or grade cell that doesn't parse,
+//! a name matching several FESA entries, an empty file, missing name columns —
+//! each aborts the import with a [`CsvImportError`] naming the rows, so a
+//! half-imported or quietly-rewritten roster never lands. That strictness is the
+//! point around the FESA fill-in: an unreadable cell treated as "missing" would
+//! be *replaced* by the federation's value, and the result looks exactly like a
+//! correct import. The parser is pure — it takes the FESA list
 //! as an argument rather than fetching it — so the server can run it against its
 //! own cache and it stays trivially testable.
 //!
 //! This lives in `osp-core` (not the browser client) so the parsing rules have a
 //! single, tested implementation shared by every client.
 
-use crate::fesa::RatedPlayer;
+use crate::fesa::{self, RatedPlayer};
 use crate::player::{Grade, NewPlayer};
 
 /// A fatal problem that aborts the whole CSV import.
@@ -36,6 +42,34 @@ pub enum CsvImportError {
     /// header being row 1). The whole import is rejected so nothing half-lands.
     #[error("these rows are missing a last name: {}", format_rows(.rows))]
     RowsMissingLastName { rows: Vec<usize> },
+    /// A quoted cell was never closed, so the rest of the file was being read as
+    /// part of it — turning a roster into one player with an enormous name.
+    #[error("a quoted cell in the CSV is never closed")]
+    UnterminatedQuote,
+    /// One or more data rows had a different number of cells than the header.
+    /// Reading them anyway would take each column from whatever happened to sit
+    /// at that index — an unquoted delimiter inside a name shifts every cell to
+    /// its right, so the ELO column can quietly be read out of the club column.
+    #[error("these rows don't have the same number of columns as the header: {}", format_rows(.rows))]
+    RaggedRows { rows: Vec<usize> },
+    /// One or more data rows had a non-empty ELO cell that isn't a plain number.
+    /// Treating it as "no rating" would let the FESA list fill in a *different*
+    /// rating, indistinguishable from a correct import — `2,100` and `2 100` are
+    /// routine spreadsheet output, so this is not a rare case.
+    #[error("these rows have an ELO that isn't a plain number: {}", format_rows(.rows))]
+    RowsWithBadRating { rows: Vec<usize> },
+    /// One or more data rows had a non-empty grade cell that isn't a dan/kyu
+    /// grade. As with the ELO, the FESA list would otherwise fill in its own.
+    #[error("these rows have an unreadable grade: {}", format_rows(.rows))]
+    RowsWithBadGrade { rows: Vec<usize> },
+    /// One or more data rows needed the FESA list to fill in a missing ELO,
+    /// grade or nationality, but their name matches several entries in it. There
+    /// is no way to tell which one the referee meant, so we ask rather than pick.
+    #[error(
+        "these rows match more than one player in the FESA rating list; fill in their ELO and grade by hand: {}",
+        format_rows(.rows)
+    )]
+    RowsMatchingSeveralRatedPlayers { rows: Vec<usize> },
 }
 
 /// Render a list of 1-based row numbers as `2, 5, 7` for the error message.
@@ -138,7 +172,12 @@ fn detect_delimiter(header_line: &str) -> char {
 
 /// A minimal RFC-4180-ish parser: quoted fields, embedded delimiters/newlines,
 /// and `""` escapes. Rows that are entirely blank are dropped.
-fn parse_rows(text: &str, delimiter: char) -> Vec<Vec<String>> {
+///
+/// A quote that is never closed is refused rather than read to the end of the
+/// file: an unclosed quote in the last text column swallows every row below it
+/// into one cell, so a roster of forty imports as one player with a very long
+/// first name — no error, no empty result, nothing to notice.
+fn parse_rows(text: &str, delimiter: char) -> Result<Vec<Vec<String>>, CsvImportError> {
     let chars: Vec<char> = text
         .replace("\r\n", "\n")
         .replace('\r', "\n")
@@ -175,6 +214,9 @@ fn parse_rows(text: &str, delimiter: char) -> Vec<Vec<String>> {
         }
         i += 1;
     }
+    if in_quotes {
+        return Err(CsvImportError::UnterminatedQuote);
+    }
     // Flush a trailing field/row not terminated by a newline.
     if !field.is_empty() || !row.is_empty() {
         row.push(field);
@@ -182,7 +224,7 @@ fn parse_rows(text: &str, delimiter: char) -> Vec<Vec<String>> {
     }
 
     rows.retain(|r| r.iter().any(|cell| !cell.trim().is_empty()));
-    rows
+    Ok(rows)
 }
 
 /// Parse CSV `text` into a list of players, filling missing ELO/grade from the
@@ -194,7 +236,7 @@ pub fn parse_players_csv(
     ratings: &[RatedPlayer],
 ) -> Result<Vec<NewPlayer>, CsvImportError> {
     let first_line = text.split('\n').next().unwrap_or("");
-    let rows = parse_rows(text, detect_delimiter(first_line));
+    let rows = parse_rows(text, detect_delimiter(first_line))?;
     let Some((header, data)) = rows.split_first() else {
         return Err(CsvImportError::Empty);
     };
@@ -219,9 +261,21 @@ pub fn parse_players_csv(
 
     let mut players = Vec::new();
     let mut bad_rows = Vec::new();
+    let mut ragged_rows = Vec::new();
+    let mut bad_rating_rows = Vec::new();
+    let mut bad_grade_rows = Vec::new();
+    let mut ambiguous_rows = Vec::new();
     for (offset, row) in data.iter().enumerate() {
         // 1-based row number in the file (header is row 1).
         let row_number = offset + 2;
+        // A row that doesn't line up with the header is refused rather than read
+        // column-by-index anyway: too few cells makes a typed ELO look absent
+        // (and get overwritten from the FESA list), too many means a delimiter
+        // slipped into a field and every column past it is someone else's data.
+        if row.len() != header.len() {
+            ragged_rows.push(row_number);
+            continue;
+        }
         let last_name = cell(row, Some(last_idx));
         let first_name = cell(row, Some(first_idx));
         if last_name.is_empty() {
@@ -236,15 +290,36 @@ pub fn parse_players_csv(
         };
 
         // What the row itself carries (a missing column or a blank cell is `None`).
-        // ELO must be a non-negative integer to count.
-        let mut rating = rating_idx
+        // A cell the referee *did* fill in but we can't read is an error, not a
+        // `None` to be quietly refilled from the FESA list: the whole point of
+        // typing it was to override what the federation has.
+        let mut rating = match rating_idx
             .map(|_| cell(row, rating_idx))
             .filter(|raw| !raw.is_empty())
-            .and_then(|raw| raw.parse::<u32>().ok());
-        let mut grade = grade_idx
+        {
+            // ELO must be a plain non-negative integer to count.
+            Some(raw) => match raw.parse::<u32>() {
+                Ok(rating) => Some(rating),
+                Err(_) => {
+                    bad_rating_rows.push(row_number);
+                    continue;
+                }
+            },
+            None => None,
+        };
+        let mut grade = match grade_idx
             .map(|_| cell(row, grade_idx))
             .filter(|raw| !raw.is_empty())
-            .and_then(|raw| Grade::parse(&raw));
+        {
+            Some(raw) => match Grade::parse(&raw) {
+                Some(grade) => Some(grade),
+                None => {
+                    bad_grade_rows.push(row_number);
+                    continue;
+                }
+            },
+            None => None,
+        };
         let nat_cell = cell(row, nat_idx);
         let mut nationality = (!nat_cell.is_empty()).then_some(nat_cell);
 
@@ -253,21 +328,27 @@ pub fn parse_players_csv(
         // name. The lookup runs whenever *any* of them is missing, so e.g. a row
         // that gave an ELO but no nationality still gets the nationality filled.
         if rating.is_none() || grade.is_none() || nationality.is_none() {
-            let key = name_key(&player.last_name, first_name.as_str());
-            if let Some(m) = ratings
-                .iter()
-                .find(|r| name_key(&r.last_name, &r.first_name) == key)
-            {
-                if rating.is_none() {
-                    rating = Some(m.rating);
-                    player.fesa_games = Some(m.games);
+            match fesa::lookup(ratings, &player.last_name, first_name.as_str()) {
+                fesa::Lookup::One(m) => {
+                    if rating.is_none() {
+                        rating = Some(m.rating);
+                        player.fesa_games = Some(m.games);
+                    }
+                    if grade.is_none() {
+                        grade = m.grade;
+                    }
+                    if nationality.is_none() && !m.nationality.trim().is_empty() {
+                        nationality = Some(m.nationality.clone());
+                    }
                 }
-                if grade.is_none() {
-                    grade = m.grade;
+                // Homonyms are real in a European-wide list. Picking the first
+                // match would hand this player someone else's rating, and nothing
+                // downstream could tell. Refuse and let the referee type it.
+                fesa::Lookup::Ambiguous(_) => {
+                    ambiguous_rows.push(row_number);
+                    continue;
                 }
-                if nationality.is_none() && !m.nationality.trim().is_empty() {
-                    nationality = Some(m.nationality.clone());
-                }
+                fesa::Lookup::None => {}
             }
         }
         player.rating = rating;
@@ -281,8 +362,27 @@ pub fn parse_players_csv(
         players.push(player);
     }
 
+    // Structural problems first: a ragged row explains most of what follows it.
+    if !ragged_rows.is_empty() {
+        return Err(CsvImportError::RaggedRows { rows: ragged_rows });
+    }
     if !bad_rows.is_empty() {
         return Err(CsvImportError::RowsMissingLastName { rows: bad_rows });
+    }
+    if !bad_rating_rows.is_empty() {
+        return Err(CsvImportError::RowsWithBadRating {
+            rows: bad_rating_rows,
+        });
+    }
+    if !bad_grade_rows.is_empty() {
+        return Err(CsvImportError::RowsWithBadGrade {
+            rows: bad_grade_rows,
+        });
+    }
+    if !ambiguous_rows.is_empty() {
+        return Err(CsvImportError::RowsMatchingSeveralRatedPlayers {
+            rows: ambiguous_rows,
+        });
     }
     if players.is_empty() {
         return Err(CsvImportError::Empty);
@@ -470,11 +570,108 @@ mod tests {
     }
 
     #[test]
-    fn a_negative_or_bogus_rating_cell_is_ignored() {
+    fn a_negative_or_bogus_rating_cell_is_refused() {
+        // Not silently dropped to "unrated": the referee typed something, and
+        // treating it as absent would let the FESA list overwrite it.
         let csv = "Last name,First name,ELO\nAlpha,Ann,-5\nBeta,Bo,abc\n";
+        assert_eq!(
+            parse_players_csv(csv, &[]),
+            Err(CsvImportError::RowsWithBadRating { rows: vec![2, 3] })
+        );
+    }
+
+    #[test]
+    fn a_thousands_separator_in_the_elo_is_refused_not_refilled_from_fesa() {
+        // The case that motivates the rule: `2 100` is routine spreadsheet output,
+        // and reading it as "no ELO" would hand Ann the FESA list's 1500 instead.
+        let csv = "Last name,First name,ELO\nAlpha,Ann,2 100\n";
+        assert_eq!(
+            parse_players_csv(csv, &[rated("Alpha", "Ann", 1500, 40, None)]),
+            Err(CsvImportError::RowsWithBadRating { rows: vec![2] })
+        );
+    }
+
+    #[test]
+    fn an_unreadable_grade_cell_is_refused() {
+        let csv = "Last name,First name,Grade\nAlpha,Ann,green belt\n";
+        assert_eq!(
+            parse_players_csv(csv, &[]),
+            Err(CsvImportError::RowsWithBadGrade { rows: vec![2] })
+        );
+    }
+
+    #[test]
+    fn rows_that_dont_match_the_header_width_are_refused() {
+        // Row 2 is short (a missing ELO cell would look like a blank one); row 3
+        // is long, which is what an unquoted delimiter inside a name produces —
+        // there, every column past it belongs to the wrong field.
+        let csv = "Last name,First name,ELO\nAlpha,Ann\nGamma,Cid,1700,extra\n";
+        assert_eq!(
+            parse_players_csv(csv, &[]),
+            Err(CsvImportError::RaggedRows { rows: vec![2, 3] })
+        );
+    }
+
+    #[test]
+    fn a_name_matching_two_fesa_entries_is_refused_rather_than_guessed() {
+        // Homonyms are real in a European-wide list; picking the first would give
+        // this player someone else's rating with nothing to show for it.
+        let csv = "Last name,First name\nAlpha,Ann\n";
+        let list = [
+            rated("Alpha", "Ann", 1500, 40, None),
+            rated("Alpha", "Ann", 2100, 80, None),
+        ];
+        assert_eq!(
+            parse_players_csv(csv, &list),
+            Err(CsvImportError::RowsMatchingSeveralRatedPlayers { rows: vec![2] })
+        );
+        // A row that needs nothing from the list is unaffected by the ambiguity.
+        let complete = "Last name,First name,ELO,Grade,Nationality\nAlpha,Ann,1800,2d,FR\n";
+        let players = parse_players_csv(complete, &list).unwrap();
+        assert_eq!(players[0].rating, Some(1800));
+    }
+
+    #[test]
+    fn an_unterminated_quote_is_refused_not_read_to_the_end_of_the_file() {
+        // The dangerous shape: the quote opens in the last text column, so it
+        // eats every row below it. This used to import as one player called
+        // "Alpha" whose first name was the rest of the file — three players
+        // silently down to one, with an `Ok` to say it went fine.
+        let csv = "Last name,First name\nAlpha,\"Ann\nBeta,Bo\nGamma,Cid\n";
+        assert_eq!(
+            parse_players_csv(csv, &[]),
+            Err(CsvImportError::UnterminatedQuote)
+        );
+        // A properly closed quote still carries a delimiter and a newline.
+        let quoted = "Last name,First name\n\"Le Roux, aine\",\"Jean\nPaul\"\n";
+        let players = parse_players_csv(quoted, &[]).unwrap();
+        assert_eq!(players[0].last_name, "Le Roux, aine");
+        assert_eq!(players[0].first_name.as_deref(), Some("Jean\nPaul"));
+    }
+
+    #[test]
+    fn a_utf8_bom_does_not_hide_the_first_column() {
+        // Excel writes one on every CSV it exports. It lands on the first header
+        // cell, so without folding it away the last-name column simply isn't
+        // found and the whole file is refused.
+        let csv = "\u{feff}Last name,First name,ELO\nAlpha,Ann,2000\n";
         let players = parse_players_csv(csv, &[]).unwrap();
-        assert_eq!(players[0].rating, None);
-        assert_eq!(players[1].rating, None);
+        assert_eq!(players[0].last_name, "Alpha");
+        assert_eq!(players[0].rating, Some(2000));
+    }
+
+    #[test]
+    fn cr_only_and_crlf_line_endings_parse_like_lf() {
+        // Classic-Mac CR-only endings, and the CRLF that any Windows export has.
+        let expected = |csv: &str| {
+            let players = parse_players_csv(csv, &[]).unwrap();
+            assert_eq!(players.len(), 2, "{csv:?}");
+            assert_eq!(players[1].last_name, "Beta", "{csv:?}");
+            assert_eq!(players[1].rating, Some(1700), "{csv:?}");
+        };
+        expected("Last name,First name,ELO\rAlpha,Ann,2000\rBeta,Bo,1700\r");
+        expected("Last name,First name,ELO\r\nAlpha,Ann,2000\r\nBeta,Bo,1700\r\n");
+        expected("Last name,First name,ELO\nAlpha,Ann,2000\nBeta,Bo,1700\n");
     }
 
     #[test]

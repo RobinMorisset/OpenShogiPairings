@@ -11,6 +11,7 @@
     "switchTournament": "大会を切り替え…",
     "switchTournamentTitle": "大会一覧に戻ります",
     "unsavedChanges": "未保存の変更があります",
+    "notPersisted": "サーバーがこの大会をディスクに書き込めませんでした。変更は反映されていますが、メモリ上にしかなく、サーバーを再起動すると失われます。",
     "noBackupsYet": "バックアップはまだありません。申込確定・準備・開始・終了・取り消しの各操作時に自動で取得されます。",
     "restore": "復元",
     "tabSettings": "設定",
@@ -108,7 +109,12 @@
     "checkLicencesTitle": "指定した国籍の登録選手を、会費納入済みの選手のCSV一覧（姓・名）と照合し、一覧にない選手を表示します。",
     "csvErrorEmpty": "このCSVファイルには選手がいません。",
     "csvErrorMissingColumns": "CSVには姓の列と名の列が必要です。",
-    "csvErrorRowsMissingLastName": "次の行に姓がありません: {rows}"
+    "csvErrorRowsMissingLastName": "次の行に姓がありません: {rows}",
+    "csvErrorUnterminatedQuote": "引用符で囲まれたセルが閉じられていないため、以降のすべてがそのセルの一部として読み込まれてしまいます。",
+    "csvErrorRaggedRows": "次の行は見出し行と列数が一致しません: {rows}",
+    "csvErrorRowsBadRating": "次の行のレーティングが数値になっていません: {rows}",
+    "csvErrorRowsBadGrade": "次の行の段級が読み取れません: {rows}",
+    "csvErrorRowsAmbiguousRatedPlayer": "次の行はFESAレーティングリストの複数の選手に一致します。レーティングと段級を手入力してください: {rows}"
   },
   "licenceCheck": {
     "hint": "会費が納入済みの選手のCSV一覧（姓・名）を読み込んでください。選択した国籍の登録選手のうち、一覧にない選手をここに表示します。氏名は姓と名で照合し、大文字・小文字とアクセント記号は区別しません。",
@@ -558,6 +564,7 @@
     "playersWithoutTeam": "{count} 人がまだどのチームにも所属していません。確定前に全員をチームに入れてください。",
     "incompleteTeam": "チーム {name} は {need} 人中 {have} 人です。",
     "membersWithoutPairingRating": "マクマホンの持ち点には、レーティングのないチームメンバー全員に組み合わせ用ELOが必要です（あと {count} 人）。",
+    "pairingRatingsWouldBeDiscarded": "組み合わせ用ELOがまだ {count} 人に設定されています。これは団体戦でマクマホンの持ち点を使う場合にのみ意味があります。無効にする前に消してください。",
     "notEnoughTeams": "団体戦には少なくとも2チームが必要です（現在 {have} チーム）。",
     "noLateRegistrationInTeamMode": "団体戦では追加登録できません。全員がチームに所属している必要があり、メンバー構成は確定済みです。",
     "notEnoughPresentTeams": "1ラウンドには少なくとも {needed} チームの参加が必要ですが、{have} チームしかいません。"

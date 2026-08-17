@@ -85,7 +85,11 @@ async fn fetch_from_fesa() -> Result<Vec<RatedPlayer>, ApiError> {
         .await
         .map_err(|e| ApiError::Upstream(format!("reading FESA response failed: {e}")))?;
 
-    let players = parse_rating_list(&decode_latin1(&bytes));
+    // A list we can't fully read is refused rather than cached: half a list looks
+    // exactly like a whole one at the autocomplete box, and the referee would
+    // register players as unrated without ever being told why.
+    let players = parse_rating_list(&decode_latin1(&bytes))
+        .map_err(|e| ApiError::Upstream(format!("FESA list could not be parsed: {e}")))?;
     if players.is_empty() {
         return Err(ApiError::Upstream(
             "FESA list parsed to zero players (format may have changed)".into(),

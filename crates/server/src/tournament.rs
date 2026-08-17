@@ -248,6 +248,12 @@ impl BlockedReason {
 pub(crate) struct TournamentView {
     pub(crate) tournament: Tournament,
     pub(crate) can_undo: bool,
+    /// `false` when the server could not write this state to disk: the edit was
+    /// applied and answered `200`, but it lives only in memory and a restart
+    /// would lose it. The client shows a standing banner — on a full disk every
+    /// later edit is a `200` too, so nothing else would ever say so. Always
+    /// `true` where there is no persistence to begin with (the desktop app).
+    pub(crate) persisted: bool,
     /// Why starting the next round would be refused, or absent if it would go
     /// ahead — [`Tournament::next_round_blocker`], rendered by the client.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -368,6 +374,7 @@ pub(crate) fn build_view(store: &TournamentStore) -> Result<TournamentView, ApiE
     Ok(TournamentView {
         tournament,
         can_undo: store.can_undo(),
+        persisted: store.persisted(),
         next_round_blocked,
         grid_export_blocked,
         version: store.version(),

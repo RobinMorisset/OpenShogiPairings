@@ -43,6 +43,13 @@ export class TournamentStore {
    *  `TournamentResponse.effective_winners`), indexed like `tournament.rounds`. */
   effectiveWinners = $state<(Winner | null)[][]>([]);
   canUndo = $state(false);
+  /**
+   * `false` when the server could not write the state it just answered with to
+   * disk (see `TournamentResponse.persisted`). The edit *was* applied, and it
+   * only lives in memory: shown as a standing banner, because every later edit
+   * comes back `200` too and nothing else would ever say so.
+   */
+  persisted = $state(true);
   /** Why the server would refuse to start the next round / export the grid, or
    *  `null` if it would go ahead. Server-computed, so the buttons that read them
    *  cannot disagree with the guards that enforce them. */
@@ -87,6 +94,7 @@ export class TournamentStore {
     this.suggestedHandicaps = res.suggested_handicaps ?? [];
     this.effectiveWinners = res.effective_winners ?? [];
     this.canUndo = res.can_undo;
+    this.persisted = res.persisted;
     this.nextRoundBlocked = res.next_round_blocked ?? null;
     this.gridExportBlocked = res.grid_export_blocked ?? null;
     this.#appliedVersion = res.version;
@@ -126,6 +134,7 @@ export class TournamentStore {
     this.suggestedHandicaps = [];
     this.effectiveWinners = [];
     this.canUndo = false;
+    this.persisted = true;
     this.nextRoundBlocked = null;
     this.gridExportBlocked = null;
     this.#appliedVersion = null;

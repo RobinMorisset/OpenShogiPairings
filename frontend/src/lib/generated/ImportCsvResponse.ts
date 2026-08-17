@@ -26,6 +26,14 @@ export type ImportCsvResponse = {
  */
 skipped_duplicates: Array<string>, tournament: Tournament, can_undo: boolean, 
 /**
+ * `false` when the server could not write this state to disk: the edit was
+ * applied and answered `200`, but it lives only in memory and a restart
+ * would lose it. The client shows a standing banner — on a full disk every
+ * later edit is a `200` too, so nothing else would ever say so. Always
+ * `true` where there is no persistence to begin with (the desktop app).
+ */
+persisted: boolean, 
+/**
  * Why starting the next round would be refused, or absent if it would go
  * ahead — [`Tournament::next_round_blocker`], rendered by the client.
  */

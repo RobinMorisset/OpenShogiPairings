@@ -11,6 +11,7 @@
     "switchTournament": "Changer de tournoi…",
     "switchTournamentTitle": "Revenir à la liste des tournois",
     "unsavedChanges": "Modifications non enregistrées",
+    "notPersisted": "Le serveur n'a pas pu écrire ce tournoi sur le disque. Vos modifications sont appliquées, mais elles n'existent qu'en mémoire et seraient perdues au redémarrage du serveur.",
     "noBackupsYet": "Aucune sauvegarde pour l'instant — elles sont prises automatiquement lors des étapes finalisation/préparation/démarrage/complétion/annulation.",
     "restore": "Restaurer",
     "tabSettings": "Paramètres",
@@ -108,7 +109,12 @@
     "checkLicencesTitle": "Vérifier les joueurs inscrits d'une nationalité donnée face à une liste CSV des licences à jour (Nom, Prénom), et montrer lesquels n'y figurent pas.",
     "csvErrorEmpty": "Le fichier CSV ne contient aucun joueur.",
     "csvErrorMissingColumns": "Le CSV doit comporter une colonne Nom et une colonne Prénom.",
-    "csvErrorRowsMissingLastName": "Ces lignes n'ont pas de nom de famille : {rows}"
+    "csvErrorRowsMissingLastName": "Ces lignes n'ont pas de nom de famille : {rows}",
+    "csvErrorUnterminatedQuote": "Une cellule entre guillemets n'est jamais refermée : tout ce qui suit serait lu comme faisant partie de cette cellule.",
+    "csvErrorRaggedRows": "Ces lignes n'ont pas le même nombre de colonnes que l'en-tête : {rows}",
+    "csvErrorRowsBadRating": "Ces lignes ont un classement qui n'est pas un nombre simple : {rows}",
+    "csvErrorRowsBadGrade": "Ces lignes ont un grade illisible : {rows}",
+    "csvErrorRowsAmbiguousRatedPlayer": "Ces lignes correspondent à plusieurs joueurs de la liste de classement FESA ; saisissez leur classement et leur grade à la main : {rows}"
   },
   "licenceCheck": {
     "hint": "Chargez la liste CSV de la fédération des joueurs dont la licence est à jour (Nom, Prénom). Tout joueur inscrit de la nationalité choisie qui n'y figure pas est listé ici. Les noms sont comparés sur nom + prénom, sans tenir compte de la casse ni des accents.",
@@ -558,6 +564,7 @@
     "playersWithoutTeam": "{count} joueurs ne sont pas encore dans une équipe. Chaque joueur doit en avoir une avant la clôture.",
     "incompleteTeam": "L'équipe {name} a {have} membres sur {need}.",
     "membersWithoutPairingRating": "Les points de départ MacMahon exigent un ELO d'appariement pour chaque membre non classé — il en manque {count}.",
+    "pairingRatingsWouldBeDiscarded": "{count} joueur(s) ont encore un ELO d'appariement, qui n'a de sens qu'en mode par équipes avec points de départ MacMahon — effacez-les avant de le désactiver.",
     "notEnoughTeams": "Un tournoi par équipes demande au moins 2 équipes (il y en a {have}).",
     "noLateRegistrationInTeamMode": "Un tournoi par équipes n'accepte pas d'inscription tardive : chaque joueur doit être dans une équipe, et les compositions sont figées.",
     "notEnoughPresentTeams": "Une ronde demande au moins {needed} équipes présentes — il n'y en a que {have}."

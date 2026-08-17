@@ -63,7 +63,10 @@ rating the engine *pairs* on (which always comes from the base). Supply it via
 ELO.
 
 Players with no entry fall back to their registration rating. The override never
-changes the pairing ratings.
+changes the pairing ratings. A key naming a tournament number the base does not
+have **aborts the run**: the overrides are the ground truth every reported number
+is measured against, and re-importing a base can shift its numbering — a run that
+carried on would report confident results for a different world.
 
 ### Rating reliability (established vs provisional)
 
@@ -89,6 +92,10 @@ provisional and the distinction would be lost. Restore it with either of:
 
 Both match by accent-folded name and write only `fesa_games`; strengths and
 pairing ratings are untouched, and an unmatched player simply stays provisional.
+A player whose name matches *several* list entries also stays provisional — there
+is no telling which entry is theirs — and is named in a warning on stderr, since
+that silence would otherwise read as "not in the list". A list with rows the
+parser cannot read aborts instead of quietly dropping them.
 
 ### Other flags
 

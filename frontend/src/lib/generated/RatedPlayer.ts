@@ -7,8 +7,10 @@ import type { Grade } from "./Grade";
 export type RatedPlayer = { last_name: string, first_name: string, rating: number, 
 /**
  * Number of rated games behind this rating. Used to judge how established a
- * rating is (the ELO estimator widens the prior for provisional ratings);
- * 0 when the column was missing or unparseable.
+ * rating is (the ELO estimator widens the prior for provisional ratings).
+ * Always the value the list carried: a row whose `#games` column is missing
+ * or unreadable is reported as malformed, never defaulted to 0 (which would
+ * silently demote an established player to provisional).
  */
 games: number, 
 /**

@@ -270,6 +270,21 @@ pub enum TournamentError {
     /// everything downstream assumes they have.
     #[error("player {player} has no tournament number, but registration is finalized")]
     UnnumberedPlayer { player: Uuid },
+    /// Two teams in the file share a registration id.
+    #[error("team id {team} appears more than once")]
+    DuplicateTeamId { team: Uuid },
+    /// Two teams in the file share a team number — the key every team score is
+    /// stored by, so they would share one score.
+    #[error("team number {number} is used by more than one team")]
+    DuplicateTeamNumber { number: TeamId },
+    /// Registration is finalized but a team has no number, which the score
+    /// tables and every board of its matches assume it has.
+    #[error("team {team} has no team number, but registration is finalized")]
+    UnnumberedTeam { team: Uuid },
+    /// A team's roster names somebody who is not a registered player. Their
+    /// board would resolve to nobody, and the team would silently play short.
+    #[error("team {team} rosters {player}, who is not a registered player")]
+    UnknownTeamMember { team: Uuid, player: Uuid },
     /// The rounds in the file are not numbered `1..=n` in order.
     #[error("expected round {expected} at this position, found round {found}")]
     MisnumberedRound { expected: u32, found: u32 },
@@ -428,6 +443,14 @@ pub enum TournamentError {
     /// in: team mode with MacMahon starting points.
     #[error("a pairing ELO is only meaningful in team mode with MacMahon starting points")]
     PairingRatingNotApplicable,
+    /// A settings change would leave hand-entered pairing ELOs where nothing
+    /// reads them (team mode with MacMahon starting points is the only place they
+    /// mean anything). Refused rather than silently dropping them.
+    #[error(
+        "{count} player(s) have a pairing ELO, which only means anything in team mode with \
+         MacMahon starting points; clear them before turning that off"
+    )]
+    PairingRatingsWouldBeDiscarded { count: usize },
     /// Registration of any kind after finalization, in team mode (see
     /// `docs/archive/team-tournaments.md`: a late individual would be teamless, and a
     /// late team would need teamless players first).
@@ -821,12 +844,21 @@ impl Tournament {
         if self.registration_finalized {
             Self::validate_elo_scale_anchor(&settings, &self.players)?;
         }
-        // A pairing ELO only means anything under MacMahon starting points; if
-        // this update turns those off, drop the values rather than leaving them
-        // stored where nothing reads them and no UI can reach them.
+        // A pairing ELO only means anything under team mode + MacMahon starting
+        // points. Where it doesn't, the referee's values can't stay — but they are
+        // not thrown away here either: the client PUTs the whole settings object
+        // for any one field, so a wipe on this path destroys hand-entered ratings
+        // on an unrelated edit, and turning MacMahon back on would not bring them
+        // back. Refuse instead and say how many are at stake; clearing a pairing
+        // ELO is always allowed, so the referee can go and do it deliberately.
         if !(settings.team_mode() && settings.macmahon_in_use()) {
-            for p in &mut self.players {
-                p.pairing_rating = None;
+            let count = self
+                .players
+                .iter()
+                .filter(|p| p.pairing_rating.is_some())
+                .count();
+            if count > 0 {
+                return Err(TournamentError::PairingRatingsWouldBeDiscarded { count });
             }
         }
         // Prune any player memberships in categories this update deleted, so a
@@ -2970,8 +3002,75 @@ impl Tournament {
                 return Err(TournamentError::UnknownCupSeed { seed });
             }
         }
+        self.validate_teams()?;
         self.validate_long_games()?;
         self.validate_round_membership()?;
+        Ok(())
+    }
+
+    /// The teams: unique ids and numbers, numbered once registration is
+    /// finalized, and rosters that name registered players — each of them once.
+    ///
+    /// Nothing here can be broken by this program: a roster is built through
+    /// `add_team_member` (which refuses a player who is already in a team) and
+    /// frozen at finalization, and a finalized team tournament refuses to remove
+    /// a player at all. A *file* can express all of it, which is the whole
+    /// reason this runs — and every one of these is load-bearing on the read
+    /// path rather than merely untidy:
+    ///
+    /// - a member nobody registered is dropped silently by
+    ///   [`TeamSlots::new`](crate::team_scoring::TeamSlots), so the team plays a
+    ///   board short and its average rating is computed over the rest;
+    /// - a short roster reaches the pairing engine, which panics on two teams
+    ///   with different numbers of boards;
+    /// - a duplicate team number makes two teams share one row of every score
+    ///   table.
+    fn validate_teams(&self) -> Result<(), TournamentError> {
+        let registered: HashSet<Uuid> = self.players.iter().map(|p| p.id).collect();
+        let mut ids = HashSet::with_capacity(self.teams.len());
+        let mut numbers = HashSet::with_capacity(self.teams.len());
+        // A player belongs to at most one team: two rosters naming the same
+        // person would play them twice in one round, in two different matches.
+        let mut claimed: HashSet<Uuid> = HashSet::new();
+        for team in &self.teams {
+            if !ids.insert(team.id) {
+                return Err(TournamentError::DuplicateTeamId { team: team.id });
+            }
+            match team.tournament_id {
+                Some(number) => {
+                    if !numbers.insert(number) {
+                        return Err(TournamentError::DuplicateTeamNumber { number });
+                    }
+                }
+                // Before finalization no team has a number yet, exactly as no
+                // player does.
+                None if !self.registration_finalized => {}
+                None => return Err(TournamentError::UnnumberedTeam { team: team.id }),
+            }
+            for &member in &team.members {
+                if !registered.contains(&member) {
+                    return Err(TournamentError::UnknownTeamMember {
+                        team: team.id,
+                        player: member,
+                    });
+                }
+                if !claimed.insert(member) {
+                    return Err(TournamentError::PlayerAlreadyInATeam(member));
+                }
+            }
+            // Rosters are full from finalization on — that is what finalization
+            // checks — and every match is `size` boards on both sides.
+            if self.registration_finalized && self.settings.team_mode() {
+                let need = self.settings.team_size();
+                if team.members.len() != need as usize {
+                    return Err(TournamentError::IncompleteTeam {
+                        name: team.name.clone(),
+                        have: team.members.len(),
+                        need,
+                    });
+                }
+            }
+        }
         Ok(())
     }
 
@@ -5092,6 +5191,98 @@ mod tests {
         assert_eq!(
             t.toggle_board_winner(1, 5, Winner::Player1),
             Err(TournamentError::BoardNotFound { round: 1, board: 5 })
+        );
+    }
+
+    /// Clearing a result in a *past* round is how a referee corrects a
+    /// mis-entered game, and it takes that round back out of the score — see
+    /// [`Tournament::toggle_board_winner`]. The consequence is worth pinning:
+    /// the standings are scored on the completed rounds only, so the corrected
+    /// round drops out entirely while every later round keeps counting.
+    #[test]
+    fn reopening_an_earlier_round_drops_it_from_the_standings_and_blocks_the_grid() {
+        let mut t = Tournament::new("T").unwrap();
+        for n in ["A", "B", "C", "D"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        for round in 1..=2 {
+            start_next_round(&mut t);
+            t.toggle_board_winner(round, 0, Winner::Player1).unwrap();
+            t.toggle_board_winner(round, 1, Winner::Player1).unwrap();
+        }
+        let points = |t: &Tournament| {
+            let mut by_player: Vec<(Uuid, u32)> = t
+                .standings()
+                .into_iter()
+                .map(|s| (s.player_id, s.points.halves()))
+                .collect();
+            by_player.sort();
+            by_player
+        };
+        let two_rounds = points(&t);
+        assert_eq!(
+            two_rounds.iter().map(|&(_, p)| p).sum::<u32>(),
+            8,
+            "two rounds of four players is four wins = 8 half-points"
+        );
+        assert!(t.grid_export_blocker().is_none());
+
+        // Clear one of round 1's results: the round is no longer complete.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        assert_eq!(
+            t.rounds.iter().map(|r| r.completed).collect::<Vec<_>>(),
+            vec![false, true],
+            "clearing a result reopens its round and leaves the later one alone"
+        );
+
+        // Round 1 is out of the score *whole* — not just the board that was
+        // cleared — while round 2 still counts.
+        let after = points(&t);
+        assert_eq!(
+            after.iter().map(|&(_, p)| p).sum::<u32>(),
+            4,
+            "only round 2 is counted now"
+        );
+        assert_ne!(after, two_rounds);
+
+        // And nothing can be published from that state: the grid would show a
+        // round with a game nobody played.
+        assert!(matches!(
+            t.grid_export_blocker(),
+            Some(TournamentError::UnfinishedRound { round: 1 })
+        ));
+
+        // Re-entering the result restores exactly what was there before.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        assert_eq!(points(&t), two_rounds);
+        assert!(t.grid_export_blocker().is_none());
+    }
+
+    #[test]
+    fn confirm_refuses_a_round_nobody_would_play_in() {
+        // Everybody marked absent: the round would have no boards at all, and
+        // every player a sit-out. It is refused for the same reason a one-player
+        // field is — there is no game to pair.
+        let mut t = Tournament::new("T").unwrap();
+        for n in ["A", "B", "C", "D"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        t.prepare_round().unwrap();
+        let absent: Vec<TournamentId> = t.players.iter().filter_map(|p| p.tournament_id).collect();
+        t.update_draft(absent.clone(), Vec::new(), Vec::new())
+            .unwrap();
+        assert_eq!(
+            t.confirm_round(),
+            Err(TournamentError::NotEnoughPresentPlayers { needed: 2, have: 0 })
+        );
+        // …and one present player is just as unpairable as none.
+        t.update_draft(absent[1..].to_vec(), Vec::new(), Vec::new())
+            .unwrap();
+        assert_eq!(
+            t.confirm_round(),
+            Err(TournamentError::NotEnoughPresentPlayers { needed: 2, have: 1 })
         );
     }
 

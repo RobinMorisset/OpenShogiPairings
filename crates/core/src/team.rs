@@ -1236,6 +1236,156 @@ mod tests {
         );
     }
 
+    /// A finalized two-by-two team tournament that loads cleanly, as the base
+    /// for the corruption cases below.
+    fn finalized_pair() -> Tournament {
+        let (mut t, ids) = team_tournament(2, 4);
+        fill_teams(&mut t, &ids, 2, 2);
+        t.finalize_registration().unwrap();
+        assert_eq!(t.validate_loaded(), Ok(()));
+        t
+    }
+
+    /// A team save's referential integrity. None of these is reachable through
+    /// this program — rosters are built through `add_team_member` and frozen at
+    /// finalization — but a file can express every one of them, and each is
+    /// load-bearing on the read path: the slots table drops an unregistered
+    /// member (the team then plays a board short and its average rating is over
+    /// the rest), the pairing engine panics on rosters of different sizes, and
+    /// two teams on one number share a row of every score table.
+    #[test]
+    fn validate_loaded_rejects_a_corrupt_team_roster() {
+        // A member nobody registered.
+        let mut t = finalized_pair();
+        let ghost = Uuid::new_v4();
+        t.teams[0].members[1] = ghost;
+        assert_eq!(
+            t.validate_loaded(),
+            Err(TournamentError::UnknownTeamMember {
+                team: t.teams[0].id,
+                player: ghost,
+            })
+        );
+
+        // The same player on two rosters: they would play twice in one round.
+        let mut t = finalized_pair();
+        let shared = t.teams[0].members[0];
+        t.teams[1].members[0] = shared;
+        assert_eq!(
+            t.validate_loaded(),
+            Err(TournamentError::PlayerAlreadyInATeam(shared))
+        );
+
+        // A roster short of the configured size — the shape that panics the
+        // pairing engine with "different numbers of boards".
+        let mut t = finalized_pair();
+        t.teams[0].members.pop();
+        assert!(matches!(
+            t.validate_loaded(),
+            Err(TournamentError::IncompleteTeam {
+                have: 1,
+                need: 2,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn validate_loaded_rejects_duplicate_or_missing_team_identity() {
+        // Two teams sharing a registration id.
+        let mut t = finalized_pair();
+        let id = t.teams[0].id;
+        t.teams[1].id = id;
+        assert_eq!(
+            t.validate_loaded(),
+            Err(TournamentError::DuplicateTeamId { team: id })
+        );
+
+        // Two teams sharing a team number: every score table is indexed by it.
+        let mut t = finalized_pair();
+        let number = t.teams[0].tournament_id.expect("finalized");
+        t.teams[1].tournament_id = Some(number);
+        assert_eq!(
+            t.validate_loaded(),
+            Err(TournamentError::DuplicateTeamNumber { number })
+        );
+
+        // Finalized but unnumbered, like an unnumbered player.
+        let mut t = finalized_pair();
+        let team = t.teams[1].id;
+        t.teams[1].tournament_id = None;
+        assert_eq!(
+            t.validate_loaded(),
+            Err(TournamentError::UnnumberedTeam { team })
+        );
+
+        // Before finalization, though, no team has a number and none is due.
+        let (mut t, ids) = team_tournament(2, 4);
+        fill_teams(&mut t, &ids, 2, 2);
+        assert!(t.teams.iter().all(|x| x.tournament_id.is_none()));
+        assert_eq!(t.validate_loaded(), Ok(()));
+    }
+
+    #[test]
+    fn a_settings_change_never_silently_discards_hand_entered_pairing_elos() {
+        let macmahon = |teams| {
+            TournamentSettings {
+                teams,
+                ..TournamentSettings::default()
+            }
+            .with_thresholds(vec![MacMahonThreshold::elo(1500)])
+        };
+        let mut t = Tournament::new("Teams").unwrap();
+        t.update_settings(macmahon(Some(TeamSettings { size: 2 })))
+            .unwrap();
+        let id = t
+            .add_player(NewPlayer {
+                last_name: "Unrated".into(),
+                ..Default::default()
+            })
+            .unwrap()
+            .id;
+        t.set_pairing_rating(id, Some(1400)).unwrap();
+
+        // Dropping MacMahon would strand the value. The client PUTs the whole
+        // settings object for any one field, so wiping here would destroy it on
+        // an edit that had nothing to do with pairing ELOs.
+        assert!(matches!(
+            t.update_settings(TournamentSettings {
+                teams: Some(TeamSettings { size: 2 }),
+                ..TournamentSettings::default()
+            }),
+            Err(TournamentError::PairingRatingsWouldBeDiscarded { count: 1 })
+        ));
+        assert_eq!(
+            t.players
+                .iter()
+                .find(|p| p.id == id)
+                .unwrap()
+                .pairing_rating,
+            Some(1400)
+        );
+        // An unrelated change under the same configuration is unaffected.
+        let mut renamed = macmahon(Some(TeamSettings { size: 2 }));
+        renamed.city = Some("Lyon".into());
+        t.update_settings(renamed).unwrap();
+        assert_eq!(
+            t.players
+                .iter()
+                .find(|p| p.id == id)
+                .unwrap()
+                .pairing_rating,
+            Some(1400)
+        );
+        // Clearing it deliberately is what unblocks the change.
+        t.set_pairing_rating(id, None).unwrap();
+        t.update_settings(TournamentSettings {
+            teams: Some(TeamSettings { size: 2 }),
+            ..TournamentSettings::default()
+        })
+        .unwrap();
+    }
+
     #[test]
     fn a_pairing_rating_is_rejected_where_nothing_would_read_it() {
         // Plain Swiss team mode: no MacMahon starting points, so no fake ELO.

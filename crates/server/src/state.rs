@@ -106,6 +106,13 @@ pub struct TournamentStore {
     /// read (see [`LoadProblem`]). Such a store is inert: `persist` needs a
     /// `current` to write, so the unreadable file is never overwritten.
     problem: Option<LoadProblem>,
+    /// Whether the last [`persist`](Self::persist) attempt failed — i.e. the
+    /// state answered to clients exists only in this process's memory. Rides out
+    /// on [`crate::tournament::TournamentView`] so the referee sees a banner:
+    /// the write is deliberately non-blocking (an edit must not be refused
+    /// because the disk is full), but "your edit is saved" is then a lie, and on
+    /// the desktop app there is no log to find it in.
+    persist_failed: bool,
 }
 
 impl TournamentStore {
@@ -122,6 +129,7 @@ impl TournamentStore {
             notifier,
             deleted: false,
             problem: None,
+            persist_failed: false,
         }
     }
 
@@ -240,10 +248,16 @@ impl TournamentStore {
 
     /// Write the current tournament through to disk, if a path is configured.
     ///
-    /// Best-effort and atomic (temp file + rename): a persistence failure is
+    /// Atomic (temp file + rename) and non-blocking: a persistence failure is
     /// logged, never propagated — it must not break the referee's action, just
     /// as backups don't (see [`crate::backup`]).
-    fn persist(&self) {
+    ///
+    /// It is *recorded*, though, in [`persist_failed`](Self::persist_failed):
+    /// answering `200` to an edit that only ever reached memory, with nothing but
+    /// a log line to say so, is how a full disk turns into a tournament that
+    /// vanishes at the next restart — and the desktop app has no log the referee
+    /// can read. The flag rides out on the view so the UI can say it.
+    fn persist(&mut self) {
         // A tournament removed from the registry must never be written back —
         // otherwise a mutation still in flight when it was deleted would recreate
         // its file after `remove` deleted it (see [`TournamentRegistry::remove`]).
@@ -253,22 +267,32 @@ impl TournamentStore {
         let (Some(path), Some(current)) = (&self.persist_path, &self.current) else {
             return;
         };
-        let bytes = match serde_json::to_vec_pretty(current) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                tracing::warn!("persist: could not serialize the tournament: {e}");
-                return;
-            }
-        };
+        let outcome = Self::write_through(path, current);
+        if let Err(e) = &outcome {
+            tracing::warn!("persist: {e}");
+        } else if self.persist_failed {
+            tracing::info!("persist: writing to disk works again");
+        }
+        self.persist_failed = outcome.is_err();
+    }
+
+    /// The write itself: serialize, write a temp file, rename it over the target.
+    fn write_through(path: &Path, current: &Tournament) -> Result<(), String> {
+        let bytes = serde_json::to_vec_pretty(current)
+            .map_err(|e| format!("could not serialize the tournament: {e}"))?;
         let tmp = path.with_extension("tmp");
-        if let Err(e) = fs::write(&tmp, &bytes) {
-            tracing::warn!("persist: could not write {}: {e}", tmp.display());
-            return;
-        }
+        fs::write(&tmp, &bytes).map_err(|e| format!("could not write {}: {e}", tmp.display()))?;
         // `rename` replaces the destination atomically on both Unix and Windows.
-        if let Err(e) = fs::rename(&tmp, path) {
-            tracing::warn!("persist: could not replace {}: {e}", path.display());
-        }
+        fs::rename(&tmp, path).map_err(|e| format!("could not replace {}: {e}", path.display()))
+    }
+
+    /// Whether the state this store answers with is safely on disk.
+    ///
+    /// `true` both for a healthy write-through store and for one with no file at
+    /// all (the embedded desktop app, dev, tests): there is nothing to warn about
+    /// where persistence was never the promise.
+    pub(crate) fn persisted(&self) -> bool {
+        !self.persist_failed
     }
 
     /// The current tournament, if one exists.
@@ -1372,6 +1396,39 @@ mod tests {
         assert_eq!(tournament.players[0].last_name, "Bob");
 
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_failed_write_through_is_recorded_without_refusing_the_edit() {
+        // A directory that isn't there stands in for the full disk: the write
+        // fails, the edit still lands, and the store says so.
+        let path = std::env::temp_dir()
+            .join(format!("osp-missing-{}", uuid::Uuid::new_v4()))
+            .join("t.json");
+        let mut store = TournamentStore::with_persistence(path.clone());
+        assert!(store.persisted(), "nothing has been written yet");
+
+        store.set_current(Tournament::new("Doomed Cup").unwrap());
+        assert!(
+            store.current().is_some(),
+            "the edit must not be refused because the disk is unwritable"
+        );
+        assert!(!store.persisted(), "…but it must not look saved either");
+
+        // And it clears once writing works again.
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        store
+            .mutate(None, |t| {
+                t.add_player(NewPlayer {
+                    last_name: "Bob".into(),
+                    ..Default::default()
+                })
+                .map(|_| ())
+            })
+            .unwrap();
+        assert!(store.persisted());
+
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
     }
 
     #[tokio::test]

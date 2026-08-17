@@ -75,24 +75,35 @@
   // there beats letting the referee submit a change the server will reject.
   const locked = $derived(finalized);
 
+  // Inline error for the two file operations below. Everything else in the app
+  // reports through `run()`, but these never reach the server.
+  let ioError = $state<string | null>(null);
+
   // Download the current settings as JSON (for the simulation CLI's --configs,
-  // or to share a configuration). Fire-and-forget: a cancelled dialog is a no-op.
-  function exportSettings() {
-    void saveSettings("tournament", settings);
+  // or to share a configuration). A cancelled dialog is a no-op — a *failed*
+  // write is not: a full disk or a permission error would otherwise look exactly
+  // like a successful export, and the referee would find out when they went
+  // looking for the file.
+  async function exportSettings() {
+    ioError = null;
+    try {
+      await saveSettings("tournament", settings);
+    } catch (err) {
+      ioError = err instanceof Error ? err.message : String(err);
+    }
   }
 
   // Load a settings JSON file and apply it. The server validates the result (and
   // any error surfaces on the app's banner via onUpdate → run); only the file
   // read / parse can fail here, which we show inline. A cancelled dialog is a
   // no-op. The synced-from-prop $effect refreshes every control afterwards.
-  let importError = $state<string | null>(null);
   async function importSettings() {
-    importError = null;
+    ioError = null;
     try {
       const loaded = await loadSettings();
       if (loaded) onUpdate(loaded);
     } catch (err) {
-      importError = err instanceof Error ? err.message : String(err);
+      ioError = err instanceof Error ? err.message : String(err);
     }
   }
 
@@ -629,8 +640,8 @@
       </button>
     </div>
     <p class="desc small-note">{$_("settings.exportSettingsDesc")}</p>
-    {#if importError}
-      <p class="import-error" role="alert">{importError}</p>
+    {#if ioError}
+      <p class="io-error" role="alert">{ioError}</p>
     {/if}
   </div>
 </div>
@@ -660,7 +671,7 @@
     flex-wrap: wrap;
     gap: 0.5rem;
   }
-  .import-error {
+  .io-error {
     color: var(--color-danger);
     font-size: 0.85rem;
     margin: 0.5rem 0 0;

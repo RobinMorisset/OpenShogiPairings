@@ -11,7 +11,7 @@ use std::io::Read;
 
 use uuid::Uuid;
 
-use osp_core::{decode_latin1, parse_rating_list, RatedPlayer, Tournament};
+use osp_core::{decode_latin1, parse_rating_list, Lookup, RatedPlayer, Tournament};
 
 /// A calendar date as `(year, month, day)` — ordered so tuple comparison is date
 /// comparison.
@@ -104,43 +104,59 @@ pub(crate) fn fold_name(s: &str) -> String {
     folded.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Match base players to FESA entries by folded `(last, first)` name and return
-/// each matched player's FESA **game count** (so the map's length is how many
-/// matched). A result table carries no game counts, so every player imports as
-/// provisional; filling `fesa_games` from a rating list restores the
-/// established/provisional distinction *without* touching strengths (the oracle
-/// still uses the results' post-ELO).
-pub(crate) fn match_games(rated: &[RatedPlayer], base: &Tournament) -> HashMap<Uuid, u32> {
-    let by_name: HashMap<(String, String), u32> = rated
-        .iter()
-        .map(|r| ((fold_name(&r.last_name), fold_name(&r.first_name)), r.games))
-        .collect();
-    let mut map = HashMap::new();
-    for p in &base.players {
-        if let Some(&games) = by_name.get(&(fold_name(&p.last_name), fold_name(&p.first_name))) {
-            map.insert(p.id, games);
-        }
-    }
-    map
+/// What matching the base players against a rating list produced.
+pub(crate) struct MatchedGames {
+    /// FESA game count per matched player (so its length is how many matched).
+    pub games: HashMap<Uuid, u32>,
+    /// Players whose name matches several list entries, `"Last First (n)"`. Their
+    /// game count is unknowable, so they are left provisional — but the caller
+    /// must say so out loud rather than let the silence read as "not in the list".
+    pub ambiguous: Vec<String>,
 }
 
-/// Game counts from the list in force on a tournament date. Returns the map and
+/// Match base players to FESA entries by name and return each matched player's
+/// FESA **game count**. A result table carries no game counts, so every player
+/// imports as provisional; filling `fesa_games` from a rating list restores the
+/// established/provisional distinction *without* touching strengths (the oracle
+/// still uses the results' post-ELO).
+///
+/// The lookup is `osp_core`'s, which is also what the CSV importer uses: this
+/// used to be a private map (last entry of a homonym pair wins) against the
+/// importer's `find` (first wins), so the same list silently meant two different
+/// things depending on who asked. Homonyms are not hypothetical — the 2024-01-01
+/// list has two pairs.
+pub(crate) fn match_games(rated: &[RatedPlayer], base: &Tournament) -> MatchedGames {
+    let mut games = HashMap::new();
+    let mut ambiguous = Vec::new();
+    for p in &base.players {
+        match osp_core::lookup(rated, &p.last_name, &p.first_name) {
+            Lookup::One(r) => {
+                games.insert(p.id, r.games);
+            }
+            Lookup::Ambiguous(n) => {
+                ambiguous.push(format!("{} {} ({n} entries)", p.last_name, p.first_name));
+            }
+            Lookup::None => {}
+        }
+    }
+    MatchedGames { games, ambiguous }
+}
+
+/// Game counts from the list in force on a tournament date. Returns the match and
 /// the resolved list URL (for reporting).
 pub(crate) fn games_before(
     date: &str,
     base: &Tournament,
-) -> Result<(HashMap<Uuid, u32>, String), String> {
+) -> Result<(MatchedGames, String), String> {
     let url = list_url_in_force(parse_ymd(date)?);
-    let rated = parse_rating_list(&fetch_url(&url)?);
+    let rated = parse_rating_list(&fetch_url(&url)?).map_err(|e| format!("{url}: {e}"))?;
     Ok((match_games(&rated, base), url))
 }
 
 /// Game counts from a specific list (URL or local path).
-pub(crate) fn games_from_list(
-    source: &str,
-    base: &Tournament,
-) -> Result<HashMap<Uuid, u32>, String> {
-    let rated = parse_rating_list(&load_list_text(source)?);
+pub(crate) fn games_from_list(source: &str, base: &Tournament) -> Result<MatchedGames, String> {
+    let rated =
+        parse_rating_list(&load_list_text(source)?).map_err(|e| format!("{source}: {e}"))?;
     Ok(match_games(&rated, base))
 }
 
@@ -261,7 +277,9 @@ mod tests {
 
         // Keyed on the folded name, yielding the FESA game count. The unmatched
         // player is simply left out (so they stay provisional).
-        let games = match_games(&rated, &base);
+        let matched = match_games(&rated, &base);
+        assert!(matched.ambiguous.is_empty());
+        let games = matched.games;
         assert_eq!(games.len(), 1);
         assert_eq!(games[&a_id], 40);
         assert!(!games.contains_key(&b_id));
@@ -291,7 +309,7 @@ mod tests {
             rated("Wietholter", "Frédérik", 42), // precomposed accents in the list
             rated("Müller", "André", 17),        // precomposed, plus an umlaut surname
         ];
-        let games = match_games(&list, &base);
+        let games = match_games(&list, &base).games;
         assert_eq!(
             games.len(),
             2,
@@ -327,7 +345,7 @@ mod tests {
         let ghost = player(&mut base, "Ghost", "Nobody"); // absent from the list
         base.finalize_registration().unwrap();
 
-        let games = games_from_list(path, &base).unwrap();
+        let games = games_from_list(path, &base).unwrap().games;
         assert_eq!(games.len(), 2);
         assert_eq!(games[&cheymol], 60);
         assert_eq!(games[&goix], 45);

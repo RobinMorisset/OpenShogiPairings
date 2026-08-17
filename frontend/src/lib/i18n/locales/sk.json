@@ -11,6 +11,7 @@
     "switchTournament": "Prepnúť turnaj…",
     "switchTournamentTitle": "Návrat na zoznam turnajov",
     "unsavedChanges": "Neuložené zmeny",
+    "notPersisted": "Server nedokázal zapísať tento turnaj na disk. Zmeny sú použité, ale existujú len v pamäti a po reštarte servera sa stratia.",
     "noBackupsYet": "Zatiaľ žiadne zálohy — vytvárajú sa automaticky pri uzavretí registrácie, príprave, spustení, dokončení a zrušení kola.",
     "restore": "Obnoviť",
     "tabSettings": "Nastavenia",
@@ -108,7 +109,12 @@
     "checkLicencesTitle": "Porovnať prihlásených hráčov jednej národnosti so zoznamom CSV zaplatených licencií (priezvisko, meno) a ukázať, kto v ňom chýba.",
     "csvErrorEmpty": "Súbor CSV neobsahuje žiadnych hráčov.",
     "csvErrorMissingColumns": "Súbor CSV musí mať stĺpec s priezviskom a stĺpec s menom.",
-    "csvErrorRowsMissingLastName": "V týchto riadkoch chýba priezvisko: {rows}"
+    "csvErrorRowsMissingLastName": "V týchto riadkoch chýba priezvisko: {rows}",
+    "csvErrorUnterminatedQuote": "Bunka v úvodzovkách nie je nikdy uzavretá, takže všetko za ňou by sa načítalo ako jej súčasť.",
+    "csvErrorRaggedRows": "Tieto riadky nemajú rovnaký počet stĺpcov ako hlavička: {rows}",
+    "csvErrorRowsBadRating": "V týchto riadkoch rating nie je jednoduché číslo: {rows}",
+    "csvErrorRowsBadGrade": "V týchto riadkoch sa nedá prečítať stupeň: {rows}",
+    "csvErrorRowsAmbiguousRatedPlayer": "Tieto riadky zodpovedajú viacerým hráčom v ratingovom zozname FESA; rating a stupeň zadajte ručne: {rows}"
   },
   "licenceCheck": {
     "hint": "Načítajte zoznam CSV federácie s hráčmi, ktorí majú zaplatenú licenciu (priezvisko, meno). Každý prihlásený hráč vybranej národnosti, ktorý v ňom nie je, sa vypíše tu. Mená sa porovnávajú podľa priezviska a mena, bez ohľadu na veľkosť písmen a diakritiku.",
@@ -558,6 +564,7 @@
     "playersWithoutTeam": "{count} hráčov ešte nie je v družstve. Pred uzavretím musí byť každý v družstve.",
     "incompleteTeam": "Družstvo {name} má {have} z {need} členov.",
     "membersWithoutPairingRating": "Štartovacie body MacMahona vyžadujú žrebovacie ELO pre každého člena bez ratingu — chýba ich {count}.",
+    "pairingRatingsWouldBeDiscarded": "{count} hráčov má stále žrebovacie ELO, ktoré má význam len v družstvovom režime so štartovacími bodmi MacMahona — pred vypnutím ich vymažte.",
     "notEnoughTeams": "Družstvový turnaj potrebuje aspoň 2 družstvá (teraz {have}).",
     "noLateRegistrationInTeamMode": "Družstvový turnaj neprijíma dodatočné prihlášky: každý hráč musí byť v družstve a zostavy sú zmrazené.",
     "notEnoughPresentTeams": "Kolo potrebuje aspoň {needed} prítomných družstiev — prítomných je len {have}."

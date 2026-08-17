@@ -286,22 +286,24 @@ fn run(args: Args) -> Result<(), String> {
     // the established/provisional reliability signal is real rather than "everyone
     // provisional". Strengths are untouched.
     if let Some(source) = &args.games_fesa_list {
-        let games = fesa::games_from_list(source, &base)?;
-        let matched = games.len();
-        apply_games(&mut base, &games);
+        let matched = fesa::games_from_list(source, &base)?;
+        let count = matched.games.len();
+        apply_games(&mut base, &matched.games);
         eprintln!(
-            "fesa game counts from {source} — matched {matched}/{} players",
+            "fesa game counts from {source} — matched {count}/{} players",
             base.players.len()
         );
+        report_ambiguous(&matched.ambiguous);
     } else if let Some(date) = &args.games_fesa_before {
-        let (games, url) = fesa::games_before(date, &base)?;
-        let matched = games.len();
-        apply_games(&mut base, &games);
+        let (matched, url) = fesa::games_before(date, &base)?;
+        let count = matched.games.len();
+        apply_games(&mut base, &matched.games);
         eprintln!(
             "fesa game counts from the list in force on {date} ({url}) — matched \
-             {matched}/{} players",
+             {count}/{} players",
             base.players.len()
         );
+        report_ambiguous(&matched.ambiguous);
     }
 
     let overrides = if let Some(strengths) = results_strengths {
@@ -497,6 +499,23 @@ fn load_settings(path: &Path) -> Result<TournamentSettings, String> {
     serde_json::from_str(&text).map_err(|e| format!("parsing {} as settings: {e}", path.display()))
 }
 
+/// Say, loudly, which players the rating list could not be pinned down for.
+///
+/// They keep `None` — the same state as "not in the list" — so their prior stays
+/// provisional. Without this line that silence is indistinguishable from a clean
+/// match, and the run would report confident numbers off a wider prior than the
+/// operator thinks they asked for.
+fn report_ambiguous(ambiguous: &[String]) {
+    if ambiguous.is_empty() {
+        return;
+    }
+    eprintln!(
+        "warning: {} player(s) match several FESA entries and were left provisional: {}",
+        ambiguous.len(),
+        ambiguous.join(", ")
+    );
+}
+
 /// Write the matched FESA game counts onto the base players (unmatched keep their
 /// `None`, i.e. stay provisional).
 fn apply_games(base: &mut Tournament, games: &HashMap<Uuid, u32>) {
@@ -519,6 +538,7 @@ fn load_overrides(path: &Path, base: &Tournament) -> Result<StrengthMap, String>
         .filter_map(|p| p.tournament_id.map(|n| (n, p.id)))
         .collect();
     let mut map = StrengthMap::new();
+    let mut unmatched = Vec::new();
     for (key, elo) in by_number {
         let number: u32 = key
             .parse()
@@ -528,10 +548,25 @@ fn load_overrides(path: &Path, base: &Tournament) -> Result<StrengthMap, String>
                 // Strengths are keyed by tournament number, which is the JSON key.
                 map.insert(TournamentId(number), elo);
             }
-            None => {
-                eprintln!("warning: strength override for #{number} matches no player; ignored")
-            }
+            // These overrides *are* the ground truth every number in the study is
+            // measured against, so one that matches nobody is a failed run, not a
+            // warning. Re-import the base, have the tournament numbers shift, and
+            // a warning here would leave the run reporting confident results for a
+            // different world.
+            None => unmatched.push(number),
         }
+    }
+    if !unmatched.is_empty() {
+        unmatched.sort_unstable();
+        let list = unmatched
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(format!(
+            "{}: strength overrides for #{list} match no player in the base tournament",
+            path.display()
+        ));
     }
     Ok(map)
 }

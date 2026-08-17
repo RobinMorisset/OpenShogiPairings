@@ -150,8 +150,11 @@ fn rating_at_grade(grade: f64) -> f64 {
 /// rating conceding `handicap`: how much weaker the giver plays. Computed by
 /// dropping `handicap_grade_value` grades from the giver's grade and measuring
 /// the rating difference.
-fn handicap_offset(giver_rating: u32, handicap: Handicap) -> f64 {
-    let giver = f64::from(giver_rating);
+///
+/// The rating is an `f64` because the giver isn't always a rated player: an
+/// imported table can name an unrated giver, and [`estimate_elos`] then sizes the
+/// handicap from that player's prior mean rather than dropping the board.
+fn handicap_offset(giver: f64, handicap: Handicap) -> f64 {
     let shifted = rating_at_grade(grade_number(giver) - handicap_grade_value(handicap));
     giver - shifted
 }
@@ -525,14 +528,15 @@ pub fn estimate_elos(
             // received them, 0 for an even game. Needs the giver's fixed rating.
             let offset_a = match board.handicap() {
                 Some(hg) => {
-                    let giver = if hg.giver == Winner::Player1 {
-                        &players[a]
-                    } else {
-                        &players[b]
-                    };
-                    let Some(giver_rating) = giver.rating else {
-                        continue; // giver must be rated to size the handicap (always is)
-                    };
+                    let giver = if hg.giver == Winner::Player1 { a } else { b };
+                    // Sizing the handicap needs a rating for the giver. A live
+                    // tournament only ever proposes odds a rated player gives, but
+                    // an imported result table takes the giver from the cell, and
+                    // that player can be unrated — so fall back to their prior
+                    // mean (all we know about them) rather than `continue`ing past
+                    // the board, which would drop a real game from *both* players'
+                    // estimates with nothing to show for it.
+                    let giver_rating = players[giver].rating.map_or(mean[giver], f64::from);
                     let h = handicap_offset(giver_rating, hg.handicap);
                     if hg.giver == Winner::Player1 {
                         -h
@@ -981,10 +985,12 @@ mod tests {
         }
         // Worked FESA example: a 1740 (1 Dan) giver conceding Rook odds (2.1 grades)
         // drops to grade 18.4 → rating 1500, a 240-point effect.
-        assert!((handicap_offset(1740, Handicap::Rook) - 240.0).abs() < 1.0);
+        assert!((handicap_offset(1740.0, Handicap::Rook) - 240.0).abs() < 1.0);
         // Bigger handicaps are worth more; Sente is almost nothing.
-        assert!(handicap_offset(1740, Handicap::SixPiece) > handicap_offset(1740, Handicap::Rook));
-        assert!(handicap_offset(1740, Handicap::Sente) < 40.0);
+        assert!(
+            handicap_offset(1740.0, Handicap::SixPiece) > handicap_offset(1740.0, Handicap::Rook)
+        );
+        assert!(handicap_offset(1740.0, Handicap::Sente) < 40.0);
     }
 
     #[test]
@@ -1006,6 +1012,37 @@ mod tests {
         );
         assert!(elos[&giver.id] > 1800.0, "the handicap game is rated now");
         assert!(elos[&receiver.id] < 1500.0);
+    }
+
+    #[test]
+    fn an_unrated_giver_sizes_the_handicap_from_their_prior_instead_of_dropping_the_board() {
+        // An imported result table takes the giver from the round cell, so it can
+        // be a player who was unrated before the tournament. Skipping the board
+        // would throw the game away for *both* players, invisibly.
+        let giver = player(None);
+        let receiver = player(Some(1500));
+        let players = vec![giver.clone(), receiver.clone()];
+        let settings = TournamentSettings::default();
+        let rounds = [decided(
+            1,
+            vec![handicap_board(
+                giver.tournament_id.unwrap(),
+                receiver.tournament_id.unwrap(),
+                Winner::Player1,
+                Handicap::Rook,
+                Winner::Player1,
+            )],
+        )];
+        let elos = estimate_elos(&players, &settings, &rounds);
+        let idle = estimate_elos(&players, &settings, &[]);
+        assert!(
+            elos[&giver.id] > idle[&giver.id],
+            "the giver won, so the game must count for them"
+        );
+        assert!(
+            elos[&receiver.id] < idle[&receiver.id],
+            "the receiver lost with odds in hand, so the game must count for them too"
+        );
     }
 
     #[test]
