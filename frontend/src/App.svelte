@@ -796,34 +796,16 @@
   const prints = new PrintJobs(run);
 
   /**
-   * Landscape paper for the standings, which is the one tab whose table is wider
-   * than it is tall — a column per round on top of the tie-breaks.
+   * Whether the standings table may ask for landscape paper (it owns the rule —
+   * see `landscapePaper` in ResultsView, which the reader page shares).
    *
-   * `@page` is a property of the document, not of an element, so it cannot be
-   * scoped to a tab in a stylesheet; the way to say "only this tab" is to put
-   * the rule in the document only while that tab is open, which is this effect.
-   *
-   * The obvious alternative, and what this replaced, is a *named* page
-   * (`@page results-landscape` + `page: results-landscape` on the standings
-   * wrapper). It works in Chrome and prints portrait in Firefox: named pages are
-   * the newer half of the feature — Firefox 110 for the `page` property against
-   * 95 for `@page { size }` — and Firefox does not change sheet size partway
-   * through a document, so the default (portrait) context of everything above
-   * the standings decides the whole job. An unnamed rule has nothing to change
-   * partway through, and asks for the older, better-supported half.
+   * The QR sheet and the result sheets are their own documents, printed from
+   * whichever tab happens to be open, and both are portrait. An unnamed `@page`
+   * is document-wide, so it has to stand down for them — and it gets the chance
+   * to, because `PrintJobs` sets these flags and then `await tick()` before
+   * calling `window.print()`, which flushes the effect that removes it.
    */
-  $effect(() => {
-    // The QR sheet and the result sheets are their own documents, printed from
-    // whichever tab happens to be open, and both are portrait. An unnamed
-    // `@page` is document-wide, so it has to stand down for them — and it gets
-    // the chance to, because `PrintJobs` sets these flags and then `await tick()`
-    // before calling `window.print()`, which flushes this effect first.
-    if (activeTab !== "results" || prints.qr || prints.sheets !== null) return;
-    const rule = document.createElement("style");
-    rule.textContent = "@page { size: landscape; }";
-    document.head.append(rule);
-    return () => rule.remove();
-  });
+  const landscapePaper = $derived(!prints.qr && prints.sheets === null);
 
   const publicUrl = $derived(
     publication.state?.key && $currentTournamentId
@@ -1373,6 +1355,7 @@
             {effectiveWinners}
             {teamMatches}
             categories={tournament.settings.categories ?? []}
+            {landscapePaper}
             onSetSitoutValue={handleSetSitoutValue}
             onSetTeamSitoutValue={handleSetTeamSitoutValue}
           />

@@ -53,6 +53,9 @@
     /** Re-score a whole team's sit-out, writing the value to every member at
      *  once — the only way to change one in team mode. */
     onSetTeamSitoutValue?: (roundNumber: number, teamId: string, value: SitoutValue) => void;
+    /** Let the caller suppress the landscape page rule below — for a print job
+     *  that is a different document (see App.svelte's QR and result sheets). */
+    landscapePaper?: boolean;
   }
 
   let {
@@ -66,7 +69,36 @@
     staticPage = false,
     onSetSitoutValue,
     onSetTeamSitoutValue,
+    landscapePaper = true,
   }: Props = $props();
+
+  /**
+   * Landscape paper while this table is on screen — it is the one view wider
+   * than it is tall, a column per round on top of the tie-breaks.
+   *
+   * Here rather than in the referee app, because this component is also what
+   * the public reader page shows (`PublicSectionBody`), print button included.
+   * The rule first lived in this file's CSS as a *named* page, which travelled
+   * with the component but printed portrait in Firefox; moving it to App.svelte
+   * fixed Firefox and quietly took it away from the reader page, which has no
+   * notion of the referee app's tabs. Owned by the table itself, both get it.
+   *
+   * `@page` is a property of the document, not of an element, so "only this
+   * view" cannot be said in a stylesheet — hence a rule that exists exactly as
+   * long as the component does. The static export cannot use it either (nothing
+   * is mounted when a file is written); `publicExport.ts` writes its own copy
+   * into the standings page alone.
+   */
+  $effect(() => {
+    if (!landscapePaper) return;
+    const rule = document.createElement("style");
+    // Marked so `collectStyles` can leave it out of a static export: it belongs
+    // to this document, and the export decides page by page.
+    rule.dataset.ospRuntimePageRule = "";
+    rule.textContent = "@page { size: landscape; }";
+    document.head.append(rule);
+    return () => rule.remove();
+  });
 
   // Round number → its index into `tournament.rounds` (and so into
   // `effectiveWinners`), so a cell can find its board's server-computed winner

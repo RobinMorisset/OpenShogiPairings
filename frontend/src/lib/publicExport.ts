@@ -59,9 +59,36 @@ function escapeHtml(text: string): string {
  * does the public page need?" is exactly the question that would go stale.
  */
 export async function collectStyles(doc: Document): Promise<string> {
-  const texts = await Promise.all(Array.from(doc.styleSheets).map(readStyleSheet));
+  // Everything except the rules a component installed for *this* document while
+  // it is on screen — today the standings table's landscape `@page` (see
+  // `landscapePaper` in ResultsView). Whether one is present depends on which
+  // tab the referee happened to be on when they exported, and it is document-
+  // wide, so leaving it in would make every page of the export landscape, or
+  // not, according to something the export has no business depending on. Each
+  // page's own paper is decided in `renderPublicPages` instead.
+  const sheets = Array.from(doc.styleSheets).filter(
+    (sheet) =>
+      !(
+        sheet.ownerNode instanceof HTMLElement &&
+        sheet.ownerNode.dataset.ospRuntimePageRule !== undefined
+      ),
+  );
+  const texts = await Promise.all(sheets.map(readStyleSheet));
   return texts.join("\n");
 }
+
+/**
+ * Landscape paper for the standings page of an export.
+ *
+ * The live app gets this from a rule the table installs while it is on screen,
+ * which cannot work here: nothing is mounted when a file is written, and one
+ * stylesheet is shared by every page of the export while only this one wants
+ * landscape. So it is added per page, to the page that is wider than it is tall.
+ */
+const LANDSCAPE_CSS = `
+/* --- Static-export paper (the standings table is a wide one) --- */
+@page { size: landscape; }
+`;
 
 /**
  * One stylesheet's text.
@@ -216,6 +243,9 @@ interface DocumentOptions {
   lang: string;
   css: string;
   body: string;
+  /** Rules for this page alone, after the shared stylesheet — the paper size,
+   *  which differs per page and so cannot live in the one `css` they share. */
+  pageCss?: string;
 }
 
 /**
@@ -233,7 +263,7 @@ interface DocumentOptions {
  *   sort of reason: a dark page dropped into a club's white website looks
  *   broken, and this one gets printed.
  */
-export function buildDocument({ title, lang, css, body }: DocumentOptions): string {
+export function buildDocument({ title, lang, css, body, pageCss = "" }: DocumentOptions): string {
   return `<!doctype html>
 <html lang="${escapeHtml(lang)}">
   <head>
@@ -244,6 +274,7 @@ export function buildDocument({ title, lang, css, body }: DocumentOptions): stri
     <style>
 ${css}
 ${TOOLTIP_CSS}
+${pageCss}
     </style>
   </head>
   <body>
@@ -291,6 +322,7 @@ export function renderPublicPages(
         lang,
         css,
         body: renderSnapshotBody(view, sections, current, slug, generatedAt),
+        pageCss: current.kind === "standings" ? LANDSCAPE_CSS : "",
       }),
     };
   });

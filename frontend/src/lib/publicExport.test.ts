@@ -308,6 +308,25 @@ describe("renderSnapshotBody", () => {
 });
 
 describe("renderPublicPages", () => {
+  // The standings table is the wide one — a column per round on top of the
+  // tie-breaks — and it is the only page of an export that wants landscape.
+  // In the live app the table installs that rule itself while it is on screen
+  // (`landscapePaper` in ResultsView); nothing is mounted when a file is
+  // written, and one stylesheet is shared by every page, so the export has to
+  // put it in page by page.
+  it("asks for landscape paper on the standings page and nowhere else", () => {
+    const files = renderPublicPages(
+      view([round(1, [board(1, 2)])]),
+      "en",
+      ".x {}",
+      new Date(2026, 7, 12, 12, 30),
+    );
+    const standings = files.find((f) => f.fileName === "tournoi-de-nantes-public.html")!;
+    const roundPage = files.find((f) => f.fileName.endsWith("-round-1.html"))!;
+    expect(standings.contents).toContain("@page { size: landscape; }");
+    expect(roundPage.contents).not.toContain("@page");
+  });
+
   it("names every page after the tournament, and titles them apart", () => {
     const files = renderPublicPages(
       view([round(1, [board(1, 2)])]),
