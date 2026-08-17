@@ -1717,6 +1717,18 @@
     background: var(--bg-warning);
     color: var(--color-warning-strong);
     font-size: 0.85rem;
+    /* This lives inside `.tab-content` — the one child the `width: 0` rule above
+       exempts — so on the Players tab, where the card is sized with
+       `max-content`, its contribution to that measurement is the whole sentence
+       on one line. It names every skipped player, so a fifteen-name import
+       measured 2409px and dragged the card, and the page behind it, out to
+       2489px against a 1265px window. A `max-width` clamps the intrinsic
+       contribution and not just the used width, so the sentence wraps and stops
+       setting the width of anything. 70ch is the measure the same kind of prose
+       already uses in RoundView (`.report-stale` and its neighbours), for the
+       same reason given there: a line the width of a standings table is not a
+       line anybody reads. */
+    max-width: 70ch;
   }
   .players {
     margin-top: 1.25rem;
