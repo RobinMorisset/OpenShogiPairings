@@ -1804,6 +1804,17 @@
     footer {
       display: none;
     }
+    /* The page box is already the measure on paper, and there is no window to be
+       95% of: `vw` resolves against the sheet, so `width: min(90rem, 95vw)` lays
+       the content out at 95% of the page and `margin: 0 auto` splits the other
+       5% into margins on top of the printer's own — indent on the left, lost
+       width on the right, on a tab whose table needs every millimetre. The top
+       padding pushes the first sheet down for nothing as well. */
+    .app {
+      width: auto;
+      margin: 0;
+      padding: 0;
+    }
     .card {
       border: none;
       background: transparent;
