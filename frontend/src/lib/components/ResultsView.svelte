@@ -1562,9 +1562,21 @@
   tr.cat-dim {
     opacity: 0.35;
   }
-  /* Override the zebra stripe (tbody tr:nth-child(even)) so every highlighted
-     row is the same color regardless of its odd/even position. */
-  tbody tr.cat-highlight {
+  /* Override the zebra stripes so every highlighted row is the same colour
+     whatever its odd/even position — both stripe rules, which is why this is a
+     list rather than one selector.
+       `tbody tr.cat-highlight` alone scores (0,1,2). That ties with
+     `tbody tr:nth-child(even)` and wins on source order, so individual mode was
+     right. It loses outright to the team-mode rule that *cancels* striping,
+     `table.teamed tbody tr:nth-child(even)` at (0,2,3) — so in team mode a
+     highlighted row on an even line kept the plain surface colour while the odd
+     ones lit up, and one selection looked half applied. The second selector
+     here matches that rule's specificity and comes later, so it wins.
+       Matching specificity deliberately, rather than reaching for `!important`:
+     the print block below turns every row background off with `!important`, and
+     a highlight that outranked *that* would print a grey band. */
+  tbody tr.cat-highlight,
+  table.teamed tbody tr.cat-highlight {
     background: var(--bg-hover-strong);
   }
   .cell-tip {
