@@ -911,3 +911,98 @@ async fn bulk_eligibility_applies_to_everyone_or_to_nobody() {
         "a rejected mutation should not bump the version"
     );
 }
+
+/// Every path this crate's per-tournament router registers has a row in
+/// `docs/reference/api.md`.
+///
+/// The ts-rs bindings have a gate that fails the build when a Rust type moves
+/// without them. This table has nothing of the sort, because it is prose: a
+/// route added to `tournament.rs` and not written up is invisible until somebody
+/// goes looking for an endpoint that was never documented. `POST
+/// /players/eligible` shipped that way and was caught by a reader asking, which
+/// is not a process.
+///
+/// Paths only, with placeholder *names* erased first — `{player_id}` in the
+/// router against `{id}` in the table, `{round_number}` against `{n}`. The doc
+/// names its parameters for legibility and that is not drift worth failing a
+/// build over; a missing path is.
+///
+/// One direction only. The table also covers the registry-level routes from
+/// `lib.rs` and the reader routes from `public.rs`, so "documented but not in
+/// this file" is the normal case, not an error.
+#[test]
+fn every_route_is_documented_in_the_api_doc() {
+    const ROUTER_SRC: &str = include_str!("../src/tournament.rs");
+    const API_DOC: &str = include_str!("../../../docs/reference/api.md");
+
+    /// `/players/{player_id}/eligible` -> `/players/{}/eligible`.
+    fn erase_placeholder_names(path: &str) -> String {
+        let mut out = String::new();
+        let mut depth = 0u32;
+        for c in path.chars() {
+            match c {
+                '{' => {
+                    depth += 1;
+                    if depth == 1 {
+                        out.push_str("{}");
+                    }
+                }
+                '}' => depth = depth.saturating_sub(1),
+                _ if depth == 0 => out.push(c),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    // Built rather than written out, so that this needle does not match the line
+    // it is written on: the text being scanned is the router's source, but a
+    // literal here would also appear in *this* file if the two were ever merged,
+    // and the failure would be a baffling phantom route.
+    let call = concat!(".", "route", "(");
+    let registered: Vec<String> = ROUTER_SRC
+        .split(call)
+        .skip(1)
+        .filter_map(|chunk| {
+            let rest = chunk.split_once('"')?.1;
+            let path = rest.split_once('"')?.0;
+            path.starts_with('/').then(|| erase_placeholder_names(path))
+        })
+        .collect();
+
+    // A silent extraction failure must not read as "everything is documented".
+    assert!(
+        registered.len() > 20,
+        "found only {} routes in tournament.rs — the extractor is broken, not the docs",
+        registered.len()
+    );
+
+    let documented: std::collections::HashSet<String> = API_DOC
+        .lines()
+        .filter_map(|line| {
+            let cell = line.trim_start().strip_prefix("| `")?;
+            let cell = cell.split_once('`')?.0;
+            let path = cell.split_once(' ')?.1.trim();
+            let path = path.split('?').next().unwrap_or(path);
+            Some(erase_placeholder_names(path))
+        })
+        .collect();
+
+    let mut missing: Vec<&String> = registered
+        .iter()
+        .filter(|path| !documented.contains(*path))
+        .collect();
+    missing.sort();
+    missing.dedup();
+
+    assert!(
+        missing.is_empty(),
+        "these routes are registered in crates/server/src/tournament.rs but have no row in \
+         docs/reference/api.md:\n{}",
+        missing
+            .iter()
+            .map(|p| format!("    {p}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
