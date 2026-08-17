@@ -966,7 +966,12 @@
     {/if}
   </div>
 
-  <table class="zebra sticky-head" class:teamed={teamMode} onmousemove={trackTip} onmouseleave={clearTip}>
+  <table
+    class="opaque-rows sticky-head"
+    class:zebra={!teamMode}
+    onmousemove={trackTip}
+    onmouseleave={clearTip}
+  >
     <thead>
       <tr>
         <th class="num pin-id">{$_("resultsView.id")}</th>
@@ -1399,8 +1404,8 @@
       box-shadow: none;
     }
   }
-  /* The striping, and its cancellation in team mode, are `table.zebra`
-     (app.css). The team row is the separator team mode uses instead. */
+  /* The striping is `table.zebra` (app.css), which this table takes only
+     outside team mode: here the team row is the separator instead. */
   .team-row {
     background: var(--bg-stripe);
   }

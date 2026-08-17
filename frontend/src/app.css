@@ -380,21 +380,24 @@ button.control-xs {
  * odd rows of a table and not the even ones.
  */
 
-/* Alternate rows, so the eye can follow one across a wide table. Every row
-   carries an explicit background, including the un-striped ones: the standings'
-   pinned identity columns take theirs with `background: inherit`, and a row left
-   transparent would let the scrolling columns show through the pinned ones. */
-:where(table.zebra tbody) tr {
+/* Rows that paint their own background instead of letting the card's show
+   through. For a table with a cell pinned over the others: the standings' frozen
+   identity columns take their background from the row with `background:
+   inherit`, so a transparent row lets the scrolling columns show through the
+   pinned ones. Nothing to do with striping — a table wants this whether or not
+   its rows alternate, which is why it is a class of its own. */
+:where(table.opaque-rows tbody) tr {
   background: var(--bg-surface);
 }
+
+/* Alternate rows tinted, so the eye can follow one across a wide table.
+   Deliberately not a permanent property of a table: in team mode the rows come
+   in blocks — a team, then its players; a match, then its boards — so striping
+   every other one would cut across them, and the block's own header row is the
+   separator instead. A table in that mode simply does not take this class.
+   (Higher specificity than the rule above, so the two need no ordering.) */
 :where(table.zebra tbody) tr:nth-child(even) {
   background: var(--bg-stripe);
-}
-/* In team mode the rows come in blocks — a team, then its players; a match, then
-   its boards — so striping every other one would cut across them. The block's
-   own header row is the separator instead, and it is the component's to tint. */
-:where(table.zebra.teamed tbody) tr:nth-child(even) {
-  background: var(--bg-surface);
 }
 
 /* A header row that stays put while the table scrolls under it.

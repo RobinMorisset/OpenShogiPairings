@@ -934,7 +934,7 @@
       </tbody>
     </table>
   {:else}
-    <table class="zebra" class:teamed={teamMode}>
+    <table class:zebra={!teamMode}>
       <thead>
         <tr>
           <th class="src-col"></th>
@@ -1486,9 +1486,8 @@
     font-weight: 600;
     border-top: 2px solid var(--border);
   }
-  /* The striping, and its cancellation in team mode, are `table.zebra`
-     (app.css); this is the shading that replaces it. One class beats the
-     cancelling rule, which is written to be beatable. */
+  /* The striping is `table.zebra` (app.css), which this table takes only
+     outside team mode: here the match header is the separator instead. */
   tr.match-head {
     background: var(--bg-stripe);
   }

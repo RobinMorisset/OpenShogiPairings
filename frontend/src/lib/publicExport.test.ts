@@ -338,7 +338,9 @@ describe("renderSnapshotBody", () => {
     // exported table look and print like the app's is these class names being
     // in the markup, not a second copy of the rules in this file.
     const html = page([round(1, [board(1, 2)])]);
-    expect(html).toMatch(/<table class="[^"]*\bzebra\b[^"]*\bsticky-head\b/);
+    const classes = (/<table class="([^"]*)"/.exec(html)?.[1] ?? "").split(/\s+/);
+    // The fixture is an individual tournament, so the standings stripe.
+    expect(classes).toEqual(expect.arrayContaining(["opaque-rows", "sticky-head", "zebra"]));
     expect(html).toMatch(/class="results[^"]*\bprint-ink\b/);
   });
 
