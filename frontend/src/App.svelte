@@ -57,14 +57,12 @@
   import { pickCsvFile } from "./lib/csvImport";
   import { handicapChoice } from "./lib/handicap";
   import { buildSheetPlayers, macMahonRowShown } from "./lib/resultSheets";
-  import { publicPage } from "./lib/publicAccess";
   import { Publication, PrintJobs } from "./lib/publication.svelte";
   import { createTeamActions } from "./lib/teamActions";
   import { TournamentStore } from "./lib/tournamentStore.svelte";
   import ContentCard from "./lib/components/ContentCard.svelte";
   import PageShell from "./lib/components/PageShell.svelte";
   import TabStrip, { type Tab } from "./lib/components/TabStrip.svelte";
-  import PublicView from "./lib/components/PublicView.svelte";
   import QrCode from "./lib/components/QrCode.svelte";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
   import Login from "./lib/components/Login.svelte";
@@ -475,11 +473,6 @@
   // (Re)load whenever the open tournament changes — including the very first
   // selection — and keep the live-sync subscription scoped to it.
   $effect(() => {
-    // A reader page renders `PublicView` and nothing of this component's
-    // markup — but its effects still run. Without this guard, opening a
-    // capability link in a browser that has a referee session would fetch and
-    // subscribe to *that* tournament behind the reader page.
-    if (publicPage) return;
     if ($currentTournamentId === null) return;
     // Reset the view before loading the newly selected tournament, so a
     // moment of stale UI from the previous one never shows.
@@ -681,9 +674,6 @@
   // Keyboard shortcuts. Skipped while typing in a field so we don't clobber the
   // browser's native caret movement (arrows) or per-field undo (Ctrl/Cmd+Z).
   function handleKeydown(e: KeyboardEvent) {
-    // Nothing here applies to a reader: no undo, and the tabs are the reader
-    // page's own (see `PublicView`).
-    if (publicPage) return;
     const target = e.target as HTMLElement | null;
     const typing =
       !!target &&
@@ -906,12 +896,6 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-{#if publicPage}
-  <!-- This tab was opened at a capability URL, so it is a reader page and
-       nothing else: no picker, no login, no way back into the referee app.
-       See `lib/publicAccess.ts`. -->
-  <PublicView page={publicPage} />
-{:else}
 <PageShell title="OpenShogiPairings" modifiers={printJob}>
   {#snippet controls()}
     {#if $currentTournamentId !== null}
@@ -1405,7 +1389,6 @@
     <ServerStatus />
   {/snippet}
 </PageShell>
-{/if}
 
 <style>
   .toolbar {
