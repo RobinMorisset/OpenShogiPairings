@@ -89,10 +89,13 @@ const CROSS_ORIGIN_CLIENTS: [&str; 3] = [
 /// on an OS-assigned port, but `osp-server` itself defaults to the well-known
 /// `127.0.0.1:3000`. Naming them keeps the browser's own same-origin policy as
 /// the backstop it is meant to be.
-fn is_app_origin(origin: &HeaderValue, _parts: &request::Parts) -> bool {
+fn is_app_origin(origin: &HeaderValue, extra: &[String]) -> bool {
     let Ok(origin) = origin.to_str() else {
         return false;
     };
+    if extra.iter().any(|allowed| allowed == origin) {
+        return true;
+    }
     // The Tauri webview's own scheme on macOS and Linux. Nothing fetched over
     // the network can claim a `tauri:` origin, so admitting the scheme is safe —
     // and it avoids depending on the host Tauri picks, which differs by platform
@@ -135,8 +138,11 @@ fn router_inner(state: AppState, static_dir: Option<PathBuf>) -> Router {
     // No `allow_credentials`: authentication here is a bearer token the client
     // reads from `localStorage` and sets by hand, never an ambient cookie, so
     // there is nothing for a browser to attach on its own.
+    let extra = Arc::clone(&state.extra_origins);
     let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::predicate(is_app_origin))
+        .allow_origin(AllowOrigin::predicate(
+            move |origin: &HeaderValue, _parts: &request::Parts| is_app_origin(origin, &extra),
+        ))
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers([CONTENT_TYPE, AUTHORIZATION, TOURNAMENT_VERSION_HEADER]);
 
@@ -227,6 +233,11 @@ pub struct ServerConfig {
     /// `ServerConfig::default()` cannot mean "keep nothing": the default here
     /// has to be the safe end, not the zero value.
     pub backup_retention: Option<std::time::Duration>,
+    /// Browser origins to answer beyond the app's own (see
+    /// [`CROSS_ORIGIN_CLIENTS`]). Empty by default, and meant for one thing:
+    /// running a second checkout whose Vite server is on another port. Listed
+    /// rather than wildcarded — see [`AppState::extra_origins`].
+    pub extra_origins: Vec<String>,
 }
 
 /// Where automatic backups go when [`ServerConfig::backup_dir`] is left unset:
@@ -256,6 +267,7 @@ pub async fn serve_with_config(
                 .unwrap_or(backup::DEFAULT_DELETED_RETENTION),
         )),
         admin_auth: config.admin_password.map(AuthConfig::new),
+        extra_origins: Arc::from(config.extra_origins),
         ..Default::default()
     };
     let app = match config.static_dir {

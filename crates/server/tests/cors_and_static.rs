@@ -10,6 +10,72 @@ use uuid::Uuid;
 mod common;
 use common::*;
 
+/// `extra_origins` adds exactly what it is given, and nothing around it.
+///
+/// It exists so a second checkout — Vite on another port — can be answered.
+/// The risk it must not become is "any port on localhost": on a server with no
+/// admin password every route is open, so a page served by any other local
+/// program could otherwise read and script the whole API. So the listed origin
+/// is answered and its neighbours are not.
+#[tokio::test]
+async fn extra_origins_are_answered_exactly_as_listed() {
+    let state = AppState {
+        extra_origins: std::sync::Arc::from(["http://localhost:5174".to_string()]),
+        ..AppState::default()
+    };
+    let allow_origin = |response: &axum::response::Response| {
+        response
+            .headers()
+            .get("access-control-allow-origin")
+            .map(|v| v.to_str().unwrap().to_string())
+    };
+    let ask = |origin: &'static str, state: AppState| async move {
+        let response = router(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/health")
+                    .header("origin", origin)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        allow_origin(&response)
+    };
+
+    // The one that was asked for, and the built-in ones alongside it.
+    assert_eq!(
+        ask("http://localhost:5174", state.clone()).await.as_deref(),
+        Some("http://localhost:5174")
+    );
+    assert_eq!(
+        ask("http://localhost:5173", state.clone()).await.as_deref(),
+        Some("http://localhost:5173"),
+        "listing an extra origin must not displace the app's own"
+    );
+
+    // Not the same host on another port, not the loopback spelling that was not
+    // listed, and not a stranger who merely contains the string.
+    for origin in [
+        "http://localhost:5175",
+        "http://127.0.0.1:5174",
+        "https://localhost:5174",
+        "http://localhost:5174.evil.example",
+    ] {
+        assert_eq!(
+            ask(origin, state.clone()).await,
+            None,
+            "{origin} was never listed"
+        );
+    }
+
+    // And with nothing configured, the default state answers no extras at all.
+    assert_eq!(
+        ask("http://localhost:5174", AppState::default()).await,
+        None
+    );
+}
+
 /// CORS names the app's own origins. It matters most on a server with no
 /// admin password, where every route is open by design: `Any` would let a
 /// page on an unrelated site read and script the whole API over

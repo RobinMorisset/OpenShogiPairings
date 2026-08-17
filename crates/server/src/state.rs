@@ -1316,6 +1316,16 @@ pub struct AppState {
     /// tournament state and be told "I already have that one", silently and
     /// forever.
     pub boot_id: Arc<str>,
+    /// Browser origins this server answers *in addition* to the app's own (see
+    /// `CROSS_ORIGIN_CLIENTS` in [`crate::router`]'s module).
+    ///
+    /// Empty everywhere that has not deliberately set `OSP_EXTRA_ORIGINS`, which
+    /// is every deployment: it exists so a second checkout can run its Vite
+    /// server on another port and still be answered. Named origins rather than a
+    /// loopback wildcard, because "any port on localhost" is a real widening —
+    /// any other local server's page could then script an API that, on a host
+    /// with no admin password, is open on every route.
+    pub extra_origins: Arc<[String]>,
 }
 
 impl Default for AppState {
@@ -1325,6 +1335,7 @@ impl Default for AppState {
             ratings: Arc::default(),
             admin_auth: None,
             boot_id: Uuid::new_v4().simple().to_string().into(),
+            extra_origins: Arc::from([] as [String; 0]),
         }
     }
 }

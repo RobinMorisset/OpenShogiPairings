@@ -16,6 +16,9 @@
 //!   either, which is only appropriate on a trusted machine or before the URL
 //!   has circulated beyond its referees. Each tournament's own (separate)
 //!   password is set when it's created.
+//! - `OSP_EXTRA_ORIGINS`   — comma-separated browser origins to answer besides
+//!   the app's own (e.g. `http://localhost:5174`), for running a second checkout
+//!   whose Vite server is on another port. Unset on any real deployment.
 //! - `OSP_STATIC_DIR`      — directory of the built SPA to serve same-origin.
 //!   Unset serves the API only (the dev flow uses the Vite server for the SPA).
 //! - `OSP_DATA_DIR`        — directory holding one file per tournament, loaded
@@ -33,6 +36,24 @@ use osp_server::ServerConfig;
 /// Default listen address when `OSP_BIND` is unset. Kept here so clients and
 /// docs agree.
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:3000";
+
+/// `OSP_EXTRA_ORIGINS` split on commas, blanks dropped.
+///
+/// For running a second checkout: its Vite server is on another port, so its
+/// origin is not one of the app's own and the browser would refuse every
+/// response. Listing the origin is deliberately more typing than a "allow any
+/// localhost port" switch would be — that switch is what would follow somebody
+/// home onto a real host, where every route is open when no admin password is
+/// set, and any other local page could then read and script the lot.
+fn extra_origins() -> Vec<String> {
+    std::env::var("OSP_EXTRA_ORIGINS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
 
 /// `OSP_BACKUP_RETENTION_DAYS` as a number of days, or `None` when it is unset
 /// (the library's own default, a month, then applies).
@@ -82,6 +103,7 @@ async fn main() {
         data_dir: std::env::var_os("OSP_DATA_DIR").map(Into::into),
         backup_dir: std::env::var_os("OSP_BACKUP_DIR").map(Into::into),
         backup_retention: backup_retention_days().map(|days| Duration::from_secs(days * 86_400)),
+        extra_origins: extra_origins(),
     };
 
     match &config.admin_password {
