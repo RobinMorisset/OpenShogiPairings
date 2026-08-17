@@ -139,6 +139,11 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
 - **Turning off team mode or MacMahon starting points silently erased every
   hand-entered pairing ELO**, and turning them back on did not restore the
   values. The change is now refused until those are cleared deliberately.
+- **Clearing a result in a past round to correct it did not stop the next round
+  from being paired**, and an unfinished round counts for nothing at all — so
+  that round's games were left out of the standings *and* out of the opponent
+  history, letting the new pairing repeat one of its boards. Starting a round is
+  now refused, naming the round to finish first.
 - **A server that cannot write to disk now says so** in a banner. Edits used to
   be accepted and reported as saved while living only in memory, so a full disk
   cost the whole tournament at the next restart with no warning anywhere.

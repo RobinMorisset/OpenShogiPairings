@@ -530,6 +530,7 @@
     "cannotRemoveTeamPlayer": "In a team tournament, players can't be removed one at a time once registration is closed — every team has to keep a full roster. Remove the whole team instead, or mark the player absent.",
     "cannotRemoveMatchedTeam": "This team has already played a match, so removing it would corrupt its opponents' tie-breaks. Mark it absent for future rounds instead.",
     "previousRoundNotComplete": "Finish the current round before starting the next one.",
+    "earlierRoundNotComplete": "Round {round} still has a game with no result. Finish it before starting a new round: while it is unfinished it counts for nothing, not even for the pairing.",
     "notEnoughPresentPlayers": "A round needs at least {needed} present players — only {have} are present.",
     "noRoundToCancel": "There is no round to cancel.",
     "roundHasResults": "This round already has recorded results, so it can't be paired again.",

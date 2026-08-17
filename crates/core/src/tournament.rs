@@ -145,6 +145,17 @@ pub enum TournamentError {
     /// A new round cannot start until the current one is completed.
     #[error("the current round must be completed first")]
     PreviousRoundNotComplete,
+    /// A new round cannot start while an *earlier* round still has a board with
+    /// no result — the shape a referee produces by clearing a past round's
+    /// result to correct it (see
+    /// [`toggle_board_winner`](Tournament::toggle_board_winner)).
+    ///
+    /// Distinct from [`PreviousRoundNotComplete`](Self::PreviousRoundNotComplete)
+    /// because it names the round, and because the two need different messages:
+    /// one says "finish the round you are playing", this one says "the round you
+    /// went back to fix is still open".
+    #[error("round {round} still has a game with no result")]
+    EarlierRoundNotComplete { round: u32 },
     /// A round is already being drafted.
     #[error("a round is already being prepared")]
     DraftAlreadyExists,
@@ -1421,7 +1432,33 @@ impl Tournament {
         if self.rounds.last().is_some_and(|last| !last.completed) {
             return Some(TournamentError::PreviousRoundNotComplete);
         }
-        None
+        self.open_earlier_round()
+    }
+
+    /// An earlier round — not the last — that still has a board with no result.
+    ///
+    /// Reachable by clearing a past round's result to correct it, which is how a
+    /// referee fixes a mis-entered game and which takes that round back out of
+    /// the score (see [`toggle_board_winner`](Self::toggle_board_winner)). While
+    /// it is out, *nothing* about it is counted: not the points, and not the
+    /// pairings either, since the whole scoring replay skips incomplete rounds.
+    /// So pairing another round on top would draw it from standings that ignore
+    /// that round and from an opponent history that has forgotten it — the new
+    /// round could repeat one of its boards. Answered as a blocker rather than
+    /// silently allowed, so the referee finishes the correction first.
+    ///
+    /// A long game in flight does not count as open here: its starting record
+    /// (and the inert one it leaves behind) settle their own round, and only the
+    /// live record in the round it ends in holds *that* round open — which is the
+    /// last round, so [`PreviousRoundNotComplete`](TournamentError::PreviousRoundNotComplete)
+    /// covers it. See [`Board::complete_for_round`](crate::Board::complete_for_round).
+    fn open_earlier_round(&self) -> Option<TournamentError> {
+        let last = self.rounds.len();
+        self.rounds
+            .iter()
+            .take(last.saturating_sub(1))
+            .find(|r| !r.completed)
+            .map(|r| TournamentError::EarlierRoundNotComplete { round: r.number })
     }
 
     /// Begin preparing the next round (the `RoundDraft` state).
@@ -1620,6 +1657,13 @@ impl Tournament {
         &mut self,
         order_boards_for_display: bool,
     ) -> Result<&Round, TournamentError> {
+        // Re-checked here, not only in `prepare_round`: the draft may have been
+        // prepared while every round was complete, and a result cleared in a past
+        // round *afterwards*. Confirming is what creates the round, so this is
+        // the gate that has to hold. Both modes go through it.
+        if let Some(blocked) = self.open_earlier_round() {
+            return Err(blocked);
+        }
         if self.settings.team_mode() {
             return self.confirm_team_round();
         }
@@ -5257,6 +5301,93 @@ mod tests {
         t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
         assert_eq!(points(&t), two_rounds);
         assert!(t.grid_export_blocker().is_none());
+    }
+
+    /// While a past round is open, no new round may start: the scoring replay
+    /// skips incomplete rounds entirely, so the pairing would be drawn from
+    /// standings *and* an opponent history that have both forgotten it — and
+    /// could re-pair one of its boards.
+    #[test]
+    fn an_earlier_open_round_blocks_the_next_one_until_it_is_finished() {
+        let mut t = Tournament::new("T").unwrap();
+        for n in ["A", "B", "C", "D"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        for round in 1..=2 {
+            start_next_round(&mut t);
+            t.toggle_board_winner(round, 0, Winner::Player1).unwrap();
+            t.toggle_board_winner(round, 1, Winner::Player1).unwrap();
+        }
+        assert_eq!(t.next_round_blocker(), None);
+
+        // Clear one of round 1's results, as a referee correcting it would.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        assert_eq!(
+            t.next_round_blocker(),
+            Some(TournamentError::EarlierRoundNotComplete { round: 1 }),
+            "the blocker must name the round, not the current one"
+        );
+        assert_eq!(
+            t.prepare_round(),
+            Err(TournamentError::EarlierRoundNotComplete { round: 1 })
+        );
+
+        // Re-entering the result unblocks it, and round 3 pairs as usual.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        assert_eq!(t.next_round_blocker(), None);
+        start_next_round(&mut t);
+        assert_eq!(t.rounds.len(), 3);
+    }
+
+    /// The same guard, on the other path: the draft is prepared while everything
+    /// is complete and a past result is cleared only afterwards. Confirming is
+    /// what creates the round, so that is where it has to be caught.
+    #[test]
+    fn a_result_cleared_after_the_draft_still_blocks_confirming_it() {
+        let mut t = Tournament::new("T").unwrap();
+        for n in ["A", "B", "C", "D"] {
+            t.add_player(named(n)).unwrap();
+        }
+        t.finalize_registration().unwrap();
+        for round in 1..=2 {
+            start_next_round(&mut t);
+            t.toggle_board_winner(round, 0, Winner::Player1).unwrap();
+            t.toggle_board_winner(round, 1, Winner::Player1).unwrap();
+        }
+        t.prepare_round().unwrap(); // round 3's draft, legitimately
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap(); // …then a correction
+        assert_eq!(
+            t.confirm_round(),
+            Err(TournamentError::EarlierRoundNotComplete { round: 1 })
+        );
+        assert_eq!(t.rounds.len(), 2, "no round was created");
+        // The draft survives, so the referee finishes the correction and confirms.
+        t.toggle_board_winner(1, 0, Winner::Player1).unwrap();
+        t.confirm_round().unwrap();
+        assert_eq!(t.rounds.len(), 3);
+    }
+
+    /// A long game in flight must *not* trip the new guard: its starting record
+    /// settles its own round, and only the live record in the round it ends in
+    /// holds that round open — which the existing "finish the current round"
+    /// blocker already covers.
+    #[test]
+    fn a_carried_long_game_does_not_look_like_an_open_earlier_round() {
+        let mut t = four_players_round1_with_long_enabled();
+        t.set_board_long(1, 0, true).unwrap();
+        t.toggle_board_winner(1, 1, Winner::Player1).unwrap();
+        // Round 1 is complete with the long board still being played.
+        assert!(t.rounds[0].completed);
+        assert_eq!(t.next_round_blocker(), None);
+        start_next_round(&mut t);
+        // Round 2 holds the long game's live record, so *it* is the open round —
+        // reported as the current one, not as an earlier one.
+        assert!(!t.rounds[1].completed);
+        assert_eq!(
+            t.next_round_blocker(),
+            Some(TournamentError::PreviousRoundNotComplete)
+        );
     }
 
     #[test]

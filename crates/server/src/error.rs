@@ -177,6 +177,10 @@ pub(crate) fn domain_payload(
 
         // Rounds.
         TournamentError::PreviousRoundNotComplete => bare("previous_round_not_complete"),
+        TournamentError::EarlierRoundNotComplete { round } => with(
+            "earlier_round_not_complete",
+            [("round", round.to_string())],
+        ),
         TournamentError::NotEnoughPresentPlayers { needed, have } => with(
             "not_enough_present_players",
             [
@@ -536,6 +540,7 @@ mod tests {
             TournamentError::RegistrationAlreadyFinalized,
             TournamentError::RegistrationNotFinalized,
             TournamentError::PreviousRoundNotComplete,
+            TournamentError::EarlierRoundNotComplete { round: 1 },
             TournamentError::DraftAlreadyExists,
             TournamentError::NoDraft,
             TournamentError::NotEnoughPresentPlayers { needed: 2, have: 1 },

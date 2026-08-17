@@ -530,6 +530,7 @@
     "cannotRemoveTeamPlayer": "Dans un tournoi par équipes, les joueurs ne peuvent pas être retirés un à un une fois les inscriptions closes : chaque équipe doit conserver un effectif complet. Retirez plutôt l'équipe entière, ou marquez le joueur absent.",
     "cannotRemoveMatchedTeam": "Cette équipe a déjà disputé une rencontre ; la retirer fausserait les départages de toutes ses adversaires. Marquez-la plutôt absente pour les rondes à venir.",
     "previousRoundNotComplete": "Terminez la ronde en cours avant de démarrer la suivante.",
+    "earlierRoundNotComplete": "La ronde {round} a encore une partie sans résultat. Terminez-la avant de démarrer une nouvelle ronde : tant qu'elle est inachevée, elle ne compte pour rien, pas même pour l'appariement.",
     "notEnoughPresentPlayers": "Une ronde nécessite au moins {needed} joueurs présents — il n'y en a que {have}.",
     "noRoundToCancel": "Il n'y a aucune ronde à annuler.",
     "roundHasResults": "Cette ronde comporte déjà des résultats enregistrés, elle ne peut plus être réappariée.",

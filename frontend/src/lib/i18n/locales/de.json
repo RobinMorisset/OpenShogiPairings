@@ -530,6 +530,7 @@
     "cannotRemoveTeamPlayer": "In einem Mannschaftsturnier können Spieler nach dem Ende der Anmeldung nicht einzeln entfernt werden — jede Mannschaft muss vollständig bleiben. Entfernen Sie stattdessen die ganze Mannschaft, oder markieren Sie den Spieler als abwesend.",
     "cannotRemoveMatchedTeam": "Diese Mannschaft hat bereits einen Wettkampf bestritten; sie zu entfernen würde die Feinwertungen all ihrer Gegner verfälschen. Markieren Sie sie stattdessen für die kommenden Runden als abwesend.",
     "previousRoundNotComplete": "Beenden Sie die laufende Runde, bevor Sie die nächste starten.",
+    "earlierRoundNotComplete": "In Runde {round} fehlt noch ein Ergebnis. Tragen Sie es nach, bevor Sie eine neue Runde starten: solange die Runde offen ist, zählt sie überhaupt nicht, auch nicht für die Paarung.",
     "notEnoughPresentPlayers": "Eine Runde braucht mindestens {needed} anwesende Spieler — es sind nur {have} anwesend.",
     "noRoundToCancel": "Es gibt keine Runde zum Abbrechen.",
     "roundHasResults": "In dieser Runde sind bereits Ergebnisse erfasst, sie kann daher nicht neu gepaart werden.",

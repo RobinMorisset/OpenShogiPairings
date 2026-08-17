@@ -530,6 +530,7 @@
     "cannotRemoveTeamPlayer": "W turnieju drużynowym nie można usuwać graczy pojedynczo po zamknięciu zapisów — każda drużyna musi zachować pełny skład. Usuń zamiast tego całą drużynę albo oznacz gracza jako nieobecnego.",
     "cannotRemoveMatchedTeam": "Ta drużyna rozegrała już mecz, więc jej usunięcie zafałszowałoby kryteria dodatkowe jej przeciwników. Oznacz ją zamiast tego jako nieobecną w kolejnych rundach.",
     "previousRoundNotComplete": "Zakończ bieżącą rundę przed rozpoczęciem następnej.",
+    "earlierRoundNotComplete": "W rundzie {round} nadal jest partia bez wyniku. Uzupełnij ją przed rozpoczęciem nowej rundy: dopóki runda jest niezakończona, nie liczy się w ogóle, nawet do kojarzenia.",
     "notEnoughPresentPlayers": "Runda wymaga obecnych graczy w liczbie co najmniej: {needed} — obecnych jest: {have}.",
     "noRoundToCancel": "Nie ma żadnej rundy do anulowania.",
     "roundHasResults": "W tej rundzie zapisano już wyniki, więc nie można jej skojarzyć ponownie.",

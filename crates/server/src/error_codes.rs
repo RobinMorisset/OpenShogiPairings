@@ -42,6 +42,7 @@ pub(crate) const LOCALIZED_ERROR_CODES: &[&str] = &[
     "cannot_remove_matched_team",
     // Rounds
     "previous_round_not_complete",
+    "earlier_round_not_complete",
     "not_enough_present_players",
     "no_round_to_cancel",
     "round_has_results",

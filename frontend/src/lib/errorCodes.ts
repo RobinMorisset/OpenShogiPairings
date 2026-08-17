@@ -42,6 +42,7 @@ export const ERROR_CODE_KEYS: Record<string, string> = {
   cannot_remove_matched_team: "serverError.cannotRemoveMatchedTeam",
 
   previous_round_not_complete: "serverError.previousRoundNotComplete",
+  earlier_round_not_complete: "serverError.earlierRoundNotComplete",
   not_enough_present_players: "serverError.notEnoughPresentPlayers",
   no_round_to_cancel: "serverError.noRoundToCancel",
   round_has_results: "serverError.roundHasResults",
