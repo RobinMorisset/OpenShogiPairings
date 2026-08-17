@@ -60,11 +60,30 @@ echo "== dependency advisories (both lockfiles) =="
 if ! cargo audit --version >/dev/null 2>&1; then
   echo "   skipped: cargo-audit is not installed (cargo install cargo-audit)."
   echo "   CI still runs it, so a push without it can come back red."
-elif command -v python3 >/dev/null 2>&1; then
-  python3 scripts/check-advisories.py
-elif command -v python >/dev/null 2>&1; then
-  # Windows (Git Bash) often has `python` and no `python3`.
-  python scripts/check-advisories.py
 else
-  echo "   skipped: no python interpreter found (the check is a python script)."
+  # Same lesson as the cargo probe above, which `command -v python3` had not
+  # learned: ask the interpreter to *run*, not merely to exist on PATH. Windows
+  # ships an App Execution Alias at
+  # ~/AppData/Local/Microsoft/WindowsApps/python3 — a stub that is present, is
+  # executable, and satisfies `command -v` — whose entire behaviour is to print
+  # "Python was not found; run without arguments to install from the Microsoft
+  # Store" and exit 49. On a machine with a real python installed as `python`,
+  # the old probe therefore picked the stub, and `set -e` turned a working
+  # advisory check into an aborted push. Running `-c ''` costs a few
+  # milliseconds and tells the two apart: the stub fails it, a real interpreter
+  # does not, and a name that isn't installed fails it too (127).
+  python_bin=""
+  for candidate in python3 python; do
+    if "$candidate" -c "" >/dev/null 2>&1; then
+      python_bin="$candidate"
+      break
+    fi
+  done
+
+  if [ -n "$python_bin" ]; then
+    "$python_bin" scripts/check-advisories.py
+  else
+    echo "   skipped: no working python interpreter found (the check is a python"
+    echo "   script). CI still runs it, so a push without it can come back red."
+  fi
 fi
