@@ -1265,7 +1265,9 @@
        not. The last two are the probe's two modes, which were a toggle of their
        own inside it until the panel gave them a tab strip to live in. -->
   {#if hasReport || probeUsable}
-    <div class="explain print-hide">
+    <!-- `fit-width` (app.css): prose inside a `max-content` card, which only
+         the pairings table may widen. -->
+    <div class="explain print-hide fit-width">
       <button
         type="button"
         class="explain-toggle"
@@ -1570,17 +1572,6 @@
     cursor: help;
   }
 
-  /* These two panels are prose inside a card sized with `max-content` (see
-     `.card.wide-table` in App.svelte), and `max-content` for a paragraph is the
-     whole sentence on one line — the stale warning below is 160 characters, and
-     it was setting the width of the entire round view. `width: 0` keeps them out
-     of that measurement and `min-width` gives them back whatever the table and
-     the window settled on, so they follow the page instead of stretching it.
-     Same reasoning, and same pair of declarations, as the card's own children. */
-  .explain {
-    width: 0;
-    min-width: 100%;
-  }
   /* One measure for everything inside the panel: the panels are as wide as the
      standings-sized card, and a 1400px line is not a line anybody reads — while
      a board's two sides, named in full and with their ratings, need more room
@@ -1594,6 +1585,7 @@
     max-width: 70ch;
   }
 
+  /* Width comes from `.fit-width` in the markup — see app.css. */
   .explain {
     margin-top: 1rem;
     font-size: 0.85rem;

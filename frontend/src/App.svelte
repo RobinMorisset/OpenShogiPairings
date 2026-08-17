@@ -895,7 +895,7 @@
     <p class="muted">{$_("app.loading")}</p>
   {:else if tournament}
     <section class="card" class:wide-table={tabHasWideTable}>
-      <div class="toolbar">
+      <div class="toolbar fit-width">
         <div class="title">
           <h2>{tournament.name}</h2>
           {#if hasUnsavedChanges}
@@ -958,7 +958,7 @@
       </div>
 
       {#if publication.open}
-        <div class="publication-panel">
+        <div class="publication-panel fit-width">
           {#if !publication.canPublish}
             <!-- The desktop app: no live link is possible from a server on a
                  random loopback port, so say so once rather than leave the
@@ -1068,7 +1068,7 @@
       {/if}
 
       {#if showBackups}
-        <div class="backups-panel">
+        <div class="backups-panel fit-width">
           <!-- The path, in the panel as well as the button's tooltip: with an
                empty list it is the only thing that answers "where would they
                be?", and it is selectable here, so it can be pasted into a file
@@ -1109,7 +1109,7 @@
         </div>
       {/if}
 
-      <div class="tabs" role="tablist">
+      <div class="tabs fit-width" role="tablist">
         <button
           type="button"
           class="tab"
@@ -1492,30 +1492,18 @@
   .card.wide-table {
     width: max-content;
     min-width: 100%;
-    /* The same trap this card sets for its children below, one level up: that
+    /* The same trap this card sets for its children, one level up: that
        `min-width` is a percentage, so without this it floors the *content* box
        at the page width and the card's own padding and border — 3rem and 2px —
        land outside it. Every tab with this class was that much wider than every
        tab without, whatever it contained, which is why they all came out to
        exactly the same width. `max-content` is a keyword, not a length, so
        `box-sizing` leaves it alone (css-sizing-3 §5.1): a table that really is
-       wider than the page still widens the card, padding outside it, as before. */
-    box-sizing: border-box;
-  }
-  /* `max-content` asks every child how wide it would like to be with nothing
-     wrapped — which for the button rows is "all of them side by side", and
-     would set the card's width from the toolbar on a tournament whose table is
-     narrow. Taking them out of that measurement (`width: 0`) leaves the table
-     as the only thing that can widen the card; `min-width` then stretches them
-     back to whatever width it settled on. */
-  .card.wide-table > :not(.tab-content) {
-    width: 0;
-    min-width: 100%;
-    /* That `min-width` is the card's *content* width, so a child with a border
-       and padding of its own — the backups and public-page panels — would put
-       them outside it and hang past the card's rounded edge. Only here: with no
-       width of their own (every other tab) those panels are laid out to fit,
-       padding included. */
+       wider than the page still widens the card, padding outside it, as before.
+
+       The other half of the contract is in the markup: only the table inside
+       `.tab-content` may widen this card, so every other child of it carries
+       `.fit-width` (see app.css). A new child added here needs that class too. */
     box-sizing: border-box;
   }
   .toolbar {

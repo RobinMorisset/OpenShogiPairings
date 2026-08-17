@@ -123,6 +123,46 @@ code {
   background: var(--bg-surface);
 }
 
+/* Opt out of a `max-content` card's width measurement.
+ *
+ * A card holding a table too wide for the screen is sized `width: max-content;
+ * min-width: 100%` (`.card.wide-table`), so that the box grows to stay behind
+ * the table instead of letting it hang out of the rounded border. But
+ * `max-content` asks *every* descendant how wide it would like to be with
+ * nothing wrapped, and for anything that is not a table the answer is
+ * nonsense — which is how the same bug arrived three times:
+ *
+ *  - the registration form is a wrapping flex row, and its `max-content` is
+ *    every field on one line, wrapping be damned. It set the width of the
+ *    whole Players tab, and having set it wide enough, then had the room never
+ *    to wrap: the one thing it is written to do.
+ *  - the standings note is a sentence, and its `max-content` is that sentence
+ *    on one line — 750px of note inside a three-column grid whose side tracks
+ *    then matched each other, 1249px in total against a table that needed 996.
+ *    The card took the larger and the page scrolled sideways into empty space
+ *    past the end of the table.
+ *  - the round's explanation panels are prose too, and the 160-character stale
+ *    warning was setting the width of the entire round view.
+ *
+ * `width: 0` takes the element out of that measurement — nothing can be wider
+ * than a box asking for nothing — and `min-width: 100%` then stretches it back
+ * to whatever width the table and the window settled on, so it follows the
+ * page instead of stretching it. The table stays the only thing that may widen
+ * the card.
+ *
+ * `box-sizing` because that `min-width` is a percentage, so it floors the
+ * *content* box: an element with a border and padding of its own (the backups
+ * and public-page panels) would put them outside it and hang past the card's
+ * rounded edge. It is harmless on the elements that have neither.
+ *
+ * Write it on anything inside a `wide-table` card that is not the table.
+ */
+.fit-width {
+  width: 0;
+  min-width: 100%;
+  box-sizing: border-box;
+}
+
 /* Form controls -------------------------------------------------------------
  *
  * One box for every kind of control — button, text input, select, textarea —
