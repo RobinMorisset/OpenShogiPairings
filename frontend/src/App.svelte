@@ -487,6 +487,17 @@
   async function run(action: () => Promise<void>) {
     busy = true;
     error = null;
+    // The CSV import's "already registered, not added again" notice describes
+    // one action, and stops being true the moment another one lands: undo the
+    // import and it is reporting players who are no longer registered at all.
+    // So it is cleared here with the error, for the same reason and at the same
+    // moment — anything the referee does next replaces it. The import puts its
+    // own list back at the end of its action, after this has run.
+    //   Only user-initiated actions reach this. The live-sync subscription, the
+    //   focus handler and the visibility handler all call `refetch` directly, so
+    //   another referee's edit arriving over SSE does not blank a notice the
+    //   referee here is still reading.
+    csvSkipped = [];
     try {
       await action();
     } catch (err) {
@@ -535,7 +546,6 @@
     run(async () => {
       const text = await pickCsvFile();
       if (text === null) return; // cancelled
-      csvSkipped = [];
       const imported = await importPlayersCsv(text);
       apply(imported);
       csvSkipped = imported.skipped_duplicates;
