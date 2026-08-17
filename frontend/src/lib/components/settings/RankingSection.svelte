@@ -72,64 +72,66 @@
   </p>
 
   <div class="thresholds">
-    {#each tiebreaks as code, i (code)}
-      <div
-        class="threshold-row"
-        class:dragging={dragIndex === i}
-        class:drag-over={dragOverIndex === i && dragIndex !== null && dragIndex !== i}
-        role="listitem"
-        draggable={!busy}
-        ondragstart={(e) => {
-          dragIndex = i;
-          e.dataTransfer?.setData("text/plain", String(i));
-          if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
-        }}
-        ondragover={(e) => {
-          e.preventDefault();
-          dragOverIndex = i;
-        }}
-        ondragleave={() => {
-          if (dragOverIndex === i) dragOverIndex = null;
-        }}
-        ondrop={(e) => {
-          e.preventDefault();
-          if (dragIndex !== null) reorderTiebreak(dragIndex, i);
-          dragIndex = null;
-          dragOverIndex = null;
-        }}
-        ondragend={() => {
-          dragIndex = null;
-          dragOverIndex = null;
-        }}
-      >
-        <span class="drag-handle" title={$_("settings.dragToReorder")} aria-hidden="true"
-          >⠿</span
+    <div class="tb-list">
+      {#each tiebreaks as code, i (code)}
+        <div
+          class="threshold-row"
+          class:dragging={dragIndex === i}
+          class:drag-over={dragOverIndex === i && dragIndex !== null && dragIndex !== i}
+          role="listitem"
+          draggable={!busy}
+          ondragstart={(e) => {
+            dragIndex = i;
+            e.dataTransfer?.setData("text/plain", String(i));
+            if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+          }}
+          ondragover={(e) => {
+            e.preventDefault();
+            dragOverIndex = i;
+          }}
+          ondragleave={() => {
+            if (dragOverIndex === i) dragOverIndex = null;
+          }}
+          ondrop={(e) => {
+            e.preventDefault();
+            if (dragIndex !== null) reorderTiebreak(dragIndex, i);
+            dragIndex = null;
+            dragOverIndex = null;
+          }}
+          ondragend={() => {
+            dragIndex = null;
+            dragOverIndex = null;
+          }}
         >
-        <span class="tb-rank">{i + 1}.</span>
-        <span class="tb-label" title={titleOf(code)}>{labelOf(code)}</span>
-        <button
-          type="button"
-          class="remove"
-          disabled={busy || i === 0}
-          title={$_("settings.moveUp")}
-          onclick={() => moveTiebreak(i, -1)}>▲</button
-        >
-        <button
-          type="button"
-          class="remove"
-          disabled={busy || i === tiebreaks.length - 1}
-          title={$_("settings.moveDown")}
-          onclick={() => moveTiebreak(i, 1)}>▼</button
-        >
-        <button
-          type="button"
-          class="remove"
-          disabled={busy}
-          title={$_("settings.removeTiebreak")}
-          onclick={() => removeTiebreak(i)}>✕</button
-        >
-      </div>
-    {/each}
+          <span class="drag-handle" title={$_("settings.dragToReorder")} aria-hidden="true"
+            >⠿</span
+          >
+          <span class="tb-rank">{i + 1}.</span>
+          <span class="tb-label" title={titleOf(code)}>{labelOf(code)}</span>
+          <button
+            type="button"
+            class="remove"
+            disabled={busy || i === 0}
+            title={$_("settings.moveUp")}
+            onclick={() => moveTiebreak(i, -1)}>▲</button
+          >
+          <button
+            type="button"
+            class="remove"
+            disabled={busy || i === tiebreaks.length - 1}
+            title={$_("settings.moveDown")}
+            onclick={() => moveTiebreak(i, 1)}>▼</button
+          >
+          <button
+            type="button"
+            class="remove"
+            disabled={busy}
+            title={$_("settings.removeTiebreak")}
+            onclick={() => removeTiebreak(i)}>✕</button
+          >
+        </div>
+      {/each}
+    </div>
     {#if tiebreaks.length === 0}
       <p class="muted">
         {$_("settings.noTiebreaks")}
@@ -177,7 +179,33 @@
     width: 1.4rem;
     text-align: right;
   }
+  /* One width for every tie-break row, so the ▲▼✕ line up down the list.
+     `.thresholds` is a column with `align-items: flex-start` (shared with the
+     MacMahon thresholds, so it is not ours to change), which sizes each row to
+     its own content: `.tb-label`'s `min-width` is a floor, not a width, so a
+     label past it widened its whole row. "Parties gagnées" — board wins in
+     French — is 114px against the 88px floor, which put that row's buttons 26px
+     right of every other row's, and across nine locales it will not be the only
+     one.
+       `width: max-content` here makes this list exactly as wide as its longest
+     row, `align-self: stretch` gives that width to all of them, and `flex: 1`
+     on the label spends the difference so the buttons finish at a common edge.
+     No width for a translation to outgrow. The list is its own element rather
+     than `.thresholds` itself because the "add a tie-break" row must stay out of
+     the measurement — its select is far wider than any row, and including it
+     would push the buttons out to `max-width: 40rem` instead. */
+  .tb-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: max-content;
+    max-width: 100%;
+  }
+  .tb-list .threshold-row {
+    align-self: stretch;
+  }
   .tb-label {
+    flex: 1;
     min-width: 5.5rem;
     font-weight: 600;
     color: var(--text-strong);
