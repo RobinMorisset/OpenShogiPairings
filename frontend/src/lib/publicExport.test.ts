@@ -332,6 +332,16 @@ describe("renderSnapshotBody", () => {
     ]);
   });
 
+  it("asks for the shared table styling by name", () => {
+    // Striping, the pinned header and ink-on-white printing are opt-in classes
+    // in app.css, which the export carries wholesale — so what makes an
+    // exported table look and print like the app's is these class names being
+    // in the markup, not a second copy of the rules in this file.
+    const html = page([round(1, [board(1, 2)])]);
+    expect(html).toMatch(/<table class="[^"]*\bzebra\b[^"]*\bsticky-head\b/);
+    expect(html).toMatch(/class="results[^"]*\bprint-ink\b/);
+  });
+
   it("opens edge tooltips inwards, so none hangs off the page", () => {
     // The last tie-break column is at the right edge; a centred tooltip there
     // would widen the document and give it a horizontal scrollbar.

@@ -894,9 +894,11 @@
 </script>
 
 {#if tournament.players.length === 0}
-  <p class="muted">{$_("resultsView.noPlayers")}</p>
+  <p class="muted print-ink">{$_("resultsView.noPlayers")}</p>
 {:else}
-  <div class="results">
+  <!-- `print-ink` (app.css): everything in here prints black on white,
+       whatever the theme on screen was. -->
+  <div class="results print-ink">
   {#if cupPodium && (cupPodium.champion || cupPodium.runner_up || cupPodium.third)}
     <div class="podium">
       <span class="cup-title">{$_("resultsView.cup")}</span>
@@ -964,7 +966,7 @@
     {/if}
   </div>
 
-  <table class:teamed={teamMode} onmousemove={trackTip} onmouseleave={clearTip}>
+  <table class="zebra sticky-head" class:teamed={teamMode} onmousemove={trackTip} onmouseleave={clearTip}>
     <thead>
       <tr>
         <th class="num pin-id">{$_("resultsView.id")}</th>
@@ -1321,27 +1323,14 @@
     font-size: 0.8rem;
   }
 
-  /* --- Pinned header row and identity columns -----------------------------
+  /* --- Pinned identity columns --------------------------------------------
    *
-   * `position: sticky` resolves against the nearest *scrolling* ancestor, and
-   * here that is deliberately the document itself: nothing between this table
-   * and <html> establishes a scrollport. Wrapping the table in the obvious
-   * `overflow-x: auto` would pin the header to that wrapper instead of to the
-   * window, which is the opposite of what this is for — so the table is left to
-   * overflow, and the card grows to cover it (`ContentCard`'s `wide`).
-   *
-   * With `border-collapse: collapse` a cell's border belongs to the *table*, so
-   * it stays behind while the sticky cell travels. The rules that separate a
-   * pinned cell from what scrolls under it are therefore inset shadows, which
-   * are painted by the cell and travel with it.
+   * The header row is `table.sticky-head` (app.css), which explains the
+   * technique — including why this table is left to overflow rather than
+   * wrapped in a scroller, and the card grows to cover it (`ContentCard`'s
+   * `wide`). These two columns are this table's alone: it is the one wide
+   * enough that a name can scroll away from its own row.
    */
-  thead th {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    background: var(--bg-surface);
-    box-shadow: inset 0 -1px 0 var(--border-divider);
-  }
   .pin-id,
   .pin-name {
     position: sticky;
@@ -1410,22 +1399,8 @@
       box-shadow: none;
     }
   }
-  /* Every row carries an explicit background, including the un-striped ones.
-     The pinned identity columns take theirs with `background: inherit`, so a
-     row left transparent would let the scrolling columns show through the
-     pinned ones. */
-  tbody tr {
-    background: var(--bg-surface);
-  }
-  tbody tr:nth-child(even) {
-    background: var(--bg-stripe);
-  }
-  /* In team mode the rows come in blocks — a team, then its players — so
-     striping every other row would cut across them. The team row is the
-     separator instead. */
-  table.teamed tbody tr:nth-child(even) {
-    background: var(--bg-surface);
-  }
+  /* The striping, and its cancellation in team mode, are `table.zebra`
+     (app.css). The team row is the separator team mode uses instead. */
   .team-row {
     background: var(--bg-stripe);
   }
@@ -1628,21 +1603,16 @@
   tr.cat-dim {
     opacity: 0.35;
   }
-  /* Override the zebra stripes so every highlighted row is the same colour
-     whatever its odd/even position — both stripe rules, which is why this is a
-     list rather than one selector.
-       `tbody tr.cat-highlight` alone scores (0,1,2). That ties with
-     `tbody tr:nth-child(even)` and wins on source order, so individual mode was
-     right. It loses outright to the team-mode rule that *cancels* striping,
-     `table.teamed tbody tr:nth-child(even)` at (0,2,3) — so in team mode a
-     highlighted row on an even line kept the plain surface colour while the odd
-     ones lit up, and one selection looked half applied. The second selector
-     here matches that rule's specificity and comes later, so it wins.
-       Matching specificity deliberately, rather than reaching for `!important`:
-     the print block below turns every row background off with `!important`, and
-     a highlight that outranked *that* would print a grey band. */
-  tbody tr.cat-highlight,
-  table.teamed tbody tr.cat-highlight {
+  /* Over the stripes, so a highlighted row is the same colour whatever its
+     odd/even position and whether or not the table is in team mode. One
+     selector because `table.zebra`'s rules are written inside `:where()` and
+     cost a class between them: this used to be two selectors and a paragraph
+     explaining that the second had to score exactly (0,2,3), because the
+     team-mode rule that cancels striping did — and a highlighted row on an even
+     line kept the plain surface colour while the odd ones lit up.
+       Still no `!important`: the print block turns every row background off
+     with one, and a highlight that outranked *that* would print a grey band. */
+  tbody tr.cat-highlight {
     background: var(--bg-hover-strong);
   }
   /* The box is `.tip-box` in app.css, shared with the static export's
@@ -1668,35 +1638,13 @@
      them. So it is now an unnamed `@page` that App.svelte installs only while
      this tab is open — see `printOrientation` there. */
 
+  /* Ink on white, hiding the pointer-only chrome and un-pinning the header, are
+     `.print-ink`, `.print-hide` and `table.sticky-head` in app.css. What is
+     left here is what this table wants to be different on paper. */
   @media print {
-    .print-hide {
-      display: none;
-    }
-    table,
-    th,
-    td,
-    .win,
-    .loss,
-    .absent,
-    .pending,
-    .points,
-    .macmahon,
-    .tiebreak,
-    .est-elo,
-    .muted,
-    .note,
-    .podium,
-    .cup-title {
-      color: #000 !important;
-      background: transparent !important;
-      border-color: #000 !important;
-    }
-    tbody tr:nth-child(even) {
-      background: transparent !important;
-    }
-    /* Paper does not scroll, so nothing has anything to stick to — and a
-       sticky cell on a page break lands on top of the rows below it. */
-    thead th,
+    /* The identity columns are pinned by this component, so it un-pins them:
+       paper does not scroll, so nothing has anything to stick to — and a sticky
+       cell on a page break lands on top of the rows below it. */
     .pin-id,
     .pin-name {
       position: static;

@@ -851,7 +851,9 @@
   }
 </script>
 
-<div class="round">
+<!-- `print-ink` (app.css): the pairings print black on white, whatever the
+     theme on screen was. -->
+<div class="round print-ink">
   {#if !staticPage}
     <div class="round-toolbar print-hide">
       {#if onPrintSheets}
@@ -878,7 +880,7 @@
   {#if round.boards.length === 0 && byeSitouts.length === 0}
     <p class="empty">{$_("roundView.noBoards")}</p>
   {:else if alphabetical}
-    <table>
+    <table class="zebra">
       <thead>
         <tr>
           <th class="num">{$_("roundView.board")}</th>
@@ -932,7 +934,7 @@
       </tbody>
     </table>
   {:else}
-    <table class:teamed={teamMode}>
+    <table class="zebra" class:teamed={teamMode}>
       <thead>
         <tr>
           <th class="src-col"></th>
@@ -1484,10 +1486,10 @@
     font-weight: 600;
     border-top: 2px solid var(--border);
   }
-  table.teamed tbody tr:nth-child(even) {
-    background: none;
-  }
-  table.teamed tbody tr.match-head {
+  /* The striping, and its cancellation in team mode, are `table.zebra`
+     (app.css); this is the shading that replaces it. One class beats the
+     cancelling rule, which is written to be beatable. */
+  tr.match-head {
     background: var(--bg-stripe);
   }
   .match-team {
@@ -1542,9 +1544,6 @@
     color: var(--text-secondary);
     font-weight: 600;
     font-size: 0.8rem;
-  }
-  tbody tr:nth-child(even) {
-    background: var(--bg-stripe);
   }
   /* The board number, centred rather than right-aligned and no wider than it
      needs to be. Right-aligned in a 3.5rem column, a one- or two-digit number
@@ -1932,10 +1931,10 @@
     font-style: italic;
   }
 
+  /* Ink on white, and hiding the pointer-only chrome, are `.print-ink` and
+     `.print-hide` in app.css. What is left here is what this table wants to be
+     different on paper. */
   @media print {
-    .print-hide {
-      display: none;
-    }
     .draw-col,
     .noshow-col,
     .long-col,
@@ -1955,28 +1954,10 @@
     .src-forced {
       visibility: hidden;
     }
-    table,
-    th,
-    td,
-    .player,
-    .giver,
-    .na,
-    .hint,
-    .bye,
-    .suggested {
-      color: #000 !important;
-      background: transparent !important;
-      border-color: #000 !important;
-    }
-    .player.winner,
-    .player.loser {
-      color: #000 !important;
-    }
+    /* A player cell carries a border on screen to mark the winner; ink on
+       white would draw a box round every name instead. */
     .player {
       border-color: transparent !important;
-    }
-    tbody tr:nth-child(even) {
-      background: transparent !important;
     }
   }
 </style>

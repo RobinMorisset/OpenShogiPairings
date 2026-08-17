@@ -367,10 +367,94 @@ button.control-xs {
    They take no size class: giving them one would hand them back the box they
    are defined by not having. */
 
+/* Tables ---------------------------------------------------------------------
+ *
+ * Opt-in classes, not rules on every `<table>`: the app has tables that are a
+ * layout (the settings grid) as readily as tables that are a list of players.
+ *
+ * Both are written to lose a specificity contest. `:where()` costs nothing, so
+ * `tr.match-head` or `tr.cat-highlight` in a component — one class — outranks
+ * them without having to know what they are made of. That is the point: these
+ * rules used to live in the components at (0,2,3), and a highlight rule had to
+ * match that number *deliberately*, in a paragraph of comment, or it lit up the
+ * odd rows of a table and not the even ones.
+ */
+
+/* Alternate rows, so the eye can follow one across a wide table. Every row
+   carries an explicit background, including the un-striped ones: the standings'
+   pinned identity columns take theirs with `background: inherit`, and a row left
+   transparent would let the scrolling columns show through the pinned ones. */
+:where(table.zebra tbody) tr {
+  background: var(--bg-surface);
+}
+:where(table.zebra tbody) tr:nth-child(even) {
+  background: var(--bg-stripe);
+}
+/* In team mode the rows come in blocks — a team, then its players; a match, then
+   its boards — so striping every other one would cut across them. The block's
+   own header row is the separator instead, and it is the component's to tint. */
+:where(table.zebra.teamed tbody) tr:nth-child(even) {
+  background: var(--bg-surface);
+}
+
+/* A header row that stays put while the table scrolls under it.
+ *
+ * `position: sticky` resolves against the nearest *scrolling* ancestor, and
+ * here that is deliberately the document itself: nothing between these tables
+ * and <html> establishes a scrollport, because wrapping one in the obvious
+ * `overflow-x: auto` would pin its header to that wrapper instead of to the
+ * window. With `border-collapse: collapse` a cell's border belongs to the
+ * *table*, so it would stay behind while the sticky cell travels — the line
+ * under the header is an inset shadow instead, painted by the cell and
+ * travelling with it. `z-index` stays below the 10 the registration form's
+ * suggestion list uses, which hangs over these tables and must keep covering
+ * them. */
+:where(table.sticky-head thead) th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-surface);
+  box-shadow: inset 0 -1px 0 var(--border-divider);
+}
+
 @media print {
   :root,
   body {
     background: #fff;
     color: #000;
+  }
+
+  /* Chrome that only means anything to a pointer: toolbars, filter chips, the
+     print button itself. */
+  .print-hide {
+    display: none;
+  }
+
+  /* Ink on white, whichever theme the screen was in.
+   *
+   * Grey says "secondary" on a screen and only says "faint" on paper, and a
+   * divider taken from the palette would come out a different shade depending
+   * on what the referee happened to be looking at when they hit print. Three
+   * components each derived this over their own list of selectors — a list that
+   * had to be extended by hand every time a cell learned a new tone, and was
+   * always one class behind.
+   *
+   * `:where(*)` so the whole thing costs one class: anything a component wants
+   * to keep different on paper — a border that should stay invisible, a medal
+   * left grey rather than black — says so with a class of its own and wins. */
+  .print-ink,
+  .print-ink :where(*) {
+    color: #000 !important;
+    background: transparent !important;
+    border-color: #000 !important;
+  }
+
+  /* Paper does not scroll, so nothing has anything to stick to — and a sticky
+     cell on a page break lands on top of the rows below it. The browser repeats
+     `<thead>` on each page by itself, and the row of black borders above is
+     already the line the shadow was drawing. */
+  :where(table.sticky-head thead) th {
+    position: static;
+    box-shadow: none;
   }
 }

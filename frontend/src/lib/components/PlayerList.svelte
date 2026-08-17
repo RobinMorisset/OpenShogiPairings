@@ -360,7 +360,7 @@
   <button type="button" class="ghost control-sm" onclick={() => printPage()}>🖨 {$_("roundView.print")}</button>
 </div>
 {#if showEligible}
-  <p class="elig-count">{$_("playerList.eligibleCount", { values: { count: eligibleCount } })}</p>
+  <p class="elig-count print-ink">{$_("playerList.eligibleCount", { values: { count: eligibleCount } })}</p>
   {#if !finalized && nationalities.length > 0}
     <div class="elig-bulk print-hide">
       <span>{$_("playerList.eligibilityByNationality")}</span>
@@ -390,9 +390,11 @@
   {/if}
 {/if}
 {#if players.length === 0}
-  <p class="empty">{$_("playerList.noPlayers")}</p>
+  <p class="empty print-ink">{$_("playerList.noPlayers")}</p>
 {:else}
-  <table>
+  <!-- `print-ink` (app.css): the roster prints black on white, whatever the
+       theme on screen was. -->
+  <table class="sticky-head print-ink">
     <thead>
       <tr>
         {@render sortHeader("tournament_id", "#", true, $_("playerList.tournamentNumberTitle"))}
@@ -593,24 +595,9 @@
     font-size: 0.8rem;
     padding: 0.4rem;
   }
-  /* Pinned to the window, as the standings' header is: a roster is long enough
-     that the column a name is under stops being obvious a screen down. Nothing
-     between this table and <html> scrolls, so `sticky` resolves against the
-     document — see the longer note in ResultsView, which explains why the table
-     is left to overflow rather than wrapped in a scroller.
-
-     The border on a collapsed table belongs to the table, so it would stay
-     behind while the cell travels; the line under the header is an inset shadow
-     instead, painted by the cell. `z-index` stays below the 10 the registration
-     form's suggestion list uses, which hangs over this table and must keep
-     covering it. */
-  thead th {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    background: var(--bg-surface);
-    box-shadow: inset 0 -1px 0 var(--border-divider);
-  }
+  /* The header is pinned to the window by `table.sticky-head` (app.css), which
+     explains the technique: a roster is long enough that the column a name is
+     under stops being obvious a screen down. */
   .num {
     text-align: right;
     font-variant-numeric: tabular-nums;
@@ -840,10 +827,10 @@
   .cat-print {
     display: none;
   }
+  /* Ink on white, hiding the pointer-only chrome and un-pinning the header are
+     `.print-ink`, `.print-hide` and `table.sticky-head` in app.css. What is
+     left here is what this table wants to be different on paper. */
   @media print {
-    .print-hide {
-      display: none;
-    }
     /* The sort direction arrows (▲ ▼ ⇅) are interactive-only chrome. */
     .sort-arrow {
       display: none;
@@ -856,33 +843,11 @@
     .cat-print {
       display: inline;
     }
-    /* Print is black & white: the cup-eligibility checkmark is green and bold on
-       screen; match the plain category checkmarks — black and normal weight. */
+    /* The cup-eligibility checkmark is green and bold on screen; ink on white
+       takes the colour, and this takes the weight, so it matches the plain
+       category checkmarks beside it. */
     .elig-frozen {
-      color: #000;
       font-weight: normal;
-    }
-    /* Ink on white, whichever theme the screen is in — as the pairings and the
-       standings already print. Grey says "secondary" on a screen and only says
-       "faint" on paper, and a divider taken from the palette would come out a
-       different shade depending on what the referee happened to be looking at
-       when they hit print. */
-    table,
-    th,
-    td,
-    .elig-count,
-    .empty {
-      color: #000 !important;
-      background: transparent !important;
-      border-color: #000 !important;
-    }
-    /* Nothing is pinned on paper: the browser repeats `<thead>` on each page by
-       itself, and sticky has no scrollport to stick to in a paginated flow. The
-       shadow under it goes with the pinning — the row of black borders above
-       already separates the header from the names. */
-    thead th {
-      position: static;
-      box-shadow: none;
     }
   }
 </style>

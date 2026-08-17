@@ -1642,7 +1642,8 @@
   /* The header, the footer and the column's own width are `PageShell`'s, and so
      is their print reset; the card's is `ContentCard`'s, the tab strip's is
      `TabStrip`'s (which takes the round controls inside it with it), and
-     `.fit-width`'s is app.css's. What is left here is this app's own furniture.
+     `.fit-width`'s and `.print-hide`'s are app.css's. What is left here is this
+     app's own furniture.
 
      The `.app` in the selectors below is the shell's element rather than this
      component's, so it takes a `:global()` to name — Svelte scopes a selector
@@ -1650,8 +1651,7 @@
      The trailing halves stay scoped, so these still only reach this app's
      markup. */
   @media print {
-    .toolbar,
-    .print-hide {
+    .toolbar {
       display: none;
     }
 
