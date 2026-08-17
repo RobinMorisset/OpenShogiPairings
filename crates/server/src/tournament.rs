@@ -65,6 +65,7 @@ use crate::{auth, live, public};
 /// - `POST   /players/licence-check` who of one nationality is missing from a licence list
 /// - `PUT    /players/{player_id}`  edit a player
 /// - `DELETE /players/{player_id}`  remove a player
+/// - `POST   /players/eligible`  set cup eligibility for a list of players, atomically
 /// - `POST   /players/{player_id}/eligible`  set cup eligibility
 /// - `POST   /players/{player_id}/category`  set membership in a player category
 /// - `POST   /players/{player_id}/adjustments`             add a manual point bonus/malus
@@ -147,6 +148,7 @@ pub(crate) fn scope(state: AppState) -> Router<AppState> {
         .route("/players", post(add_player))
         .route("/players/import-csv", post(import_players_csv))
         .route("/players/licence-check", post(check_licences))
+        .route("/players/eligible", post(set_players_eligible))
         .route(
             "/players/{player_id}",
             axum::routing::put(edit_player).delete(remove_player),
@@ -1096,6 +1098,44 @@ async fn set_player_eligible(
     store.mutate(expected, |t| {
         t.set_player_eligible(params.player_id, req.eligible)
             .map(|_| ())
+    })?;
+    view(&store)
+}
+
+/// Body of the bulk eligibility endpoint: which players, and the flag to give
+/// all of them.
+#[derive(Debug, Deserialize)]
+struct SetManyEligibleRequest {
+    player_ids: Vec<Uuid>,
+    eligible: bool,
+}
+
+/// Set cup eligibility for a list of players in one mutation.
+///
+/// The client used to do this by looping over the single-player endpoint, which
+/// meant a request that failed halfway — an id that is no longer registered,
+/// another referee's edit landing in between — left the roster half-changed,
+/// with no version at which the referee's instruction was carried out.
+///
+/// The loop lives inside the `mutate` closure instead, which runs against a
+/// clone and only swaps it in if the whole closure returns `Ok`. So this is
+/// all-or-nothing, and it costs one version bump and one undo step for the whole
+/// bulk rather than one per player.
+///
+/// Which players is the caller's business: the UI selects them by nationality,
+/// but the rule for that ("no nationality" is a group too) lives in the
+/// registration form and has no business being restated here.
+async fn set_players_eligible(
+    TournamentCtx(instance): TournamentCtx,
+    ExpectedVersion(expected): ExpectedVersion,
+    Json(req): Json<SetManyEligibleRequest>,
+) -> Result<Json<TournamentView>, ApiError> {
+    let mut store = instance.write();
+    store.mutate(expected, |t| {
+        for id in &req.player_ids {
+            t.set_player_eligible(*id, req.eligible)?;
+        }
+        Ok(())
     })?;
     view(&store)
 }

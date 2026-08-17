@@ -27,6 +27,7 @@
     setBoardNoShow,
     setBoardWinner,
     setPlayerEligible,
+    setPlayersEligible,
     setPlayerCategory,
     setSitoutValue,
     setTeamSitoutValue,
@@ -596,17 +597,19 @@
     });
   }
 
-  // Bulk cup-eligibility toggle: every player of the given nationality, one
-  // request at a time so each response's tournament state is applied before
-  // the next request goes out.
+  // Bulk cup-eligibility toggle: every player of the given nationality, in one
+  // request. It used to be a loop over the single-player endpoint, which could
+  // fail on the seventh of twelve and leave the roster in a state nobody asked
+  // for — half eligible, half not, and no version at which the instruction had
+  // been carried out. The server applies the whole list inside one mutation, so
+  // it either all lands or none of it does, and one undo puts it back.
   function handleSetEligibleByNationality(nationality: string, eligible: boolean) {
     run(async () => {
       const ids = (tournament?.players ?? [])
         .filter((p) => (p.nationality ?? "") === nationality)
         .map((p) => p.id);
-      for (const id of ids) {
-        apply(await setPlayerEligible(id, eligible));
-      }
+      if (ids.length === 0) return;
+      apply(await setPlayersEligible(ids, eligible));
     });
   }
 

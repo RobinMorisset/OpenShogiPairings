@@ -880,6 +880,26 @@ export function setPlayerEligible(
   });
 }
 
+/**
+ * Set cup eligibility for many players at once — the bulk control on the Players
+ * tab.
+ *
+ * One request rather than a loop over {@link setPlayerEligible}, because the
+ * server applies the whole list inside a single mutation: either every player
+ * named here changes or none does, and the lot costs one undo step. Looping
+ * client-side could fail on the seventh of twelve and leave the roster in a
+ * state the referee never asked for.
+ */
+export function setPlayersEligible(
+  ids: string[],
+  eligible: boolean,
+): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath("/players/eligible"), {
+    method: "POST",
+    body: JSON.stringify({ player_ids: ids, eligible }),
+  });
+}
+
 /** Add or remove a player's membership in a referee-defined category. */
 export function setPlayerCategory(
   id: string,

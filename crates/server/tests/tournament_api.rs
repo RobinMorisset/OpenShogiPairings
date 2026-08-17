@@ -839,3 +839,75 @@ async fn blank_player_name_is_400() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+/// The bulk eligibility endpoint is all-or-nothing.
+///
+/// The point of it existing: the client used to loop over the single-player
+/// endpoint, so a failure partway through left some players changed and some
+/// not. Here a list containing one unknown id must change nobody — including the
+/// players named *before* the bad one, which is what a loop would already have
+/// written.
+#[tokio::test]
+async fn bulk_eligibility_applies_to_everyone_or_to_nobody() {
+    let state = AppState::default();
+    let id = create(&state, "Cup").await;
+
+    let mut ids = Vec::new();
+    for name in ["Alice", "Bob", "Carol"] {
+        let (_, body) = send(
+            router(state.clone()),
+            json_req("POST", &t(id, "/players"), json!({ "last_name": name })),
+        )
+        .await;
+        let players = body["tournament"]["players"].as_array().unwrap();
+        ids.push(players.last().unwrap()["id"].as_str().unwrap().to_string());
+    }
+
+    // `eligible` defaults to false and is skipped when false, so an untouched
+    // player carries no such key at all — which is exactly the state the failed
+    // call below must leave the untouched ones in.
+    let eligible = |p: &serde_json::Value| p["eligible"] == json!(true);
+
+    let (status, body) = send(
+        router(state.clone()),
+        json_req(
+            "POST",
+            &t(id, "/players/eligible"),
+            json!({ "player_ids": ids, "eligible": true }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let players = body["tournament"]["players"].as_array().unwrap();
+    assert!(
+        players.iter().all(eligible),
+        "every named player should have been set: {players:#?}"
+    );
+    let version_after_bulk = body["version"].clone();
+
+    // The same call with an unknown id in the *middle*, asking for the opposite
+    // flag. Alice comes before it, so a loop would already have cleared her.
+    let with_unknown = vec![ids[0].clone(), Uuid::new_v4().to_string(), ids[1].clone()];
+    let (status, _) = send(
+        router(state.clone()),
+        json_req(
+            "POST",
+            &t(id, "/players/eligible"),
+            json!({ "player_ids": with_unknown, "eligible": false }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Nobody moved, and the failed call did not even bump the version.
+    let (_, body) = send(router(state.clone()), get(&t(id, ""))).await;
+    let players = body["tournament"]["players"].as_array().unwrap();
+    assert!(
+        players.iter().all(eligible),
+        "a rejected bulk must leave every player as they were: {players:#?}"
+    );
+    assert_eq!(
+        body["version"], version_after_bulk,
+        "a rejected mutation should not bump the version"
+    );
+}
