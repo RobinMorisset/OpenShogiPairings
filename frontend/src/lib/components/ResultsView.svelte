@@ -1288,6 +1288,20 @@
   }
   table {
     width: 100%;
+    /* Never wider than the columns actually need. `width: 100%` alone made the
+       table fill whatever it was given, and a table with room to spare hands the
+       surplus to every column in proportion — 254px spread over fourteen of them
+       on a 1300px card, which reads as a hole after each left-aligned name and
+       simply as air everywhere else. The referee app is where that showed,
+       because its card is `min-width: 100%` of the page while the table's own
+       content came to 996px; the reader page is usually narrower than the table
+       and so had nothing to give away, which is why the same stylesheet looked
+       tighter there.
+       Still `width: 100%` underneath, so nothing changes when the space is
+       *not* there: the table is then min(container, content) exactly as before,
+       and goes on shrinking into a narrow reader page rather than overflowing
+       it. */
+    max-width: max-content;
     border-collapse: collapse;
     font-size: 0.9rem;
   }
