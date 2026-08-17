@@ -449,6 +449,15 @@
   // listing them all (a player can lead more than one).
   const categoryLeaders = $derived.by(() => {
     const leaders = new Map<string, string[]>();
+    // Not in team mode. The mark means "first of this category in the table",
+    // and it reads that way because the table is the individual ranking — but
+    // in team mode the table is teams in *their* ranked order, each followed by
+    // its members in board order, so the leader of a category turns up wherever
+    // their team happens to sit. A ⭐ against the 14th row, on a table nobody is
+    // reading as an individual ranking, claims something that is not being
+    // shown. The prize it stands for is an individual one, and this is not the
+    // table that awards it.
+    if (teamMode) return leaders;
     for (const cat of categories) {
       const leader = rows.find(({ player }) => (player.categories ?? []).includes(cat.id));
       if (!leader) continue;
