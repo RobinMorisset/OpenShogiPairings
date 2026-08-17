@@ -20,6 +20,7 @@
   import ConnectionStatus from "./ConnectionStatus.svelte";
   import ContentCard from "./ContentCard.svelte";
   import LocaleSwitcher from "./LocaleSwitcher.svelte";
+  import PageShell from "./PageShell.svelte";
   import PublicSectionBody from "./PublicSectionBody.svelte";
   import ThemeSwitcher from "./ThemeSwitcher.svelte";
 
@@ -114,22 +115,14 @@
   });
 </script>
 
-<div class="app">
-  <header>
-    <div class="header-top">
-      <div class="header-titles">
-        <h1>{tournament?.name ?? "OpenShogiPairings"}</h1>
-        <p class="subtitle">{$_("publicView.subtitle")}</p>
-      </div>
-      <div class="header-controls">
-        {#if view}
-          <ConnectionStatus />
-        {/if}
-        <ThemeSwitcher />
-        <LocaleSwitcher />
-      </div>
-    </div>
-  </header>
+<PageShell title={tournament?.name ?? "OpenShogiPairings"} subtitle={$_("publicView.subtitle")}>
+  {#snippet controls()}
+    {#if view}
+      <ConnectionStatus />
+    {/if}
+    <ThemeSwitcher />
+    <LocaleSwitcher />
+  {/snippet}
 
   {#if gone}
     <p class="error-banner" role="alert">{$_("publicView.gone")}</p>
@@ -179,67 +172,9 @@
       </div>
     </ContentCard>
   {/if}
-</div>
+</PageShell>
 
 <style>
-  .app {
-    width: min(90rem, 95vw);
-    margin: 0 auto;
-    padding: 2rem 0 3rem;
-  }
-  header {
-    margin-bottom: 1.5rem;
-  }
-  /* The referee app's header grid, ported verbatim — see the long comment on
-     `.header-top` in App.svelte for why it is a grid. This page had the
-     `position: absolute` version that comment describes, because it was written
-     the same morning the fix landed and the fix only touched App.svelte. The
-     failure is worse here than it ever was there: the centred cell holds the
-     *tournament's own name*, so how much room it wants is up to the referee, and
-     the controls are wider (ConnectionStatus says "Reconnecting…", not "Live").
-     At a 560px window the controls sat 36px on top of the title.
-       `align-items: start` rather than App's `center` is the one difference, and
-     only because the middle cell is two lines here (name over subtitle): it
-     keeps the controls level with the title, which is where `top: 0.2rem` used
-     to put them. */
-  .header-top {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: start;
-    gap: 0.5rem;
-  }
-  .header-titles {
-    grid-column: 2;
-    text-align: center;
-  }
-  .header-controls {
-    grid-column: 3;
-    justify-self: end;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-  /* Narrower than this the two would still fit side by side, but only by
-     squeezing the title against them. Stack instead. */
-  @media (max-width: 34rem) {
-    .header-top {
-      grid-template-columns: 1fr;
-      justify-items: center;
-    }
-    .header-titles,
-    .header-controls {
-      grid-column: 1;
-      justify-self: center;
-    }
-  }
-  h1 {
-    font-size: 1.8rem;
-    margin: 0;
-  }
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0.25rem 0 0;
-  }
   .tabs {
     display: flex;
     flex-wrap: wrap;
@@ -281,10 +216,10 @@
   }
 
   @media print {
-    header,
+    /* (The header, the footer and the column's width are `PageShell`'s to
+       reset, and the card's is `ContentCard`'s.) */
     .tabs {
       display: none;
     }
-    /* (The card's own print reset is `ContentCard`'s.) */
   }
 </style>

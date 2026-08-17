@@ -306,6 +306,16 @@ describe("renderSnapshotBody", () => {
     expect(html.match(/data-tip=/g)!.length).toBe(html.match(/osp-tip(?![-\w])/g)!.length);
   });
 
+  it("keeps its header on paper, stamp and all", () => {
+    // The two live pages drop the header when printing — on paper the sheet is
+    // about the tournament, not the software. This one must not: its header
+    // carries the "taken at" stamp, and a printed static page with no date on
+    // it is the failure mode this whole transport is written around.
+    const html = page([round(1, [board(1, 2)])]);
+    expect(html).toMatch(/<header[^>]*class="[^"]*\bprint-keep\b/);
+    expect(html).toContain("12 August 2026");
+  });
+
   it("grows the card behind the pages whose content is a table", () => {
     // `ContentCard`'s `wide`, decided by `sectionNeedsWideCard` so that this
     // export and the live reader page cannot disagree about it. The standings

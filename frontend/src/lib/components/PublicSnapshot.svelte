@@ -28,6 +28,7 @@
   } from "../publicPage";
   import type { PublicTournamentResponse } from "../types";
   import ContentCard from "./ContentCard.svelte";
+  import PageShell from "./PageShell.svelte";
   import PublicSectionBody from "./PublicSectionBody.svelte";
 
   interface Props {
@@ -50,15 +51,15 @@
   const tournament = $derived(view.tournament);
 </script>
 
-<div class="app">
-  <header>
-    <h1>{tournament.name}</h1>
-    <!-- Not `publicView.subtitle`: that one ends in "— live", which is the one
-         thing a file on somebody's web server is not. -->
-    <p class="subtitle">{$_("publicExport.subtitle")}</p>
-    <p class="generated">{$_("publicExport.generatedAt", { values: { when: generatedAt } })}</p>
-  </header>
-
+<!-- Not `publicView.subtitle`: that one ends in "— live", which is the one thing
+     a file on somebody's web server is not. And `printHeader`, because the
+     stamp under it is the whole reason this header exists. -->
+<PageShell
+  title={tournament.name}
+  subtitle={$_("publicExport.subtitle")}
+  stamp={$_("publicExport.generatedAt", { values: { when: generatedAt } })}
+  printHeader
+>
   {#if sections.length > 1}
     <nav class="tabs">
       {#each sections as section (sectionId(section))}
@@ -77,31 +78,9 @@
   <ContentCard wide={sectionNeedsWideCard(current)}>
     <PublicSectionBody {view} section={current} staticPage />
   </ContentCard>
-</div>
+</PageShell>
 
 <style>
-  .app {
-    width: min(90rem, 95vw);
-    margin: 0 auto;
-    padding: 2rem 0 3rem;
-  }
-  header {
-    margin-bottom: 1.5rem;
-    text-align: center;
-  }
-  h1 {
-    font-size: 1.8rem;
-    margin: 0;
-  }
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0.25rem 0 0;
-  }
-  .generated {
-    color: var(--text-secondary);
-    font-size: 0.9rem;
-    margin: 0.5rem 0 0;
-  }
   /* Deliberately the live page's tab styling, on anchors instead of buttons:
      the reader should not be able to tell that one is a script and the other a
      set of files. */

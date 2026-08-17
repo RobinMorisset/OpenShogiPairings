@@ -62,6 +62,7 @@
   import { createTeamActions } from "./lib/teamActions";
   import { TournamentStore } from "./lib/tournamentStore.svelte";
   import ContentCard from "./lib/components/ContentCard.svelte";
+  import PageShell from "./lib/components/PageShell.svelte";
   import PublicView from "./lib/components/PublicView.svelte";
   import QrCode from "./lib/components/QrCode.svelte";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
@@ -809,6 +810,16 @@
    */
   const landscapePaper = $derived(!prints.qr && prints.sheets === null);
 
+  /**
+   * The print job in progress, as a class on the page shell.
+   *
+   * Both printed documents are states of the *whole page* — each hides almost
+   * everything and rearranges what is left — so the flag has to sit on the
+   * element every print rule below hangs off, which is the shell's. The two
+   * never overlap: each is set, printed and cleared inside one `run`.
+   */
+  const printJob = $derived(prints.qr ? "printing-qr" : prints.sheets ? "printing-sheets" : "");
+
   const publicUrl = $derived(
     publication.state?.key && $currentTournamentId
       ? publicPageUrl($currentTournamentId, publication.state.key)
@@ -863,19 +874,14 @@
        See `lib/publicAccess.ts`. -->
   <PublicView page={publicPage} />
 {:else}
-<div class="app" class:printing-qr={prints.qr} class:printing-sheets={prints.sheets !== null}>
-  <header>
-    <div class="header-top">
-      <h1>OpenShogiPairings</h1>
-      <div class="header-controls">
-        {#if $currentTournamentId !== null}
-          <ConnectionStatus />
-        {/if}
-        <ThemeSwitcher />
-        <LocaleSwitcher />
-      </div>
-    </div>
-  </header>
+<PageShell title="OpenShogiPairings" modifiers={printJob}>
+  {#snippet controls()}
+    {#if $currentTournamentId !== null}
+      <ConnectionStatus />
+    {/if}
+    <ThemeSwitcher />
+    <LocaleSwitcher />
+  {/snippet}
 
   {#if error && !$authRequired}
     <p class="error-banner" role="alert">{error}</p>
@@ -1419,7 +1425,7 @@
   {/if}
 
   {#if prints.sheets && tournament}
-    <!-- A direct child of `.app`, so the print stylesheet below can hide its
+    <!-- A direct child of the shell, so the print stylesheet below can hide its
          siblings and leave the slips alone whatever tab is open. -->
     <ResultSheets
       tournamentName={tournament.name}
@@ -1430,61 +1436,13 @@
     />
   {/if}
 
-  <footer>
+  {#snippet footer()}
     <ServerStatus />
-  </footer>
-</div>
+  {/snippet}
+</PageShell>
 {/if}
 
 <style>
-  .app {
-    width: min(90rem, 95vw);
-    margin: 0 auto;
-    padding: 2rem 0 3rem;
-  }
-  header {
-    margin-bottom: 1.5rem;
-  }
-  /* Three columns so the title is centred in the *window* while the controls
-     still occupy real space at the right. They used to be `position: absolute`,
-     which centred the title beautifully and let the controls sit on top of it
-     the moment the window was too narrow for both — and no breakpoint fixes
-     that, because the block's width depends on what is in it (the Live
-     indicator only exists once a tournament is open). Laid out in the grid they
-     cannot overlap at any width. */
-  .header-top {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  .header-top h1 {
-    grid-column: 2;
-  }
-  .header-controls {
-    grid-column: 3;
-    justify-self: end;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-  /* Narrower than this the two would still fit side by side, but only by
-     squeezing the title against them. Stack instead. */
-  @media (max-width: 34rem) {
-    .header-top {
-      grid-template-columns: 1fr;
-      justify-items: center;
-    }
-    .header-top h1,
-    .header-controls {
-      grid-column: 1;
-      justify-self: center;
-    }
-  }
-  h1 {
-    font-size: 1.8rem;
-    margin: 0;
-  }
   .toolbar {
     display: flex;
     justify-content: space-between;
@@ -1750,87 +1708,67 @@
     color: var(--text-secondary);
     text-align: center;
   }
-  footer {
-    margin-top: 2rem;
-    display: flex;
-    justify-content: center;
-  }
 
+  /* The header, the footer and the column's own width are `PageShell`'s, and so
+     is their print reset; the card's is `ContentCard`'s and `.fit-width`'s is
+     app.css's. What is left here is this app's own furniture.
+
+     The `.app` in the selectors below is the shell's element rather than this
+     component's, so it takes a `:global()` to name — Svelte scopes a selector
+     to the markup it is written in, and would otherwise quietly match nothing.
+     The trailing halves stay scoped, so these still only reach this app's
+     markup. */
   @media print {
-    header,
     .toolbar,
     .tabs,
     .round-controls,
-    .print-hide,
-    footer {
+    .print-hide {
       display: none;
     }
-    /* The page box is already the measure on paper, and there is no window to be
-       95% of: `vw` resolves against the sheet, so `width: min(90rem, 95vw)` lays
-       the content out at 95% of the page and `margin: 0 auto` splits the other
-       5% into margins on top of the printer's own — indent on the left, lost
-       width on the right, on a tab whose table needs every millimetre. The top
-       padding pushes the first sheet down for nothing as well. */
-    .app {
-      width: auto;
-      margin: 0;
-      padding: 0;
-    }
-    /* (The card's own print reset — no border, no background, back to the page
-       width — is `ContentCard`'s, and `.fit-width`'s is app.css's.) */
 
     /* Printing the QR code for the wall is a different document from printing
        the pairings: one sheet, the tournament's name, the code as large as the
        page allows, and the link underneath for anyone who would rather type it.
        Everything else — including the panel's own explanation and buttons — is
        for the referee at the screen, not for the wall. */
-    .app.printing-qr .tab-content,
-    .app.printing-qr .backups-panel,
-    .app.printing-qr .publication-panel .small,
-    .app.printing-qr .publication-actions {
+    :global(.app.printing-qr) .tab-content,
+    :global(.app.printing-qr) .backups-panel,
+    :global(.app.printing-qr) .publication-panel .small,
+    :global(.app.printing-qr) .publication-actions {
       display: none;
     }
-    .app.printing-qr .publication-panel {
+    :global(.app.printing-qr) .publication-panel {
       border: none;
       background: transparent;
       padding: 0;
       text-align: center;
     }
-    .app.printing-qr .qr-print-title {
+    :global(.app.printing-qr) .qr-print-title {
       display: block;
       font-size: 1.6rem;
       margin: 0 0 1rem;
     }
-    .app.printing-qr .public-share {
+    :global(.app.printing-qr) .public-share {
       display: block;
     }
-    .app.printing-qr .qr-holder {
+    :global(.app.printing-qr) .qr-holder {
       width: min(15cm, 80vw);
       margin: 0 auto 0.8rem;
     }
-    .app.printing-qr .public-url {
+    :global(.app.printing-qr) .public-url {
       font-size: 0.9rem;
     }
 
     /* Printing the result sheets is a document of its own too: pages of slips to
        cut apart, and nothing of the screen around them. The slips sit beside the
-       card rather than inside it, so hiding every other child of `.app` — rather
-       than naming the parts of whichever tab happens to be open — is what leaves
-       them alone. The width and padding go as well: the grid inside sizes itself
-       to the printable area.
-
-       The card is `ContentCard`'s element rather than this component's, so it
-       takes a `:global()` to name — Svelte scopes a selector to the markup it
-       is written in, and would otherwise quietly match nothing. */
-    .app.printing-sheets > header,
-    .app.printing-sheets > .error-banner,
-    .app.printing-sheets > :global(.card),
-    .app.printing-sheets > footer {
+       card rather than inside it, so hiding every other child of the shell —
+       rather than naming the parts of whichever tab happens to be open — is what
+       leaves them alone. (The header and footer are already gone: the shell
+       hides those for every print job, and its column is already back to the
+       page width.) */
+    :global(.app.printing-sheets) > .error-banner,
+    :global(.app.printing-sheets > .card) {
       display: none;
-    }
-    .app.printing-sheets {
-      width: auto;
-      padding: 0;
     }
   }
 </style>
