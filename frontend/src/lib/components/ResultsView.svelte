@@ -1346,6 +1346,15 @@
        `--id-col` — landing on top of the last 1.1rem of the numbers. */
     box-sizing: border-box;
     width: var(--id-col);
+    /* `width` on a table cell is a suggestion the layout algorithm may shrink;
+       `min-width` is not, and the two rules only agree while the column really
+       is `--id-col` wide. In the referee app that never came up, because the
+       card around the table is `max-content` (see `.card.wide-table` in
+       App.svelte) so the table is always laid out at its natural width. The
+       reader page has no such card: in a narrow window the table is squeezed to
+       the viewport, this column went down to 28px while the name column went on
+       pinning at 52px, and the two froze with a 24px hole between them. */
+    min-width: var(--id-col);
     /* The table starts at the card's edge, so this cell's left padding is
        stacked on top of the card's own — and the numbers are right-aligned, so
        all of it reads as a gap before the table begins. */
