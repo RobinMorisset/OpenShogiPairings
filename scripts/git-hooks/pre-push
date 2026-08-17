@@ -43,8 +43,29 @@ echo "== rustdoc (broken links) =="
 # ~4s after a core edit, which is why this is here and not in pre-commit.
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --quiet
 
+# On Windows (Git Bash / MSYS), node isn't on the PATH a hook runs with: hooks
+# don't source the interactive profile, so the entry a Node installer adds there
+# isn't in scope. Same guard pre-commit carries, hoisted above both npm calls
+# below rather than repeated in each.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) export PATH="/c/Program Files/nodejs:$PATH" ;;
+esac
+
 echo "== npm test (frontend) =="
 (cd frontend && npm test)
+
+echo "== npm advisories =="
+# The npm half of the advisory check. Byte-for-byte the command CI runs, for the
+# same reason as the cargo one below: a push that passed here must not come back
+# red an hour later.
+#   `--audit-level=high`, not npm's default of moderate. The one moderate
+#   outstanding is esbuild's dev-server advisory, reached only through
+#   svelte-i18n's own nested copy, and npm's fix for it is a downgrade to
+#   svelte-i18n 3.7.1 — a gate whose only remedy is worse than the finding is a
+#   gate people learn to pass with --no-verify. It still gets printed.
+# Needs the network (the tree goes to the registry to be scored), like the cargo
+# check below.
+(cd frontend && npm audit --audit-level=high)
 
 echo "== dependency advisories (both lockfiles) =="
 # Byte-for-byte the command CI runs, so an advisory can't first surface as a red

@@ -115,6 +115,22 @@ jobs:
         run: npm test
       - name: i18n locale keys in sync
         run: node scripts/check-i18n-keys.mjs
+      # npm advisories, the other half of what the `audit` job below does for the
+      # Cargo lockfiles. Here rather than there because this job already has Node
+      # and a warm npm cache; a job of its own would set both up again to run one
+      # command.
+      #   `--audit-level=high` rather than npm's default of moderate. The one
+      #   moderate outstanding is esbuild's dev-server advisory
+      #   (GHSA-67mh-4wv8-2f99), reached only through svelte-i18n's own nested
+      #   copy, and npm's fix for it is a *downgrade* to svelte-i18n 3.7.1 —
+      #   gating on it would mean a permanently red build whose only remedy is
+      #   worse than the finding. Moderates are still printed either way, so a new
+      #   one shows up in the log without being a stop sign.
+      # Same command the pre-push hook runs, so an advisory can't first surface
+      # here after a push that passed locally.
+      - name: Advisories (npm)
+        working-directory: frontend
+        run: npm audit --audit-level=high
 
   # Security advisories against both lockfiles — the workspace's and the desktop
   # app's, which is outside the workspace and carries a tree (Tauri, the webview
