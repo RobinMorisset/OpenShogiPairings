@@ -1582,18 +1582,19 @@
     text-align: center;
   }
 
-  /* A named page so only this tab's print job goes landscape — the table is
-     wide (one column per round plus the tie-breaks), unlike the pairings view. */
-  @page results-landscape {
-    size: landscape;
-  }
+  /* The landscape orientation for this tab is NOT here. It used to be, as a
+     named page (`@page results-landscape` + `page:` on `.results`), which prints
+     landscape in Chrome and portrait in Firefox — the browser most referees use
+     from the server build. Named pages are the newer half of the feature
+     (Firefox 110 for the `page` property against 95 for `@page { size }`), and
+     Firefox does not change sheet size partway through a document: the pages
+     before `.results` are in the default page context, and the whole job follows
+     them. So it is now an unnamed `@page` that App.svelte installs only while
+     this tab is open — see `printOrientation` there. */
 
   @media print {
     .print-hide {
       display: none;
-    }
-    .results {
-      page: results-landscape;
     }
     table,
     th,
