@@ -140,6 +140,39 @@ code {
   margin-bottom: 1rem;
 }
 
+/* The floating explanation of a cell — what a tie-break means, why a pairing
+ * came out the way it did.
+ *
+ * Two things draw it and they cannot be the same element: the app positions a
+ * real `<div>` under the cursor with a script (`.cell-tip` in ResultsView),
+ * while the static export, where no script will ever run, gets a `::after` on
+ * the cell itself and shows it on hover. A pseudo-element cannot carry a
+ * class, so this rule names both — everything about how the box *looks* is
+ * here, and each side adds only how it is placed and shown.
+ *
+ * They had drifted already, under a comment in the export claiming they were
+ * "the same box": 340px against `min(21rem, 60vw)`. The clamp is the better
+ * one — 21rem is the same 336px, and the `60vw` keeps a long explanation from
+ * covering a phone's whole screen — so it is what both use now.
+ *
+ * `.osp-tip` exists only in exported files; in the app this half of the
+ * selector matches nothing, and a `::after` with no `content` draws nothing.
+ */
+.tip-box,
+.osp-tip::after {
+  z-index: 1000;
+  max-width: min(21rem, 60vw);
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.4rem;
+  background: var(--text);
+  color: var(--bg-surface);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  white-space: pre-line;
+  pointer-events: none;
+  box-shadow: 0 4px 14px var(--shadow-dropdown);
+}
+
 /* Text that is there to be read second: a hint, a count, an empty-state line.
  *
  * Seven components restated this colour and two more used the class without

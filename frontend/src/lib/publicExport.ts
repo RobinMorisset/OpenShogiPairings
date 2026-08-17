@@ -197,7 +197,11 @@ function anchorTooltips(root: HTMLElement): void {
  * Native `title` would be the zero-effort answer and was the first one, but a
  * browser shows it only after a second of hovering and in the OS's own styling,
  * which reads as "the tooltips are gone" next to the app's instant panel. This
- * is the same box (`.cell-tip`) drawn by `:hover::after` instead.
+ * is the same box drawn by `:hover::after` instead — literally the same now:
+ * the box itself is `.tip-box, .osp-tip::after` in app.css, which the export
+ * carries anyway, so the two cannot drift apart again (they had, on their
+ * width, under a comment saying they were the same). What is left here is what
+ * a pseudo-element needs and a positioned `<div>` does not.
  *
  * Appended after the app's own stylesheet so it wins on equal specificity, and
  * dropped from print, where a tooltip cannot be hovered.
@@ -209,23 +213,13 @@ const TOOLTIP_CSS = `
   content: attr(data-tip);
   display: none;
   position: absolute;
-  z-index: 1000;
   top: 100%;
   left: 50%;
   transform: translateX(-50%);
   width: max-content;
-  max-width: min(21rem, 60vw);
-  padding: 0.35rem 0.55rem;
-  border-radius: 0.4rem;
-  background: var(--text);
-  color: var(--bg-surface);
-  font-size: 0.78rem;
+  /* The cell it hangs off may be a bold, centred header. */
   font-weight: 400;
-  line-height: 1.4;
   text-align: left;
-  white-space: pre-line;
-  pointer-events: none;
-  box-shadow: 0 4px 14px var(--shadow-dropdown);
 }
 .osp-tip.osp-tip-start::after { left: 0; transform: none; }
 .osp-tip.osp-tip-end::after { left: auto; right: 0; transform: none; }

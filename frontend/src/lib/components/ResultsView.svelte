@@ -1239,7 +1239,7 @@
 
 {#if tip}
   <div
-    class="cell-tip print-hide"
+    class="cell-tip tip-box print-hide"
     style="left: {tip.x}px; top: {tip.y}px; transform: translateY({tip.below
       ? '18px'
       : 'calc(-100% - 14px)'});"
@@ -1645,19 +1645,11 @@
   table.teamed tbody tr.cat-highlight {
     background: var(--bg-hover-strong);
   }
+  /* The box is `.tip-box` in app.css, shared with the static export's
+     hover-only version of the same panel. All this adds is that here it is a
+     real element, placed under the cursor by the script above. */
   .cell-tip {
     position: fixed;
-    z-index: 1000;
-    max-width: 340px;
-    padding: 0.35rem 0.55rem;
-    border-radius: 0.4rem;
-    background: var(--text);
-    color: var(--bg-surface);
-    font-size: 0.78rem;
-    line-height: 1.4;
-    white-space: pre-line;
-    pointer-events: none;
-    box-shadow: 0 4px 14px var(--shadow-dropdown);
   }
   /* Sits above the table, so the gap goes below it. */
   .note {
