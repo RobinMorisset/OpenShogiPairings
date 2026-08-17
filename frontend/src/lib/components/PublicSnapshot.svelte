@@ -30,6 +30,7 @@
   import ContentCard from "./ContentCard.svelte";
   import PageShell from "./PageShell.svelte";
   import PublicSectionBody from "./PublicSectionBody.svelte";
+  import TabStrip from "./TabStrip.svelte";
 
   interface Props {
     view: PublicTournamentResponse;
@@ -61,18 +62,18 @@
   printHeader
 >
   {#if sections.length > 1}
-    <nav class="tabs">
-      {#each sections as section (sectionId(section))}
-        {#if sectionId(section) === sectionId(current)}
-          <!-- The page you are on is not a link to itself. It still looks like
-               the selected tab; it just does not offer to reload the page you
-               are already reading. -->
-          <span class="tab active" aria-current="page">{sectionLabel(section, $_)}</span>
-        {:else}
-          <a class="tab" href={sectionFile(section, slug)}>{sectionLabel(section, $_)}</a>
-        {/if}
-      {/each}
-    </nav>
+    <!-- The same strip the live page renders, given files instead of a click
+         handler — it is what makes these tabs links, and the only thing that
+         does. The reader should not be able to tell that one is a script and
+         the other a directory of files. -->
+    <TabStrip
+      tabs={sections.map((section) => ({
+        id: sectionId(section),
+        label: sectionLabel(section, $_),
+        href: sectionFile(section, slug),
+      }))}
+      active={sectionId(current)}
+    />
   {/if}
 
   <ContentCard wide={sectionNeedsWideCard(current)}>
@@ -80,47 +81,9 @@
   </ContentCard>
 </PageShell>
 
-<style>
-  /* Deliberately the live page's tab styling, on anchors instead of buttons:
-     the reader should not be able to tell that one is a script and the other a
-     set of files. */
-  .tabs {
-    display: flex;
-    flex-wrap: wrap;
-    /* Wider than the live page's 0.25rem: there the tabs are buttons, which
-       the browser gives a visible box; here they are bare text, and 4px of
-       flex gap between two of those reads as one run of words. */
-    gap: 0.6rem;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 1.25rem;
-  }
-  .tab {
-    padding: 0.4rem 0.8rem;
-    border: 1px solid transparent;
-    border-bottom: none;
-    border-radius: 0.4rem 0.4rem 0 0;
-    color: var(--text-secondary);
-    text-decoration: none;
-    font: inherit;
-    margin-bottom: -1px;
-  }
-  .tab:hover:not(.active) {
-    color: var(--text);
-  }
-  .tab.active {
-    color: var(--text);
-    border-color: var(--border);
-    background: var(--bg-surface);
-  }
-  @media print {
-    /* The links are the one thing paper cannot follow. */
-    .tabs {
-      display: none;
-    }
-    /* (The card's own print reset is `ContentCard`'s. This page used to have a
-       partial copy of the card's screen rules and none of its print ones, so
-       an exported standings table wide enough to matter was cropped at the
-       edge of the sheet — in the one artifact whose whole point is being
-       printed.) */
-  }
-</style>
+<!-- No styles left: the shell, the strip and the card are components now, and
+     each brings its own — including the print rules this page used to have only
+     half of. (It carried a partial copy of the card's screen rules and none of
+     its print ones, so an exported standings table wide enough to matter was
+     cropped at the edge of the sheet — in the one artifact whose whole point is
+     being printed.) -->

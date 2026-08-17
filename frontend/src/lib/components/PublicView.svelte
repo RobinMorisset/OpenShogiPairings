@@ -22,6 +22,7 @@
   import LocaleSwitcher from "./LocaleSwitcher.svelte";
   import PageShell from "./PageShell.svelte";
   import PublicSectionBody from "./PublicSectionBody.svelte";
+  import TabStrip from "./TabStrip.svelte";
   import ThemeSwitcher from "./ThemeSwitcher.svelte";
 
   interface Props {
@@ -150,21 +151,15 @@
            only the entrant list, and a tab strip of one tab is furniture. The
            export hides its navigation on the same condition. -->
       {#if sections.length > 1}
-        <!-- `fit-width` (app.css): a tab strip's max-content is every tab on
-             one line, and only the table below may widen this card. -->
-        <div class="tabs fit-width" role="tablist">
-          {#each sections as section (sectionId(section))}
-            <button
-              type="button"
-              class="tab"
-              class:active={sectionId(section) === sectionId(activeSection)}
-              data-testid={`public-tab-${sectionId(section)}`}
-              onclick={() => (activeTab = sectionId(section))}
-            >
-              {sectionLabel(section, $_)}
-            </button>
-          {/each}
-        </div>
+        <TabStrip
+          tabs={sections.map((section) => ({
+            id: sectionId(section),
+            label: sectionLabel(section, $_),
+            testid: `public-tab-${sectionId(section)}`,
+          }))}
+          active={sectionId(activeSection)}
+          onSelect={(id) => (activeTab = id)}
+        />
       {/if}
 
       <div class="tab-content">
@@ -175,32 +170,9 @@
 </PageShell>
 
 <style>
-  .tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 1.25rem;
-  }
-  .tab {
-    padding: 0.4rem 0.8rem;
-    border: 1px solid transparent;
-    border-bottom: none;
-    border-radius: 0.4rem 0.4rem 0 0;
-    background: transparent;
-    color: var(--text-secondary);
-    font: inherit;
-    cursor: pointer;
-    margin-bottom: -1px;
-  }
-  .tab:hover:not(.active) {
-    color: var(--text);
-  }
-  .tab.active {
-    color: var(--text);
-    border-color: var(--border);
-    background: var(--bg-surface);
-  }
+  /* The shell, the card and the tab strip are components of their own, and each
+     brings its own screen and print rules. What is left is this page's two
+     messages. */
   .error-banner {
     background: var(--bg-danger);
     border: 1px solid var(--border-danger);
@@ -213,13 +185,5 @@
   .muted {
     color: var(--text-secondary);
     text-align: center;
-  }
-
-  @media print {
-    /* (The header, the footer and the column's width are `PageShell`'s to
-       reset, and the card's is `ContentCard`'s.) */
-    .tabs {
-      display: none;
-    }
   }
 </style>

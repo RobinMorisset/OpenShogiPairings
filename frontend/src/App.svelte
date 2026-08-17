@@ -63,6 +63,7 @@
   import { TournamentStore } from "./lib/tournamentStore.svelte";
   import ContentCard from "./lib/components/ContentCard.svelte";
   import PageShell from "./lib/components/PageShell.svelte";
+  import TabStrip, { type Tab } from "./lib/components/TabStrip.svelte";
   import PublicView from "./lib/components/PublicView.svelte";
   import QrCode from "./lib/components/QrCode.svelte";
   import ServerStatus from "./lib/components/ServerStatus.svelte";
@@ -156,21 +157,58 @@
   // groups by match. Declared here because the tab list below reads it.
   const teamMode = $derived(tournament?.settings.teams != null);
 
-  // The tabs in the order they're rendered below, so the arrow-key shortcuts can
-  // step through them. Kept in sync by construction with the markup order.
-  const tabOrder = $derived(
+  // The tab strip: what it shows, in the order it shows it. A list rather than
+  // markup because two other things read it — the arrow-key shortcuts below,
+  // and `TabStrip`, which the reader page and the static export render from
+  // their own lists so that a tab cannot look like one thing here and another
+  // there.
+  const tabs = $derived<Tab[]>(
     tournament
       ? [
-          "settings",
-          "players",
-          ...(teamMode ? ["teams"] : []),
-          ...(showResults ? ["results"] : []),
-          ...(showCup ? ["cup"] : []),
-          ...tournament.rounds.map((r) => `round-${r.number}`),
-          ...(tournament.draft ? ["draft"] : []),
+          { id: "settings", label: $_("app.tabSettings"), testid: "tab-settings" },
+          {
+            id: "players",
+            label: $_("app.tabPlayers", { values: { count: tournament.players.length } }),
+            testid: "tab-players",
+          },
+          ...(teamMode
+            ? [
+                {
+                  id: "teams",
+                  label: $_("app.tabTeams", { values: { count: (tournament.teams ?? []).length } }),
+                  testid: "tab-teams",
+                },
+              ]
+            : []),
+          ...(showResults
+            ? [{ id: "results", label: $_("app.tabResults"), testid: "tab-results" }]
+            : []),
+          ...(showCup ? [{ id: "cup", label: $_("app.tabCup"), testid: "tab-cup" }] : []),
+          ...tournament.rounds.map((r) => ({
+            id: `round-${r.number}`,
+            label: r.completed
+              ? $_("app.tabRoundCompleted", { values: { number: r.number } })
+              : $_("app.tabRound", { values: { number: r.number } }),
+            testid: `tab-round-${r.number}`,
+          })),
+          ...(tournament.draft
+            ? [
+                {
+                  id: "draft",
+                  label: $_("app.tabRoundDraft", { values: { number: tournament.draft.number } }),
+                  testid: "tab-draft",
+                  // The round being prepared is not one of the settled ones.
+                  accent: true,
+                },
+              ]
+            : []),
         ]
       : [],
   );
+
+  /** The tabs the arrow keys step through — the strip's own order, by
+   *  construction rather than by a second list kept in sync with it. */
+  const tabOrder = $derived(tabs.map((t) => t.id));
 
   // The suggested-handicap slice for the active round, matched by position
   // (rounds are numbered sequentially without gaps).
@@ -1116,138 +1154,65 @@
         </div>
       {/if}
 
-      <div class="tabs fit-width" role="tablist">
-        <button
-          type="button"
-          class="tab"
-          class:active={activeTab === "settings"}
-          data-testid="tab-settings"
-          onclick={() => (activeTab = "settings")}
-        >
-          {$_("app.tabSettings")}
-        </button>
-        <button
-          type="button"
-          class="tab"
-          class:active={activeTab === "players"}
-          data-testid="tab-players"
-          onclick={() => (activeTab = "players")}
-        >
-          {$_("app.tabPlayers", { values: { count: tournament.players.length } })}
-        </button>
-        {#if teamMode}
-          <button
-            type="button"
-            class="tab"
-            class:active={activeTab === "teams"}
-            data-testid="tab-teams"
-            onclick={() => (activeTab = "teams")}
-          >
-            {$_("app.tabTeams", { values: { count: (tournament.teams ?? []).length } })}
-          </button>
-        {/if}
-        {#if showResults}
-          <button
-            type="button"
-            class="tab"
-            class:active={activeTab === "results"}
-            data-testid="tab-results"
-            onclick={() => (activeTab = "results")}
-          >
-            {$_("app.tabResults")}
-          </button>
-        {/if}
-        {#if showCup}
-          <button
-            type="button"
-            class="tab"
-            class:active={activeTab === "cup"}
-            data-testid="tab-cup"
-            onclick={() => (activeTab = "cup")}
-          >
-            {$_("app.tabCup")}
-          </button>
-        {/if}
-        {#each tournament.rounds as round (round.number)}
-          <button
-            type="button"
-            class="tab"
-            class:active={activeTab === `round-${round.number}`}
-            data-testid={`tab-round-${round.number}`}
-            onclick={() => (activeTab = `round-${round.number}`)}
-          >
-            {round.completed
-              ? $_("app.tabRoundCompleted", { values: { number: round.number } })
-              : $_("app.tabRound", { values: { number: round.number } })}
-          </button>
-        {/each}
-        {#if tournament.draft}
-          <button
-            type="button"
-            class="tab draft-tab"
-            class:active={activeTab === "draft"}
-            data-testid="tab-draft"
-            onclick={() => (activeTab = "draft")}
-          >
-            {$_("app.tabRoundDraft", { values: { number: tournament.draft.number } })}
-          </button>
-        {/if}
-        <div class="round-controls">
-          {#if phase === "registration" && cupEnabled}
-            <label class="cup-size" title={$_("app.cupTitle")}>
-              {$_("app.cupLabel")}
-              {#if validCupSizes.length > 0}
-                <select class="control-lg" bind:value={cupSizeChoice} disabled={busy}>
-                  {#each validCupSizes as s (s)}
-                    <option value={s}>
-                      {$_(
-                        cupFormat === "qualifier"
-                          ? "app.cupSizeOptionQualifier"
-                          : "app.cupSizeOption",
-                        { values: { size: s, field: cupFieldSize(s) } },
-                      )}
-                    </option>
-                  {/each}
-                </select>
-              {:else}
-                <span class="cup-warn">
-                  {$_("app.cupNeedMoreEligible", { values: { needed: cupFieldSize(8) } })}
-                </span>
-              {/if}
-            </label>
-          {/if}
-          <button
-            type="button"
-            class="ctrl control-lg primary"
-            data-testid="prepare-round"
-            onclick={handlePrepareRound}
-            disabled={!startEnabled}
-            title={startTitle}
-          >
-            {$_("app.prepareRound", { values: { number: nextRoundNumber } })}
-          </button>
-          <button
-            type="button"
-            class="ctrl control-lg"
-            data-testid="export-grid"
-            onclick={handleExportGrid}
-            disabled={!exportEnabled}
-            title={exportTitle}
-          >
-            {$_("app.exportGrid")}
-          </button>
-          <button
-            type="button"
-            class="ctrl control-lg danger"
-            data-testid="cancel-round"
-            onclick={handleCancelRound}
-            disabled={!canCancel}
-            title={cancelTitle}
-          >
-            {$_("app.cancelLastRound")}
-          </button>
-        </div>
-      </div>
+      <TabStrip {tabs} active={activeTab} onSelect={(id) => (activeTab = id)}>
+        {#snippet trailing()}
+          <div class="round-controls">
+            {#if phase === "registration" && cupEnabled}
+              <label class="cup-size" title={$_("app.cupTitle")}>
+                {$_("app.cupLabel")}
+                {#if validCupSizes.length > 0}
+                  <select class="control-lg" bind:value={cupSizeChoice} disabled={busy}>
+                    {#each validCupSizes as s (s)}
+                      <option value={s}>
+                        {$_(
+                          cupFormat === "qualifier"
+                            ? "app.cupSizeOptionQualifier"
+                            : "app.cupSizeOption",
+                          { values: { size: s, field: cupFieldSize(s) } },
+                        )}
+                      </option>
+                    {/each}
+                  </select>
+                {:else}
+                  <span class="cup-warn">
+                    {$_("app.cupNeedMoreEligible", { values: { needed: cupFieldSize(8) } })}
+                  </span>
+                {/if}
+              </label>
+            {/if}
+            <button
+              type="button"
+              class="ctrl control-lg primary"
+              data-testid="prepare-round"
+              onclick={handlePrepareRound}
+              disabled={!startEnabled}
+              title={startTitle}
+            >
+              {$_("app.prepareRound", { values: { number: nextRoundNumber } })}
+            </button>
+            <button
+              type="button"
+              class="ctrl control-lg"
+              data-testid="export-grid"
+              onclick={handleExportGrid}
+              disabled={!exportEnabled}
+              title={exportTitle}
+            >
+              {$_("app.exportGrid")}
+            </button>
+            <button
+              type="button"
+              class="ctrl control-lg danger"
+              data-testid="cancel-round"
+              onclick={handleCancelRound}
+              disabled={!canCancel}
+              title={cancelTitle}
+            >
+              {$_("app.cancelLastRound")}
+            </button>
+          </div>
+        {/snippet}
+      </TabStrip>
 
       <div class="tab-content">
         {#if activeTab === "settings"}
@@ -1575,36 +1540,8 @@
     color: var(--text-on-danger);
   }
 
-  .tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 1.25rem;
-  }
-  .tab {
-    padding: 0.4rem 0.8rem;
-    border: 1px solid transparent;
-    border-bottom: none;
-    border-radius: 0.4rem 0.4rem 0 0;
-    background: transparent;
-    color: var(--text-secondary);
-    font: inherit;
-    cursor: pointer;
-    margin-bottom: -1px;
-  }
-  .tab:hover:not(:disabled):not(.active) {
-    color: var(--text);
-  }
-  .tab.active {
-    color: var(--text);
-    border-color: var(--border);
-    background: var(--bg-surface);
-  }
-  .tab.draft-tab {
-    font-style: italic;
-    color: var(--color-accent);
-  }
+  /* On the strip's line, at its right end. The strip itself — and how a tab
+     looks — is `TabStrip`'s. */
   .round-controls {
     margin-left: auto;
     display: flex;
@@ -1710,8 +1647,9 @@
   }
 
   /* The header, the footer and the column's own width are `PageShell`'s, and so
-     is their print reset; the card's is `ContentCard`'s and `.fit-width`'s is
-     app.css's. What is left here is this app's own furniture.
+     is their print reset; the card's is `ContentCard`'s, the tab strip's is
+     `TabStrip`'s (which takes the round controls inside it with it), and
+     `.fit-width`'s is app.css's. What is left here is this app's own furniture.
 
      The `.app` in the selectors below is the shell's element rather than this
      component's, so it takes a `:global()` to name — Svelte scopes a selector
@@ -1720,8 +1658,6 @@
      markup. */
   @media print {
     .toolbar,
-    .tabs,
-    .round-controls,
     .print-hide {
       display: none;
     }
