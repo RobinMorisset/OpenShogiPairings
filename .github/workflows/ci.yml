@@ -50,6 +50,28 @@ jobs:
         run: cargo doc --workspace --no-deps --document-private-items --locked
       - name: Test
         run: cargo test --workspace --locked
+      # The tests above are what write frontend/src/lib/generated/, so this costs
+      # a `git diff` and nothing else — those files were rewritten seconds ago by
+      # the run that just finished.
+      #   Until now this lived only in the pre-push hook, which is opt-in per
+      #   clone (`git config core.hooksPath`, see the README) and skippable with
+      #   --no-verify. Nothing here caught the drift: clippy does not regenerate,
+      #   and the frontend job type-checks a fresh checkout against the
+      #   *committed* bindings — so a stale copy stays green while the wire format
+      #   and the TypeScript types disagree, and the mismatch surfaces at runtime
+      #   instead.
+      #   `--others` as well as the diff: a newly exported type writes a file git
+      #   has never seen, which `git diff` alone would not report.
+      - name: ts-rs bindings up to date
+        run: |
+          untracked=$(git ls-files --others --exclude-standard -- frontend/src/lib/generated)
+          if ! git diff --quiet -- frontend/src/lib/generated || [ -n "$untracked" ]; then
+            echo "::error file=frontend/src/lib/generated::A Rust type changed without its TypeScript binding following. Run 'cargo test --workspace' and commit frontend/src/lib/generated/."
+            git --no-pager diff -- frontend/src/lib/generated
+            for f in $untracked; do echo "new, uncommitted binding: $f"; done
+            exit 1
+          fi
+          echo "bindings match the committed files"
 
   # The declared MSRV is real: build the workspace on exactly the toolchain
   # `rust-version` in Cargo.toml names. Every other Rust job here runs `stable`,
@@ -104,9 +126,15 @@ jobs:
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
-      - name: Type-check (svelte-check)
+      # `build`, not `check`: the former is `svelte-check && vite build`, so this
+      # is a superset of the type-check for ~2s more. Without it nothing here
+      # ever bundles, and a failure that type-checks but does not build — an
+      # unresolvable dynamic import, a rollup or plugin error — waits until
+      # someone cuts a release tag, since tauri.conf.json's beforeBuildCommand is
+      # this same `npm run build`. That is the worst moment to find out.
+      - name: Type-check and build (svelte-check, vite)
         working-directory: frontend
-        run: npm run check
+        run: npm run build
       - name: Lint (eslint)
         working-directory: frontend
         run: npm run lint

@@ -14,10 +14,13 @@ echo "== ts-rs bindings up to date =="
 #   means building the test binaries: ~10s on a touched core file, almost all of
 #   it compiling the ~4k lines of #[cfg(test)] code in osp-core and osp-server
 #   that clippy only ever type-checks. By this point they are already built.
-#   Nothing else catches the drift. Clippy does not regenerate; a Rust-only
-#   commit stages no frontend file, so pre-commit's frontend block is skipped;
-#   and CI type-checks a fresh checkout against the *committed* bindings, so a
-#   stale copy stays green while the wire format and the TS types disagree.
+#   CI runs this same check now (the `rust` job, straight after its test step);
+#   it stays here too, for feedback before the push rather than minutes after
+#   it. Nothing *else* catches the drift, which is why it needs to be in both:
+#   clippy does not regenerate; a Rust-only commit stages no frontend file, so
+#   pre-commit's frontend block is skipped; and CI's frontend job type-checks a
+#   fresh checkout against the *committed* bindings, so a stale copy would sail
+#   through green while the wire format and the TS types disagree.
 #   `--others` as well as the diff: a newly exported type writes a file git has
 #   never seen, which `git diff` alone would not report.
 if ! git diff --quiet -- frontend/src/lib/generated ||
