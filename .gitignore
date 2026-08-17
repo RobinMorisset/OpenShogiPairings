@@ -13,6 +13,12 @@ frontend/.vite/
 frontend/src-tauri/target/
 frontend/src-tauri/gen/
 
+# Per-checkout dev server state, written by scripts/dev-worktree.mjs: the
+# tournaments and backups of a scratch worktree, kept inside it rather than in
+# the per-user directory the real app uses, so a second server cannot list (or
+# overwrite) the first one's data.
+.dev-data/
+
 # Claude Code runtime artifacts. launch.json is machine-specific (absolute
 # paths to node/cargo vary per dev machine and the preview tool's spawn
 # environment doesn't inherit shell PATH customizations), so each developer
