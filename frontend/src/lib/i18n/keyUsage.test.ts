@@ -20,7 +20,7 @@ import CONNECTION_SRC from "../components/ConnectionStatus.svelte?raw";
 import RULE_ID_SRC from "../generated/RuleId.ts?raw";
 import SCOPE_REASON_SRC from "../generated/ScopeReason.ts?raw";
 import SITOUT_VALUE_SRC from "../generated/SitoutValue.ts?raw";
-import UNDO_CODE_SRC from "../generated/UndoCode.ts?raw";
+import CHANGE_CODE_SRC from "../generated/ChangeCode.ts?raw";
 import { TRANSLATED_LABELS as TRANSLATED_TIEBREAK_LABELS } from "../tiebreaks";
 import { TIEBREAKS } from "../types";
 import en from "./locales/en.json";
@@ -100,8 +100,12 @@ const DYNAMIC_SITES: { site: string; keys: string[] }[] = [
     keys: connectionStatusKeys(),
   },
   {
-    site: "App.svelte undoTitle() — one per UndoCode (generated from Rust)",
-    keys: unionMembers(UNDO_CODE_SRC, "UndoCode").map((c) => `undo.${c}`),
+    site: "App.svelte undoTitle() — one per ChangeCode (generated from Rust)",
+    keys: unionMembers(CHANGE_CODE_SRC, "ChangeCode").map((c) => `undo.${c}`),
+  },
+  {
+    site: "App.svelte redoTitle() — the same codes, worded the other way round",
+    keys: unionMembers(CHANGE_CODE_SRC, "ChangeCode").map((c) => `redo.${c}`),
   },
 ];
 

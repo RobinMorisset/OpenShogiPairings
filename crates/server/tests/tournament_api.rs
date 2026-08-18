@@ -378,6 +378,84 @@ async fn edit_then_undo_reverts_step_by_step() {
 }
 
 #[tokio::test]
+async fn redo_puts_back_what_undo_took_away() {
+    let state = AppState::default();
+    let id = create(&state, "Cup").await;
+    send(
+        router(state.clone()),
+        json_req(
+            "POST",
+            &t(id, "/players"),
+            json!({ "last_name": "Alpha", "first_name": "Ann" }),
+        ),
+    )
+    .await;
+
+    // Nothing has been undone, so there is nothing to redo...
+    let (_, body) = send(router(state.clone()), get(&t(id, ""))).await;
+    assert!(body["redo_label"].is_null());
+    let (status, body) = send(router(state.clone()), post_empty(&t(id, "/redo"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("nothing left to redo"),
+        "{body}"
+    );
+
+    // ...until an undo, which hands the registration to the redo button — named,
+    // so the button can say whose registration it would put back.
+    let (_, body) = send(router(state.clone()), post_empty(&t(id, "/undo"))).await;
+    assert!(body["tournament"]["players"].as_array().unwrap().is_empty());
+    assert!(body["undo_label"].is_null());
+    assert_eq!(body["redo_label"]["code"], "register_player");
+    assert_eq!(body["redo_label"]["values"]["name"], "Alpha Ann");
+
+    let (status, body) = send(router(state.clone()), post_empty(&t(id, "/redo"))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["tournament"]["players"][0]["last_name"], "Alpha");
+    // And the two labels have swapped sides.
+    assert_eq!(body["undo_label"]["code"], "register_player");
+    assert!(body["redo_label"].is_null());
+}
+
+#[tokio::test]
+async fn a_new_edit_drops_the_redo_offer() {
+    let state = AppState::default();
+    let id = create(&state, "Cup").await;
+    for name in ["Alpha", "Beta"] {
+        send(
+            router(state.clone()),
+            json_req("POST", &t(id, "/players"), json!({ "last_name": name })),
+        )
+        .await;
+    }
+    send(router(state.clone()), post_empty(&t(id, "/undo"))).await;
+
+    // Editing from here forks the history: Beta's registration is no longer
+    // reachable, so the server must stop offering to put it back rather than
+    // splice in a tournament that never had Gamma.
+    let (_, body) = send(
+        router(state.clone()),
+        json_req("POST", &t(id, "/players"), json!({ "last_name": "Gamma" })),
+    )
+    .await;
+    assert!(body["redo_label"].is_null());
+
+    let (status, _) = send(router(state.clone()), post_empty(&t(id, "/redo"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (_, body) = send(router(state.clone()), get(&t(id, ""))).await;
+    let names: Vec<&str> = body["tournament"]["players"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["last_name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["Alpha", "Gamma"]);
+}
+
+#[tokio::test]
 async fn start_round_pairs_current_players() {
     let state = AppState::default();
     let id = create(&state, "Cup").await;

@@ -9,13 +9,13 @@
 //!
 //! So every mutation carries a label onto the stack, and the current top of it
 //! rides along in every [`TournamentView`](crate::tournament::TournamentView).
-//! The label is a stable machine [`UndoCode`] plus language-neutral
+//! The label is a stable machine [`ChangeCode`] plus language-neutral
 //! interpolation `values`, the same shape errors and blocked reasons already
 //! travel in: the wording is the client's business, the decision about *what
 //! happened* is the server's — the frontend cannot re-derive it, because by the
 //! time it asks, the change has already been folded into the tournament.
 //!
-//! A code is part of the API contract. `keyUsage.test.ts` expands [`UndoCode`]'s
+//! A code is part of the API contract. `keyUsage.test.ts` expands [`ChangeCode`]'s
 //! generated TypeScript union into the `undo.*` keys the catalogues must define,
 //! so a variant added here without nine translations fails the frontend build
 //! naming itself.
@@ -30,8 +30,8 @@ use uuid::Uuid;
 /// its interpolation values.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
-pub(crate) struct UndoLabel {
-    pub(crate) code: UndoCode,
+pub(crate) struct ChangeLabel {
+    pub(crate) code: ChangeCode,
     /// Language-neutral interpolation values, empty for a label that needs none
     /// — always present on the wire, like [`BlockedReason`](crate::tournament)'s,
     /// so the client has one shape to render rather than two.
@@ -50,7 +50,7 @@ pub(crate) struct UndoLabel {
 #[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[ts(rename_all = "snake_case")]
-pub(crate) enum UndoCode {
+pub(crate) enum ChangeCode {
     /// A tournament settings change.
     Settings,
     /// The last round (or the open draft) was cancelled.
@@ -95,9 +95,9 @@ pub(crate) enum UndoCode {
     EditTeam,
 }
 
-impl UndoLabel {
+impl ChangeLabel {
     /// A label with no interpolation values.
-    fn bare(code: UndoCode) -> Self {
+    fn bare(code: ChangeCode) -> Self {
         Self {
             code,
             values: BTreeMap::new(),
@@ -106,7 +106,7 @@ impl UndoLabel {
 
     /// A label carrying interpolation values. Values must be language-neutral
     /// (a name, a number); the catalogues put them into the translated phrase.
-    fn with(code: UndoCode, values: impl IntoIterator<Item = (&'static str, String)>) -> Self {
+    fn with(code: ChangeCode, values: impl IntoIterator<Item = (&'static str, String)>) -> Self {
         Self {
             code,
             values: values
@@ -117,40 +117,40 @@ impl UndoLabel {
     }
 
     pub(crate) fn settings() -> Self {
-        Self::bare(UndoCode::Settings)
+        Self::bare(ChangeCode::Settings)
     }
 
     pub(crate) fn cancel_round() -> Self {
-        Self::bare(UndoCode::CancelRound)
+        Self::bare(ChangeCode::CancelRound)
     }
 
     pub(crate) fn prepare_round(round: u32) -> Self {
-        Self::with(UndoCode::PrepareRound, [("round", round.to_string())])
+        Self::with(ChangeCode::PrepareRound, [("round", round.to_string())])
     }
 
     pub(crate) fn edit_draft(round: u32) -> Self {
-        Self::with(UndoCode::EditDraft, [("round", round.to_string())])
+        Self::with(ChangeCode::EditDraft, [("round", round.to_string())])
     }
 
     pub(crate) fn start_round(round: u32) -> Self {
-        Self::with(UndoCode::StartRound, [("round", round.to_string())])
+        Self::with(ChangeCode::StartRound, [("round", round.to_string())])
     }
 
     pub(crate) fn force_pairing(round: u32) -> Self {
-        Self::with(UndoCode::ForcePairing, [("round", round.to_string())])
+        Self::with(ChangeCode::ForcePairing, [("round", round.to_string())])
     }
 
     pub(crate) fn board_result(round: u32, board_index: usize) -> Self {
-        Self::board(UndoCode::BoardResult, round, board_index)
+        Self::board(ChangeCode::BoardResult, round, board_index)
     }
 
     pub(crate) fn board_handicap(round: u32, board_index: usize) -> Self {
-        Self::board(UndoCode::BoardHandicap, round, board_index)
+        Self::board(ChangeCode::BoardHandicap, round, board_index)
     }
 
     /// The two board-level labels, which name the board the way the round view
     /// does: numbered from 1, not indexed from 0.
-    fn board(code: UndoCode, round: u32, board_index: usize) -> Self {
+    fn board(code: ChangeCode, round: u32, board_index: usize) -> Self {
         Self::with(
             code,
             [
@@ -161,14 +161,14 @@ impl UndoLabel {
     }
 
     pub(crate) fn sitout_value(round: u32) -> Self {
-        Self::with(UndoCode::SitoutValue, [("round", round.to_string())])
+        Self::with(ChangeCode::SitoutValue, [("round", round.to_string())])
     }
 
     /// Named from the request rather than from the tournament, since the player
     /// this is about does not exist there yet.
     pub(crate) fn register_player(new: &NewPlayer) -> Self {
         Self::named(
-            UndoCode::RegisterPlayer,
+            ChangeCode::RegisterPlayer,
             format!(
                 "{} {}",
                 new.last_name,
@@ -184,45 +184,45 @@ impl UndoLabel {
     /// somebody not already in the tournament, and how many that was is known
     /// after the mutation, not before it — where the label has to be built.
     pub(crate) fn import_players() -> Self {
-        Self::bare(UndoCode::ImportPlayers)
+        Self::bare(ChangeCode::ImportPlayers)
     }
 
     pub(crate) fn edit_player(tournament: Option<&Tournament>, player: Uuid) -> Self {
-        Self::named(UndoCode::EditPlayer, player_name(tournament, player))
+        Self::named(ChangeCode::EditPlayer, player_name(tournament, player))
     }
 
     pub(crate) fn edit_players() -> Self {
-        Self::bare(UndoCode::EditPlayers)
+        Self::bare(ChangeCode::EditPlayers)
     }
 
     pub(crate) fn remove_player(tournament: Option<&Tournament>, player: Uuid) -> Self {
-        Self::named(UndoCode::RemovePlayer, player_name(tournament, player))
+        Self::named(ChangeCode::RemovePlayer, player_name(tournament, player))
     }
 
     /// The point adjustment label, for a player or a whole team — the referee
     /// reads "the point adjustment for X" the same way either way, so the two
     /// share a code and differ only in whose name is interpolated.
     pub(crate) fn adjust_points(name: String) -> Self {
-        Self::named(UndoCode::AdjustPoints, name)
+        Self::named(ChangeCode::AdjustPoints, name)
     }
 
     pub(crate) fn add_team(name: &str) -> Self {
-        Self::named(UndoCode::AddTeam, name.to_string())
+        Self::named(ChangeCode::AddTeam, name.to_string())
     }
 
     pub(crate) fn rename_team(tournament: Option<&Tournament>, team: Uuid) -> Self {
-        Self::named(UndoCode::RenameTeam, team_name(tournament, team))
+        Self::named(ChangeCode::RenameTeam, team_name(tournament, team))
     }
 
     pub(crate) fn remove_team(tournament: Option<&Tournament>, team: Uuid) -> Self {
-        Self::named(UndoCode::RemoveTeam, team_name(tournament, team))
+        Self::named(ChangeCode::RemoveTeam, team_name(tournament, team))
     }
 
     pub(crate) fn edit_team(tournament: Option<&Tournament>, team: Uuid) -> Self {
-        Self::named(UndoCode::EditTeam, team_name(tournament, team))
+        Self::named(ChangeCode::EditTeam, team_name(tournament, team))
     }
 
-    fn named(code: UndoCode, name: String) -> Self {
+    fn named(code: ChangeCode, name: String) -> Self {
         Self::with(code, [("name", name)])
     }
 }
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn a_board_is_named_from_one_like_the_round_view() {
-        let label = UndoLabel::board_result(2, 0);
+        let label = ChangeLabel::board_result(2, 0);
         assert_eq!(label.values.get("round").map(String::as_str), Some("2"));
         assert_eq!(label.values.get("board").map(String::as_str), Some("1"));
     }

@@ -266,6 +266,7 @@ async fn the_public_page_needs_no_password_but_grants_no_writes() {
         ("GET", format!("/publication?k={key}")),
         ("POST", format!("/players?k={key}")),
         ("POST", format!("/undo?k={key}")),
+        ("POST", format!("/redo?k={key}")),
     ] {
         let (status, _) = send(
             router(state.clone()),
@@ -316,6 +317,7 @@ async fn a_passwordless_tournament_on_an_admin_host_is_not_writable_by_strangers
         ("GET", ""),
         ("POST", "/players"),
         ("POST", "/undo"),
+        ("POST", "/redo"),
         ("PUT", "/publication"),
         ("DELETE", ""),
     ] {

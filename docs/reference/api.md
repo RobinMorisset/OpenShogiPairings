@@ -34,6 +34,7 @@ instead — see [public read-only access](architecture.md#public-read-only-acces
 | `GET /` | Fetch the tournament (`TournamentView`; 404 if unknown). |
 | `DELETE /` | Delete the tournament: its registry entry and its persisted file. Its backups are kept (see `GET /api/tournaments/deleted`), so this is recoverable. Gated by *this tournament's* token, like the rest of this table — deleting one is not an admin capability, unlike creating one. |
 | `POST /undo` | Revert the last change (server-side undo history). `409` when there is nothing left to undo — a caller whose view is current cannot reach that (everything which empties the history bumps the version), so it means the request was built from a stale one. |
+| `POST /redo` | Re-apply the change the last `/undo` took back, on the same terms. Any mutation discards what was undone, so a redo offered a moment ago can legitimately be gone — the `409` is the same answer as above. |
 | `GET /american-grid` | Export the cross-table (American Grid) as `text/plain` for an ELO update: a header carrying the tournament's name, place, dates and time control, then one row per player in final-rank order, opponents referenced by final rank, drawn games as `=`. |
 | `PUT /settings` | Replace the whole `TournamentSettings`. Its shape is nested: `pairing` is a tagged union — either `{ "kind": "swiss", "floater_style": "classic"｜"median", "macmahon": { "thresholds": [ { "criterion": { "kind": "elo", "value": 1200 }, "drops_after_round"?: 3 }, { "criterion": { "kind": "grade", "grade": { "kind": "dan"｜"kyu", "level": 1 } } } ], "source": { "kind": "static" } }, "airtight_groups"?: 2, "club_protection": { "kind": "on", "rounds"?: 3, "exempt_clubs"?: ["Paris"] }, "nationality_protection": { "kind": "on", "rounds"?: 3, "exempt_nationalities"?: ["JP"] } }` or `{ "kind": "elo", "estimator": { … } }` for the experimental pure-ELO pairing mode. Alongside `pairing`, the top level carries `cup_enabled`, `cup_format` (`"direct"`｜`"qualifier"` — see the hybrid-cup section above; only consulted when `cup_enabled`), `long_boards_enabled`, `handicap_policy` (`{ "kind": "none" }｜{ "kind": "enabled", "display": …, "wiel_rule"?: false }`), `half_point_absences`, `tiebreaks` (an ordered array, e.g. `["points","sos_m",…]`), and `categories` (referee-defined player categories, an array of `{ "id", "name" }`; blank-named entries are dropped on normalization). Notes: a threshold's `criterion` mixes ELO and grade freely (each counted independently) and `drops_after_round` makes it a degressive threshold; `airtight_groups`, if set, forbids pairing across MacMahon groups during rounds `1..=n`; `club_protection` is `{ "kind": "off" }` or `{ "kind": "on", … }`, and `nationality_protection` is the same shape one rule tier weaker (its exempt list is `exempt_nationalities`); both default to off and are omitted from the response when off; `macmahon.source` is `{ "kind": "static" }` or `{ "kind": "from_estimate", "estimator": { … } }` (estimate-based MacMahon). The `estimator` knobs are described in [`docs/archive/elo-pairing-mode.md`](../archive/elo-pairing-mode.md). |
 | `POST /cancel-round` | Cancel the last round — discards the open draft if one is being prepared, otherwise removes the most recent round (undoable). |
@@ -83,11 +84,11 @@ Clients pull the list once and filter locally.
 Known limitations and future work are tracked in [TODO.md](../../TODO.md).
 
 Every mutating endpoint returns the full updated `TournamentView`. Its
-`undo_label` — `{ code, values }`, absent when there is nothing to undo — says
-what `POST /undo` would revert, so the button can name somebody else's change
-rather than only offering to take it back; the codes are the `UndoCode` enum in
-`crates/server/src/undo.rs`, and the client localizes them under `undo.*`.
-Save/load is
+`undo_label` and `redo_label` — `{ code, values }`, absent when there is nothing
+in that direction — say what `POST /undo` and `POST /redo` would do, so the
+buttons can name somebody else's change rather than only offering to move it;
+the codes are the `ChangeCode` enum in `crates/server/src/history.rs`, and the
+client localizes them under `undo.*` and `redo.*`. Save/load is
 platform-aware: in the **Tauri** desktop app it uses native OS file dialogs (the
 `dialog` plugin plus small `read_text_file`/`write_text_file` commands), and in
 the browser it falls back to a JSON download / file-picker upload. Either way a

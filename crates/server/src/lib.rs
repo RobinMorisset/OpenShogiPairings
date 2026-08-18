@@ -32,6 +32,7 @@ mod auth;
 mod backup;
 mod error;
 mod error_codes;
+mod history;
 mod live;
 mod public;
 mod ratings;
@@ -40,7 +41,6 @@ mod save;
 mod scope;
 mod state;
 mod tournament;
-mod undo;
 
 pub use auth::AuthConfig;
 // Everything [`AppState`] hands back — the registry and its instances, a store
@@ -50,8 +50,8 @@ pub use auth::AuthConfig;
 // type down.
 pub use ratings::CachedRatings;
 pub use state::{
-    AppState, MutateError, NoSuchTournament, NothingToUndo, TournamentInstance, TournamentProblem,
-    TournamentRegistry, TournamentStore, TournamentSummary,
+    AppState, Direction, MutateError, NoSuchTournament, NothingLeft, TournamentInstance,
+    TournamentProblem, TournamentRegistry, TournamentStore, TournamentSummary,
 };
 
 use std::path::PathBuf;

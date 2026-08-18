@@ -31,6 +31,7 @@
     setPlayerCategory,
     setSitoutValue,
     setTeamSitoutValue,
+    redoTournament,
     undoTournament,
     updateDraft,
     updateSettings,
@@ -50,8 +51,8 @@
     RatedPlayer,
     SitoutValue,
     TournamentResponse,
+    ChangeLabel,
     TournamentSettings,
-    UndoLabel,
     Winner,
   } from "./lib/types";
   import { saveAmericanGrid, saveTournament } from "./lib/tournamentFile";
@@ -101,22 +102,31 @@
   const suggestedHandicaps = $derived(store.suggestedHandicaps);
   const effectiveWinners = $derived(store.effectiveWinners);
   const undoLabel = $derived(store.undoLabel);
+  const redoLabel = $derived(store.redoLabel);
   const canUndo = $derived(undoLabel !== null);
-  /** The Undo shortcut, spelled the way this platform spells it. Presentation
-   *  only — `handleKeydown` takes Ctrl and Cmd everywhere. */
+  const canRedo = $derived(redoLabel !== null);
+  /** The two shortcuts, spelled the way this platform spells them.
+   *  Presentation only — `handleKeydown` also takes Ctrl+Y off macOS, which is
+   *  left unadvertised: showing the Shift+Z spelling next to the Undo button's
+   *  Ctrl+Z lets a referee guess one from the other, while Windows muscle
+   *  memory still works silently. */
   const undoShortcut = isMac() ? "⌘Z" : "Ctrl+Z";
-  /** What the Undo button says it would take back, and how to reach it from the
-   *  keyboard — the server names the change (see `crates/server/src/undo.rs`),
-   *  the catalogues word it. Falls back to the generic wording when there is
-   *  nothing to undo, which is also when the button is disabled; the shortcut
-   *  rides along either way, since that is the half a referee is here to learn. */
-  function undoTitle(label: UndoLabel | null): string {
+  const redoShortcut = isMac() ? "⇧⌘Z" : "Ctrl+Shift+Z";
+  /** What a history button says it would do, and how to reach it from the
+   *  keyboard — the server names the change (see `crates/server/src/history.rs`),
+   *  the catalogues word it in both directions. Falls back to the generic
+   *  wording when there is nothing that way, which is also when the button is
+   *  disabled; the shortcut rides along either way, since that is the half a
+   *  referee is here to learn. */
+  function stepTitle(
+    label: ChangeLabel | null,
+    direction: "undo" | "redo",
+    shortcut: string,
+  ): string {
     const action = label
-      ? $_(`undo.${label.code}`, { values: label.values })
-      : $_("app.undoTitle");
-    return $_("app.undoTitleShortcut", {
-      values: { action, shortcut: undoShortcut },
-    });
+      ? $_(`${direction}.${label.code}`, { values: label.values })
+      : $_(direction === "undo" ? "app.undoTitle" : "app.redoTitle");
+    return $_("app.actionWithShortcut", { values: { action, shortcut } });
   }
   const hasUnsavedChanges = $derived(store.hasUnsavedChanges);
   const persisted = $derived(store.persisted);
@@ -698,6 +708,12 @@
     });
   }
 
+  function handleRedo() {
+    run(async () => {
+      apply(await redoTournament());
+    });
+  }
+
   // Keyboard shortcuts. Skipped while typing in a field so we don't clobber the
   // browser's native caret movement (arrows) or per-field undo (Ctrl/Cmd+Z).
   function handleKeydown(e: KeyboardEvent) {
@@ -709,11 +725,26 @@
         target.tagName === "TEXTAREA" ||
         target.tagName === "SELECT");
 
+    const key = e.key.toLowerCase();
+
     // Ctrl/Cmd+Z → undo the last tournament change.
-    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z") {
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && key === "z") {
       if (typing) return;
       e.preventDefault();
       if (canUndo && !busy) handleUndo();
+      return;
+    }
+
+    // Ctrl/Cmd+Shift+Z — or Ctrl+Y, which is what Windows reaches for — → redo.
+    // Ctrl+Y is deliberately not bound on macOS: there it is readline's yank,
+    // which every text field on the platform already answers to.
+    if (
+      ((e.metaKey || e.ctrlKey) && e.shiftKey && key === "z") ||
+      (e.ctrlKey && !e.metaKey && !isMac() && key === "y")
+    ) {
+      if (typing) return;
+      e.preventDefault();
+      if (canRedo && !busy) handleRedo();
       return;
     }
 
@@ -965,9 +996,19 @@
             data-testid="undo"
             onclick={handleUndo}
             disabled={busy || !canUndo}
-            title={undoTitle(undoLabel)}
+            title={stepTitle(undoLabel, "undo", undoShortcut)}
           >
             {$_("app.undo")}
+          </button>
+          <button
+            type="button"
+            class="ghost control-lg"
+            data-testid="redo"
+            onclick={handleRedo}
+            disabled={busy || !canRedo}
+            title={stepTitle(redoLabel, "redo", redoShortcut)}
+          >
+            {$_("app.redo")}
           </button>
           <button
             type="button"

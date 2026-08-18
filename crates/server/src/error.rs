@@ -12,7 +12,7 @@ use osp_core::{CsvImportError, TournamentError};
 use serde::Serialize;
 
 use crate::error_codes::LOCALIZED_ERROR_CODES;
-use crate::state::{MutateError, NothingToUndo};
+use crate::state::{MutateError, NothingLeft};
 
 /// An error that can be returned from an API handler.
 #[derive(Debug)]
@@ -399,8 +399,8 @@ impl From<MutateError> for ApiError {
     }
 }
 
-impl From<NothingToUndo> for ApiError {
-    fn from(err: NothingToUndo) -> Self {
+impl From<NothingLeft> for ApiError {
+    fn from(err: NothingLeft) -> Self {
         // A 409 like the version conflict it sits beside, and for the same
         // reason: the request contradicts a state the caller has not seen yet,
         // and rereading is what fixes it. English-only — the referee's own

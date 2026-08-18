@@ -10,4 +10,4 @@
  * a winner, a draw, a no-show and a long-game flag are all
  * [`BoardResult`](Self::BoardResult).
  */
-export type UndoCode = "settings" | "cancel_round" | "prepare_round" | "edit_draft" | "start_round" | "force_pairing" | "board_result" | "board_handicap" | "sitout_value" | "register_player" | "import_players" | "edit_player" | "edit_players" | "remove_player" | "adjust_points" | "add_team" | "rename_team" | "remove_team" | "edit_team";
+export type ChangeCode = "settings" | "cancel_round" | "prepare_round" | "edit_draft" | "start_round" | "force_pairing" | "board_result" | "board_handicap" | "sitout_value" | "register_player" | "import_players" | "edit_player" | "edit_players" | "remove_player" | "adjust_points" | "add_team" | "rename_team" | "remove_team" | "edit_team";

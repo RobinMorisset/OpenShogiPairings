@@ -17,12 +17,12 @@ use uuid::Uuid;
 
 use crate::backup;
 use crate::error::ApiError;
+use crate::history::ChangeLabel;
 use crate::live::ExpectedVersion;
 use crate::ratings;
 use crate::scope::TournamentCtx;
-use crate::state::{AppState, TournamentInstance, TournamentStore};
-use crate::undo::UndoLabel;
-use crate::{auth, live, public, undo};
+use crate::state::{AppState, Direction, TournamentInstance, TournamentStore};
+use crate::{auth, history, live, public};
 
 /// Build the router nested at `/api/tournaments/{id}`.
 ///
@@ -46,6 +46,7 @@ use crate::{auth, live, public, undo};
 /// - `GET    /`               fetch the tournament
 /// - `DELETE /`               delete the tournament
 /// - `POST   /undo`           revert the last player change (409 if there is none)
+/// - `POST   /redo`           re-apply the last undone change (409 if there is none)
 /// - `GET    /american-grid` export the cross-table for ELO (text)
 /// - `PUT    /settings`      update tournament settings (MacMahon, …)
 /// - `POST   /cancel-round`           cancel the last round (or draft)
@@ -92,8 +93,8 @@ use crate::{auth, live, public, undo};
 /// - `GET    /public/events` the same projection, pushed on every change
 ///
 /// Every endpoint (except login/events/the text exports) returns a
-/// [`TournamentView`] (the tournament plus what an undo would revert), so
-/// clients can refresh their view and the undo button from a single response.
+/// [`TournamentView`] (the tournament plus what an undo or a redo would do), so
+/// clients can refresh their view and both buttons from a single response.
 pub(crate) fn scope(state: AppState) -> Router<AppState> {
     let public = Router::new()
         .route("/login", post(auth::tournament_login))
@@ -107,6 +108,7 @@ pub(crate) fn scope(state: AppState) -> Router<AppState> {
         )
         .route("/public-snapshot", get(public::get_public_snapshot))
         .route("/undo", post(undo))
+        .route("/redo", post(redo))
         .route("/american-grid", get(american_grid))
         .route("/settings", put(update_settings))
         .route("/cancel-round", post(cancel_round))
@@ -250,10 +252,15 @@ pub(crate) struct TournamentView {
     pub(crate) tournament: Tournament,
     /// What the undo button would revert, or absent when there is nothing to
     /// undo — which is also how the client knows to disable it (see
-    /// [`crate::undo`]).
+    /// [`crate::history`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub(crate) undo_label: Option<UndoLabel>,
+    pub(crate) undo_label: Option<ChangeLabel>,
+    /// The same for the redo button: the change the last undo took back, absent
+    /// when there is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub(crate) redo_label: Option<ChangeLabel>,
     /// `false` when the server could not write this state to disk: the edit was
     /// applied and answered `200`, but it lives only in memory and a restart
     /// would lose it. The client shows a standing banner — on a full disk every
@@ -380,6 +387,7 @@ pub(crate) fn build_view(store: &TournamentStore) -> Result<TournamentView, ApiE
     Ok(TournamentView {
         tournament,
         undo_label: store.undo_label().cloned(),
+        redo_label: store.redo_label().cloned(),
         persisted: store.persisted(),
         next_round_blocked,
         grid_export_blocked,
@@ -429,17 +437,38 @@ async fn delete_tournament(
 /// button is disabled whenever `undo_label` is absent, so this answers a stale
 /// or third-party client, which is worth a line in the log.
 async fn undo(
+    ctx: TournamentCtx,
+    version: ExpectedVersion,
+) -> Result<Json<TournamentView>, ApiError> {
+    step(ctx, version, Direction::Undo)
+}
+
+/// Re-apply the change the last undo took back, on the same terms.
+async fn redo(
+    ctx: TournamentCtx,
+    version: ExpectedVersion,
+) -> Result<Json<TournamentView>, ApiError> {
+    step(ctx, version, Direction::Redo)
+}
+
+/// The body both share. Not `async`: it only takes a lock and returns, and
+/// keeping it sync makes it obvious that no `.await` happens while the write
+/// guard is held.
+fn step(
     TournamentCtx(instance): TournamentCtx,
     ExpectedVersion(expected): ExpectedVersion,
+    direction: Direction,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
     if store.current().is_none() {
         return Err(ApiError::NoTournament);
     }
     store.ensure_current_version(expected)?;
-    store.undo().inspect_err(|err| {
-        tracing::warn!("refusing an undo: {err}");
-    })?;
+    let moved = match direction {
+        Direction::Undo => store.undo(),
+        Direction::Redo => store.redo(),
+    };
+    moved.inspect_err(|err| tracing::warn!("refusing: {err}"))?;
     view(&store)
 }
 
@@ -531,7 +560,7 @@ async fn update_settings(
     Json(settings): Json<TournamentSettings>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    store.mutate(expected, UndoLabel::settings(), move |t| {
+    store.mutate(expected, ChangeLabel::settings(), move |t| {
         t.update_settings(settings)?;
         Ok(())
     })?;
@@ -554,7 +583,7 @@ async fn cancel_round(
     ExpectedVersion(expected): ExpectedVersion,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    store.mutate(expected, UndoLabel::cancel_round(), |t| {
+    store.mutate(expected, ChangeLabel::cancel_round(), |t| {
         t.cancel_last_round()
     })?;
     backup_after(&instance, &store, "round cancelled");
@@ -574,7 +603,7 @@ async fn prepare_round(
 ) -> Result<Json<TournamentView>, ApiError> {
     let cup_size = body.and_then(|Json(b)| b.cup_size);
     let mut store = instance.write();
-    let undo_label = UndoLabel::prepare_round(next_round_number(&store));
+    let undo_label = ChangeLabel::prepare_round(next_round_number(&store));
     store.mutate(expected, undo_label, |t| {
         if !t.registration_finalized {
             t.finalize_registration_with(cup_size)?;
@@ -672,7 +701,7 @@ async fn update_draft(
     Json(req): Json<DraftUpdate>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::edit_draft(next_round_number(&store));
+    let undo_label = ChangeLabel::edit_draft(next_round_number(&store));
     store.mutate(expected, undo_label, |t| {
         if t.settings.team_mode() {
             // The core rejects the player-level halves in team mode, so hand it
@@ -711,7 +740,7 @@ async fn confirm_round(
     ExpectedVersion(expected): ExpectedVersion,
 ) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::start_round(next_round_number(&store));
+    let undo_label = ChangeLabel::start_round(next_round_number(&store));
     store.mutate(expected, undo_label, |t| t.confirm_round().map(|_| ()))?;
     let label = round_label(&store, "round", "started");
     backup_after(&instance, &store, &label);
@@ -781,7 +810,7 @@ async fn force_pairing(
         ));
     }
     let mut store = instance.write();
-    let undo_label = UndoLabel::force_pairing(current_round_number(&store));
+    let undo_label = ChangeLabel::force_pairing(current_round_number(&store));
     store.mutate(expected, undo_label, |t| {
         t.force_pairing(req.a, req.b).map(|_| ())
     })?;
@@ -818,7 +847,7 @@ async fn set_board_result(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
     let was_completed = round_completed(&store, params.round_number);
-    let undo_label = UndoLabel::board_result(params.round_number, params.board_index);
+    let undo_label = ChangeLabel::board_result(params.round_number, params.board_index);
     store.mutate(expected, undo_label, |t| {
         t.toggle_board_winner(params.round_number, params.board_index, req.clicked)
             .map(|_| ())
@@ -855,7 +884,7 @@ async fn set_board_drawn(
     Json(req): Json<SetDrawnRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::board_result(params.round_number, params.board_index);
+    let undo_label = ChangeLabel::board_result(params.round_number, params.board_index);
     store.mutate(expected, undo_label, |t| {
         t.set_board_drawn(params.round_number, params.board_index, req.drawn)
             .map(|_| ())
@@ -883,7 +912,7 @@ async fn set_board_no_show(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
     let was_completed = round_completed(&store, params.round_number);
-    let undo_label = UndoLabel::board_result(params.round_number, params.board_index);
+    let undo_label = ChangeLabel::board_result(params.round_number, params.board_index);
     store.mutate(expected, undo_label, |t| {
         t.set_board_no_show(params.round_number, params.board_index, req.absent)
             .map(|_| ())
@@ -923,7 +952,7 @@ async fn set_sitout_value(
     Json(req): Json<SetSitoutValueRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::sitout_value(params.round_number);
+    let undo_label = ChangeLabel::sitout_value(params.round_number);
     store.mutate(expected, undo_label, |t| {
         t.set_sitout_value(params.round_number, params.player, req.value)
             .map(|_| ())
@@ -951,7 +980,7 @@ async fn set_team_sitout_value(
     Json(req): Json<SetSitoutValueRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::sitout_value(params.round_number);
+    let undo_label = ChangeLabel::sitout_value(params.round_number);
     store.mutate(expected, undo_label, |t| {
         t.set_team_sitout_value(params.round_number, params.team_id, req.value)
             .map(|_| ())
@@ -979,7 +1008,7 @@ async fn set_board_long(
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
     let was_completed = round_completed(&store, params.round_number);
-    let undo_label = UndoLabel::board_result(params.round_number, params.board_index);
+    let undo_label = ChangeLabel::board_result(params.round_number, params.board_index);
     store.mutate(expected, undo_label, |t| {
         t.set_board_long(params.round_number, params.board_index, req.long)
             .map(|_| ())
@@ -1009,7 +1038,7 @@ async fn set_board_handicap(
     Json(req): Json<SetHandicapRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::board_handicap(params.round_number, params.board_index);
+    let undo_label = ChangeLabel::board_handicap(params.round_number, params.board_index);
     store.mutate(expected, undo_label, |t| {
         t.set_board_handicap(params.round_number, params.board_index, req.handicap)
             .map(|_| ())
@@ -1024,7 +1053,7 @@ async fn add_player(
     Json(new_player): Json<NewPlayer>,
 ) -> Result<(StatusCode, Json<TournamentView>), ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::register_player(&new_player);
+    let undo_label = ChangeLabel::register_player(&new_player);
     store.mutate(expected, undo_label, |t| {
         t.add_player(new_player).map(|_| ())
     })?;
@@ -1057,7 +1086,7 @@ async fn import_players_csv(
     let new_players = osp_core::parse_players_csv(&body, &ratings).map_err(ApiError::CsvImport)?;
     let mut store = instance.write();
     let mut skipped_duplicates = Vec::new();
-    store.mutate(expected, UndoLabel::import_players(), |t| {
+    store.mutate(expected, ChangeLabel::import_players(), |t| {
         skipped_duplicates = t.add_players_skipping_duplicates(new_players)?;
         Ok(())
     })?;
@@ -1125,7 +1154,7 @@ async fn edit_player(
     Json(new_player): Json<NewPlayer>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::edit_player(store.current(), params.player_id);
+    let undo_label = ChangeLabel::edit_player(store.current(), params.player_id);
     store.mutate(expected, undo_label, |t| {
         t.edit_player(params.player_id, new_player).map(|_| ())
     })?;
@@ -1139,7 +1168,7 @@ async fn remove_player(
     Path(params): Path<PlayerParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::remove_player(store.current(), params.player_id);
+    let undo_label = ChangeLabel::remove_player(store.current(), params.player_id);
     store.mutate(expected, undo_label, |t| t.remove_player(params.player_id))?;
     view(&store)
 }
@@ -1158,7 +1187,7 @@ async fn set_player_eligible(
     Json(req): Json<SetEligibleRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::edit_player(store.current(), params.player_id);
+    let undo_label = ChangeLabel::edit_player(store.current(), params.player_id);
     store.mutate(expected, undo_label, |t| {
         t.set_player_eligible(params.player_id, req.eligible)
             .map(|_| ())
@@ -1195,7 +1224,7 @@ async fn set_players_eligible(
     Json(req): Json<SetManyEligibleRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    store.mutate(expected, UndoLabel::edit_players(), |t| {
+    store.mutate(expected, ChangeLabel::edit_players(), |t| {
         for id in &req.player_ids {
             t.set_player_eligible(*id, req.eligible)?;
         }
@@ -1220,7 +1249,7 @@ async fn set_player_category(
     Json(req): Json<SetCategoryRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::edit_player(store.current(), params.player_id);
+    let undo_label = ChangeLabel::edit_player(store.current(), params.player_id);
     store.mutate(expected, undo_label, |t| {
         t.set_player_category(params.player_id, req.category_id, req.member)
             .map(|_| ())
@@ -1243,7 +1272,8 @@ async fn add_point_adjustment(
     Json(req): Json<AddAdjustmentRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::adjust_points(undo::player_name(store.current(), params.player_id));
+    let undo_label =
+        ChangeLabel::adjust_points(history::player_name(store.current(), params.player_id));
     store.mutate(expected, undo_label, |t| {
         t.add_point_adjustment(params.player_id, req.delta, req.reason)
             .map(|_| ())
@@ -1266,7 +1296,8 @@ async fn remove_point_adjustment(
     Path(params): Path<AdjustmentParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::adjust_points(undo::player_name(store.current(), params.player_id));
+    let undo_label =
+        ChangeLabel::adjust_points(history::player_name(store.current(), params.player_id));
     store.mutate(expected, undo_label, |t| {
         t.remove_point_adjustment(params.player_id, params.adjustment_id)
             .map(|_| ())
@@ -1332,7 +1363,7 @@ async fn add_team(
     Json(req): Json<TeamNameRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::add_team(&req.name);
+    let undo_label = ChangeLabel::add_team(&req.name);
     store.mutate(expected, undo_label, |t| t.add_team(&req.name).map(|_| ()))?;
     view(&store)
 }
@@ -1345,7 +1376,7 @@ async fn rename_team(
     Json(req): Json<TeamNameRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::rename_team(store.current(), params.team_id);
+    let undo_label = ChangeLabel::rename_team(store.current(), params.team_id);
     store.mutate(expected, undo_label, |t| {
         t.rename_team(params.team_id, &req.name).map(|_| ())
     })?;
@@ -1359,7 +1390,7 @@ async fn remove_team(
     Path(params): Path<TeamParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::remove_team(store.current(), params.team_id);
+    let undo_label = ChangeLabel::remove_team(store.current(), params.team_id);
     store.mutate(expected, undo_label, |t| t.remove_team(params.team_id))?;
     view(&store)
 }
@@ -1372,7 +1403,7 @@ async fn add_team_member(
     Json(req): Json<AddTeamMemberRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::edit_team(store.current(), params.team_id);
+    let undo_label = ChangeLabel::edit_team(store.current(), params.team_id);
     store.mutate(expected, undo_label, |t| {
         t.add_team_member(params.team_id, req.player_id).map(|_| ())
     })?;
@@ -1386,7 +1417,7 @@ async fn remove_team_member(
     Path(params): Path<TeamMemberParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::edit_team(store.current(), params.team_id);
+    let undo_label = ChangeLabel::edit_team(store.current(), params.team_id);
     store.mutate(expected, undo_label, |t| {
         t.remove_team_member(params.team_id, params.player_id)
             .map(|_| ())
@@ -1403,7 +1434,7 @@ async fn set_team_board_order(
     Json(req): Json<BoardOrderRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::edit_team(store.current(), params.team_id);
+    let undo_label = ChangeLabel::edit_team(store.current(), params.team_id);
     store.mutate(expected, undo_label, |t| {
         t.set_team_board_order(params.team_id, req.order.clone())
             .map(|_| ())
@@ -1419,7 +1450,7 @@ async fn sort_team_by_rating(
     Path(params): Path<TeamParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::edit_team(store.current(), params.team_id);
+    let undo_label = ChangeLabel::edit_team(store.current(), params.team_id);
     store.mutate(expected, undo_label, |t| {
         t.sort_team_by_rating(params.team_id).map(|_| ())
     })?;
@@ -1450,7 +1481,8 @@ async fn add_team_adjustment(
     Json(req): Json<TeamAdjustmentRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::adjust_points(undo::team_name(store.current(), params.team_id));
+    let undo_label =
+        ChangeLabel::adjust_points(history::team_name(store.current(), params.team_id));
     store.mutate(expected, undo_label, |t| {
         t.add_team_adjustment(params.team_id, req.delta, req.reason.clone())
             .map(|_| ())
@@ -1465,7 +1497,8 @@ async fn remove_team_adjustment(
     Path(params): Path<TeamAdjustmentParams>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::adjust_points(undo::team_name(store.current(), params.team_id));
+    let undo_label =
+        ChangeLabel::adjust_points(history::team_name(store.current(), params.team_id));
     store.mutate(expected, undo_label, |t| {
         t.remove_team_adjustment(params.team_id, params.adjustment_id)
             .map(|_| ())
@@ -1482,7 +1515,7 @@ async fn set_pairing_rating(
     Json(req): Json<PairingRatingRequest>,
 ) -> Result<Json<TournamentView>, ApiError> {
     let mut store = instance.write();
-    let undo_label = UndoLabel::edit_player(store.current(), params.player_id);
+    let undo_label = ChangeLabel::edit_player(store.current(), params.player_id);
     store.mutate(expected, undo_label, |t| {
         t.set_pairing_rating(params.player_id, req.pairing_rating)
             .map(|_| ())

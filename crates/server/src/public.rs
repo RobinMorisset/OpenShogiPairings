@@ -140,11 +140,12 @@ impl From<TournamentView> for PublicTournamentView {
         // compile error here rather than a silent publication.
         let TournamentView {
             tournament,
-            // Referee session state — what *their* undo button would revert,
-            // and why their next-round / export buttons are not live. A reader
-            // has neither button, and both name players, rounds and rules that
-            // are the referee's business.
+            // Referee session state — what *their* undo and redo buttons would
+            // do, and why their next-round / export buttons are not live. A
+            // reader has none of those buttons, and all three name players,
+            // rounds and rules that are the referee's business.
             undo_label: _,
+            redo_label: _,
             next_round_blocked: _,
             grid_export_blocked: _,
             // The referee's problem to see and act on, not the room's: a reader

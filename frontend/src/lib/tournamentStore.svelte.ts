@@ -11,6 +11,7 @@
 import { fetchTournament } from "./api";
 import type {
   BlockedReason,
+  ChangeLabel,
   CupBracketView,
   CupPodium,
   Handicap,
@@ -19,7 +20,6 @@ import type {
   TeamStanding,
   Tournament,
   TournamentResponse,
-  UndoLabel,
   Winner,
 } from "./types";
 
@@ -43,11 +43,13 @@ export class TournamentStore {
   /** Winner that counts for standings/pairing per board, server-computed (see
    *  `TournamentResponse.effective_winners`), indexed like `tournament.rounds`. */
   effectiveWinners = $state<(Winner | null)[][]>([]);
-  /** What an undo would revert, or `null` when there is nothing to undo —
-   *  which is also what disables the button. Server-side session state: the
-   *  history lives there, and so does the decision about how to describe its
-   *  top (see `crates/server/src/undo.rs`). */
-  undoLabel = $state<UndoLabel | null>(null);
+  /** What an undo would revert, and what a redo would put back — `null` when
+   *  there is nothing in that direction, which is also what disables the
+   *  button. Server-side session state: the history lives there, and so does
+   *  the decision about how to describe either end of it (see
+   *  `crates/server/src/history.rs`). */
+  undoLabel = $state<ChangeLabel | null>(null);
+  redoLabel = $state<ChangeLabel | null>(null);
   /**
    * `false` when the server could not write the state it just answered with to
    * disk (see `TournamentResponse.persisted`). The edit *was* applied, and it
@@ -99,6 +101,7 @@ export class TournamentStore {
     this.suggestedHandicaps = res.suggested_handicaps ?? [];
     this.effectiveWinners = res.effective_winners ?? [];
     this.undoLabel = res.undo_label ?? null;
+    this.redoLabel = res.redo_label ?? null;
     this.persisted = res.persisted;
     this.nextRoundBlocked = res.next_round_blocked ?? null;
     this.gridExportBlocked = res.grid_export_blocked ?? null;
@@ -139,6 +142,7 @@ export class TournamentStore {
     this.suggestedHandicaps = [];
     this.effectiveWinners = [];
     this.undoLabel = null;
+    this.redoLabel = null;
     this.persisted = true;
     this.nextRoundBlocked = null;
     this.gridExportBlocked = null;

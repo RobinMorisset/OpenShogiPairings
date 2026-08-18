@@ -23,8 +23,8 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::auth::AuthConfig;
+use crate::history::ChangeLabel;
 use crate::ratings::CachedRatings;
-use crate::undo::UndoLabel;
 
 /// Capacity of the change-notification channel. Small on purpose: subscribers
 /// only care about the *latest* version, and one that lags past the buffer is
@@ -70,25 +70,35 @@ impl LoadProblem {
     }
 }
 
-/// One step of the undo history: the tournament as it stood before a change,
-/// and what that change was.
+/// One step of the undo history: a tournament to go back (or forward) to, and
+/// the change that separates it from the current one.
+///
+/// The same shape serves both stacks, which is what makes undo and redo exact
+/// mirrors of each other: on the undo stack `snapshot` is the state *before*
+/// the change, on the redo stack the state *after* it, and `label` names that
+/// change either way.
 ///
 /// The label is carried rather than derived, because by the time anyone asks,
 /// the change has been folded into the tournament and the two snapshots on
 /// either side of it no longer say which edit produced the difference — see
-/// [`crate::undo`].
+/// [`crate::history`].
 struct HistoryEntry {
-    before: Tournament,
-    label: UndoLabel,
+    snapshot: Tournament,
+    label: ChangeLabel,
 }
 
 /// The current tournament plus a linear undo history.
 ///
 /// The history is a stack of full tournament snapshots taken *before* each
-/// player mutation; undo pops the most recent one. Snapshots are cheap (a
-/// tournament is just a list of players), which is why we snapshot rather than
-/// track inverse commands. Loading a tournament resets the history, so undo is
-/// scoped to edits made since.
+/// player mutation; undo pops the most recent one onto a second stack, and redo
+/// moves it back. Snapshots are cheap (a tournament is just a list of players),
+/// which is why we snapshot rather than track inverse commands. Loading a
+/// tournament resets both stacks, so undo is scoped to edits made since.
+///
+/// A new mutation **discards** the redo stack, the standard rule: once history
+/// forks, the abandoned branch is no longer reachable by any sequence of undos,
+/// and offering to jump to it would splice in a state that never followed from
+/// what is on screen.
 ///
 /// When [`persist_path`](Self::persist_path) is set (a hosted server passes a
 /// per-tournament file, see [`TournamentRegistry`]), the *current* tournament
@@ -103,6 +113,10 @@ struct HistoryEntry {
 pub struct TournamentStore {
     current: Option<Tournament>,
     history: Vec<HistoryEntry>,
+    /// The changes undone since the last mutation, newest last — what redo
+    /// walks back up. Emptied by [`mutate`](Self::mutate) and
+    /// [`set_current`](Self::set_current).
+    redone: Vec<HistoryEntry>,
     /// Where to write the current tournament, or `None` for in-memory only
     /// (embedded desktop / dev / tests).
     persist_path: Option<PathBuf>,
@@ -137,6 +151,7 @@ impl TournamentStore {
         Self {
             current: None,
             history: Vec::new(),
+            redone: Vec::new(),
             persist_path,
             version: 0,
             notifier,
@@ -319,17 +334,26 @@ impl TournamentStore {
     /// wants to know whether an undo is possible asks `is_some()`. Keeping the
     /// two as one field is deliberate — a separate boolean could disagree with
     /// the label beside it, and there is no state in which it should.
-    pub(crate) fn undo_label(&self) -> Option<&UndoLabel> {
+    pub(crate) fn undo_label(&self) -> Option<&ChangeLabel> {
         self.history.last().map(|entry| &entry.label)
     }
 
-    /// Set the current tournament and clear the undo history.
+    /// What a redo would re-apply, or `None` when there is nothing to redo — on
+    /// the same terms as [`undo_label`](Self::undo_label).
+    pub(crate) fn redo_label(&self) -> Option<&ChangeLabel> {
+        self.redone.last().map(|entry| &entry.label)
+    }
+
+    /// Set the current tournament and clear both history stacks.
     ///
     /// Used by create and load — these establish a new baseline, so prior
-    /// history no longer applies.
+    /// history no longer applies. Clearing the redo stack here is not
+    /// housekeeping: its snapshots carry the *previous* tournament's id, so a
+    /// redo against a stale one would swap in a different tournament entirely.
     pub fn set_current(&mut self, tournament: Tournament) {
         self.current = Some(tournament);
         self.history.clear();
+        self.redone.clear();
         self.persist();
         self.bump_and_notify();
     }
@@ -341,7 +365,7 @@ impl TournamentStore {
     /// mutation (e.g. validation error) leaves state and history untouched.
     ///
     /// `label` says what the change was, for the undo button to name (see
-    /// [`crate::undo`]). It is built by the caller *before* the mutation runs,
+    /// [`crate::history`]). It is built by the caller *before* the mutation runs,
     /// since a label naming a player or a team has to be read from the state
     /// the change is about to replace — the very thing that is gone afterwards.
     ///
@@ -355,7 +379,7 @@ impl TournamentStore {
     pub(crate) fn mutate<F>(
         &mut self,
         expected: Option<u32>,
-        label: UndoLabel,
+        label: ChangeLabel,
         f: F,
     ) -> Result<(), MutateError>
     where
@@ -376,8 +400,10 @@ impl TournamentStore {
             None => return Err(MutateError::NoTournament),
         };
         f(&mut next).map_err(MutateError::Domain)?;
-        let before = self.current.replace(next).expect("current was Some");
-        self.history.push(HistoryEntry { before, label });
+        let snapshot = self.current.replace(next).expect("current was Some");
+        self.history.push(HistoryEntry { snapshot, label });
+        // History has forked: whatever was undone is no longer reachable.
+        self.redone.clear();
         self.persist();
         self.bump_and_notify();
         Ok(())
@@ -412,7 +438,7 @@ impl TournamentStore {
         }
     }
 
-    /// Revert to the previous state.
+    /// Revert to the previous state, putting the change on the redo stack.
     ///
     /// An empty history is an error rather than a silent no-op. Everything that
     /// empties it — an undo, a load, a restored backup — bumps the version, so a
@@ -420,26 +446,73 @@ impl TournamentStore {
     /// cannot legitimately arrive here: reaching it means the request was built
     /// from a view that has moved, and answering as though an undo had happened
     /// would report a change that never took place.
-    pub fn undo(&mut self) -> Result<(), NothingToUndo> {
-        let entry = self.history.pop().ok_or(NothingToUndo)?;
-        self.current = Some(entry.before);
+    pub fn undo(&mut self) -> Result<(), NothingLeft> {
+        self.step(Direction::Undo)
+    }
+
+    /// Re-apply the change the last undo took back, putting it back on the undo
+    /// stack. The exact mirror of [`undo`](Self::undo), including its refusal to
+    /// pretend when there is nothing there.
+    pub fn redo(&mut self) -> Result<(), NothingLeft> {
+        self.step(Direction::Redo)
+    }
+
+    /// Move one step along the history, in either direction.
+    ///
+    /// Written once rather than twice because the two are genuinely the same
+    /// operation: pop the far stack, swap its snapshot with the current
+    /// tournament, and push what was current onto the near stack — carrying the
+    /// label along, since it names the change between the two states no matter
+    /// which side you approach it from.
+    fn step(&mut self, direction: Direction) -> Result<(), NothingLeft> {
+        let (from, to) = match direction {
+            Direction::Undo => (&mut self.history, &mut self.redone),
+            Direction::Redo => (&mut self.redone, &mut self.history),
+        };
+        let entry = from.pop().ok_or(NothingLeft(direction))?;
+        let current = self
+            .current
+            .replace(entry.snapshot)
+            .expect("a store with history has a current tournament");
+        to.push(HistoryEntry {
+            snapshot: current,
+            label: entry.label,
+        });
         self.persist();
         self.bump_and_notify();
         Ok(())
     }
 }
 
-/// [`TournamentStore::undo`] was asked to revert with an empty history.
-#[derive(Debug, Clone, Copy)]
-pub struct NothingToUndo;
+/// Which way along the history a step goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Undo,
+    Redo,
+}
 
-impl std::fmt::Display for NothingToUndo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("there is nothing left to undo")
+impl Direction {
+    /// The verb, for the message a refusal carries.
+    fn verb(self) -> &'static str {
+        match self {
+            Direction::Undo => "undo",
+            Direction::Redo => "redo",
+        }
     }
 }
 
-impl std::error::Error for NothingToUndo {}
+/// [`TournamentStore::undo`] or [`redo`](TournamentStore::redo) was asked to
+/// move through a history that has nothing left in that direction.
+#[derive(Debug, Clone, Copy)]
+pub struct NothingLeft(pub Direction);
+
+impl std::fmt::Display for NothingLeft {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "there is nothing left to {}", self.0.verb())
+    }
+}
+
+impl std::error::Error for NothingLeft {}
 
 /// No tournament with this id is registered.
 #[derive(Debug, Clone, Copy)]
@@ -1419,8 +1492,8 @@ mod tests {
     /// A stand-in label for the tests that exercise the snapshot, version and
     /// persistence machinery rather than the wording — which is every test here
     /// but the one that reads a label back.
-    fn any_label() -> UndoLabel {
-        UndoLabel::settings()
+    fn any_label() -> ChangeLabel {
+        ChangeLabel::settings()
     }
 
     #[test]
@@ -1549,12 +1622,12 @@ mod tests {
                 ..Default::default()
             };
             store
-                .mutate(None, UndoLabel::register_player(&new), add_named(name))
+                .mutate(None, ChangeLabel::register_player(&new), add_named(name))
                 .unwrap();
         }
 
         let label = store.undo_label().expect("Bob's registration");
-        assert_eq!(label.code, crate::undo::UndoCode::RegisterPlayer);
+        assert_eq!(label.code, crate::history::ChangeCode::RegisterPlayer);
         assert_eq!(label.values.get("name").map(String::as_str), Some("Bob"));
 
         store.undo().unwrap();
@@ -1563,6 +1636,83 @@ mod tests {
 
         store.undo().unwrap();
         assert!(store.undo_label().is_none());
+    }
+
+    /// Redo walks back up what undo took down, and the two labels swap sides as
+    /// it goes: whatever undo would revert is what redo just re-applied.
+    #[test]
+    fn redo_walks_back_up_the_stack_undo_came_down() {
+        let mut store = TournamentStore::empty(None);
+        store.set_current(Tournament::new("Cup").unwrap());
+        store.mutate(None, any_label(), add_named("Alice")).unwrap();
+        store.mutate(None, any_label(), add_named("Bob")).unwrap();
+
+        store.undo().unwrap();
+        store.undo().unwrap();
+        assert!(store.current().unwrap().players.is_empty());
+        assert!(store.undo_label().is_none());
+        assert!(store.redo_label().is_some());
+
+        store.redo().unwrap();
+        store.redo().unwrap();
+        let names: Vec<&str> = store
+            .current()
+            .unwrap()
+            .players
+            .iter()
+            .map(|p| p.last_name.as_str())
+            .collect();
+        // Both back, and in the order they were added — a redo that restored a
+        // snapshot from the wrong side would put them back reversed, or lose one.
+        assert_eq!(names, ["Alice", "Bob"]);
+        assert!(store.redo_label().is_none());
+        assert!(store.undo_label().is_some());
+    }
+
+    /// The rule that keeps the history a line rather than a tree: once a new
+    /// edit lands, the undone branch is unreachable and must not be offered.
+    #[test]
+    fn a_new_mutation_discards_what_was_undone() {
+        let mut store = TournamentStore::empty(None);
+        store.set_current(Tournament::new("Cup").unwrap());
+        store.mutate(None, any_label(), add_named("Alice")).unwrap();
+        store.undo().unwrap();
+        assert!(store.redo_label().is_some());
+
+        store.mutate(None, any_label(), add_named("Bob")).unwrap();
+
+        assert!(store.redo_label().is_none());
+        assert!(matches!(store.redo(), Err(NothingLeft(Direction::Redo))));
+        // And the branch really is gone: redoing Alice on top of Bob would have
+        // swapped in a tournament that never contained him.
+        let names: Vec<&str> = store
+            .current()
+            .unwrap()
+            .players
+            .iter()
+            .map(|p| p.last_name.as_str())
+            .collect();
+        assert_eq!(names, ["Bob"]);
+    }
+
+    /// A load establishes a new baseline, and its snapshots carry a different
+    /// tournament id — so a redo left over from the previous one would not
+    /// merely be stale, it would swap the whole tournament out.
+    #[test]
+    fn loading_a_tournament_clears_the_redo_stack_too() {
+        let mut store = TournamentStore::empty(None);
+        store.set_current(Tournament::new("Cup").unwrap());
+        store.mutate(None, any_label(), add_named("Alice")).unwrap();
+        store.undo().unwrap();
+        assert!(store.redo_label().is_some());
+
+        let other = Tournament::new("Another Cup").unwrap();
+        let other_id = other.id;
+        store.set_current(other);
+
+        assert!(store.redo_label().is_none());
+        assert!(store.undo_label().is_none());
+        assert_eq!(store.current().unwrap().id, other_id);
     }
 
     /// An undo with nothing to revert must say so rather than report success:
@@ -1574,9 +1724,10 @@ mod tests {
         let version = store.version();
 
         assert!(store.undo_label().is_none());
-        assert!(store.undo().is_err());
-        // And it changed nothing: no phantom version bump for subscribers to
-        // refetch on, so a rejected undo cannot look like somebody's edit.
+        assert!(matches!(store.undo(), Err(NothingLeft(Direction::Undo))));
+        assert!(matches!(store.redo(), Err(NothingLeft(Direction::Redo))));
+        // And they changed nothing: no phantom version bump for subscribers to
+        // refetch on, so a rejected step cannot look like somebody's edit.
         assert_eq!(store.version(), version);
     }
 

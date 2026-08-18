@@ -55,6 +55,10 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   client, which had none at all.
 - The server status line now says **which build the server is**, not just its
   version number, so a bug report can name it exactly.
+- **Redo**, next to Undo in the toolbar and on `Ctrl/Cmd+Shift+Z` (and `Ctrl+Y`
+  off macOS). It names what it would put back, exactly as Undo names what it
+  would remove. Making any other change drops the offer, as everywhere else:
+  once you have edited past an undo, the branch you left is gone.
 
 ### Fixed
 

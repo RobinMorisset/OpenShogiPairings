@@ -514,6 +514,13 @@ export function undoTournament(): Promise<TournamentResponse> {
   return request<TournamentResponse>(scopedPath("/undo"), { method: "POST" });
 }
 
+/** Re-apply the change the last undo took back. Answers 409 if there is none —
+ *  which the caller's own button already prevents, so it means the view is
+ *  stale (see the shared 409 handling in `App.svelte`). */
+export function redoTournament(): Promise<TournamentResponse> {
+  return request<TournamentResponse>(scopedPath("/redo"), { method: "POST" });
+}
+
 /**
  * Fetch the American Grid (cross-table) export as plain text, ready to save for
  * an ELO update. Unlike the other endpoints this returns raw text, not JSON.
