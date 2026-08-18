@@ -7,12 +7,16 @@ This project does NOT adhere to semantic versioning. Assume that even minor
 version changes can change the save format and thus break compatibility; it
 will be explicitly mentioned in the changelog for that version though.
 
-## [Unreleased]
+## [1.4.1] - 2026-08-18
 
 Backwards compatible.
 
 ### Added
 
+- **Redo**, next to Undo in the toolbar and on `Ctrl/Cmd+Shift+Z` (and `Ctrl+Y`
+  off macOS). It names what it would put back, exactly as Undo names what it
+  would remove. Making any other change drops the offer, as everywhere else:
+  once you have edited past an undo, the branch you left is gone.
 - **The tournament picker shows each tournament's city, country and dates**
   under its name, when they were entered in its settings.
 
@@ -71,10 +75,6 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
   client, which had none at all.
 - The server status line now says **which build the server is**, not just its
   version number, so a bug report can name it exactly.
-- **Redo**, next to Undo in the toolbar and on `Ctrl/Cmd+Shift+Z` (and `Ctrl+Y`
-  off macOS). It names what it would put back, exactly as Undo names what it
-  would remove. Making any other change drops the offer, as everywhere else:
-  once you have edited past an undo, the branch you left is gone.
 
 ### Fixed
 

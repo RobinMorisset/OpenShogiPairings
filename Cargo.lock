@@ -903,7 +903,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "osp-core"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "derive_more",
  "integer-blossom",
@@ -919,7 +919,7 @@ dependencies = [
 
 [[package]]
 name = "osp-server"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "axum",
  "bcrypt",
@@ -942,7 +942,7 @@ dependencies = [
 
 [[package]]
 name = "osp-sim"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "clap",
  "osp-core",

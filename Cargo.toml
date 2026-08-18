@@ -11,7 +11,7 @@ members = ["crates/core", "crates/matching", "crates/server", "crates/sim"]
 exclude = ["frontend/src-tauri"]
 
 [workspace.package]
-version = "1.4.0"
+version = "1.4.1"
 edition = "2021"
 # The oldest Rust that builds this workspace, and the single place that number
 # lives — the README quotes it and CI pins a toolchain to it (the `msrv` job in
