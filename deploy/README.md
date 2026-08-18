@@ -14,6 +14,25 @@ You need a host with a public IP and a domain name pointed at it (an A/AAAA DNS
 record). Everything below assumes that domain is `tournament.example.com` —
 substitute your own.
 
+## How much of this has actually been exercised
+
+Know what you are leaning on:
+
+- The architecture being deployed — `osp-server` serving the built SPA
+  same-origin from `OSP_STATIC_DIR` — is covered by integration tests
+  ([`crates/server/tests/cors_and_static.rs`](../crates/server/tests/cors_and_static.rs))
+  and has run in one real deployment (Option B, the bare binary).
+- The [`Caddyfile`](./Caddyfile) was used in that one deployment (July 2026)
+  and not since.
+- The [`Dockerfile`](./Dockerfile) has **never been built or run**. Read Option
+  A as a starting point, and test the image before trusting it with a
+  tournament.
+
+The configuration table below cannot silently rot, though:
+[`crates/server/tests/env_docs.rs`](../crates/server/tests/env_docs.rs) fails
+when the server reads a variable this README does not name, or when anything in
+this directory names a variable the server no longer reads.
+
 ## Configuration (environment variables)
 
 The server is configured entirely through the environment:
@@ -26,6 +45,7 @@ The server is configured entirely through the environment:
 | `OSP_DATA_DIR`        | Directory holding one `{id}.json` (+ `{id}.auth.json`) per tournament.                     | *(unset = in-memory)* |
 | `OSP_BACKUP_DIR`      | Directory holding one folder of rotating automatic backups per tournament.                 | the per-user data dir |
 | `OSP_BACKUP_RETENTION_DAYS` | How long a *deleted* tournament's backups are kept before they are swept. `0` deletes them with it. | `30` |
+| `OSP_EXTRA_ORIGINS`   | Extra browser origins to answer (CORS) — a dev knob for a frontend served from another origin. Serving the SPA same-origin needs none; leave it unset on a real deployment. | *(unset)* |
 
 ### Who can do what
 

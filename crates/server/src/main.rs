@@ -24,6 +24,10 @@
 //! - `OSP_DATA_DIR`        — directory holding one file per tournament, loaded
 //!   on boot and written through to on every change. Unset keeps everything in
 //!   memory (lost on restart).
+//! - `OSP_BACKUP_DIR`      — directory holding one folder of rotating automatic
+//!   backups per tournament, deleted tournaments included for the retention
+//!   window below. Unset falls back to the per-user data directory; where they
+//!   land is logged at startup either way.
 //! - `OSP_BACKUP_RETENTION_DAYS` — how long a *deleted* tournament's backups are
 //!   kept before they are swept (default 30). `0` deletes them along with the
 //!   tournament, which is unrecoverable.
