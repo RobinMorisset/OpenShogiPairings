@@ -17,11 +17,7 @@ scoped_out?: ScopeReason,
 /**
  * Per-rule net change (priority order), only rules that actually moved.
  */
-cost_delta: Array<RuleDelta>, 
-/**
- * The affected player rings.
- */
-cycles: Array<AffectedCycle>, 
+cost_delta: Array<RuleDelta>, cycles: Array<AffectedCycle>, 
 /**
  * The new boards (those that differ from the confirmed pairing), each with
  * its rule ledger. A board with no `player2` is a new bye.

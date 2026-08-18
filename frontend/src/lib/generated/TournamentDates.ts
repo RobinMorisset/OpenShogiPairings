@@ -8,11 +8,7 @@ import type { IsoDate } from "./IsoDate";
  * start is rejected at construction — including when deserialized — rather than
  * printed into an export.
  */
-export type TournamentDates = { 
-/**
- * First day of play.
- */
-first: IsoDate, 
+export type TournamentDates = { first: IsoDate, 
 /**
  * Last day of play — the same as `first` for a one-day event.
  */

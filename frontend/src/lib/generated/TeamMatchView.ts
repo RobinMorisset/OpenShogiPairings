@@ -25,13 +25,8 @@ boards: Array<number>,
  * Board wins for `team1`, in half-wins like every [`HalfWins`] on the wire (a
  * board is won or it isn't, so these are always whole).
  */
-wins1: HalfWins, 
+wins1: HalfWins, wins2: HalfWins, 
 /**
- * Board wins for `team2`.
- */
-wins2: HalfWins, 
-/**
- * Whether every board of the match is decided. A match without one has no
- * result yet — see [`MatchResult::points1`].
+ * `false` means the match has no result yet — see [`MatchResult::points1`].
  */
 decided: boolean, };

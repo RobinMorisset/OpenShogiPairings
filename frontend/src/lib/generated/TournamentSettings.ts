@@ -79,11 +79,7 @@ cup_format: CupFormat,
  * two rounds and score two points for the winner. Off by default. See
  * `docs/reference/two-round-boards.md`.
  */
-long_boards_enabled: boolean, 
-/**
- * How handicap games are treated (see [`HandicapPolicy`]).
- */
-handicap_policy: HandicapPolicy, 
+long_boards_enabled: boolean, handicap_policy: HandicapPolicy, 
 /**
  * Whether a player marked **absent** for a round is awarded half a point
  * (rather than the default zero). Off by default.

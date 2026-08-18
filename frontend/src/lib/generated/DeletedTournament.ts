@@ -14,19 +14,11 @@ export type DeletedTournament = {
  * Its id — the key to restore it by, and the id it comes back under: a
  * restored tournament is the same tournament, not a copy of it.
  */
-id: string, 
-/**
- * Its name when it was deleted.
- */
-name: string, 
+id: string, name: string, 
 /**
  * Unix seconds at which it was deleted.
  */
-deleted_at: number, 
-/**
- * Whether restoring it needs the password it had.
- */
-has_password: boolean, 
+deleted_at: number, has_password: boolean, 
 /**
  * Its surviving backups, newest first — the last of them taken as it was
  * deleted. Sent whole so the referee can pick an earlier one rather than

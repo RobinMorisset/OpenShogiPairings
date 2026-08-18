@@ -6,9 +6,6 @@ import type { RoundDraft } from "./RoundDraft";
 import type { Team } from "./Team";
 import type { TournamentSettings } from "./TournamentSettings";
 
-/**
- * A tournament: a name and its registered players.
- */
 export type Tournament = { 
 /**
  * Format version of this record (see [`TOURNAMENT_FORMAT_VERSION`]).
@@ -18,15 +15,7 @@ export type Tournament = {
  * the field exists to say which shape the rest of the bytes are in, so
  * assuming the current one turns "I don't know" into a confident misread.
  */
-format_version: number, 
-/**
- * Stable unique identifier for the tournament.
- */
-id: string, 
-/**
- * Human-readable tournament name.
- */
-name: string, 
+format_version: number, id: string, name: string, 
 /**
  * Tournament-wide settings (MacMahon groups, …). Defaulted so older saves
  * that predate it load with no MacMahon.
@@ -37,7 +26,7 @@ settings: TournamentSettings,
  */
 players: Array<Player>, 
 /**
- * Whether registration has been finalized (a prerequisite for round 1).
+ * A prerequisite for round 1.
  */
 registration_finalized: boolean, 
 /**
