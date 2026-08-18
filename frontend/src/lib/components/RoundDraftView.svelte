@@ -237,18 +237,28 @@
   }
 
   /** The absence list grouped by team, so a team that has withdrawn can be
-   *  ticked in one go. Players in no team — which finalization rules out —
-   *  are kept in a trailing group rather than dropped from the list. */
+   *  ticked in one go.
+   *
+   *  Teams by name, for the same reason the plain list is by name: it is what
+   *  the referee is scanning for. Their members stay in roster order, which is
+   *  board order — within three or four names there is nothing to scan for, and
+   *  the boards are what the round is about to be made of.
+   *
+   *  Players in no team are kept in a trailing group rather than dropped from
+   *  the list. `finalize_teams` refuses an unassigned player and a draft only
+   *  exists after finalization, so this cannot fill — but if it ever did, the
+   *  cost of the net is nothing and the cost of dropping them is a player the
+   *  referee cannot mark absent. */
   const absenceGroups = $derived.by(() => {
     const grouped = teams
       .map((t) => ({
         number: t.tournament_id ?? -1,
+        name: t.name,
         members: (teamMembers.get(t.tournament_id ?? -1) ?? [])
           .map((id) => byId.get(id))
-          .filter((p) => p != null)
-          .sort(byLastName),
+          .filter((p) => p != null),
       }))
-      .sort((a, b) => a.number - b.number);
+      .sort((a, b) => a.name.localeCompare(b.name) || a.number - b.number);
     const inATeam = new Set(grouped.flatMap((g) => g.members.map(tid)));
     return {
       grouped,
