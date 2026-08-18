@@ -237,20 +237,15 @@
   }
 
   /** The absence list grouped by team, so a team that has withdrawn can be
-   *  ticked in one go.
+   *  ticked in one go. Every player is in one: `finalize_teams` refuses to
+   *  finalize while any is unassigned, and a draft only exists afterwards.
    *
    *  Teams by name, for the same reason the plain list is by name: it is what
    *  the referee is scanning for. Their members stay in roster order, which is
    *  board order — within three or four names there is nothing to scan for, and
-   *  the boards are what the round is about to be made of.
-   *
-   *  Players in no team are kept in a trailing group rather than dropped from
-   *  the list. `finalize_teams` refuses an unassigned player and a draft only
-   *  exists after finalization, so this cannot fill — but if it ever did, the
-   *  cost of the net is nothing and the cost of dropping them is a player the
-   *  referee cannot mark absent. */
-  const absenceGroups = $derived.by(() => {
-    const grouped = teams
+   *  the boards are what the round is about to be made of. */
+  const absenceGroups = $derived(
+    teams
       .map((t) => ({
         number: t.tournament_id ?? -1,
         name: t.name,
@@ -258,13 +253,8 @@
           .map((id) => byId.get(id))
           .filter((p) => p != null),
       }))
-      .sort((a, b) => a.name.localeCompare(b.name) || a.number - b.number);
-    const inATeam = new Set(grouped.flatMap((g) => g.members.map(tid)));
-    return {
-      grouped,
-      loose: allSorted.filter((p) => !inATeam.has(tid(p))).sort(byLastName),
-    };
-  });
+      .sort((a, b) => a.name.localeCompare(b.name) || a.number - b.number),
+  );
 
   /** Whether every member of a team is already marked absent — the team-level
    *  checkbox's state, and what makes the team itself absent from the round. */
@@ -480,7 +470,7 @@
     {#if teamMode}
       <!-- Grouped by team: a team that has withdrawn is ticked in one go, and
            its members' own boxes still work for a single absentee. -->
-      {#each absenceGroups.grouped as group (group.number)}
+      {#each absenceGroups as group (group.number)}
         <div class="team-absence">
           <label class="chk team-chk">
             <input
@@ -500,13 +490,6 @@
           </div>
         </div>
       {/each}
-      {#if absenceGroups.loose.length > 0}
-        <div class="players-grid">
-          {#each absenceGroups.loose as p (p.id)}
-            {@render absentBox(p)}
-          {/each}
-        </div>
-      {/if}
     {:else}
       <div class="players-grid">
         {#each absenceCandidates as p (p.id)}
