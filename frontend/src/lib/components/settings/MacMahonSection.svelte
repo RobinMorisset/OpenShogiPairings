@@ -115,6 +115,13 @@
   // each edit rather than lagging a round-trip.
   const normalized = $derived(cleanThresholds(thresholds));
 
+  // Whether to offer airtight groups: the rule forbids pairing across MacMahon
+  // groups, and with no threshold there is only one group, so it has nothing to
+  // forbid. Mirrors the server, which clears the window in `normalized()` when
+  // the last threshold goes — so unlike estimate-based MacMahon there is no
+  // set-but-inert state to keep on screen.
+  const showAirtight = $derived(normalized.length > 0);
+
   // Whether a player meets one threshold, mirroring the server's
   // `ThresholdCriterion::met_by`: a missing rating/grade never meets the
   // corresponding kind of threshold.
@@ -336,31 +343,33 @@
       </fieldset>
     {/if}
 
-    <fieldset class="sub">
-      <legend>{$_("settings.airtightGroupsTitle")}</legend>
-      <p class="desc">
-        {$_("settings.airtightGroupsDesc")}
-      </p>
-      <label class="check">
-        <input
-          type="checkbox"
-          checked={airtightRounds != null}
-          disabled={busy}
-          onchange={(e) => setAirtightEnabled(e.currentTarget.checked)}
-        />
-        {$_("settings.onlyFirstRoundsPrefix")}
-        <input
-          type="number"
-          min="1"
-          step="1"
-          class="threshold narrow control-sm control-quiet"
-          value={airtightRounds ?? 1}
-          disabled={busy || airtightRounds == null}
-          onchange={(e) => editAirtightRounds(e.currentTarget.value)}
-        />
-        {$_("settings.onlyFirstRoundsSuffix")}
-      </label>
-    </fieldset>
+    {#if showAirtight}
+      <fieldset class="sub">
+        <legend>{$_("settings.airtightGroupsTitle")}</legend>
+        <p class="desc">
+          {$_("settings.airtightGroupsDesc")}
+        </p>
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={airtightRounds != null}
+            disabled={busy}
+            onchange={(e) => setAirtightEnabled(e.currentTarget.checked)}
+          />
+          {$_("settings.onlyFirstRoundsPrefix")}
+          <input
+            type="number"
+            min="1"
+            step="1"
+            class="threshold narrow control-sm control-quiet"
+            value={airtightRounds ?? 1}
+            disabled={busy || airtightRounds == null}
+            onchange={(e) => editAirtightRounds(e.currentTarget.value)}
+          />
+          {$_("settings.onlyFirstRoundsSuffix")}
+        </label>
+      </fieldset>
+    {/if}
   </div>
 </section>
 

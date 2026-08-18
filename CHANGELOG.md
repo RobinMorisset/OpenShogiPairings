@@ -12,28 +12,19 @@ will be explicitly mentioned in the changelog for that version though.
 ### Added
 
 - **The tournament picker shows each tournament's city, country and dates**
-  under its name, when they were entered in its settings. A server holding
-  three events called "Open" no longer asks you to open them one by one.
+  under its name, when they were entered in its settings.
 
 ### Changed
 
+- **The "airtight groups" setting is hidden until a MacMahon threshold exists**,
+  and cleared on save when the last threshold goes. The rule forbids pairing
+  across MacMahon groups, so with no threshold there is a single group and
+  nothing to forbid — the settings no longer store a window that groups by
+  nothing.
 - **The Undo button now says what it would take back** — "Undo registering Habu
   Yoshiharu", "Undo the result on board 3 of round 2" — instead of a generic
   "Undo the last change". It matters most with several referees on one
   tournament, where the button reverts whoever acted last rather than you.
-- `POST /undo` now answers `409` when there is nothing left to undo, instead of
-  `200` with an unchanged tournament — which told the caller an undo had
-  happened when none had.
-
-### Fixed
-
-- **A CSV roster whose ELO column marks estimated ratings with a `*`, or whose
-  grade column says `NC`, imports again.** 1.4.0 started refusing every such row
-  ("these rows have an ELO that isn't a plain number"), which rejected whole
-  real rosters — the French federation's export writes both. `1033*` now imports
-  as 1033 (still not an established rating: nothing filled it in from the FESA
-  list), and `NC` counts as "no grade" like an empty cell rather than as an
-  unreadable one. A `*` with no number behind it is still refused.
 - **Each browser tab now keeps its own tournament across reloads and browser
   restarts.** The open tournament's id is part of the tab's URL (`/t/{id}`)
   rather than one browser-wide key, which used to make every restored tab land
@@ -41,6 +32,10 @@ will be explicitly mentioned in the changelog for that version though.
   between the picker and the tournament, a `/t/{id}` link can be bookmarked or
   pasted into another browser, and a URL naming a tournament the server no
   longer has says so over the picker instead of silently dropping there.
+
+### Fixed
+
+- The **Load CSV** button had gotten too strict and was rejecting valid CSVs.
 
 ## [1.4.0] - 2026-08-18
 

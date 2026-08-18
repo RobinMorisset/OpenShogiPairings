@@ -107,7 +107,8 @@ tournament. For how it's built, see [Architecture](#architecture) below.
   rounds and with nationalities (e.g. the host country) exempted. When only one
   of the two can be honoured, the club clash is the one avoided.
 - **Airtight groups**: for the first N rounds, forbid pairing players with a
-  different MacMahon point total, ahead of the usual score-gap penalty.
+  different MacMahon point total, ahead of the usual score-gap penalty. Offered
+  only once a MacMahon threshold exists — without one there is a single group.
 - **Floater selection style** — classic Swiss (the strongest of the lower
   group floats up) or median Swiss (the median floats up) — when a score
   group must pair across group lines.

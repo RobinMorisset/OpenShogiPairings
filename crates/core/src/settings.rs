@@ -784,7 +784,9 @@ pub enum PairingMode {
         #[serde(default)]
         floater_style: FloaterStyle,
         /// "Airtight groups": if set, forbid pairing across MacMahon groups during
-        /// rounds `1..=n`. Meaningless without thresholds.
+        /// rounds `1..=n`. Meaningless without thresholds — with none there is a
+        /// single group — so [`TournamentSettings::normalized`] clears it there
+        /// rather than storing a window that groups by nothing.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(as = "Option::<u32>")]
         airtight_groups: Option<NonZeroU32>,
@@ -1247,8 +1249,10 @@ impl TournamentSettings {
     /// Return these settings in canonical form: thresholds sorted ascending by
     /// value and de-duplicated (keeping the first entry for a repeated value,
     /// and treating a `drops_after_round` of 0 as "never drops" since it can't
-    /// take effect before round 1 anyway), and exempt clubs / nationalities
-    /// trimmed, emptied-dropped and de-duplicated case-insensitively.
+    /// take effect before round 1 anyway), the airtight-groups window dropped
+    /// when no threshold is left for it to group by, and exempt clubs /
+    /// nationalities trimmed, emptied-dropped and de-duplicated
+    /// case-insensitively.
     /// Independent of the order fields were entered, so pairing/standings are
     /// reproducible from the stored settings.
     pub fn normalized(mut self) -> Self {
@@ -1258,11 +1262,23 @@ impl TournamentSettings {
             club_protection,
             nationality_protection,
             macmahon,
+            airtight_groups,
             ..
         } = &mut self.pairing
         {
             macmahon.thresholds =
                 Self::normalize_thresholds(std::mem::take(&mut macmahon.thresholds));
+
+            // Airtight groups forbid pairing across MacMahon groups, and with no
+            // threshold there is a single group: the window is dropped rather
+            // than left set-but-inert, so the stored settings never claim a rule
+            // that isn't running. This also drops it in the corner case where
+            // manual point adjustments alone would have split players into
+            // groups — a deliberate simplification: the setting is presented as
+            // hanging off the thresholds.
+            if macmahon.thresholds.is_empty() {
+                *airtight_groups = None;
+            }
 
             // The two exempt lists: keep the first spelling of each, trimmed and
             // non-empty.
@@ -1728,6 +1744,32 @@ mod tests {
         assert!(s.airtight_groups_active(1));
         assert!(s.airtight_groups_active(2));
         assert!(!s.airtight_groups_active(3)); // past the window
+    }
+
+    #[test]
+    fn normalized_drops_the_airtight_window_without_thresholds() {
+        // Nothing to group by: no threshold means one MacMahon group, so the
+        // window is cleared rather than stored as a rule that never separates
+        // anyone.
+        let window = |s: &TournamentSettings| match &s.pairing {
+            PairingMode::Swiss {
+                airtight_groups, ..
+            } => *airtight_groups,
+            PairingMode::Elo { .. } => None,
+        };
+
+        let bare = TournamentSettings::default()
+            .with_airtight(NonZeroU32::new(2))
+            .normalized();
+        assert_eq!(window(&bare), None);
+        assert!(!bare.airtight_groups_active(1));
+
+        // With a threshold it survives untouched.
+        let with_threshold = TournamentSettings::default()
+            .with_thresholds(vec![mmt(1500)])
+            .with_airtight(NonZeroU32::new(2))
+            .normalized();
+        assert_eq!(window(&with_threshold), NonZeroU32::new(2));
     }
 
     #[test]

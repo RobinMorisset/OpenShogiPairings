@@ -15,7 +15,9 @@ import type { NationalityProtection } from "./NationalityProtection";
 export type PairingMode = { "kind": "swiss", floater_style: FloaterStyle, 
 /**
  * "Airtight groups": if set, forbid pairing across MacMahon groups during
- * rounds `1..=n`. Meaningless without thresholds.
+ * rounds `1..=n`. Meaningless without thresholds — with none there is a
+ * single group — so [`TournamentSettings::normalized`] clears it there
+ * rather than storing a window that groups by nothing.
  */
 airtight_groups?: number | null, club_protection?: ClubProtection, 
 /**
