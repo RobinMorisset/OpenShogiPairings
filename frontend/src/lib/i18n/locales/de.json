@@ -175,6 +175,7 @@
     "suggested": "Vorschlag",
     "long": "2R",
     "longTitle": "Langpartie: doppelte Bedenkzeit, erstreckt sich über zwei Runden und bringt dem Sieger zwei Punkte",
+    "carriedLongTitle": "Diese Langpartie endet in Runde {round} — tragen Sie ihr Ergebnis dort ein.",
     "clickToSetWinner": "Klicken, um als Sieger einzutragen",
     "drawTitle": "Vor der entscheidenden Partie gab es ein Remis (für die ELO-Auswertung erfasst)",
     "drawForfeitedTitle": "Es wurde nicht gespielt, also gab es kein Remis: Zuerst das Nichtantreten aufheben",

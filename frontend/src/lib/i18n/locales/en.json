@@ -175,6 +175,7 @@
     "suggested": "Suggested",
     "long": "2R",
     "longTitle": "A long game: double time control, lasting two rounds and scoring two points for the winner",
+    "carriedLongTitle": "This long game finishes in round {round} — record its result there.",
     "clickToSetWinner": "Click to set as winner",
     "drawTitle": "A draw occurred before the decisive game (recorded for ELO)",
     "drawForfeitedTitle": "Nobody played, so nobody drew: clear the no-show first",

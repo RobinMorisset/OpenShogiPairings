@@ -175,6 +175,7 @@
     "suggested": "Suggéré",
     "long": "2R",
     "longTitle": "Partie longue : cadence doublée, s'étalant sur deux rondes et rapportant deux points au vainqueur",
+    "carriedLongTitle": "Cette partie longue se termine à la ronde {round} : saisissez son résultat là-bas.",
     "clickToSetWinner": "Cliquer pour désigner le vainqueur",
     "drawTitle": "Une nulle a eu lieu avant la partie décisive (enregistrée pour l'ELO)",
     "drawForfeitedTitle": "Personne n'a joué, donc personne n'a fait nulle : retirez d'abord l'absence",

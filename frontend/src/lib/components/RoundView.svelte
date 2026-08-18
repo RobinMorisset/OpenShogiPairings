@@ -243,6 +243,21 @@
     return winnerOf(board) === other(side) || absent(forfeitOf(board), side);
   }
 
+  // The one round a carried game's result can be entered in: a long game spans
+  // exactly two, so its live `long_end` board is in the next one.
+  const carriedTitle = $derived(
+    $_("roundView.carriedLongTitle", { values: { round: round.number + 1 } }),
+  );
+
+  /** A long game carried out of this round: it is played on while the field
+   *  plays the next one, and everything about it — result, handicap, an
+   *  absence — is recorded on its `long_end` board there. This record holds
+   *  none of it, and `refuse_if_carried` (`crates/core`) rejects every write
+   *  aimed at it, so the round view offers none. */
+  function isCarried(board: Board): boolean {
+    return board.record?.kind === "long_carried";
+  }
+
   // The long checkbox is editable only on the current round; turning it *on* also
   // needs the board still undecided (turning it off after a result is the demote
   // path). Mirrors the server's `set_board_long` guards.
@@ -977,6 +992,12 @@
           {/if}
         {#each group.boards as index (index)}
           {@const board = round.boards[index]}
+          <!-- A carried long game is shown but not offered, on the same footing
+               as a reader's copy below: its controls would all be refused, so
+               the row renders as the record it is rather than as a board with
+               nothing filled in yet. -->
+          {@const carried = isCarried(board)}
+          {@const showOnly = readOnly || carried}
           <tr>
             <td
               class="src-col src-{sourceBadge($_, board.source).kind}"
@@ -995,11 +1016,13 @@
                  not-allowed cursor, which is a poor way to render a name
                  nobody was ever invited to click. -->
             <td class="p1-col">
-              {#if readOnly}
+              {#if showOnly}
                 <span
                   class="player"
                   class:winner={isWinner(board, "player1")}
-                  class:loser={isLoser(board, "player1")}>{name(board.player1)}</span
+                  class:loser={isLoser(board, "player1")}
+                  class:carried
+                  title={carried ? carriedTitle : undefined}>{name(board.player1)}</span
                 >
               {:else}
                 <button
@@ -1016,11 +1039,13 @@
               {/if}
             </td>
             <td>
-              {#if readOnly}
+              {#if showOnly}
                 <span
                   class="player"
                   class:winner={isWinner(board, "player2")}
-                  class:loser={isLoser(board, "player2")}>{name(board.player2)}</span
+                  class:loser={isLoser(board, "player2")}
+                  class:carried
+                  title={carried ? carriedTitle : undefined}>{name(board.player2)}</span
                 >
               {:else}
                 <button
@@ -1038,7 +1063,7 @@
             </td>
             {#if showDrawColumn}
               <td class="draw-col">
-                {#if readOnly}
+                {#if showOnly}
                   {#if drawnOf(board)}
                     <span class="mark" title={$_("roundView.drawTitle")}>=</span>
                   {/if}
@@ -1063,7 +1088,7 @@
             {/if}
             {#if showNoShowColumn}
               <td class="noshow-col">
-                {#if readOnly}
+                {#if showOnly}
                   <!-- Only the side that actually missed the board is marked,
                        and with which of the two absences it was; the arrows are
                        the referee's "click here to record one". -->
@@ -1132,7 +1157,7 @@
             {/if}
             {#if showHandicapColumn}
               <td class="handicap-col">
-                {#if readOnly}
+                {#if showOnly}
                   {#if handicapOf(board)}
                     <span class="mark">{handicapOf(board)?.handicap}</span>
                     <span class="giver"
@@ -1779,7 +1804,8 @@
   .player.winner::before {
     visibility: visible;
   }
-  .player.loser {
+  .player.loser,
+  .player.carried {
     color: var(--text-tertiary);
   }
 

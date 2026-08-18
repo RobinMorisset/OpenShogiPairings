@@ -175,6 +175,7 @@
     "suggested": "Sugerowana",
     "long": "2R",
     "longTitle": "Długa partia: podwójne tempo gry, trwa dwie rundy i daje zwycięzcy dwa punkty",
+    "carriedLongTitle": "Ta długa partia kończy się w rundzie {round} — tam zapisz jej wynik.",
     "clickToSetWinner": "Kliknij, aby wskazać zwycięzcę",
     "drawTitle": "Przed partią decydującą padł remis (zapisany na potrzeby ELO)",
     "drawForfeitedTitle": "Partia nie została rozegrana, więc nie było remisu: najpierw usuń walkower",
