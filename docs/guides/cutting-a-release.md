@@ -152,13 +152,21 @@ the other.
 
 ## Notes
 
-- **Unsigned builds.** The apps are not code-signed, so users get an "unknown
-  publisher" (Windows) or "unidentified developer / damaged" (macOS) warning on
+- **Unsigned builds.** The apps carry no trusted signature, so users get an
+  "unknown publisher" (Windows) or "unidentified developer" (macOS) warning on
   first launch. This is documented for users in the README's
   [Download](../../README.md#download) section. Removing it means buying an Apple
   Developer ID (~$99/yr) and a Windows code-signing certificate, then adding the
   signing secrets to the workflow — see the
   [tauri-action docs](https://github.com/tauri-apps/tauri-action).
+- **The macOS bundle is ad-hoc signed** — that's `bundle.macOS.signingIdentity`
+  set to `"-"` in [`tauri.conf.json`](../../frontend/src-tauri/tauri.conf.json),
+  which JSON gives no way to explain in place, hence this note. An ad-hoc
+  signature carries no identity and buys no trust, so Gatekeeper still stops the
+  app; what it avoids is the *worse* dialog. Apple Silicon refuses to run a
+  binary with no signature at all, and a downloaded bundle that fails validation
+  outright is reported as "damaged" and offered to the Trash rather than as
+  merely unverified. Don't drop the setting to "simplify" the config.
 - **Draft by default.** `create-release` passes `--draft` to `gh release create`,
   so a bad build never goes public on its own — publishing is always the manual
   click in step 5. Dropping that flag would make a tag push publish

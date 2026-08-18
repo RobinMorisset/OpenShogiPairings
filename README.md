@@ -21,14 +21,22 @@ page:
 - **macOS** — download the `.dmg`, open it, and drag OpenShogiPairings into
   Applications. It's a universal build (both Apple Silicon and Intel Macs).
 
-> **You'll see an "unknown publisher" / "damaged" warning the first time.** These
-> builds are **not code-signed** — I haven't paid for the Apple and Windows
-> signing certificates — so the operating system shows a scary-looking warning on
-> first launch. The app is safe; here's how to get past it:
+> **You'll see an "unknown publisher" / "unverified developer" warning the first
+> time.** These builds are **not code-signed** — I haven't paid for the Apple and
+> Windows signing certificates — so the operating system shows a scary-looking
+> warning on first launch. The app is safe; here's how to get past it:
 > - **Windows**: on the blue SmartScreen popup, click **More info → Run anyway**.
-> - **macOS**: right-click (or Ctrl-click) the app and choose **Open**, then
->   confirm in the dialog. If macOS insists the app is "damaged", run this once in
->   Terminal and then open it normally:
+> - **macOS 15 (Sequoia) and later**: double-click the app, click **Done** on the
+>   warning that it can't be verified — that first, failed launch is what makes
+>   the next step appear — then open **System Settings → Privacy & Security**,
+>   scroll down to *Security*, click **Open Anyway** next to the line about
+>   OpenShogiPairings, and confirm with your password. From then on it opens
+>   normally.
+> - **macOS 14 and earlier**: right-click (or Ctrl-click) the app and choose
+>   **Open**, then confirm in the dialog. Sequoia removed this shortcut, which is
+>   why it has its own longer path above.
+> - If macOS insists the app is **"damaged"**, run this once in Terminal and then
+>   open it normally:
 >   ```sh
 >   xattr -dr com.apple.quarantine /Applications/OpenShogiPairings.app
 >   ```

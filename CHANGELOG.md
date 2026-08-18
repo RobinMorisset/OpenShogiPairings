@@ -151,6 +151,11 @@ with the version that has it. Saves from v1.0.0 cannot be opened at all.
 
 ### Changed
 
+- **The macOS app is now ad-hoc signed**, so a downloaded copy is reported as
+  coming from an unidentified developer rather than as "damaged". It is still
+  not signed with an Apple Developer ID, so Gatekeeper still asks before the
+  first launch; the README now spells out the macOS 15 path for that, which no
+  longer accepts the old right-click → Open shortcut.
 - **Better backups**: the directory is configurable by `OSP_BACKUP_DIR`, shown
   in a tooltip, and backups are preserved for `OSP_BACKUP_RETENTION_DAYS`
   (default: 30) even after a tournament is deleted, and can be restored from the
