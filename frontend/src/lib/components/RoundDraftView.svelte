@@ -116,6 +116,12 @@
   function byNumber(a: Player, b: Player) {
     return (a.tournament_id ?? Infinity) - (b.tournament_id ?? Infinity);
   }
+  // Last name, then first name — the order a referee scans a list of names in,
+  // and the same one the round view's lookup by name uses. `localeCompare` so
+  // the accented names of a European field sort where they are looked for.
+  function byLastName(a: Player, b: Player) {
+    return a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name);
+  }
   const allSorted = $derived([...players].sort(byNumber));
   // Everyone the round will include — what the server's minimum is measured
   // against. Distinct from `present` below, which is only the Swiss pool.
@@ -140,8 +146,10 @@
   // `confirm_round` gives them no sit-out either. Ticking one therefore changed
   // nothing about the round it was ticked in. The forfeit it looked like it was
   // recording is recorded where it happens: on the board, in the round view.
+  // By name, not by number: this is the one list the referee reads down looking
+  // for a particular person, rather than one the round's own order matters in.
   const absenceCandidates = $derived(
-    allSorted.filter((p) => !longSet.has(tid(p)) && !cupSet.has(tid(p))),
+    allSorted.filter((p) => !longSet.has(tid(p)) && !cupSet.has(tid(p))).sort(byLastName),
   );
 
   // A cup player can still *arrive* absent: `prepare_round` carries the previous
@@ -238,13 +246,13 @@
         members: (teamMembers.get(t.tournament_id ?? -1) ?? [])
           .map((id) => byId.get(id))
           .filter((p) => p != null)
-          .sort(byNumber),
+          .sort(byLastName),
       }))
       .sort((a, b) => a.number - b.number);
     const inATeam = new Set(grouped.flatMap((g) => g.members.map(tid)));
     return {
       grouped,
-      loose: allSorted.filter((p) => !inATeam.has(tid(p))),
+      loose: allSorted.filter((p) => !inATeam.has(tid(p))).sort(byLastName),
     };
   });
 
