@@ -45,3 +45,16 @@ typed-index-collections = "3"
 rand = { version = "0.8", default-features = false }
 rand_chacha = "0.3"
 tracing = "0.1"
+
+# Strip the release binaries. Debug symbols are the single largest thing in
+# them — measured with `cargo bloat`, `osp-server` is 9.2 MiB of which only
+# 4.7 MiB is `.text` — and nothing ships them anywhere they would be read: the
+# server and the simulator both run from a build made on the machine that runs
+# them, where the object files are still next to the binary.
+#
+# `true` (= "symbols") rather than "debuginfo", matching what the desktop app
+# already does in `frontend/src-tauri/Cargo.toml`. The cost is that a panic
+# backtrace in a release build carries addresses instead of names; the server's
+# own error paths report through `tracing`, which is unaffected.
+[profile.release]
+strip = true
