@@ -37,6 +37,27 @@ tauri-build = { version = "2.6.3", features = [] }
 # handler should not take down the whole desktop app.)
 [profile.release]
 strip = true
+# One codegen unit per crate, then a whole-graph merge — the same trade the
+# workspace root makes, for the same reason: 16 units emit each generic
+# instantiation independently and every copy carries its own unwinding metadata.
+# Measured on `target/release/app`, stripped:
+#
+#   codegen-units = 16 (default)  12.27 MB
+#   codegen-units = 1             10.03 MB   -18.2%
+#   + lto = "fat"                  9.51 MB   -22.5%
+#
+# A third of that is `__eh_frame` + `__gcc_except_tab` + `__unwind_info`, which
+# fall from 2.18 MB to 1.21 MB. Fat LTO's own contribution is entirely metadata
+# and constants — it leaves `.text` slightly *larger* than one codegen unit alone
+# (6.98 vs 6.91 MB), inlining trading some size back.
+#
+# This is the binary that ships to referees, and it is built about once a
+# fortnight, so the cost is in the right place: a full release build goes from
+# 73s to 201s. `tauri dev` is unaffected — it builds the debug profile — and the
+# release workflow (.github/workflows/release.yml) passes no `--debug`, so the
+# published artifact is what these numbers describe.
+codegen-units = 1
+lto = "fat"
 
 [dependencies]
 serde_json = "1.0"
