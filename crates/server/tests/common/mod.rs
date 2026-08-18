@@ -33,7 +33,6 @@ pub fn state_with_backups() -> AppState {
     }
 }
 
-/// Send one request through the router and return (status, parsed JSON body).
 pub async fn send(app: Router, req: Request<Body>) -> (StatusCode, serde_json::Value) {
     let response = app.oneshot(req).await.unwrap();
     let status = response.status();

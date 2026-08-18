@@ -83,7 +83,6 @@ impl TeamSlots {
         self.by_tid.get(player).copied().flatten()
     }
 
-    /// The team a player plays for.
     pub(crate) fn team_of(&self, player: TournamentId) -> Option<TeamId> {
         self.slot_of(player).map(|(team, _)| team)
     }
@@ -138,10 +137,8 @@ pub struct TeamMatchView {
     /// Board wins for `team1`, in half-wins like every [`HalfWins`] on the wire (a
     /// board is won or it isn't, so these are always whole).
     pub wins1: HalfWins,
-    /// Board wins for `team2`.
     pub wins2: HalfWins,
-    /// Whether every board of the match is decided. A match without one has no
-    /// result yet — see [`MatchResult::points1`].
+    /// `false` means the match has no result yet — see [`MatchResult::points1`].
     pub decided: bool,
 }
 
@@ -351,7 +348,6 @@ pub(crate) struct TeamScore {
     /// The cumulative ("CUSS") tie-breaks, round by round — the same fold a
     /// player's score does.
     pub cumulative: Cumulative,
-    /// Whether the team has already had a bye of some kind.
     pub had_bye: bool,
     pub last_ascended: Option<u32>,
     pub last_descended: Option<u32>,

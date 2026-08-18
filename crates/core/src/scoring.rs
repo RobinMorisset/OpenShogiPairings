@@ -375,7 +375,7 @@ pub(crate) fn compute_scores(
                 None => continue,
             };
             let s = &mut by_tid[winner];
-            s.victories += HalfWins::from_whole(reps); // one win per game (two for a long board)
+            s.victories += HalfWins::from_whole(reps);
             for _ in 0..reps {
                 s.defeated.push(loser);
             }
@@ -398,7 +398,7 @@ pub(crate) fn compute_scores(
             };
             if let Some(present) = board.no_show_opponent() {
                 let s = &mut by_tid[present];
-                s.victories += HalfWins::from_whole(reps); // one win (two for a long board)
+                s.victories += HalfWins::from_whole(reps);
             }
         }
 

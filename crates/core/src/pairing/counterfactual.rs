@@ -108,7 +108,6 @@ pub struct Counterfactual {
     pub scoped_out: Option<ScopeReason>,
     /// Per-rule net change (priority order), only rules that actually moved.
     pub cost_delta: Vec<RuleDelta>,
-    /// The affected player rings.
     pub cycles: Vec<AffectedCycle>,
     /// The new boards (those that differ from the confirmed pairing), each with
     /// its rule ledger. A board with no `player2` is a new bye.

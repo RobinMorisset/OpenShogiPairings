@@ -189,7 +189,6 @@ impl TournamentStore {
         self.problem.as_ref()
     }
 
-    /// The current change version. Bumped on every state change.
     pub fn version(&self) -> u32 {
         self.version
     }
@@ -323,7 +322,6 @@ impl TournamentStore {
         !self.persist_failed
     }
 
-    /// The current tournament, if one exists.
     pub fn current(&self) -> Option<&Tournament> {
         self.current.as_ref()
     }
@@ -514,7 +512,6 @@ impl std::fmt::Display for NothingLeft {
 
 impl std::error::Error for NothingLeft {}
 
-/// No tournament with this id is registered.
 #[derive(Debug, Clone, Copy)]
 pub struct NoSuchTournament(pub Uuid);
 
@@ -529,7 +526,6 @@ impl std::error::Error for NoSuchTournament {}
 /// Failure of [`TournamentStore::mutate`].
 #[derive(Debug)]
 pub enum MutateError {
-    /// No tournament exists to mutate.
     NoTournament,
     /// The edit was based on a tournament version that is no longer current —
     /// another writer changed it first (optimistic-concurrency conflict, `409`).
@@ -588,7 +584,6 @@ impl Drop for PublicStreamSlot {
 }
 
 impl TournamentInstance {
-    /// Assemble an instance around an already-built store.
     fn new(
         store: TournamentStore,
         auth: Option<AuthConfig>,
@@ -1139,7 +1134,6 @@ impl TournamentRegistry {
         Ok(key)
     }
 
-    /// Look up one tournament's instance by id.
     pub fn get(&self, id: Uuid) -> Option<Arc<TournamentInstance>> {
         self.instances
             .read()
@@ -1451,7 +1445,6 @@ pub(crate) enum RestoreError {
     PasswordNotNeeded,
     /// Its directory survived but holds no backup to restore from.
     NoBackups,
-    /// The requested backup isn't one of its backups.
     NoSuchBackup,
     /// The backup file itself no longer describes a valid tournament.
     Invalid(TournamentError),

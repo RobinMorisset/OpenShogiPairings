@@ -94,12 +94,10 @@ pub(crate) struct DeletedTournament {
     /// Its id — the key to restore it by, and the id it comes back under: a
     /// restored tournament is the same tournament, not a copy of it.
     pub id: Uuid,
-    /// Its name when it was deleted.
     pub name: String,
     /// Unix seconds at which it was deleted.
     #[ts(type = "number")]
     pub deleted_at: u64,
-    /// Whether restoring it needs the password it had.
     pub has_password: bool,
     /// Its surviving backups, newest first — the last of them taken as it was
     /// deleted. Sent whole so the referee can pick an earlier one rather than

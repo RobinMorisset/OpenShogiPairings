@@ -35,7 +35,6 @@ pub enum CsvImportError {
     /// The file had no data rows (empty, or a header with nothing under it).
     #[error("the CSV file has no players to import")]
     Empty,
-    /// The header lacked a last-name and/or first-name column.
     #[error("the CSV must have a last-name column and a first-name column")]
     MissingNameColumns,
     /// One or more data rows had a blank last name (1-based row numbers, the
@@ -112,7 +111,6 @@ const ALIASES: &[(Field, &[&str])] = &[
     (Field::Club, &["club"]),
 ];
 
-/// Which known field a header cell names, if any.
 fn match_column(header: &str) -> Option<Field> {
     let norm = normalize(header);
     ALIASES
@@ -252,7 +250,6 @@ pub fn parse_players_csv(
     let nat_idx = index_of(Field::Nationality);
     let club_idx = index_of(Field::Club);
 
-    // FESA lookup by accent-folded name, for filling missing ELO/grade.
     let cell = |row: &[String], idx: Option<usize>| -> String {
         idx.and_then(|i| row.get(i))
             .map(|s| s.trim().to_string())
@@ -431,7 +428,6 @@ mod tests {
 
     #[test]
     fn accent_insensitive_headers_and_semicolon_delimiter() {
-        // French headers, semicolon-separated, accents on the column names.
         let csv = "Nom;Prénom;Classement;Nat.\n\
                    Dupont;Jean;1500;FR\n";
         let players = parse_players_csv(csv, &[]).unwrap();
@@ -555,7 +551,6 @@ mod tests {
         let csv = "Last name,First name\nAlpha,Ann\n,Bo\nGamma,Gil\n";
         let err = parse_players_csv(csv, &[]).unwrap_err();
         assert_eq!(err, CsvImportError::RowsMissingLastName { rows: vec![3] });
-        // The message names the offending row.
         assert!(err.to_string().contains('3'));
     }
 
@@ -676,7 +671,6 @@ mod tests {
 
     #[test]
     fn grade_kind_round_trips_through_parse() {
-        // Guard the enum wiring the importer relies on.
         assert_eq!(Grade::parse("1d").map(|g| g.kind), Some(GradeKind::Dan));
         assert_eq!(Grade::parse("1k").map(|g| g.kind), Some(GradeKind::Kyu));
     }

@@ -41,7 +41,6 @@ use crate::units::TournamentId;
 /// needs half as many players again (see [`cup_field_size`]).
 pub const CUP_SIZES: [u32; 4] = [8, 16, 32, 64];
 
-/// How the cup bracket is filled. See the module docs for the shapes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(rename_all = "snake_case")]
@@ -602,13 +601,10 @@ fn stage_before_final(alive: u32) -> CupStage {
 /// advancement.
 #[derive(Clone, Copy)]
 enum Slot {
-    /// A known player.
     Player(TournamentId),
     /// Permanently empty — both feeding players were no-shows, so the opposing
     /// slot's player advances unopposed (a cup bye).
     Empty,
-    /// Not yet determined — the feeding match hasn't been decided; the winner
-    /// stays pending until it is.
     Pending,
 }
 

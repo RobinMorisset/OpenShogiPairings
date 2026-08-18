@@ -44,7 +44,6 @@ async fn login_then_use_the_token_to_reach_the_api() {
     let state = AppState::default();
     let (id, _token) = create_with_password(&state, "Cup", "secret").await;
 
-    // Log in with the right password to obtain the session token.
     let (status, body) = send(
         router(state.clone()),
         json_req("POST", &t(id, "/login"), json!({ "password": "secret" })),
@@ -54,7 +53,6 @@ async fn login_then_use_the_token_to_reach_the_api() {
     let token = body["token"].as_str().unwrap().to_string();
     assert!(!token.is_empty());
 
-    // A bogus token is still rejected.
     let (status, _) = send(
         router(state.clone()),
         json_req_auth(
@@ -67,7 +65,6 @@ async fn login_then_use_the_token_to_reach_the_api() {
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // The real token gets through and the request succeeds.
     let (status, body) = send(
         router(state.clone()),
         json_req_auth(
@@ -102,7 +99,6 @@ async fn stale_version_header_is_409_but_matching_one_passes() {
     let (_, body) = send(router(state.clone()), get(&t(id, ""))).await;
     let version = body["version"].as_u64().unwrap();
 
-    // A stale base version is rejected with 409.
     let stale = version - 1;
     let (status, _) = send(
         router(state.clone()),
@@ -117,7 +113,6 @@ async fn stale_version_header_is_409_but_matching_one_passes() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
 
-    // The current version is accepted, and bumps the version again.
     let (status, body) = send(
         router(state.clone()),
         Request::builder()

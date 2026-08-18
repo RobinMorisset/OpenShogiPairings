@@ -805,7 +805,7 @@ mod tests {
             boards: vec![Board {
                 record: GameRecord::Short(Outcome::Forfeit {
                     absent: Forfeit::Player2(AbsenceKind::NoShow),
-                }), // P2 absent
+                }),
                 ..Board::pending(p1, p2, 0, PairingSource::Swiss)
             }],
             sitouts: Vec::new(),

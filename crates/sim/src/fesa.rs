@@ -59,12 +59,10 @@ fn permanent_list_in_force(date: Ymd) -> Ymd {
         .expect("y-1 candidates always precede a date in year y")
 }
 
-/// The FESA rating-list URL for the list in force on `date`.
 pub(crate) fn list_url_in_force(date: Ymd) -> String {
     list_url(permanent_list_in_force(date))
 }
 
-/// The FESA URL for a dated rating list.
 pub(crate) fn list_url(date: Ymd) -> String {
     format!(
         "https://fesashogi.eu/old/ratinglists/{:04}-{:02}-{:02}.txt",
@@ -319,7 +317,6 @@ mod tests {
         assert_eq!(games[&andre], 17);
     }
 
-    /// A player with the given last/first name.
     fn player(base: &mut Tournament, last: &str, first: &str) -> uuid::Uuid {
         base.add_player(NewPlayer {
             last_name: last.into(),

@@ -164,7 +164,6 @@ impl Tournament {
         Ok(())
     }
 
-    /// The team a player belongs to, if any.
     pub fn team_of(&self, player: Uuid) -> Option<&Team> {
         self.teams.iter().find(|t| t.members.contains(&player))
     }
@@ -724,7 +723,6 @@ impl Tournament {
         self.team_mut(team).map(|t| &*t)
     }
 
-    /// Remove a previously applied team adjustment.
     pub fn remove_team_adjustment(
         &mut self,
         team: Uuid,
@@ -746,7 +744,6 @@ impl Tournament {
         self.team_mut(team).map(|t| &*t)
     }
 
-    /// Mutable access to a team by id.
     fn team_mut(&mut self, team: Uuid) -> Result<&mut Team, TournamentError> {
         self.teams
             .iter_mut()
@@ -886,7 +883,6 @@ mod tests {
         (t, ids)
     }
 
-    /// Fill `teams` teams of `size` from `ids`, in order.
     fn fill_teams(t: &mut Tournament, ids: &[Uuid], teams: usize, size: usize) -> Vec<Uuid> {
         (0..teams)
             .map(|k| {
@@ -1492,14 +1488,12 @@ mod tests {
 
     // --- Pairing ----------------------------------------------------------
 
-    /// Start a round on a finalized tournament, with the given players absent.
     fn start_round(t: &mut Tournament, absent: Vec<TournamentId>) {
         t.prepare_round().unwrap();
         t.update_draft(absent, Vec::new(), Vec::new()).unwrap();
         t.confirm_round().unwrap();
     }
 
-    /// A player's tournament number.
     fn tid(t: &Tournament, id: Uuid) -> TournamentId {
         t.players
             .iter()
@@ -1777,7 +1771,6 @@ mod tests {
 
     // --- Team-level draft operations --------------------------------------
 
-    /// The team number of the team a player plays for.
     fn team_number(t: &Tournament, player: Uuid) -> TeamId {
         t.team_of(player).unwrap().tournament_id.unwrap()
     }

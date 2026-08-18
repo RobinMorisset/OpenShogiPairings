@@ -70,8 +70,6 @@ pub struct RatedPlayer {
     pub grade: Option<Grade>,
 }
 
-/// Decode ISO-8859-1 (Latin-1) bytes to a `String`.
-///
 /// The FESA file is Latin-1, so it is not valid UTF-8 and can't be read as a
 /// `String` directly. Each byte maps to the identically-numbered Unicode code
 /// point, which is exactly Latin-1 — and keeps 1 byte = 1 character, so the
@@ -239,7 +237,6 @@ enum Row {
     Other,
 }
 
-/// Classify and parse a single line.
 fn parse_row(line: &str, width: usize) -> Row {
     // Drop the leading rank ("  1 ", "1000 ", …) and anchor to the name start;
     // this absorbs the 4-digit rank column shift. No rank, no player row.

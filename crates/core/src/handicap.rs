@@ -17,8 +17,6 @@ fn elo_prime(elo: f64) -> f64 {
     }
 }
 
-/// The suggested handicap for a game between two players, from their ratings.
-///
 /// `None` when either player is unrated (the transform needs a numeric rating)
 /// or the adjusted gap is small enough to call it an even game (≤45). The nine
 /// non-equal bins map 1:1 onto [`Handicap::ALL`].

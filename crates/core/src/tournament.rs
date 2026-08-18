@@ -69,7 +69,6 @@ use typed_index_collections::TiVec;
 /// upgrade has to translate — nor is the v13 flag, which lives on a round.
 pub const TOURNAMENT_FORMAT_VERSION: u32 = 13;
 
-/// Minimum number of players required to start a round.
 pub(crate) const MIN_PLAYERS_PER_ROUND: usize = 2;
 
 /// Minimum number of present teams required to start a team round — the team
@@ -77,7 +76,6 @@ pub(crate) const MIN_PLAYERS_PER_ROUND: usize = 2;
 /// Crate-internal: only `team.rs`'s own guard reads it.
 pub(crate) const MIN_TEAMS_PER_ROUND: usize = 2;
 
-/// A tournament: a name and its registered players.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(deny_unknown_fields)]
@@ -89,9 +87,7 @@ pub struct Tournament {
     /// the field exists to say which shape the rest of the bytes are in, so
     /// assuming the current one turns "I don't know" into a confident misread.
     pub format_version: u32,
-    /// Stable unique identifier for the tournament.
     pub id: Uuid,
-    /// Human-readable tournament name.
     pub name: String,
     /// Tournament-wide settings (MacMahon groups, …). Defaulted so older saves
     /// that predate it load with no MacMahon.
@@ -100,7 +96,7 @@ pub struct Tournament {
     /// Registered players, in registration order.
     #[serde(default)]
     pub players: Vec<Player>,
-    /// Whether registration has been finalized (a prerequisite for round 1).
+    /// A prerequisite for round 1.
     #[serde(default)]
     pub registration_finalized: bool,
     /// The round currently being set up but not yet started, if any. Its
@@ -124,25 +120,19 @@ pub struct Tournament {
 /// Errors that can arise while mutating a [`Tournament`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TournamentError {
-    /// The tournament name was empty or whitespace-only.
     #[error("tournament name must not be empty")]
     EmptyTournamentName,
-    /// A player's last name was empty or whitespace-only.
     #[error("player last name must not be empty")]
     EmptyPlayerName,
-    /// No player with the given id exists in this tournament.
     #[error("no player with id {0}")]
     PlayerNotFound(Uuid),
 
     #[error("no category with id {0}")]
     CategoryNotFound(Uuid),
-    /// Registration has already been finalized.
     #[error("registration is already finalized")]
     RegistrationAlreadyFinalized,
-    /// Registration must be finalized before starting rounds.
     #[error("registration must be finalized first")]
     RegistrationNotFinalized,
-    /// A new round cannot start until the current one is completed.
     #[error("the current round must be completed first")]
     PreviousRoundNotComplete,
     /// A new round cannot start while an *earlier* round still has a board with
@@ -156,25 +146,19 @@ pub enum TournamentError {
     /// went back to fix is still open".
     #[error("round {round} still has a game with no result")]
     EarlierRoundNotComplete { round: u32 },
-    /// A round is already being drafted.
     #[error("a round is already being prepared")]
     DraftAlreadyExists,
-    /// An operation needs a draft round in progress, but there is none.
     #[error("no round is being prepared")]
     NoDraft,
     /// Too few present (non-absent) players to start a round.
     #[error("need at least {needed} present players (have {have})")]
     NotEnoughPresentPlayers { needed: usize, have: usize },
-    /// The draft's constraints are inconsistent (see the message).
     #[error("invalid round setup: {0}")]
     InvalidDraft(String),
-    /// There is no round (or draft) to cancel.
     #[error("no round to cancel")]
     NoRoundToCancel,
-    /// There is no current (in-progress) round to act on (e.g. to re-pair).
     #[error("there is no current round")]
     NoCurrentRound,
-    /// A pairing can't be forced onto a round that already has recorded results.
     #[error("cannot re-pair a round that already has recorded results")]
     RoundHasResults,
     /// The clicked board already has a result, so it cannot be made long: the
@@ -187,7 +171,6 @@ pub enum TournamentError {
     /// board and was still refused, which needs saying rather than implying.
     #[error("another game in this cup round already has a result")]
     LongFlagAfterCoupledResult,
-    /// A board's "long game" flag can only be changed on the current round.
     #[error("a long game can only be set on the current round")]
     NotCurrentRound,
     /// A long game must be resolved before the record that depends on it can be
@@ -227,10 +210,8 @@ pub enum TournamentError {
          start the next round, or untick the long box to score it as one game"
     )]
     UncarriedLongGame { round: u32 },
-    /// No round with the given number exists.
     #[error("no round number {0}")]
     RoundNotFound(u32),
-    /// No board with the given index exists in the round.
     #[error("no board {board} in round {round}")]
     BoardNotFound { round: u32, board: usize },
     /// A draw was recorded on a board that was forfeited — nobody played, so
@@ -254,7 +235,6 @@ pub enum TournamentError {
     /// bug.
     #[error("board {board} of round {round} was forfeited, so it cannot have a handicap")]
     HandicapOnForfeitedBoard { round: u32, board: usize },
-    /// The serialized record uses a format version this build cannot read.
     #[error("unsupported tournament format version {found} (this build supports {supported})")]
     UnsupportedFormatVersion { found: u32, supported: u32 },
     /// The save is from an older format this build *can* upgrade, but only for a
@@ -270,7 +250,6 @@ pub enum TournamentError {
     /// enough to read its format version).
     #[error("malformed tournament save: {0}")]
     MalformedSave(String),
-    /// Two players in the file share a registration id.
     #[error("player id {player} appears more than once")]
     DuplicatePlayerId { player: Uuid },
     /// Two players in the file share a tournament number — the key every score
@@ -281,7 +260,6 @@ pub enum TournamentError {
     /// everything downstream assumes they have.
     #[error("player {player} has no tournament number, but registration is finalized")]
     UnnumberedPlayer { player: Uuid },
-    /// Two teams in the file share a registration id.
     #[error("team id {team} appears more than once")]
     DuplicateTeamId { team: Uuid },
     /// Two teams in the file share a team number — the key every team score is
@@ -296,13 +274,10 @@ pub enum TournamentError {
     /// board would resolve to nobody, and the team would silently play short.
     #[error("team {team} rosters {player}, who is not a registered player")]
     UnknownTeamMember { team: Uuid, player: Uuid },
-    /// The rounds in the file are not numbered `1..=n` in order.
     #[error("expected round {expected} at this position, found round {found}")]
     MisnumberedRound { expected: u32, found: u32 },
-    /// A board or sit-out names a tournament number no player in the file has.
     #[error("round {round} names tournament number {player}, who is not in this tournament")]
     UnknownRoundPlayer { round: u32, player: TournamentId },
-    /// A board pairs a player with themselves.
     #[error("round {round} pairs player {player} against themselves")]
     BoardAgainstSelf { round: u32, player: TournamentId },
     /// A player takes part in one round more than once — on two boards, in two
@@ -331,13 +306,10 @@ pub enum TournamentError {
          (K multiplier 0), or use a non-flat unrated prior"
     )]
     EloEstimateUnanchored,
-    /// The cup is enabled but no size was chosen at finalization.
     #[error("choose a cup size to finalize (the cup is enabled)")]
     CupSizeRequired,
-    /// The chosen cup size is not one of the supported powers of two.
     #[error("invalid cup size {size} (must be one of 8, 16, 32, 64)")]
     InvalidCupSize { size: u32 },
-    /// Fewer eligible players than the chosen cup size.
     #[error("need at least {needed} eligible players for the cup (have {have})")]
     NotEnoughEligiblePlayers { needed: u32, have: usize },
     /// A loaded cup's seed list is the wrong length for its bracket size — the
@@ -349,13 +321,10 @@ pub enum TournamentError {
         expected: u32,
         found: usize,
     },
-    /// A loaded cup seeds the same player into two bracket slots.
     #[error("cup seed {seed} appears more than once")]
     DuplicateCupSeed { seed: TournamentId },
-    /// A loaded cup seeds a tournament number no player in the file carries.
     #[error("cup seed {seed} is not a player of this tournament")]
     UnknownCupSeed { seed: TournamentId },
-    /// A player who is seeded in the cup bracket cannot be removed.
     #[error("cannot remove a player seeded in the cup")]
     CannotRemoveCupPlayer,
     /// A player who has already played a game (appears on a board of a started
@@ -380,13 +349,10 @@ pub enum TournamentError {
     /// inconsistency — should not happen for a properly gated round).
     #[error("the cup bracket is missing an earlier result")]
     CupBracketInconsistent,
-    /// A manual point adjustment was requested with a blank reason.
     #[error("a point adjustment needs a reason")]
     EmptyAdjustmentReason,
-    /// A manual point adjustment of zero was requested (it would have no effect).
     #[error("a point adjustment must not be zero")]
     ZeroPointAdjustment,
-    /// No point adjustment with the given id exists for that player.
     #[error("no point adjustment {adjustment} for player {player}")]
     AdjustmentNotFound { player: Uuid, adjustment: Uuid },
 
@@ -397,42 +363,32 @@ pub enum TournamentError {
     /// picks.
     #[error("team mode does not support {} — turn one of the two off", .0.describe())]
     TeamModeConflict(TeamModeConflict),
-    /// The configured team size is outside [`TEAM_SIZES`].
     #[error("invalid team size {size} (must be between 2 and 9)")]
     InvalidTeamSize { size: u32 },
     /// Team mode, or the team size, was changed after registration was
     /// finalized — both reshape every roster and every future match.
     #[error("team mode and team size are fixed once registration is finalized")]
     TeamSettingsLocked,
-    /// A team operation was attempted on an individual tournament.
     #[error("this is not a team tournament")]
     NotATeamTournament,
-    /// No team with the given id exists in this tournament.
     #[error("no team with id {0}")]
     TeamNotFound(Uuid),
-    /// A team's name was empty or whitespace-only.
     #[error("team name must not be empty")]
     EmptyTeamName,
-    /// Another team already has that name (compared ignoring case).
     #[error("a team named {0} already exists")]
     DuplicateTeamName(String),
     /// A player was assigned to a team while already a member of another — a
     /// player belongs to exactly one team.
     #[error("player {0} is already in another team")]
     PlayerAlreadyInATeam(Uuid),
-    /// A player was assigned to a team that already has its full roster.
     #[error("that team already has its {size} members")]
     TeamIsFull { size: u32 },
-    /// A player was removed from, or reordered within, a team they aren't in.
     #[error("player {player} is not a member of team {team}")]
     NotATeamMember { team: Uuid, player: Uuid },
-    /// A board-order reorder didn't name exactly the team's current members.
     #[error("a board order must list exactly the team's current members")]
     InvalidBoardOrder,
-    /// Finalization found a player belonging to no team.
     #[error("every player must be in a team before finalizing ({count} are not)")]
     PlayersWithoutTeam { count: usize },
-    /// Finalization found a team whose roster isn't the configured size.
     #[error("team {name} has {have} of {need} members")]
     IncompleteTeam {
         name: String,
@@ -447,7 +403,6 @@ pub enum TournamentError {
          member ({count} are missing one)"
     )]
     MembersWithoutPairingRating { count: usize },
-    /// Fewer than two teams at finalization.
     #[error("need at least 2 teams (have {have})")]
     NotEnoughTeams { have: usize },
     /// A pairing rating was set outside the one configuration it means anything
@@ -467,7 +422,6 @@ pub enum TournamentError {
     /// late team would need teamless players first).
     #[error("a team tournament cannot take late registrations")]
     NoLateRegistrationInTeamMode,
-    /// Too few present teams to start a team round.
     #[error("need at least {needed} present teams (have {have})")]
     NotEnoughPresentTeams { needed: usize, have: usize },
     /// A player-level forced pairing or forced bye was submitted for a team
@@ -2919,7 +2873,6 @@ impl Tournament {
             .and_then(|p| p.rating)
     }
 
-    /// Immutable access to a board by round number and index.
     fn board(&self, round_number: u32, board_index: usize) -> Result<&Board, TournamentError> {
         let round = self
             .rounds
@@ -6893,7 +6846,6 @@ mod tests {
             .unwrap()
     }
 
-    /// Find the board (in the round with the given number) pairing `a` and `b`.
     fn find_board(t: &Tournament, rnum: u32, a: Uuid, b: Uuid) -> Option<&Board> {
         let (a, b) = (tid(t, a), tid(t, b));
         t.rounds
@@ -6957,7 +6909,6 @@ mod tests {
         assert!(t.update_settings(TournamentSettings::elo_pairing()).is_ok());
     }
 
-    /// Record `winner` beating `loser` on their board in round `rnum`.
     fn decide(t: &mut Tournament, rnum: u32, winner: Uuid, loser: Uuid) {
         let (winner, loser) = (tid(t, winner), tid(t, loser));
         let round = t.rounds.iter().find(|r| r.number == rnum).unwrap();
@@ -6995,7 +6946,6 @@ mod tests {
         }
     }
 
-    /// Mark the board pairing `a` and `b` in round `rnum` as a double no-show.
     fn no_show_both(t: &mut Tournament, rnum: u32, a: Uuid, b: Uuid) {
         let (a, b) = (tid(t, a), tid(t, b));
         let round = t.rounds.iter().find(|r| r.number == rnum).unwrap();

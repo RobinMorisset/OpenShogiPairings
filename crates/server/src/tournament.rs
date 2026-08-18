@@ -409,7 +409,6 @@ fn view(store: &TournamentStore) -> Result<Json<TournamentView>, ApiError> {
     build_view(store).map(Json)
 }
 
-/// Fetch the tournament.
 async fn get_tournament(
     TournamentCtx(instance): TournamentCtx,
 ) -> Result<Json<TournamentView>, ApiError> {
@@ -862,7 +861,6 @@ async fn set_board_result(
     view(&store)
 }
 
-/// Whether the numbered round exists and is currently completed.
 fn round_completed(store: &TournamentStore, round_number: u32) -> bool {
     store
         .current()
@@ -1046,7 +1044,6 @@ async fn set_board_handicap(
     view(&store)
 }
 
-/// Register a player in the tournament.
 async fn add_player(
     TournamentCtx(instance): TournamentCtx,
     ExpectedVersion(expected): ExpectedVersion,
@@ -1161,7 +1158,6 @@ async fn edit_player(
     view(&store)
 }
 
-/// Remove a player from the tournament by id.
 async fn remove_player(
     TournamentCtx(instance): TournamentCtx,
     ExpectedVersion(expected): ExpectedVersion,
@@ -1289,7 +1285,6 @@ struct AdjustmentParams {
     adjustment_id: Uuid,
 }
 
-/// Remove a previously applied point adjustment.
 async fn remove_point_adjustment(
     TournamentCtx(instance): TournamentCtx,
     ExpectedVersion(expected): ExpectedVersion,
@@ -1356,7 +1351,6 @@ struct PairingRatingRequest {
     pairing_rating: Option<u32>,
 }
 
-/// Register a new team.
 async fn add_team(
     TournamentCtx(instance): TournamentCtx,
     ExpectedVersion(expected): ExpectedVersion,
@@ -1368,7 +1362,6 @@ async fn add_team(
     view(&store)
 }
 
-/// Rename a team.
 async fn rename_team(
     TournamentCtx(instance): TournamentCtx,
     ExpectedVersion(expected): ExpectedVersion,
@@ -1490,7 +1483,6 @@ async fn add_team_adjustment(
     view(&store)
 }
 
-/// Remove a previously applied team adjustment.
 async fn remove_team_adjustment(
     TournamentCtx(instance): TournamentCtx,
     ExpectedVersion(expected): ExpectedVersion,

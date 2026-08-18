@@ -101,7 +101,6 @@ async fn the_listing_says_where_and_when_each_tournament_is_held() {
     assert!(bare.get("dates").is_none());
 }
 
-/// A `DELETE` carrying an `Authorization: Bearer <token>` header.
 fn delete_with_token(uri: &str, token: &str) -> Request<Body> {
     Request::builder()
         .method("DELETE")

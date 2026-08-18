@@ -472,12 +472,12 @@ pub fn estimate_elos(
     for (i, p) in players.iter().enumerate() {
         let (mu0, sigma0) = prior(p, m, provisional, unrated_center, unrated_k);
         mean[i] = mu0;
-        theta[i] = mu0; // seed at the prior mean
-                        // K multiplier 0 pins every *rated* player to their registration rating
-                        // (only unrated players are estimated). Their `sigma0` is 0, which would
-                        // give a degenerate Gaussian, so mark them pinned and skip their update
-                        // entirely; the seed already holds their rating. Unrated players are
-                        // unaffected (their prior is independent of `m`).
+        theta[i] = mu0;
+        // K multiplier 0 pins every *rated* player to their registration rating
+        // (only unrated players are estimated). Their `sigma0` is 0, which would
+        // give a degenerate Gaussian, so mark them pinned and skip their update
+        // entirely; the seed already holds their rating. Unrated players are
+        // unaffected (their prior is independent of `m`).
         if m == 0.0 && p.rating.is_some() {
             pinned[i] = true;
             penalties.push(PriorPenalty::Flat); // unused; the pin skips their update

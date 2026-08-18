@@ -637,7 +637,6 @@ async fn rotating_the_key_cuts_off_a_reader_who_is_already_connected() {
         String::from_utf8(chunk.to_vec()).unwrap()
     }
 
-    // Connected and receiving the state, as a reader with a valid key should.
     assert!(frame(&mut body).await.contains("event: state"));
 
     // The referee issues a new link. The reader is cut off *now* — not at

@@ -150,7 +150,6 @@ pub(crate) fn std_dev(values: &[f64]) -> f64 {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MeanCi {
     pub mean: f64,
-    /// Half-width of the 95% interval, i.e. the `±` term.
     pub ci: f64,
 }
 
@@ -181,13 +180,11 @@ pub(crate) fn mean_ci95(values: &[f64]) -> MeanCi {
 pub(crate) struct PairedDiff {
     /// `mean(b − a)` — positive means `b` scores higher on the metric.
     pub delta: f64,
-    /// Half-width of the 95% interval on `delta`.
     pub ci: f64,
     /// `delta / SE`; magnitude over ~1.96 is significant at p < 0.05.
     pub z: f64,
 }
 
-/// Paired difference of `b` minus `a`, element-wise by run index.
 pub(crate) fn paired_diff(a: &[f64], b: &[f64]) -> Option<PairedDiff> {
     if a.len() != b.len() || a.len() < 2 {
         return None;

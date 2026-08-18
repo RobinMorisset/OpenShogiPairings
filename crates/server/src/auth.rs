@@ -82,7 +82,6 @@ impl AuthConfig {
         &self.inner.password_hash
     }
 
-    /// Whether `presented` matches the password this hash was built from.
     pub fn password_matches(&self, presented: &str) -> bool {
         Self::hash_matches(&self.inner.password_hash, presented)
     }

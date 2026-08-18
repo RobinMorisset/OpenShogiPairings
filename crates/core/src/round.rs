@@ -254,7 +254,6 @@ impl Forfeit {
         }
     }
 
-    /// Whether `side` missed the board.
     pub fn absent(self, side: Winner) -> bool {
         self.kind(side).is_some()
     }
@@ -772,7 +771,6 @@ pub enum SitoutValue {
 }
 
 impl SitoutValue {
-    /// The score this is worth.
     pub fn points(self) -> HalfPoints {
         match self {
             SitoutValue::Zero => HalfPoints::ZERO,

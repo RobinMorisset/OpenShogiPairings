@@ -230,7 +230,6 @@ struct Args {
 struct RunSpec {
     /// Rounds per simulated tournament, defaulted from the base's round count.
     rounds: u32,
-    /// Simulated tournaments per variant.
     runs: u64,
     /// Master seed; run i uses `seed + i`.
     seed: u64,
@@ -631,7 +630,6 @@ struct VariantReport {
     per_run_hit: Vec<f64>,
     /// Mean game-interest metric (game-weighted Sen welfare) over runs.
     interest: f64,
-    /// Per-run game-interest metric.
     per_run_interest: Vec<f64>,
     /// Each player's pooled game interest across runs: (mean interest, mean games
     /// per tournament).

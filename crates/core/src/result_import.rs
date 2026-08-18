@@ -54,25 +54,20 @@ use crate::units::TournamentId;
 /// Why a cross-table could not be imported.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ResultImportError {
-    /// The text contained no parseable player rows.
     #[error("no player rows found")]
     NoPlayers,
     /// A data row could not be parsed (missing number, no ELO column, …).
     #[error("line {line}: could not parse player row ({reason})")]
     BadRow { line: usize, reason: String },
-    /// A round cell did not match any known shape.
     #[error("line {line}: malformed round cell {cell:?}")]
     BadCell { line: usize, cell: String },
-    /// Two rows share the same `Nr`.
+    /// Two rows share the same `Nr` — the cross-table's player-number column.
     #[error("duplicate player number {0}")]
     DuplicateNumber(u32),
-    /// Rows disagree on how many round columns there are.
     #[error("rows disagree on the number of rounds ({expected} vs {found})")]
     InconsistentRounds { expected: usize, found: usize },
-    /// A cell references a player number that has no row.
     #[error("round {round}: player {by} references unknown opponent {opponent}")]
     UnknownOpponent { round: u32, by: u32, opponent: u32 },
-    /// A game recorded by one player is not mirrored by the opponent.
     #[error("round {round}: {a} recorded a game vs {b}, but {b} did not reciprocate")]
     Asymmetric { round: u32, a: u32, b: u32 },
     /// Both sides of a game recorded the same win/loss (or disagreed on a draw).
@@ -368,7 +363,7 @@ impl Outcome {
         let perspective_won = match self {
             Outcome::Win => true,
             Outcome::Loss => false,
-            Outcome::Draw => true, // arbitrary decisive winner for a lost-info draw
+            Outcome::Draw => true,
         };
         match (perspective_won, is_player1) {
             (true, true) | (false, false) => Winner::Player1,
@@ -464,7 +459,6 @@ fn parse_handicap(
 mod tests {
     use super::*;
 
-    /// One row with the given number, name and cells.
     fn row(number: u32, last: &str, rating: u32, cells: &[Cell]) -> RawRow {
         RawRow {
             number,
@@ -485,7 +479,6 @@ mod tests {
         }
     }
 
-    /// A game cell carrying a handicap this player gave (`gave`) or received.
     fn handicap_game(opponent: u32, outcome: Outcome, handicap: Handicap, gave: bool) -> Cell {
         Cell::Game {
             opponent,
@@ -494,7 +487,6 @@ mod tests {
         }
     }
 
-    /// The tournament number of the player with this last name.
     fn tid(t: &Tournament, last: &str) -> TournamentId {
         t.players
             .iter()

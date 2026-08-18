@@ -1149,7 +1149,6 @@ mod tests {
             if matched == n {
                 return 0;
             }
-            // first unmatched vertex
             let i = (0..n).find(|&i| !used[i]).unwrap();
             used[i] = true;
             let mut best = i128::inf();

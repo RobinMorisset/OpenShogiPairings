@@ -51,7 +51,6 @@ pub(crate) struct ChangeLabel {
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[ts(rename_all = "snake_case")]
 pub(crate) enum ChangeCode {
-    /// A tournament settings change.
     Settings,
     /// The last round (or the open draft) was cancelled.
     CancelRound,
@@ -65,11 +64,9 @@ pub(crate) enum ChangeCode {
     ForcePairing,
     /// A board's outcome: a winner, a draw, a no-show, or a long-game flag.
     BoardResult,
-    /// A board's handicap.
     BoardHandicap,
     /// What a round scored somebody who sat it out.
     SitoutValue,
-    /// A player was registered.
     RegisterPlayer,
     /// A roster was imported from a CSV file.
     ImportPlayers,
@@ -85,11 +82,8 @@ pub(crate) enum ChangeCode {
     RemovePlayer,
     /// A manual point bonus/malus was added or removed.
     AdjustPoints,
-    /// A team was created.
     AddTeam,
-    /// A team was renamed.
     RenameTeam,
-    /// A team was deleted.
     RemoveTeam,
     /// A team's roster or board order changed.
     EditTeam,

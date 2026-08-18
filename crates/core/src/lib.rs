@@ -129,7 +129,6 @@ pub struct HealthStatus {
 }
 
 impl HealthStatus {
-    /// Build the status describing this running build.
     pub fn current() -> Self {
         Self {
             status: "ok".to_string(),

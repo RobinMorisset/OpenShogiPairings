@@ -179,7 +179,6 @@ async fn serves_spa_assets_and_falls_back_to_index() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert!(body.contains("<title>app</title>"));
 
-    // The API still works alongside the static fallback.
     let (status, body) = send(app, get("/api/health")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "ok");

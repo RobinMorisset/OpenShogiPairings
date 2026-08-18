@@ -80,8 +80,8 @@ fn main() -> ExitCode {
         }
     };
 
-    // Collect ratings. Unrated players meet no ELO threshold, so they live in the
-    // bottom band: count them as strictly below every candidate boundary.
+    // Unrated players meet no ELO threshold, so they live in the bottom band:
+    // count them as strictly below every candidate boundary.
     let mut rated: Vec<u32> = tournament.players.iter().filter_map(|p| p.rating).collect();
     rated.sort_unstable();
     let unrated = tournament.players.len() - rated.len();

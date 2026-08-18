@@ -267,12 +267,10 @@ impl<'u> PairingModel<'u> {
         }
     }
 
-    /// Scalar edge weight for pairing unit `a` against unit `b`.
     pub(super) fn edge_cost(&self, a: UnitKey, b: UnitKey) -> i128 {
         edge_cost(&self.ctx(), &self.rules, &self.mult, a, b)
     }
 
-    /// Scalar edge weight for giving `unit` the bye.
     pub(super) fn bye_cost(&self, unit: UnitKey) -> i128 {
         bye_cost(&self.ctx(), &self.rules, &self.mult, unit)
     }

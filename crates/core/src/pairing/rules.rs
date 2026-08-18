@@ -276,30 +276,23 @@ impl Rule {
         let sa = &ctx.units[a];
         let sb = &ctx.units[b];
         match self {
-            // Rule 1: never play the same opponent twice.
             Rule::Rematch => i128::from(sa.opponents.contains(&b)),
-            // Rule 1b (qualifier cup, round 1): never pair two pre-qualified cup
-            // players. Only in the rule set when the set is non-empty, so the
+            // Rule 1b: only in the rule set when the set is non-empty, so the
             // lookup is free in every other round and every other format.
             Rule::CupPrequalified => i128::from(sa.prequalified && sb.prequalified),
-            // Rule 2: bye-only rule, real boards are neutral.
             Rule::ByeGroup => 0,
-            // Rule 3 (optional, first N rounds): forbid crossing MacMahon groups;
-            // penalty is the square of the gap in MacMahon starting points. Only in
-            // the rule set when active (inactive rules are filtered out upstream),
-            // so no `airtight_active` check; and the gap is squared, so its sign —
-            // and an `abs` — are irrelevant.
+            // Rule 3: only in the rule set when active (inactive rules are
+            // filtered out upstream), so no `airtight_active` check.
             Rule::AirtightGroups => {
                 let gap = sa.macmahon.halves() as i128 - sb.macmahon.halves() as i128;
                 gap * gap
             }
-            // Rule 4: prefer equal scores; penalty is the square of the gap (so the
-            // gap's sign, and an `abs`, don't matter).
             Rule::ScoreGap => {
                 let gap = sa.points.halves() as i128 - sb.points.halves() as i128;
                 gap * gap
             }
-            // Rule 5: the lower-scored player floats up, the higher-scored down.
+            // Rule 5: the lower-scored player is the ascender, the higher-scored
+            // the descender.
             Rule::FloatRepeat => match sa.points.cmp(&sb.points) {
                 Ordering::Less => {
                     float_units(sa.last_ascended, ctx.round)
@@ -311,10 +304,7 @@ impl Rule {
                 }
                 Ordering::Equal => 0,
             },
-            // Rule 6: on a cross-group (float) edge, prefer the right floaters —
-            // classic Swiss wants the weakest of the upper group down and the
-            // first of the lower group up; median Swiss wants the median of
-            // each group instead. Same-group edges aren't floats, so no penalty.
+            // Rule 6: same-group edges aren't floats, so no penalty.
             Rule::FloaterSelection => match sa.points.cmp(&sb.points) {
                 Ordering::Equal => 0,
                 // The higher-scored player is the descender, the lower the ascender;
@@ -322,29 +312,20 @@ impl Rule {
                 Ordering::Greater => floater_units(ctx, a, true) + floater_units(ctx, b, false),
                 Ordering::Less => floater_units(ctx, b, true) + floater_units(ctx, a, false),
             },
-            // Rule 7: avoid pairing club-mates — but only when protection is active
-            // this round, ignoring unknown clubs and clubs on the exempt list. Club
-            // names are matched case-insensitively. Only in the rule set when
-            // protection is active (inactive rules are filtered out upstream), so
-            // no `club_active` check.
-            //
-            // Within the rule's ladder tier the matching minimizes the same-club
-            // *games* of the round — see [`shared_affiliation_units`] for why the
-            // count is over aligned board positions.
+            // Rule 7: only in the rule set when protection is active this round
+            // (inactive rules are filtered out upstream), so no `club_active`
+            // check.
             Rule::Club => shared_affiliation_units(&sa.clubs, &sb.clubs, ctx.exempt_clubs),
-            // Rule 8: the same, one tier weaker, over nationalities — so when the
-            // two rules disagree the club clash is the one the matching avoids.
-            // Also filtered out upstream when inactive.
+            // Rule 8: also filtered out upstream when inactive.
             Rule::Nationality => shared_affiliation_units(
                 &sa.nationalities,
                 &sb.nationalities,
                 ctx.exempt_nationalities,
             ),
-            // Rule 9: fold within a score group — squared deviation from the ideal
-            // fold. Squaring (rather than |·|) spreads an unavoidable deviation across
-            // boards instead of dumping it all on one, so no single player faces an
-            // opponent far from the fold's intent — and it matches the squared
-            // ScoreGap / EloGap rules. See `docs/reference/swiss-fold.md`.
+            // Rule 9: squaring (rather than |·|) spreads an unavoidable deviation
+            // across boards instead of dumping it all on one, so no single player
+            // faces an opponent far from the fold's intent — and it matches the
+            // squared ScoreGap / EloGap rules. See `docs/reference/swiss-fold.md`.
             Rule::Fold => {
                 if sa.points != sb.points {
                     return 0;
@@ -370,9 +351,7 @@ impl Rule {
                     }
                 }
             }
-            // Bye selection acts only on the bye edge; a real board is neutral.
             Rule::ByeSelection => 0,
-            // ELO mode: prefer equal estimated ELO; penalty is the squared gap.
             Rule::EloGap => {
                 let gap = (sa.elo - sb.elo) as i128;
                 gap * gap
@@ -389,17 +368,14 @@ impl Rule {
             // A sit-out isn't a pairing, so two pre-qualified players can't clash
             // on it.
             Rule::CupPrequalified => 0,
-            // The bye should go to the lowest score group; penalty is the square
-            // of the gap to the lowest score among free players.
             Rule::ByeGroup => {
                 let gap = s.points.halves() as i128 - ctx.min_points;
                 gap * gap
             }
             Rule::FloatRepeat => float_units(s.last_descended, ctx.round),
-            // A bye is a downfloat, so prefer the weakest of the group (classic)
-            // or its median (median Swiss) to take it.
+            // A bye is a downfloat, so it is scored as one (the "descending"
+            // direction of floater_units).
             Rule::FloaterSelection => floater_units(ctx, unit, true),
-            // ELO mode: the weakest present player (lowest ELO rank) takes the bye.
             Rule::ByeSelection => ctx.elo_rank[unit],
             Rule::AirtightGroups
             | Rule::ScoreGap
@@ -571,16 +547,13 @@ pub(super) fn fold_ranks(
     units: &TiSlice<UnitKey, PairingUnit>,
     free: &[UnitKey],
 ) -> TiVec<UnitKey, Option<FoldInfo>> {
-    // Group the free units by their points.
     let mut groups: HashMap<HalfPoints, Vec<UnitKey>> = HashMap::new();
     for &k in free {
         groups.entry(units[k].points).or_default().push(k);
     }
-    // Result indexed by unit key (`None` for a non-free unit).
+    // `None` for a non-free unit.
     let mut info: TiVec<UnitKey, Option<FoldInfo>> = vec![None; units.len()].into();
     for group in groups.values_mut() {
-        // Highest rating first; ties broken by key for a stable, reproducible
-        // ordering.
         group.sort_by(|&x, &y| {
             units[y]
                 .fold_rating()

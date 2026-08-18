@@ -12,13 +12,10 @@ use uuid::Uuid;
 use crate::cup::CupFormat;
 use crate::player::Grade;
 
-/// What can be wrong with the tournament's dates.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DateError {
-    /// Not an ISO `YYYY-MM-DD` calendar date.
     #[error("invalid date {0:?}: expected an ISO calendar date, YYYY-MM-DD")]
     Malformed(String),
-    /// The tournament would end before it starts.
     #[error("the tournament's last day ({last}) precedes its first ({first})")]
     Backwards { first: IsoDate, last: IsoDate },
 }
@@ -74,7 +71,7 @@ impl IsoDate {
     }
 }
 
-/// The length of a month, Gregorian leap years included.
+/// Gregorian leap years included.
 fn days_in_month(year: u32, month: u32) -> u32 {
     match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
@@ -108,7 +105,6 @@ impl<'de> Deserialize<'de> for IsoDate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct TournamentDates {
-    /// First day of play.
     pub first: IsoDate,
     /// Last day of play — the same as `first` for a one-day event.
     pub last: IsoDate,
@@ -123,7 +119,6 @@ impl TournamentDates {
         Ok(TournamentDates { first, last })
     }
 
-    /// Whether the whole event fits in a single day.
     pub fn single_day(&self) -> bool {
         self.first == self.last
     }
@@ -267,7 +262,6 @@ pub enum FloaterStyle {
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ClubProtection {
-    /// No club protection.
     #[default]
     Off,
     /// Avoid pairing club-mates.
@@ -325,7 +319,6 @@ impl ClubProtection {
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NationalityProtection {
-    /// No nationality protection.
     #[default]
     Off,
     /// Avoid pairing players of the same nationality.
@@ -419,7 +412,6 @@ impl Default for HandicapPolicy {
 }
 
 impl HandicapPolicy {
-    /// Whether a handicap game counts as a win for the giver regardless of result.
     fn wiel_rule(self) -> bool {
         matches!(
             self,
@@ -985,7 +977,6 @@ pub struct TournamentSettings {
     /// `docs/reference/two-round-boards.md`.
     #[serde(default)]
     pub long_boards_enabled: bool,
-    /// How handicap games are treated (see [`HandicapPolicy`]).
     #[serde(default)]
     pub handicap_policy: HandicapPolicy,
     /// Whether a player marked **absent** for a round is awarded half a point
@@ -1175,7 +1166,6 @@ impl TournamentSettings {
         }
     }
 
-    /// Whether this is a team tournament.
     pub fn team_mode(&self) -> bool {
         self.teams.is_some()
     }
@@ -1428,19 +1418,16 @@ impl TournamentSettings {
         self.estimator().map_or(705.0, |e| e.unrated_k.get() as f64)
     }
 
-    /// The prior shape for an established player.
     pub fn elo_prior_shape_established(&self) -> EloPriorShape {
         self.estimator()
             .map_or_else(EloPriorShape::default, |e| e.prior_shape_established)
     }
 
-    /// The prior shape for a provisionally-rated player.
     pub fn elo_prior_shape_provisional(&self) -> EloPriorShape {
         self.estimator()
             .map_or_else(EloPriorShape::default, |e| e.prior_shape_provisional)
     }
 
-    /// The prior shape for an unrated player.
     pub fn elo_prior_shape_unrated(&self) -> EloPriorShape {
         self.estimator()
             .map_or_else(EloPriorShape::default, |e| e.prior_shape_unrated)
