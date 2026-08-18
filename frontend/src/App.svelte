@@ -1097,7 +1097,7 @@
       {/if}
 
       {#if showBackups}
-        <div class="backups-panel fit-width">
+        <div class="backups-panel fit-width print-hide">
           <!-- The path, in the panel as well as the button's tooltip: with an
                empty list it is the only thing that answers "where would they
                be?", and it is selectable here, so it can be pasted into a file
@@ -1638,13 +1638,21 @@
       display: none;
     }
 
+    /* The publication panel is chrome for the referee at the screen, with one
+       exception: the QR code for the wall is printed out of it, so that job —
+       and only that job — keeps it. (`.print-hide` would be simpler and is what
+       the backups panel next to it uses, but it hides for every print job with
+       no way back.) */
+    :global(.app:not(.printing-qr)) .publication-panel {
+      display: none;
+    }
+
     /* Printing the QR code for the wall is a different document from printing
        the pairings: one sheet, the tournament's name, the code as large as the
        page allows, and the link underneath for anyone who would rather type it.
        Everything else — including the panel's own explanation and buttons — is
        for the referee at the screen, not for the wall. */
     :global(.app.printing-qr) .tab-content,
-    :global(.app.printing-qr) .backups-panel,
     :global(.app.printing-qr) .publication-panel .small,
     :global(.app.printing-qr) .publication-actions {
       display: none;

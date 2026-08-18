@@ -849,5 +849,11 @@
     .elig-frozen {
       font-weight: normal;
     }
+    /* An editable cell is a button whose border is transparent until hovered —
+       and `border-color: #000` (app.css) would ink that border in, boxing every
+       name, club and rating on the page. Keep it invisible. */
+    .cell-btn {
+      border-color: transparent !important;
+    }
   }
 </style>

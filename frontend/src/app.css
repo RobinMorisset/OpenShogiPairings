@@ -428,9 +428,14 @@ button.control-xs {
   }
 
   /* Chrome that only means anything to a pointer: toolbars, filter chips, the
-     print button itself. */
+     print button itself.
+   *
+   * `!important` because most of what carries this class is a flex row, and a
+   * component's own `.round-toolbar { display: flex }` comes out of Svelte as
+   * `.round-toolbar.svelte-hash` — two classes to this rule's one, so without
+   * it the scoped rule wins and the toolbar prints. */
   .print-hide {
-    display: none;
+    display: none !important;
   }
 
   /* Ink on white, whichever theme the screen was in.
