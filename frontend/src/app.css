@@ -305,6 +305,22 @@ button.ghost {
   background: transparent;
 }
 
+/* A ghost button that is "on": a panel it opened is showing, or a mode it
+ * switched is running. Every one of them means one of those two things — the
+ * backups and public-page panels, the licence check, the result-sheets
+ * popover, the round view's lookup by name — so the mark is here rather than
+ * restated, differently, in each of the four components that used to hold it.
+ *
+ * The border is the saturated accent rather than `--border-accent`, whose pale
+ * tint is barely a change from the border already there; and the label is
+ * stated rather than inherited, because the token that looks like the one to
+ * reach for here — `--text-on-accent` — is for text on an accent *fill*, and
+ * over a transparent button it is white on white in the light theme. */
+button.ghost.active {
+  border-color: var(--color-accent);
+  color: var(--text);
+}
+
 /* The three sizes, which are two questions rather than one: how much room round
  * the label, and how big the label is.
  *

@@ -168,7 +168,4 @@
     justify-content: flex-end;
     gap: 0.4rem;
   }
-  .ghost.active {
-    border-color: var(--border-accent);
-  }
 </style>

@@ -1514,14 +1514,6 @@
     gap: 0.5rem;
     margin-bottom: 0.5rem;
   }
-  /* Matches `.explain-tab.active`: an accent border on the ghost button's
-     transparent background. (`--text-on-accent` is for text *on* an accent
-     fill, so it would be invisible here.) */
-  .round-toolbar .ghost.active {
-    border-color: var(--color-accent);
-    color: var(--text);
-    font-weight: 600;
-  }
   table {
     width: 100%;
     border-collapse: collapse;
