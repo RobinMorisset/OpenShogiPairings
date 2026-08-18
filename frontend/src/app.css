@@ -438,6 +438,14 @@ button.control-xs {
     display: none !important;
   }
 
+  /* An error banner is something to act on at the screen; on paper it is a red
+     box stamped across the top of a sheet the referee is about to pin to a
+     wall. Named here rather than classed at each of the four banners, since
+     none of them means anything to a printer. */
+  .error-banner {
+    display: none;
+  }
+
   /* Ink on white, whichever theme the screen was in.
    *
    * Grey says "secondary" on a screen and only says "faint" on paper, and a

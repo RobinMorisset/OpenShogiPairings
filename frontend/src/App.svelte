@@ -1681,12 +1681,11 @@
 
     /* Printing the result sheets is a document of its own too: pages of slips to
        cut apart, and nothing of the screen around them. The slips sit beside the
-       card rather than inside it, so hiding every other child of the shell —
-       rather than naming the parts of whichever tab happens to be open — is what
-       leaves them alone. (The header and footer are already gone: the shell
-       hides those for every print job, and its column is already back to the
-       page width.) */
-    :global(.app.printing-sheets) > .error-banner,
+       card rather than inside it, so hiding the card — rather than naming the
+       parts of whichever tab happens to be open — is what leaves them alone.
+       (The shell's other children are already gone: it hides the header and the
+       footer for every print job, app.css hides the error banner, and its column
+       is already back to the page width.) */
     :global(.app.printing-sheets > .card) {
       display: none;
     }
