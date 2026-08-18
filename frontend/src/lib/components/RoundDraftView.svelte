@@ -401,28 +401,28 @@
 {/snippet}
 
 <div class="draft">
-  {#if onPrintSheets}
-    <div class="draft-toolbar">
+  <div class="draft-head">
+    <p class="summary">
+      {#if teamMode}
+        <!-- The pool is measured in teams here, because teams are what get
+             paired; the absent count stays per player, because that is what the
+             referee ticks. -->
+        {$_("roundDraftView.summaryTeams", { values: { number: draft.number, present: presentTeams.length, absent: draft.absent.length } })}
+      {:else if cupPlayers.length > 0}
+        {$_("roundDraftView.summaryWithCup", { values: { number: draft.number, present: present.length, cup: cupPlayers.length, absent: draft.absent.length } })}
+      {:else}
+        {$_("roundDraftView.summary", { values: { number: draft.number, present: present.length, absent: draft.absent.length } })}
+      {/if}
+    </p>
+    {#if onPrintSheets}
       <ResultSheetsButton
         playerCount={players.length}
         macMahonRow={sheetMacMahonRow}
         onPrint={onPrintSheets}
         {busy}
       />
-    </div>
-  {/if}
-  <p class="summary">
-    {#if teamMode}
-      <!-- The pool is measured in teams here, because teams are what get
-           paired; the absent count stays per player, because that is what the
-           referee ticks. -->
-      {$_("roundDraftView.summaryTeams", { values: { number: draft.number, present: presentTeams.length, absent: draft.absent.length } })}
-    {:else if cupPlayers.length > 0}
-      {$_("roundDraftView.summaryWithCup", { values: { number: draft.number, present: present.length, cup: cupPlayers.length, absent: draft.absent.length } })}
-    {:else}
-      {$_("roundDraftView.summary", { values: { number: draft.number, present: present.length, absent: draft.absent.length } })}
     {/if}
-  </p>
+  </div>
 
   {#if cupPlayers.length > 0}
     <p class="cup-note">
@@ -606,18 +606,22 @@
     flex-direction: column;
     gap: 1.25rem;
   }
-  /* Matches the round view's toolbar, so the print buttons sit in the same
-     corner whether the round is being drafted or played. */
-  /* Centred for the same reason as `.round-toolbar`: the result-sheets button
-     is wrapped, and a stretched wrapper would hang its popover below the
-     button's real edge. */
-  .draft-toolbar {
+  /* The round's summary and the sheets button share a row: the summary is one
+     short line and the button sits in the corner, so a row each was mostly
+     empty space. The button still ends up where `.round-toolbar` puts it, so
+     it does not move between drafting a round and playing it.
+     Centred rather than stretched: the result-sheets button is wrapped, and a
+     stretched wrapper would hang its popover below the button's real edge. */
+  .draft-head {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    margin-bottom: -0.75rem;
+    justify-content: space-between;
+    gap: 0.75rem;
   }
   .summary {
+    /* Takes the row's slack, so a summary long enough to wrap does so within
+       its own half rather than pushing the button off the edge. */
+    flex: 1;
     margin: 0;
     color: var(--text-strong);
   }
