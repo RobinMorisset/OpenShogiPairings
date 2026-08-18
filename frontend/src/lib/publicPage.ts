@@ -95,11 +95,14 @@ export function publicSections(view: PublicTournamentResponse): PublicSection[] 
  *
  * The same list as the referee app's `tabHasWideTable`, minus the tabs a
  * reader has no equivalent of: standings (a column per round plus the
- * tie-breaks) and the rounds (two named players and their ratings per board).
- * The cup bracket is not a table and sizes itself.
+ * tie-breaks), the rounds (two named players and their ratings per board), and
+ * the cup bracket — not a table, but an SVG laid out in pixels, which overflows
+ * a phone exactly as they do.
  */
 export function sectionNeedsWideCard(section: PublicSection): boolean {
-  return section.kind === "standings" || section.kind === "round";
+  return (
+    section.kind === "standings" || section.kind === "round" || section.kind === "cup"
+  );
 }
 
 /**

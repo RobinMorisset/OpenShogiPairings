@@ -320,14 +320,15 @@ describe("renderSnapshotBody", () => {
     // `ContentCard`'s `wide`, decided by `sectionNeedsWideCard` so that this
     // export and the live reader page cannot disagree about it. The standings
     // (a column per round) and the rounds (two named players a board) overflow
-    // a narrow screen; the cup bracket sizes itself.
+    // a narrow screen, and so does the cup bracket — an SVG laid out in pixels,
+    // which cannot wrap either.
     const rounds = [round(1, [board(1, 2)])];
     const withCupSections = publicSections(withCup(view(rounds)));
     const wide = (html: string) => /<section class="card[^"]*\bwide-table\b/.test(html);
     expect(withCupSections.map((s) => s.kind)).toEqual(["standings", "cup", "round"]);
     expect(withCupSections.map((_, i) => wide(pageOf(withCup(view(rounds)), i)))).toEqual([
       true,
-      false,
+      true,
       true,
     ]);
   });

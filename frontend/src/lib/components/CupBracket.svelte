@@ -279,12 +279,20 @@
 </div>
 
 <style>
+  /* No scroller of its own: the card grows behind the bracket and the page
+     scrolls, which is what the standings and the rounds do (`ContentCard`'s
+     `wide`, asked for by `tabHasWideTable` and `sectionNeedsWideCard`). An
+     inner scroller put the bar under the bracket instead — several screens
+     down on a tall one, and only reachable after scrolling past everything you
+     were trying to move. */
   .cup-bracket {
-    overflow-x: auto;
     padding: 0.5rem 0 1rem;
   }
   svg {
-    max-width: none; /* keep intrinsic size; the container scrolls if narrow */
+    /* Never shrink to fit: the boxes are laid out in pixels, so scaling the
+       bracket down to a phone would only make it unreadable. It keeps its size
+       and the card takes the width. */
+    max-width: none;
     font-family: inherit;
   }
   .link {

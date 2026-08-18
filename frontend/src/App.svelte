@@ -122,9 +122,14 @@
   let activeTab = $state("players");
 
   /**
-   * Whether the open tab's content is a table that will not wrap — so the card
-   * should grow to stay behind it instead of letting it overflow the rounded
-   * panel (`ContentCard`'s `wide`).
+   * Whether the open tab's content has a width of its own that will not wrap —
+   * so the card should grow to stay behind it instead of letting it overflow
+   * the rounded panel (`ContentCard`'s `wide`).
+   *
+   * The three tables, and the cup bracket, which is an SVG laid out in pixels
+   * and just as unwrappable. It used to scroll inside itself instead, which put
+   * its scrollbar under the bracket — reachable only after scrolling to the
+   * bottom of a tall page, and nowhere near the part you wanted to move.
    *
    * Deliberately a list rather than "always on": the card is sized with
    * `max-content`, which asks the content how wide it would like to be with
@@ -132,7 +137,10 @@
    * the Settings tab it would be the whole paragraph on one line.
    */
   const tabHasWideTable = $derived(
-    activeTab === "results" || activeTab === "players" || activeTab.startsWith("round-"),
+    activeTab === "results" ||
+      activeTab === "players" ||
+      activeTab === "cup" ||
+      activeTab.startsWith("round-"),
   );
 
   const activeRound = $derived(
