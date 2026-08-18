@@ -9,6 +9,8 @@ will be explicitly mentioned in the changelog for that version though.
 
 ## [Unreleased]
 
+Backwards compatible.
+
 ### Added
 
 - **The tournament picker shows each tournament's city, country and dates**
@@ -16,15 +18,6 @@ will be explicitly mentioned in the changelog for that version though.
 
 ### Changed
 
-- **The "airtight groups" setting is hidden until a MacMahon threshold exists**,
-  and cleared on save when the last threshold goes. The rule forbids pairing
-  across MacMahon groups, so with no threshold there is a single group and
-  nothing to forbid — the settings no longer store a window that groups by
-  nothing.
-- **The Undo button now says what it would take back** — "Undo registering Habu
-  Yoshiharu", "Undo the result on board 3 of round 2" — instead of a generic
-  "Undo the last change". It matters most with several referees on one
-  tournament, where the button reverts whoever acted last rather than you.
 - **Each browser tab now keeps its own tournament across reloads and browser
   restarts.** The open tournament's id is part of the tab's URL (`/t/{id}`)
   rather than one browser-wide key, which used to make every restored tab land
@@ -32,6 +25,9 @@ will be explicitly mentioned in the changelog for that version though.
   between the picker and the tournament, a `/t/{id}` link can be bookmarked or
   pasted into another browser, and a URL naming a tournament the server no
   longer has says so over the picker instead of silently dropping there.
+- **The "airtight groups" setting is hidden until a MacMahon threshold exists**,
+  and cleared on save when the last threshold goes.
+- **The Undo button's tooltip now says what action it undoes**.
 
 ### Fixed
 
