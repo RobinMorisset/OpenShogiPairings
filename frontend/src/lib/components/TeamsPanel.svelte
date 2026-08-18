@@ -383,7 +383,7 @@
                  the tournament, which is exactly when the rosters are frozen. -->
             <button
               type="button"
-              class="small"
+              class="control-xs"
               disabled={busy}
               title={$_("teams.adjustmentTitle")}
               onclick={() => toggleAdjustments(team.id)}
@@ -393,7 +393,7 @@
             {#if !finalized}
               <button
                 type="button"
-                class="small"
+                class="control-xs"
                 disabled={busy || roster.length < 2 || sortedByRating(roster)}
                 title={$_("teams.sortByRatingTitle")}
                 onclick={() => onSortByRating(team.id)}
@@ -406,7 +406,7 @@
                  The server refuses one that has played, naming why. -->
             <button
               type="button"
-              class="small danger"
+              class="control-xs danger"
               disabled={busy}
               title={$_(finalized ? "teams.removeWithPlayersTitle" : "teams.removeTitle")}
               onclick={() => confirmRemove(team, roster.length)}
@@ -428,7 +428,7 @@
                     <span class="reason">{adj.reason}</span>
                     <button
                       type="button"
-                      class="small danger"
+                      class="control-xs danger"
                       title={$_("teams.removeAdjustment")}
                       disabled={busy}
                       onclick={() => onRemoveAdjustment(team.id, adj.id)}>✕</button
@@ -439,7 +439,7 @@
             {/if}
             <div class="adjustment-form">
               <input
-                class="adj-delta control-quiet"
+                class="adj-delta control-xs control-quiet"
                 type="number"
                 placeholder={$_("teams.adjustmentPointsPlaceholder")}
                 bind:value={adjustmentDelta}
@@ -447,7 +447,7 @@
                 onkeydown={(e) => adjustmentKeydown(e, team.id)}
               />
               <input
-                class="adj-reason control-quiet"
+                class="adj-reason control-xs control-quiet"
                 type="text"
                 placeholder={$_("teams.adjustmentReasonPlaceholder")}
                 bind:value={adjustmentReason}
@@ -456,13 +456,13 @@
               />
               <button
                 type="button"
-                class="small"
+                class="control-xs"
                 disabled={busy}
                 onclick={() => submitAdjustment(team.id)}>{$_("teams.addAdjustment")}</button
               >
               <!-- Opening this is one click and closing it was another click on
                    the same ±, which is not something a misclick suggests. -->
-              <button type="button" class="small" onclick={closeAdjustments}>
+              <button type="button" class="control-xs" onclick={closeAdjustments}>
                 {$_("teams.cancelAdjustment")}
               </button>
             </div>
@@ -508,21 +508,21 @@
               {#if !finalized}
                 <button
                   type="button"
-                  class="small"
+                  class="control-xs"
                   disabled={busy || index === 0}
                   title={$_("teams.moveUp")}
                   onclick={() => move(team, index, -1)}>▲</button
                 >
                 <button
                   type="button"
-                  class="small"
+                  class="control-xs"
                   disabled={busy || index === roster.length - 1}
                   title={$_("teams.moveDown")}
                   onclick={() => move(team, index, 1)}>▼</button
                 >
                 <button
                   type="button"
-                  class="small danger"
+                  class="control-xs danger"
                   disabled={busy}
                   title={$_("teams.removeMemberTitle")}
                   onclick={() => onRemoveMember(team.id, member.id)}>✕</button
@@ -738,23 +738,19 @@
     align-items: center;
     gap: 0.3rem;
   }
-  /* Sized to the `.small` buttons they sit between, not to the panel's
-     full-size fields — this is a mini-form inside a card. */
-  .adj-delta,
-  .adj-reason {
-    font-size: 0.85em;
-    padding: 0.15rem 0.35rem;
-  }
+  /* `control-xs` throughout this card — the buttons beside a line of prose and
+     this mini-form alike, which is smaller than the panel's own `control-sm`
+     fields on purpose. It replaces a local `.small` that set `padding: 0` and
+     no `min-height`: the label then filled the box edge to edge, and the row's
+     buttons came out five pixels shorter than the fields between them. The
+     shared size states a height all three settle on, so they line up and the
+     spare pixels centre the label instead. */
   .adj-delta {
-    width: 4rem;
+    width: 4.5rem;
   }
   .adj-reason {
     flex: 1;
     min-width: 4rem;
-  }
-  .small {
-    padding: 0 0.35rem;
-    font-size: 0.85em;
   }
   /* The member picker sits at the foot of the card; the field and its list are
      `Combobox`'s own. */
