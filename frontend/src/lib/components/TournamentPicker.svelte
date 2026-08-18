@@ -17,6 +17,7 @@
   import type {
     DeletedTournament,
     Tournament,
+    TournamentDates,
     TournamentProblem,
     TournamentSummary,
   } from "../types";
@@ -75,6 +76,29 @@
   /** A timestamp in Unix seconds, in the reader's own locale. */
   function when(seconds: number): string {
     return new Date(seconds * 1000).toLocaleString($locale ?? undefined);
+  }
+
+  // The days an event runs, in the reader's own locale: one date for a one-day
+  // event, a range otherwise. Read as UTC — an ISO day is a calendar day, and
+  // parsing it in the reader's zone would show the day before west of Greenwich.
+  function dateRange(dates: TournamentDates): string {
+    const format = new Intl.DateTimeFormat($locale ?? undefined, {
+      dateStyle: "medium",
+      timeZone: "UTC",
+    });
+    const first = new Date(`${dates.first}T00:00:00Z`);
+    if (dates.first === dates.last) return format.format(first);
+    return format.formatRange(first, new Date(`${dates.last}T00:00:00Z`));
+  }
+
+  // Where and when the tournament is held, as the one line under its name —
+  // "Ludwigshafen, Germany · 2–4 Jan 2026". Whatever the referee left unset is
+  // simply absent, separators included, and `null` (no line at all) is the
+  // ordinary case of a tournament that set none of the three.
+  function eventLine(t: TournamentSummary): string | null {
+    const place = [t.city, t.country].filter(Boolean).join(", ");
+    const parts = [place, t.dates ? dateRange(t.dates) : ""].filter(Boolean);
+    return parts.length > 0 ? parts.join(" · ") : null;
   }
 
   // Restoring puts the tournament back as it was, backups and all, so there is
@@ -264,6 +288,7 @@
     {:else}
       <ul class="tournaments">
         {#each tournaments as t (t.id)}
+          {@const event = eventLine(t)}
           <li>
             <button
               type="button"
@@ -274,19 +299,27 @@
               disabled={busy || !!t.problem}
               title={t.problem ? describeProblem(t.problem) : undefined}
             >
-              {#if t.problem}
-                <!-- The tooltip is on the whole row, not just the sign: a
-                     disabled button that says nothing is the thing being fixed
-                     here. -->
-                <span class="warning" title={describeProblem(t.problem)}>⚠️</span>
-              {:else if t.has_password}
-                {#if getToken(t.id)}
-                  <span class="lock" title={$_("picker.passwordUnlocked")}>🔓</span>
-                {:else}
-                  <span class="lock" title={$_("picker.passwordProtected")}>🔒</span>
+              <span class="pick-name">
+                {#if t.problem}
+                  <!-- The tooltip is on the whole row, not just the sign: a
+                       disabled button that says nothing is the thing being fixed
+                       here. -->
+                  <span class="warning" title={describeProblem(t.problem)}>⚠️</span>
+                {:else if t.has_password}
+                  {#if getToken(t.id)}
+                    <span class="lock" title={$_("picker.passwordUnlocked")}>🔓</span>
+                  {:else}
+                    <span class="lock" title={$_("picker.passwordProtected")}>🔒</span>
+                  {/if}
                 {/if}
+                {t.name}
+              </span>
+              <!-- Under the name, and only when there is something to say: two
+                   tournaments called "Open" on the same server are told apart by
+                   their town and their dates, not by their names. -->
+              {#if event}
+                <span class="pick-event" data-testid="tournament-event">{event}</span>
               {/if}
-              {t.name}
             </button>
             <button
               type="button"
@@ -529,10 +562,21 @@
   }
   .pick {
     flex: 1;
+    /* A column, so the event line sits under the name rather than beside it —
+       and left-aligned as a block, which `text-align` alone no longer does once
+       the children are flex items. */
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.1rem;
     text-align: left;
     padding: 0.6rem 0.4rem;
     border: none;
     border-radius: 0.4rem;
+  }
+  .pick-event {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
   }
   .lock,
   .warning {

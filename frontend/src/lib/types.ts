@@ -76,6 +76,7 @@ export type { TeamStanding } from "./generated/TeamStanding";
 export type { ThresholdCriterion } from "./generated/ThresholdCriterion";
 export type { Tiebreak } from "./generated/Tiebreak";
 export type { Tournament } from "./generated/Tournament";
+export type { TournamentDates } from "./generated/TournamentDates";
 export type { TournamentResponse } from "./generated/TournamentResponse";
 export type { TournamentProblem } from "./generated/TournamentProblem";
 export type { TournamentSummary } from "./generated/TournamentSummary";

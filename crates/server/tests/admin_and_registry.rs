@@ -56,6 +56,51 @@ async fn admin_password_gates_tournament_creation() {
     assert_eq!(status, StatusCode::OK);
 }
 
+/// The picker's list carries each tournament's city, country and dates, so two
+/// events with the same name can be told apart without opening either — and
+/// carries none of the three for a tournament whose referee entered none.
+#[tokio::test]
+async fn the_listing_says_where_and_when_each_tournament_is_held() {
+    let state = AppState::default();
+    let placed = create(&state, "New Year's Open").await;
+    let bare = create(&state, "New Year's Open").await;
+    let (status, _) = send(
+        router(state.clone()),
+        json_req(
+            "PUT",
+            &t(placed, "/settings"),
+            json!({
+                "city": "Ludwigshafen",
+                "country": "Germany",
+                "dates": { "first": "2026-01-02", "last": "2026-01-04" },
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, list) = send(router(state.clone()), get("/api/tournaments")).await;
+    assert_eq!(status, StatusCode::OK);
+    let entries = list["tournaments"].as_array().unwrap();
+    let entry = |id: Uuid| {
+        entries
+            .iter()
+            .find(|e| e["id"] == id.to_string())
+            .unwrap_or_else(|| panic!("{id} is missing from the listing"))
+    };
+    let placed = entry(placed);
+    assert_eq!(placed["city"], "Ludwigshafen");
+    assert_eq!(placed["country"], "Germany");
+    assert_eq!(placed["dates"]["first"], "2026-01-02");
+    assert_eq!(placed["dates"]["last"], "2026-01-04");
+
+    // Absent, not empty strings: the picker draws no line at all for this one.
+    let bare = entry(bare);
+    assert!(bare.get("city").is_none());
+    assert!(bare.get("country").is_none());
+    assert!(bare.get("dates").is_none());
+}
+
 /// A `DELETE` carrying an `Authorization: Bearer <token>` header.
 fn delete_with_token(uri: &str, token: &str) -> Request<Body> {
     Request::builder()

@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use axum::body::Bytes;
 use constant_time_eq::constant_time_eq;
-use osp_core::{Tournament, TournamentError};
+use osp_core::{Tournament, TournamentDates, TournamentError};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use ts_rs::TS;
@@ -754,14 +754,28 @@ impl From<&TournamentError> for TournamentProblem {
     }
 }
 
-/// Summary of a tournament for the picker list (`GET /api/tournaments`) — name
-/// and whether it's locked, never the tournament's contents.
+/// Summary of a tournament for the picker list (`GET /api/tournaments`) — its
+/// name, where and when it is held, and whether it's locked, never the
+/// tournament's contents.
 #[derive(Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/lib/generated/")]
 pub struct TournamentSummary {
     pub id: Uuid,
     pub name: String,
     pub has_password: bool,
+    /// Where the event is held and when, straight from its settings — each
+    /// absent when the referee never entered it, and all three absent for a
+    /// tournament that cannot be read at all (see [`Self::problem`]).
+    ///
+    /// Not contents: they are the three lines a referee facing a server with
+    /// four tournaments called "Open" needs to tell them apart, which is the
+    /// job the picker's list has.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dates: Option<TournamentDates>,
     /// Why this one cannot be opened — a save from a format version this build
     /// no longer reads, most often. `None` is the normal case.
     ///
@@ -1038,8 +1052,9 @@ impl TournamentRegistry {
         }
     }
 
-    /// List known tournaments (id, name, whether it's password-protected) —
-    /// enough for the picker, never the tournament's contents.
+    /// List known tournaments (id, name, city/country/dates, whether it's
+    /// password-protected) — enough for the picker, never the tournament's
+    /// contents.
     ///
     /// `published_only` restricts the listing to tournaments that have opted
     /// into public reading. That is what an unauthenticated caller gets on a
@@ -1075,10 +1090,17 @@ impl TournamentRegistry {
                         )
                     }
                 };
+                // Second `current()` rather than another arm of the match
+                // above: an unreadable tournament has no settings to describe
+                // it with, and `and_then` says so once instead of three times.
+                let settings = store.current().map(|tournament| &tournament.settings);
                 Some(TournamentSummary {
                     id: *id,
                     name,
                     has_password: instance.auth.is_some(),
+                    city: settings.and_then(|s| s.city.clone()),
+                    country: settings.and_then(|s| s.country.clone()),
+                    dates: settings.and_then(|s| s.dates.clone()),
                     problem,
                 })
             })

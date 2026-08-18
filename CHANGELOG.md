@@ -9,6 +9,12 @@ will be explicitly mentioned in the changelog for that version though.
 
 ## [Unreleased]
 
+### Added
+
+- **The tournament picker shows each tournament's city, country and dates**
+  under its name, when they were entered in its settings. A server holding
+  three events called "Open" no longer asks you to open them one by one.
+
 ### Changed
 
 - **The Undo button now says what it would take back** — "Undo registering Habu
