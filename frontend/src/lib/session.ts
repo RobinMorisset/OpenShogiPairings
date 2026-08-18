@@ -42,9 +42,17 @@ function readStorage(key: string): string | null {
 }
 
 /**
- * Which tournament is open, persisted so a reload doesn't bounce back to the
- * picker. `null` means "show the picker". `api.ts` subscribes to this to
- * scope every request and reset its version tracking on a switch.
+ * Which tournament is open. `null` means "show the picker". `api.ts`
+ * subscribes to this to scope every request and reset its version tracking on
+ * a switch.
+ *
+ * Seeded here from the shared "last opened" localStorage key, which is all the
+ * persistence the Tauri shell has (single window, no address bar). In a
+ * browser the tab's URL is the real identity — `main.ts` wires
+ * `tournamentUrl.ts` over this store before the app mounts, and an id in the
+ * URL overrides this seed: the key is shared across tabs, so trusting it
+ * beyond a fresh tab at `/` would land every restored tab on whichever
+ * tournament was opened last anywhere.
  */
 export const currentTournamentId = writable<string | null>(
   readStorage(CURRENT_TOURNAMENT_KEY),

@@ -15,6 +15,7 @@
     "switchTournamentTitle": "Revenir à la liste des tournois",
     "unsavedChanges": "Modifications non enregistrées",
     "notPersisted": "Le serveur n'a pas pu écrire ce tournoi sur le disque. Vos modifications sont appliquées, mais elles n'existent qu'en mémoire et seraient perdues au redémarrage du serveur.",
+    "tournamentGone": "Ce tournoi n'existe plus sur le serveur.",
     "noBackupsYet": "Aucune sauvegarde pour l'instant — elles sont prises automatiquement lors des étapes finalisation/préparation/démarrage/complétion/annulation.",
     "restore": "Restaurer",
     "tabSettings": "Paramètres",

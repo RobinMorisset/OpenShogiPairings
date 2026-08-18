@@ -25,6 +25,16 @@ will be explicitly mentioned in the changelog for that version though.
   `200` with an unchanged tournament — which told the caller an undo had
   happened when none had.
 
+### Fixed
+
+- **Each browser tab now keeps its own tournament across reloads and browser
+  restarts.** The open tournament's id is part of the tab's URL (`/t/{id}`)
+  rather than one browser-wide key, which used to make every restored tab land
+  on whichever tournament was opened last in *any* tab. Back/Forward now walk
+  between the picker and the tournament, a `/t/{id}` link can be bookmarked or
+  pasted into another browser, and a URL naming a tournament the server no
+  longer has says so over the picker instead of silently dropping there.
+
 ## [1.4.0] - 2026-08-18
 
 The save format changed again, but a **tournament that has not started yet can

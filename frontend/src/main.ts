@@ -2,7 +2,10 @@ import { mount } from "svelte";
 import "./app.css";
 import { prewarmApiBase } from "./lib/api";
 import { waitLocale } from "./lib/i18n";
+import { isTauri } from "./lib/platform";
 import { publicPage } from "./lib/publicAccess";
+import { currentTournamentId } from "./lib/session";
+import { wireTournamentUrl } from "./lib/tournamentUrl";
 import App from "./App.svelte";
 import PublicView from "./lib/components/PublicView.svelte";
 
@@ -32,9 +35,21 @@ const appPromise = waitLocale().then(() =>
         target: document.getElementById("app")!,
         props: { page: publicPage },
       })
-    : mount(App, {
-        target: document.getElementById("app")!,
-      }),
+    : mountApp(),
 );
+
+function mountApp() {
+  // Bind the open tournament to the tab's URL (`/t/{id}`) before the app
+  // mounts, so an id in the URL wins over the localStorage "last opened" seed
+  // and the first load already targets the right tournament. Referee tabs in a
+  // browser only: the reader page took the other branch above, and the Tauri
+  // shell is a single window with no address bar, restored from the bundle at
+  // its root URL — there the seed alone is the persistence, and pushed paths
+  // would be states a webview reload cannot serve (see `lib/tournamentUrl.ts`).
+  if (!isTauri()) wireTournamentUrl(currentTournamentId, window);
+  return mount(App, {
+    target: document.getElementById("app")!,
+  });
+}
 
 export default appPromise;

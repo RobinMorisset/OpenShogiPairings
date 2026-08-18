@@ -15,6 +15,7 @@
     "switchTournamentTitle": "Zurück zur Turnierliste",
     "unsavedChanges": "Nicht gespeicherte Änderungen",
     "notPersisted": "Der Server konnte dieses Turnier nicht auf die Festplatte schreiben. Die Änderungen sind übernommen, liegen aber nur im Arbeitsspeicher und gingen bei einem Neustart des Servers verloren.",
+    "tournamentGone": "Dieses Turnier existiert auf dem Server nicht mehr.",
     "noBackupsYet": "Noch keine Sicherungen — sie werden automatisch angelegt, wenn eine Runde finalisiert, vorbereitet, gestartet, abgeschlossen oder abgebrochen wird.",
     "restore": "Wiederherstellen",
     "tabSettings": "Einstellungen",

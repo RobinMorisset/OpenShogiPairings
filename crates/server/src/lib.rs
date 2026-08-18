@@ -179,6 +179,13 @@ fn router_inner(state: AppState, static_dir: Option<PathBuf>) -> Router {
         // harmless for a stray refresh, but this is a URL printed on a QR code
         // and handed to a roomful of people, so it must be a plain `200`.
         app = app.route_service("/t/{id}/public", ServeFile::new(&index));
+        // The referee app's own tournament URL (`frontend/src/lib/tournamentUrl.ts`):
+        // every open tab lives at `/t/{id}` and reloads from it, so like the
+        // reader page it is a real page of the app, not a stray path — a plain
+        // `200`, not the fallback's `404`-with-shell. Whether the id names a
+        // live tournament is the API's question, answered after the shell
+        // loads; this route only says the *path shape* is one the app owns.
+        app = app.route_service("/t/{id}", ServeFile::new(&index));
         app = app.fallback_service(ServeDir::new(dir).not_found_service(ServeFile::new(index)));
     }
 

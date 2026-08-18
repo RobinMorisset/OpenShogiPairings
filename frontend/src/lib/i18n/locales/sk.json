@@ -15,6 +15,7 @@
     "switchTournamentTitle": "Návrat na zoznam turnajov",
     "unsavedChanges": "Neuložené zmeny",
     "notPersisted": "Server nedokázal zapísať tento turnaj na disk. Zmeny sú použité, ale existujú len v pamäti a po reštarte servera sa stratia.",
+    "tournamentGone": "Tento turnaj už na serveri neexistuje.",
     "noBackupsYet": "Zatiaľ žiadne zálohy — vytvárajú sa automaticky pri uzavretí registrácie, príprave, spustení, dokončení a zrušení kola.",
     "restore": "Obnoviť",
     "tabSettings": "Nastavenia",

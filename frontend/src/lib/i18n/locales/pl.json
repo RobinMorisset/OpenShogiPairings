@@ -15,6 +15,7 @@
     "switchTournamentTitle": "Wróć do listy turniejów",
     "unsavedChanges": "Niezapisane zmiany",
     "notPersisted": "Serwer nie mógł zapisać tego turnieju na dysku. Zmiany zostały zastosowane, ale istnieją tylko w pamięci i zostaną utracone po ponownym uruchomieniu serwera.",
+    "tournamentGone": "Ten turniej już nie istnieje na serwerze.",
     "noBackupsYet": "Brak kopii zapasowych — tworzone są automatycznie przy finalizacji, przygotowaniu, rozpoczęciu, zakończeniu i anulowaniu rundy.",
     "restore": "Przywróć",
     "tabSettings": "Ustawienia",

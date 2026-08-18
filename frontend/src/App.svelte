@@ -492,8 +492,12 @@
           /* the panel fetches it again when opened */
         });
       } else {
-        // The tournament no longer exists (e.g. deleted from another
-        // client/tab) — back to the picker.
+        // The tournament no longer exists — deleted from another client/tab,
+        // or a stale/mistyped `/t/{id}` URL. Back to the picker, but say why:
+        // a tab that silently lands on the picker looks like it lost the
+        // referee's tournament. (The banner survives the switch: the reload
+        // effect only clears `error` when a tournament is *opened*.)
+        error = $_("app.tournamentGone");
         currentTournamentId.set(null);
       }
     } catch (err) {

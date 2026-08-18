@@ -15,6 +15,7 @@
     "switchTournamentTitle": "Return to the tournament list",
     "unsavedChanges": "Unsaved changes",
     "notPersisted": "The server could not write this tournament to disk. Your changes have been applied, but they exist only in memory and would be lost if the server restarts.",
+    "tournamentGone": "This tournament no longer exists on the server.",
     "noBackupsYet": "No backups yet — taken automatically as the round moves through finalize/prepare/start/complete/cancel.",
     "restore": "Restore",
     "tabSettings": "Settings",
