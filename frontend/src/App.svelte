@@ -1281,7 +1281,9 @@
               categories={tournament.settings.categories ?? []}
               finalized={tournament.registration_finalized}
               onEdit={handleEditPlayer}
-              onRemove={handleRemovePlayer}
+              onRemove={teamMode && tournament.registration_finalized
+                ? undefined
+                : handleRemovePlayer}
               onToggleEligible={handleToggleEligible}
               onSetEligibleByNationality={handleSetEligibleByNationality}
               onToggleCategory={handleToggleCategory}

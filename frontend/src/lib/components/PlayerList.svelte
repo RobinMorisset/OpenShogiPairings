@@ -19,7 +19,10 @@
     finalized?: boolean;
     /** Commit an in-place edit of a player's fields. */
     onEdit: (id: string, player: NewPlayer) => void;
-    onRemove: (id: string) => void;
+    /** Remove a player outright. Absent = no button: a finalized team
+     *  tournament pairs by team and holds each roster at `team_size`, so the
+     *  server refuses an individual removal (remove the whole team instead). */
+    onRemove?: (id: string) => void;
     /** Toggle a player's cup eligibility. */
     onToggleEligible?: (id: string, eligible: boolean) => void;
     /** Set cup eligibility for every player of the given nationality. */
@@ -117,8 +120,19 @@
     onSetEligibleByNationality?.(bulkNationality, eligible);
   }
 
-  // #, last name, first name, rating, grade, nat., club, [categories…], [cup], actions.
-  const colCount = $derived(7 + categories.length + (showEligible ? 1 : 0) + 1);
+  // The actions column holds the removal button, the adjustment button and the
+  // adjustment badge. A finalized team tournament has neither button — and
+  // normally no badge either, since team mode refuses per-player adjustments;
+  // the badge is still asked about, because a tournament switched to team mode
+  // after one was applied would otherwise hide points it is still counting.
+  const showActions = $derived(
+    !!onRemove || !!onAddAdjustment || players.some((p) => adjustmentTotal(p) !== 0),
+  );
+
+  // #, last name, first name, rating, grade, nat., club, [categories…], [cup], [actions].
+  const colCount = $derived(
+    7 + categories.length + (showEligible ? 1 : 0) + (showActions ? 1 : 0),
+  );
 
   type Field = "last_name" | "first_name" | "rating" | "grade" | "nationality" | "club";
 
@@ -417,7 +431,9 @@
             </button>
           </th>
         {/if}
-        <th class="print-hide" aria-label={$_("playerList.actions")}></th>
+        {#if showActions}
+          <th class="print-hide" aria-label={$_("playerList.actions")}></th>
+        {/if}
       </tr>
     </thead>
     <tbody>
@@ -472,36 +488,41 @@
               {/if}
             </td>
           {/if}
-          <td class="actions print-hide">
-            {#if adjustmentTotal(player) !== 0}
-              <span class="adj-badge" title={adjustmentTitle(player)}>
-                {adjustmentTotal(player) > 0 ? "+" : ""}{adjustmentTotal(player)}
-              </span>
-            {/if}
-            <!-- No adjustment control without a handler: a team tournament ranks
-                 by team, so a per-player delta moves nothing (the server refuses
-                 it), and offering the button would only lead to that error. -->
-            {#if onAddAdjustment}
-              <button
-                type="button"
-                class="adjust"
-                title={$_("playerList.manualAdjustmentTitle")}
-                disabled={busy}
-                onclick={() => toggleAdjustments(player.id)}
-              >
-                ±
-              </button>
-            {/if}
-            <button
-              type="button"
-              class="remove"
-              title={$_("playerList.removePlayer")}
-              disabled={busy}
-              onclick={() => onRemove(player.id)}
-            >
-              ✕
-            </button>
-          </td>
+          {#if showActions}
+            <td class="actions print-hide">
+              {#if adjustmentTotal(player) !== 0}
+                <span class="adj-badge" title={adjustmentTitle(player)}>
+                  {adjustmentTotal(player) > 0 ? "+" : ""}{adjustmentTotal(player)}
+                </span>
+              {/if}
+              <!-- No adjustment control without a handler: a team tournament ranks
+                   by team, so a per-player delta moves nothing (the server refuses
+                   it), and offering the button would only lead to that error. -->
+              {#if onAddAdjustment}
+                <button
+                  type="button"
+                  class="adjust"
+                  title={$_("playerList.manualAdjustmentTitle")}
+                  disabled={busy}
+                  onclick={() => toggleAdjustments(player.id)}
+                >
+                  ±
+                </button>
+              {/if}
+              <!-- Likewise for removal, which a finalized team tournament refuses. -->
+              {#if onRemove}
+                <button
+                  type="button"
+                  class="remove"
+                  title={$_("playerList.removePlayer")}
+                  disabled={busy}
+                  onclick={() => onRemove(player.id)}
+                >
+                  ✕
+                </button>
+              {/if}
+            </td>
+          {/if}
         </tr>
         {#if adjustingId === player.id}
           <tr class="adjustments-row">
