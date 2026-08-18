@@ -7,7 +7,7 @@ This project does NOT adhere to semantic versioning. Assume that even minor
 version changes can change the save format and thus break compatibility; it
 will be explicitly mentioned in the changelog for that version though.
 
-## [Unreleased]
+## [1.4.0] - 2026-08-18
 
 The save format changed again, but a **tournament that has not started yet can
 still be opened from a v1.1.0, v1.2.0 or v1.3.0 save**, with its players and all
