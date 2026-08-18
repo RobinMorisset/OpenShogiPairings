@@ -1417,9 +1417,12 @@
     display: flex;
     gap: 0.5rem;
   }
+  /* An accent border on the ghost button's transparent background — the same
+     "this panel is open" mark as the ratings and result-sheets buttons.
+     `--text-on-accent` is for text *on* an accent fill; over a transparent
+     button it is white on white in the light theme. */
   .toolbar-actions .ghost.active {
     border-color: var(--border-accent);
-    color: var(--text-on-accent);
   }
 
   .backups-panel {
