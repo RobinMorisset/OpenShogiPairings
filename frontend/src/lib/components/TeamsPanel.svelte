@@ -406,7 +406,7 @@
                  The server refuses one that has played, naming why. -->
             <button
               type="button"
-              class="control-xs danger"
+              class="control-xs"
               disabled={busy}
               title={$_(finalized ? "teams.removeWithPlayersTitle" : "teams.removeTitle")}
               onclick={() => confirmRemove(team, roster.length)}
@@ -428,7 +428,7 @@
                     <span class="reason">{adj.reason}</span>
                     <button
                       type="button"
-                      class="control-xs danger"
+                      class="control-xs"
                       title={$_("teams.removeAdjustment")}
                       disabled={busy}
                       onclick={() => onRemoveAdjustment(team.id, adj.id)}>✕</button
@@ -522,7 +522,7 @@
                 >
                 <button
                   type="button"
-                  class="control-xs danger"
+                  class="control-xs"
                   disabled={busy}
                   title={$_("teams.removeMemberTitle")}
                   onclick={() => onRemoveMember(team.id, member.id)}>✕</button
