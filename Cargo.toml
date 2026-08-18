@@ -58,3 +58,28 @@ tracing = "0.1"
 # own error paths report through `tracing`, which is unaffected.
 [profile.release]
 strip = true
+# Optimize for size at link time, which costs build time and nothing else.
+# `codegen-units = 1` compiles each crate as one unit, so the duplicate generic
+# instantiations that 16 units produce independently are emitted once — and
+# roughly half of what that saves is not code but the *unwinding metadata*
+# attached to it (`__eh_frame`, `__gcc_except_tab`, `__unwind_info`), which every
+# copy otherwise carries. Fat LTO then merges the whole graph and takes another
+# slice off. Measured on `osp-server`, workspace build, stripped:
+#
+#   codegen-units = 16 (default)  7.12 MB
+#   codegen-units = 1             5.93 MB   -16.6%
+#   + lto = "fat"                 5.65 MB   -20.5%
+#
+# Deliberately *not* traded for anything that matters at run time. The solver —
+# the only hot path here — measured 15.2-15.9 ms (n=300) and 112-114 ms (n=600)
+# across all three, i.e. unchanged; `opt-level = "z"` was rejected because it
+# made the same solve 3.3x slower. `panic = "unwind"` is likewise kept: the
+# server catches handler panics with `CatchPanicLayer` and returns an error
+# response, which `panic = "abort"` would silently disable.
+#
+# This only touches `cargo build --release`. Debug builds — the ones run dozens
+# of times a day — use `[profile.dev]` and are not affected; the cost lands on
+# release builds, which are cut about once a fortnight. Nothing in CI builds
+# release, so no pipeline pays for it either.
+codegen-units = 1
+lto = "fat"
