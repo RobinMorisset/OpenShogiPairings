@@ -32,6 +32,8 @@ Backwards compatible.
 ### Fixed
 
 - The **Load CSV** button had gotten too strict and was rejecting valid CSVs.
+- The Player 1 / Player 2 columns of a round no longer move when you change
+  round.
 
 ## [1.4.0] - 2026-08-18
 

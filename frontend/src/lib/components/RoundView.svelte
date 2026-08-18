@@ -899,7 +899,7 @@
       <thead>
         <tr>
           <th class="num">{$_("roundView.board")}</th>
-          <th class="alpha-name">{$_("roundView.playerColumn")}</th>
+          <th class="alpha-name name-anchor">{$_("roundView.playerColumn")}</th>
           <th class="alpha-name">{$_("roundView.opponentColumn")}</th>
           {#if handicapPolicy === "suggested"}
             <th class="suggested-col">{$_("roundView.suggested")}</th>
@@ -1764,6 +1764,23 @@
   .p1-col {
     text-align: right;
   }
+  /* The two name columns share whatever the fixed ones leave, and `auto` table
+     layout hands that share out in proportion to the *widest name in each* —
+     which is a different pair of names every round. So the seam the two columns
+     meet at moved every time the reader changed tab, by up to a third of the
+     table: in a four-round event it walked steadily rightward, which reads as
+     the table sliding rather than as new pairings.
+
+     Pinning the left column to a share of the table takes the round's own names
+     out of it. The seam then lands in the same place in every round, and the
+     right column absorbs the variation — including the trailing columns a
+     read-only round only shows when it has a draw or an absence to put in them.
+     45% rather than half because the board number and the source badge sit on
+     the left of the seam too, and count towards its half. */
+  .p1-col,
+  .name-anchor {
+    width: 45%;
+  }
   .p1-col .player {
     text-align: right;
   }
@@ -1965,6 +1982,15 @@
       width: auto;
     }
     .player {
+      width: auto;
+    }
+    /* And the seam goes back to being content's to place. A percentage column
+       inside a shrink-to-fit table is circular — the browser resolves it by
+       growing the table, which here made the sheet ~12% wider than the names
+       on it need. Nothing drifts on paper: a sheet is printed once, and there
+       is no other round beside it to disagree with. */
+    .p1-col,
+    .name-anchor {
       width: auto;
     }
     /* Only the forced-pairing lock is dropped from print — the cup trophy stays. */
