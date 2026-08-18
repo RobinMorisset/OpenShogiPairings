@@ -321,7 +321,6 @@
     "absentCupWarningPlural": "{names} sú v pohári, ale označení ako neprítomní — partie pavúka sa aj tak vytvoria; po spustení kola zapíšte kontumačné výsledky.",
     "absentThisRound": "V tomto kole neprítomní",
     "absentDefaultHint": "Predvolene sú to tí, ktorí chýbali v poslednom kole.",
-    "cupTag": "pohár",
     "longNote": "Hráčov, ktorí ešte dohrávajú dlhú partiu zo skoršieho kola: {count} — v tomto kole sa preto nepárujú.",
     "forcedPairings": "Vynútené dvojice",
     "removeForcedPairing": "Odstrániť túto vynútenú dvojicu",

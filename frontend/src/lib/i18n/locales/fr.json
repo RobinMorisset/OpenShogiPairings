@@ -321,7 +321,6 @@
     "absentCupWarningPlural": "{names} sont dans la coupe mais marqués absents — les parties du tableau sont tout de même créées ; enregistrez les résultats par forfait au démarrage de la ronde.",
     "absentThisRound": "Absents cette ronde",
     "absentDefaultHint": "Par défaut, les absents de la ronde précédente.",
-    "cupTag": "coupe",
     "longNote": "{count} joueurs terminent encore une partie longue d'une ronde précédente ; ils ne sont pas appariés dans cette ronde.",
     "forcedPairings": "Appariements forcés",
     "removeForcedPairing": "Retirer cet appariement forcé",

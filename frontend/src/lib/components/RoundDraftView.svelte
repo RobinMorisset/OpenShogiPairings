@@ -127,18 +127,28 @@
   // Present players not already fixed into a forced pairing / bye.
   const forceable = $derived(present.filter((p) => !forcedIds.has(tid(p))));
 
-  // Who the absence list offers. A player finishing a long game is *playing*,
-  // not choosing to sit out: the round is about to receive their board, and the
-  // server refuses a draft that marks them absent (marking them anyway gave them
-  // a sit-out on top of that board, which hid the game from the cross-table
-  // export and scored them twice). So they are not offered at all.
+  // Who the absence list offers — nobody the round has already spoken for.
   //
-  // Cup players stay on the list: marking one absent is how the referee records
-  // a bracket forfeit, which is a real thing to want.
-  const absenceCandidates = $derived(allSorted.filter((p) => !longSet.has(tid(p))));
+  // A player finishing a long game is *playing*, not choosing to sit out: the
+  // round is about to receive their board, and the server refuses a draft that
+  // marks them absent (marking them anyway gave them a sit-out on top of that
+  // board, which hid the game from the cross-table export and scored them
+  // twice).
+  //
+  // A cup player has a board too — the bracket is generated from the seeding
+  // and ignores the absent set entirely, and that board is what scores them, so
+  // `confirm_round` gives them no sit-out either. Ticking one therefore changed
+  // nothing about the round it was ticked in. The forfeit it looked like it was
+  // recording is recorded where it happens: on the board, in the round view.
+  const absenceCandidates = $derived(
+    allSorted.filter((p) => !longSet.has(tid(p)) && !cupSet.has(tid(p))),
+  );
 
-  // Cup players the referee has marked absent — their bracket game is still
-  // created, so the referee is warned to record the forfeit.
+  // A cup player can still *arrive* absent: `prepare_round` carries the previous
+  // round's absentees into the new draft, so someone who missed the last Swiss
+  // round is still marked when the cup takes them. The list above no longer
+  // shows them, so this is what says so — and what it asks for (record the
+  // forfeit on their board) is the right instruction in exactly that case.
   const absentCupPlayers = $derived(
     allSorted.filter((p) => cupSet.has(tid(p)) && absentSet.has(tid(p))),
   );
@@ -395,8 +405,7 @@
       disabled={busy}
       onchange={() => toggleAbsent(tid(p))}
     />
-    {label(tid(p))}{#if cupSet.has(tid(p))}<span class="cup-tag">{$_("roundDraftView.cupTag")}</span
-      >{/if}
+    {label(tid(p))}
   </label>
 {/snippet}
 
@@ -635,16 +644,6 @@
     color: var(--color-warning);
     font-size: 0.85rem;
     line-height: 1.4;
-  }
-  .cup-tag {
-    margin-left: 0.35rem;
-    padding: 0 0.3rem;
-    border-radius: 0.6rem;
-    font-size: 0.68rem;
-    font-weight: 600;
-    color: var(--color-warning-strong);
-    border: 1px solid var(--border-warning);
-    background: var(--bg-warning);
   }
   section {
     border: 1px solid var(--border-divider);

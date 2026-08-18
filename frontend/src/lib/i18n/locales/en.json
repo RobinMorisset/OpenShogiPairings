@@ -321,7 +321,6 @@
     "absentCupWarningPlural": "{names} are in the cup but marked absent — the bracket game is still created; record the forfeit result when the round starts.",
     "absentThisRound": "Absent this round",
     "absentDefaultHint": "Defaults to those absent last round.",
-    "cupTag": "cup",
     "longNote": "{count} players are still finishing a long game from an earlier round, so they sit out this round's pairing.",
     "forcedPairings": "Forced pairings",
     "removeForcedPairing": "Remove this forced pairing",

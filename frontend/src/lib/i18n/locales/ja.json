@@ -321,7 +321,6 @@
     "absentCupWarningPlural": "{names} はトーナメントに残っていますが欠場と指定されています。トーナメント表の対局は作成されるため、回戦の開始後に不戦敗として結果を入力してください。",
     "absentThisRound": "この回戦の欠場者",
     "absentDefaultHint": "初期値は前の回戦の欠場者です。",
-    "cupTag": "トーナメント",
     "longNote": "{count}名が前の回戦からの長時間対局を継続中のため、この回戦の組み合わせからは外れます。",
     "forcedPairings": "指定した組み合わせ",
     "removeForcedPairing": "この指定を削除",

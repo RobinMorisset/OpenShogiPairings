@@ -321,7 +321,6 @@
     "absentCupWarningPlural": "{names} są w pucharze, ale oznaczeni jako nieobecni — partie z drabinki i tak zostaną utworzone; zapisz wyniki walkowerem po rozpoczęciu rundy.",
     "absentThisRound": "Nieobecni w tej rundzie",
     "absentDefaultHint": "Domyślnie są to osoby nieobecne w poprzedniej rundzie.",
-    "cupTag": "puchar",
     "longNote": "Graczy kończących jeszcze długą partię z wcześniejszej rundy: {count}. Nie biorą oni udziału w kojarzeniu tej rundy.",
     "forcedPairings": "Wymuszone pary",
     "removeForcedPairing": "Usuń tę wymuszoną parę",
