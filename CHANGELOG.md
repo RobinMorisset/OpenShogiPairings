@@ -27,6 +27,13 @@ will be explicitly mentioned in the changelog for that version though.
 
 ### Fixed
 
+- **A CSV roster whose ELO column marks estimated ratings with a `*`, or whose
+  grade column says `NC`, imports again.** 1.4.0 started refusing every such row
+  ("these rows have an ELO that isn't a plain number"), which rejected whole
+  real rosters — the French federation's export writes both. `1033*` now imports
+  as 1033 (still not an established rating: nothing filled it in from the FESA
+  list), and `NC` counts as "no grade" like an empty cell rather than as an
+  unreadable one. A `*` with no number behind it is still refused.
 - **Each browser tab now keeps its own tournament across reloads and browser
   restarts.** The open tournament's id is part of the tab's URL (`/t/{id}`)
   rather than one browser-wide key, which used to make every restored tab land

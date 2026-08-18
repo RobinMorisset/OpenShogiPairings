@@ -13,7 +13,9 @@
 //!
 //! The whole import is **all-or-nothing**, and it refuses anything it cannot
 //! read rather than guessing: a row without a last name, a row whose cell count
-//! doesn't match the header, a non-empty ELO or grade cell that doesn't parse,
+//! doesn't match the header, a non-empty ELO or grade cell that doesn't parse
+//! (`NC` in the grade column and a `*` marking an estimated ELO do parse — see
+//! [`is_ungraded`] and [`parse_rating`]),
 //! a name matching several FESA entries, an empty file, missing name columns —
 //! each aborts the import with a [`CsvImportError`] naming the rows, so a
 //! half-imported or quietly-rewritten roster never lands. That strictness is the
@@ -110,6 +112,32 @@ const ALIASES: &[(Field, &[&str])] = &[
     ),
     (Field::Club, &["club"]),
 ];
+
+/// The ELO cell as a plain non-negative integer, or `None` if it isn't one.
+///
+/// A trailing `*` is accepted and dropped: the French federation's exports mark
+/// a rating estimated from the grade, rather than earned over the board, that
+/// way. The number is still the seeding value the referee meant, and "not an
+/// established rating" is already carried by [`NewPlayer::fesa_games`] being
+/// `None` for anything the FESA list didn't supply. Refusing it would be worse
+/// than useless here: those rows are exactly the ones the FESA list has nothing
+/// to fill in from, so the estimate is all there is.
+fn parse_rating(raw: &str) -> Option<u32> {
+    raw.strip_suffix('*').unwrap_or(raw).trim_end().parse().ok()
+}
+
+/// Grade cells that say "this player has no grade" instead of naming one —
+/// `NC` (*non classé*) is what the French federation's exports put there.
+///
+/// They mean the same as an empty cell, so they are read as "no grade" (open to
+/// the FESA fill-in) rather than as an unreadable one. Matched through
+/// [`normalize`], which folds case and turns punctuation into a separator — so
+/// `"nc"`, `"NC"` and `"N.C."` (which folds to `"n c"`) all count.
+const UNGRADED_MARKERS: &[&str] = &["nc", "n c"];
+
+fn is_ungraded(raw: &str) -> bool {
+    UNGRADED_MARKERS.contains(&normalize(raw).as_str())
+}
 
 fn match_column(header: &str) -> Option<Field> {
     let norm = normalize(header);
@@ -295,9 +323,9 @@ pub fn parse_players_csv(
             .filter(|raw| !raw.is_empty())
         {
             // ELO must be a plain non-negative integer to count.
-            Some(raw) => match raw.parse::<u32>() {
-                Ok(rating) => Some(rating),
-                Err(_) => {
+            Some(raw) => match parse_rating(&raw) {
+                Some(rating) => Some(rating),
+                None => {
                     bad_rating_rows.push(row_number);
                     continue;
                 }
@@ -306,7 +334,7 @@ pub fn parse_players_csv(
         };
         let mut grade = match grade_idx
             .map(|_| cell(row, grade_idx))
-            .filter(|raw| !raw.is_empty())
+            .filter(|raw| !raw.is_empty() && !is_ungraded(raw))
         {
             Some(raw) => match Grade::parse(&raw) {
                 Some(grade) => Some(grade),
@@ -573,6 +601,55 @@ mod tests {
             parse_players_csv(csv, &[]),
             Err(CsvImportError::RowsWithBadRating { rows: vec![2, 3] })
         );
+    }
+
+    #[test]
+    fn an_elo_marked_provisional_with_a_trailing_star_is_kept() {
+        // The French federation writes an ELO estimated from the grade as `1033*`.
+        // The star is a note about where the number came from, not a typo in it,
+        // and these players are precisely the ones the FESA list cannot fill in.
+        let csv = "Last name,First name,ELO\nAlpha,Ann,1033*\nBeta,Bo,1*\n";
+        let players = parse_players_csv(csv, &[]).unwrap();
+        assert_eq!(players[0].rating, Some(1033));
+        assert_eq!(players[1].rating, Some(1));
+        // Still not an established rating: nothing here came from the FESA list.
+        assert_eq!(players[0].fesa_games, None);
+    }
+
+    #[test]
+    fn a_starred_elo_still_wins_over_the_fesa_list() {
+        // Kept like any other typed ELO — the star must not turn it back into a
+        // hole for the federation's number to fall into.
+        let csv = "Last name,First name,ELO\nAlpha,Ann,1033*\n";
+        let players = parse_players_csv(csv, &[rated("Alpha", "Ann", 1800, 42, None)]).unwrap();
+        assert_eq!(players[0].rating, Some(1033));
+    }
+
+    #[test]
+    fn a_star_without_a_number_is_still_refused() {
+        let csv = "Last name,First name,ELO\nAlpha,Ann,*\nBeta,Bo,20*00\n";
+        assert_eq!(
+            parse_players_csv(csv, &[]),
+            Err(CsvImportError::RowsWithBadRating { rows: vec![2, 3] })
+        );
+    }
+
+    #[test]
+    fn nc_in_the_grade_column_means_ungraded_not_unreadable() {
+        let csv = "Last name,First name,Grade\nAlpha,Ann,NC\nBeta,Bo,nc\nGamma,Gil,N.C.\n";
+        let players = parse_players_csv(csv, &[]).unwrap();
+        assert!(players.iter().all(|p| p.grade.is_none()));
+    }
+
+    #[test]
+    fn an_nc_grade_is_open_to_the_fesa_fill_in_like_a_blank_one() {
+        // "not classified here" is a hole, not an override: if the federation's
+        // list grades this player, that grade is the best thing to import.
+        let csv = "Last name,First name,Grade\nAlpha,Ann,NC\n";
+        let ratings = vec![rated("Alpha", "Ann", 1800, 42, Some(Grade::dan(2)))];
+        let players = parse_players_csv(csv, &ratings).unwrap();
+        assert_eq!(players[0].grade, Some(Grade::dan(2)));
+        assert_eq!(players[0].rating, Some(1800));
     }
 
     #[test]
